@@ -49,3 +49,15 @@ done
 "$TFP_CC" -std=c11 -Wall -Wextra -Werror -g -I "$TFP_ROOT/src" -I "$TFP_ROOT/tests" \
   "$TFP_ROOT/src/backend.c" "$TFP_ROOT/src/snapshot.c" "$TFP_ROOT/tests/snapshot_vectors_test.c" -lm -o "$TFP_ROOT/work/tests/snapshot_vectors"
 "$TFP_ROOT/work/tests/snapshot_vectors"
+"$TFP_CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g -I "$TFP_ROOT/src" \
+  "$TFP_ROOT/tests/camera_math_c_test.c" -lm -o "$TFP_ROOT/work/tests/camera_math_c"
+"$TFP_ROOT/work/tests/camera_math_c"
+# Differential tests against the retail helper sources: only where that (read-only) tree and a C++ compiler exist.
+TFP_RETAIL_NATIVE="${TFP_RETAIL:-$HOME/Worktrees/goose-gadgets/tfp-smooth/Goose Gadget Kit}/native/first_person"
+if [ -f "$TFP_RETAIL_NATIVE/camera_handoff.h" ] && command -v g++ >/dev/null; then
+  g++ -std=c++17 -O2 -w -I "$TFP_RETAIL_NATIVE" -I "$TFP_ROOT/src" "$TFP_ROOT/tests/diff_camera_math.cpp" \
+    -o "$TFP_ROOT/work/tests/diff_camera_math"
+  "$TFP_ROOT/work/tests/diff_camera_math"
+else
+  echo "Camera math: differential test skipped (retail source or g++ not found)"
+fi
