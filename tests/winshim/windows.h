@@ -72,17 +72,31 @@ inline void shim_region(uint64_t base, uint64_t size, DWORD type, DWORD protect)
   shim_regions[shim_region_count++] = ShimRegion{base, size, type, protect};
 }
 
+// Observers for a differential test (all optional): every read (before and after), write, compare-and-swap
+// and lock operation the helper makes, in order; and a switch that makes module pinning fail.
+inline void (*shim_on_read)(uint64_t at, size_t size, int after, bool complete) = nullptr;
+inline void (*shim_on_write)(uint64_t at, size_t size, bool complete) = nullptr;
+inline void (*shim_on_cas)(uint64_t target, uint64_t exchange, uint64_t comparand, uint64_t observed) = nullptr;
+inline void (*shim_on_lock)(void *lock, int operation) = nullptr; // 0/1 exclusive acquire/release, 2/3 shared
+inline bool shim_pin_fails = false;
+
+// This process's id, asked once (a test that forks after its first read sets shim_self back to 0 in the child).
+inline pid_t shim_self = 0;
+inline pid_t shim_pid() { if (!shim_self) shim_self = getpid(); return shim_self; }
 inline HANDLE GetCurrentProcess() { return nullptr; }
 inline BOOL ReadProcessMemory(HANDLE, LPCVOID at, LPVOID out, SIZE_T size, SIZE_T *done) {
+  if (shim_on_read) shim_on_read(reinterpret_cast<uint64_t>(at), size, 0, false);
   struct iovec local = {out, size}, remote = {const_cast<void *>(at), size};
-  ssize_t n = process_vm_readv(getpid(), &local, 1, &remote, 1, 0);
+  ssize_t n = process_vm_readv(shim_pid(), &local, 1, &remote, 1, 0);
   if (done) *done = n < 0 ? 0 : static_cast<SIZE_T>(n);
+  if (shim_on_read) shim_on_read(reinterpret_cast<uint64_t>(at), size, 1, n == static_cast<ssize_t>(size));
   return n == static_cast<ssize_t>(size);
 }
 inline BOOL WriteProcessMemory(HANDLE, LPVOID at, LPCVOID in, SIZE_T size, SIZE_T *done) {
   struct iovec local = {const_cast<void *>(in), size}, remote = {at, size};
-  ssize_t n = process_vm_writev(getpid(), &local, 1, &remote, 1, 0);
+  ssize_t n = process_vm_writev(shim_pid(), &local, 1, &remote, 1, 0);
   if (done) *done = n < 0 ? 0 : static_cast<SIZE_T>(n);
+  if (shim_on_write) shim_on_write(reinterpret_cast<uint64_t>(at), size, n == static_cast<ssize_t>(size));
   return n == static_cast<ssize_t>(size);
 }
 // Pages: answered from /proc/self/maps, so protection changes and the test binary's own code are seen as they are.
@@ -116,8 +130,12 @@ inline SIZE_T VirtualQuery(LPCVOID at, MEMORY_BASIC_INFORMATION *out, SIZE_T siz
   while (std::fgets(line, sizeof line, maps)) {
     unsigned long long begin = 0, end = 0, offset = 0, inode = 0;
     char perms[8] = "", device[16] = "";
+    char *cursor = line;
+    begin = std::strtoull(cursor, &cursor, 16);
+    if (*cursor != '-') continue;
+    end = std::strtoull(cursor + 1, &cursor, 16);
+    if (a < begin || a >= end) continue; // most lines: no need to parse the rest
     if (std::sscanf(line, "%llx-%llx %7s %llx %15s %llu", &begin, &end, perms, &offset, device, &inode) < 6) continue;
-    if (a < begin || a >= end) continue;
     std::memset(out, 0, sizeof *out);
     out->BaseAddress = reinterpret_cast<void *>(begin);
     out->AllocationBase = out->BaseAddress;
@@ -198,16 +216,23 @@ inline DWORD WaitForSingleObject(HANDLE h, DWORD milliseconds) {
 inline BOOL CloseHandle(HANDLE h) { delete static_cast<ShimEvent *>(h); return 1; }
 inline HMODULE GetModuleHandleW(LPCWSTR) { return nullptr; }
 inline void *GetProcAddress(HMODULE, const char *) { return nullptr; }
-inline BOOL GetModuleHandleExW(DWORD, LPCWSTR, HMODULE *out) { if (out) *out = reinterpret_cast<HMODULE>(1); return 1; }
-inline void AcquireSRWLockExclusive(SRWLOCK *l) { pthread_rwlock_wrlock(&l->lock); }
-inline void ReleaseSRWLockExclusive(SRWLOCK *l) { pthread_rwlock_unlock(&l->lock); }
-inline void AcquireSRWLockShared(SRWLOCK *l) { pthread_rwlock_rdlock(&l->lock); }
-inline void ReleaseSRWLockShared(SRWLOCK *l) { pthread_rwlock_unlock(&l->lock); }
+inline BOOL GetModuleHandleExW(DWORD, LPCWSTR, HMODULE *out) {
+  if (shim_pin_fails) return 0;
+  if (out) *out = reinterpret_cast<HMODULE>(1);
+  return 1;
+}
+inline void AcquireSRWLockExclusive(SRWLOCK *l) { if (shim_on_lock) shim_on_lock(l, 0); pthread_rwlock_wrlock(&l->lock); }
+inline void ReleaseSRWLockExclusive(SRWLOCK *l) { if (shim_on_lock) shim_on_lock(l, 1); pthread_rwlock_unlock(&l->lock); }
+inline void AcquireSRWLockShared(SRWLOCK *l) { if (shim_on_lock) shim_on_lock(l, 2); pthread_rwlock_rdlock(&l->lock); }
+inline void ReleaseSRWLockShared(SRWLOCK *l) { if (shim_on_lock) shim_on_lock(l, 3); pthread_rwlock_unlock(&l->lock); }
 inline BOOL QueryPerformanceFrequency(LARGE_INTEGER *f) { f->QuadPart = 1000000; return 1; }
 inline BOOL QueryPerformanceCounter(LARGE_INTEGER *c) { c->QuadPart = static_cast<int64_t>(shim_clock_ms * 1000); return 1; }
 inline uint64_t GetTickCount64() { return static_cast<uint64_t>(shim_clock_ms); }
 inline void *InterlockedCompareExchangePointer(void *volatile *target, void *exchange, void *comparand) {
-  return __sync_val_compare_and_swap(target, comparand, exchange);
+  void *observed = __sync_val_compare_and_swap(target, comparand, exchange);
+  if (shim_on_cas) shim_on_cas(reinterpret_cast<uint64_t>(target), reinterpret_cast<uint64_t>(exchange),
+                               reinterpret_cast<uint64_t>(comparand), reinterpret_cast<uint64_t>(observed));
+  return observed;
 }
 inline void *InterlockedExchangePointer(void *volatile *target, void *value) {
   return __sync_lock_test_and_set(target, value);

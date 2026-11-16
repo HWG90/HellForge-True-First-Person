@@ -2,7 +2,7 @@
 
 `src/camera_helper.c` and `src/camera_helper.h` are `native/first_person/native_ads_camera.cpp` and `native_ads_camera.h` of the retail kit at 0.5.41-smooth.66, in C11, for build 25480438. "cpp:N" is a line of the retail file, "c:N" a line of `src/camera_helper.c`. The arithmetic headers are not translated again: `src/camera_math.h` is used.
 
-Both compile checks pass with no warnings: `cc -std=c11 -Wall -Wextra -Werror` and `zig cc -std=c11 -target x86_64-windows-gnu -Wall -Wextra -Werror`. Nothing here has been run; no tests were written.
+Both compile checks pass with no warnings: `cc -std=c11 -Wall -Wextra -Werror` and `zig cc -std=c11 -target x86_64-windows-gnu -Wall -Wextra -Werror`. When this was written nothing had been run; since then the translation is compared with the retail source call by call, see section 6.
 
 ## 1. The host interface (`TfpCameraHost`, set once with `tfp_camera_set_host`)
 
@@ -133,3 +133,96 @@ I found no place where a retired feature changes an output on the normal path.
 7. **Hook before `tfp_camera_set_host`.** Calling any function before the host is set dereferences NULL. Retail has no such state; I added no guard.
 8. **`_Thread_local` in a DLL built for `x86_64-windows-gnu`.** Compiles; whether zig uses native or emulated TLS for the mod DLL was not looked at.
 9. **`B_HEX_SETTER` length.** Retail's string is 48 bytes (the inventory says 47); 48 are checked here, all from the image.
+
+## 6. Differential test
+
+`tests/diff_camera_helper.cpp` (with `tests/diff_camera_helper_world.h` and `tests/diff_camera_helper_scripts.h`), run by `tests/run-native.sh` when the retail tree, g++ and Linux are present. The retail file is compiled natively over `tests/winshim` with `NADSC_FIXTURE`; `src/camera_helper.c` is compiled as its own C object (`cc -std=c11 -O1 -ffp-contract=off -Wall -Wextra -Werror`) and linked in. To run one script: `work/tests/diff_camera_helper "<part of its name>"`; `--list` names them; `TFP_DIFF_REACHED=1` prints what each script reached.
+
+**Result: no difference between the original and the translation was found, and no fix was made to `src/camera_helper.c` or `.h`.** 192 scripts and 61,073 probe runs; 1,395,379 calls compared, 1,133,557 of them hook frames; 148,190,296 reads, writes, swaps, lock steps and forwarded calls matched one for one. About 15 seconds on 16 cores (roughly three minutes of processor time). A soak of 1,000 further random walks (`TFP_DIFF_EXTRA_WALKS=1000`, 3.9 million frames) found no difference either.
+
+### How the two are made comparable
+
+- One logical scene (`Scene`) is written into two sets of real pages: one with retail's addresses and offsets (taken from the retail source), one with this build's (taken from the table in section 2, not from the `#define` block; the values were also checked against `src/profile.h` and `src/native_contract.h`). The structure layout numbers both builds share are written once, as retail has them. Every region has an unreadable page on each side.
+- An address in one world is compared with an address in the other by name and offset ("body+0x70", "game:api_root+0", "owner:flags[1]+0").
+- The original reads through the stand-in `ReadProcessMemory`; the translation's host `read` makes the same `process_vm_readv` call. Clock: both read `fixture_time`. `readable_span` and the slot's page test are answered for the translation by the original's own functions (`VirtualQuery` over `/proc/self/maps`). The compare-and-swap is real in both, with the original's fixture seams (`fixture_cas_fail_at`, `fixture_foreign_cas_at`, `fixture_mutate_after_cas`) repeated on the translation's own call count.
+- The dispatch slot is compared by what it holds: the game's setter (original: the test's function, as `fixture_target`; translation: `exe + setter`), the helper (original: `setter_hook`; translation: `host.hook`), or a raw foreign value.
+- The hook is called directly: the original with `_ReturnAddress()` answering `game + CALL + 4` of its world, the translation with that of its own. Forwarding goes to the test's "game setter" in both (`fixture_target`, `host.forward`); it writes the position into the camera node, and after each frame the test stores the rotation found at argument+64 as the camera's world rotation, as the game's call pair does.
+- Every script runs in a child process forked from a parent that has built the two worlds and given the translation its host, and has made no other call to either helper, so both start from their start-up state.
+
+### What is compared, after every call
+
+The return value; the full ordered record of what the helper did: every memory read (place, length, complete or failed), every write through `WriteProcessMemory`/`host.write`, every compare-and-swap (what was stored, expected, found), every lock and unlock of the two locks, and the forwarded setter call (camera pointer, unit, whether the pointer forwarded was the game's own argument or the helper's buffer, and the 16 position bytes bit for bit); the 96 bytes of the caller's argument buffer (position, and the rotation the helper may rewrite); the slot; the generation written by `begin`; the error code; then `read_stats`, `handoff_stats` (while a lease is held), `entry_trace` and `anchor_stats`, byte for byte, and the record of those four calls themselves. The translation's locks must be balanced at each return.
+
+### Scripts
+
+| group | scripts |
+|---|---|
+| hip view at 30, 60, 144 frames a second, head moving and still, plain and with presentation + mode 15; a jerking head (6 cm lag clamp) | 12 |
+| the game's own first-person request forwarded untouched, with and without presentation | 2 |
+| exits from it: remembered eye, exit 300 ms late, eye further than 1 m, no eye, eye older than the gap, a full reset between eye record and exit, eye hold switched off and on; modes 15, 1, 2; exit under mask 2 and 0 | 42 |
+| weapon swap: known weapon (70 ms glide), unknown, empty-handed (80 ms fade), 2.5 s limit, 300 ms tolerance; two frame rates | 10 |
+| aim-release anchor: learned and used, not learned, key changed, too far, no body node, 4.5 mm wobble, link one past the last node, 16 ms gap, switched off and on, body/camera/rig as the weapon, distance swept through 0.8 m; modes 15, 4, 7 | 33 |
+| exit hold; seated view (180 ms turn); guard byte for one and many frames, vault mask, other masks, not on foot, foreign camera/unit/caller, null argument, odd request rings | 12 |
+| gates: head 8 m, root 10 m, non-finite argument, context and body basis, graph and head node, head distance, vertical look, camera local/world, pointers swapped under the armed helper | 2 |
+| owner lost on a hip or a native frame (20 causes), then end and arm again | 40 |
+| time: gaps over, at and under the limit, backwards, repeated; limits 16, 250, 1000 ms | 3 |
+| control calls in right and wrong orders; `set_presentation` again in mid-lease; refused configurations, images, code bytes and worlds (about 120) | 3 |
+| dispatch slot: foreign value at begin and at end, swap faulting at begin and at end, value arriving between proof and swap, read-only page, owner changing right after the swap, begin answering 2, pin failing, target not executable, unaligned slot, unwritable generation | 14 |
+| ship's bridge; the opt-in eases (`set_handoff` nonzero: entry, rotation, both); a one-frame native view entered before the camera was linked; second avatar row; 21 weapons in a 16-entry memory; after `tfp_camera_reset_for_tests`; the translation-only checks below | 11 |
+| seeded random walks, 4,000 frames each, mixing all of the above with the adapter's calls, time steps of every kind and one-frame damage | 8 |
+| probes (17 calls: twelve kinds of frame, begin, validate, end, set_presentation, read_stats): for every single read the call makes, one run in which that read fails and heals, one in which it stays unreadable to the end of the call, and one for each of 34 values (request kind, mask, guard, aim, unit generations, camera parent, slot, graph count, head hash, animation state, world table, seat, registry, rig, descriptor ...) changing just before that read | 61,073 runs |
+
+Each script also checks, from the original's state, that it reached what it is for (so many frames replaced, an eye hold, a glide, an anchor frame, ...).
+
+### Checks only the translation makes
+
+The reference is the fixture build of the original, which compiles three production checks out (Open 5). The translation has them; they are answered through the host and asserted separately (script "checks only the translation makes", expected results read off the original's non-fixture lines):
+
+- `executable(graph getter)` in `graph` (cpp:330-332): answered true in every compared call; answered false once at begin and validate (expected and got: 0, error 16) and once in the hook (error 16, the game's own argument forwarded, still armed).
+- `pin(exe)` in begin (cpp:1095-1097): answered true; answered false once (expected and got: 0, error 9, generation 0, slot untouched, no generation consumed).
+- `writable_slot`'s image test (cpp:440-441): the host checks that the image asked about is the executable, and answers with the original's fixture test (committed, writable, private).
+- The slot must hold `exe + setter` (cpp:1039): compared through the slot classes above.
+
+### Not compared, and why
+
+- **A hook call before any begin recorded the game's setter.** The original calls a null pointer there. Such frames are skipped and counted.
+- **A read of the caller's own argument that stays unreadable.** Both helpers then write the rotation to that page themselves and fault; only the failure that heals is compared for reads of the argument.
+- **Concurrency.** One thread. The order of lock operations relative to reads, the swap and the forwarded call is compared; End waiting for a setter in flight is not exercised.
+- **The direct call of the original setter** (`host.forward` NULL, c:759). The fake `exe + setter` is not code.
+- **`now()` from the performance counter, `readable_span`'s and `executable`'s own `VirtualQuery` logic.** The fixture clock is used; the two page questions are answered for the translation by the original's functions.
+- **The retired exports** (section 3) and the Windows build of the C (MinGW's `expf`/`exp`, Open 6). Natively both sides use glibc, with `-ffp-contract=off`.
+- **Whether the constants of section 2 are right for build 25480438.** The test proves the translation reads the places the table names; it cannot prove the table.
+- **Internal state with no export**: `eye_glides`, `eye_hold_frames`, `guard_grace_frames`, `ads_learned` are written and never read by any export, in retail too.
+
+### Test-only additions
+
+`tests/winshim/windows.h`: optional observers `shim_on_read`, `shim_on_write`, `shim_on_cas`, `shim_on_lock`; `shim_pin_fails`; the process id asked once (`shim_pid`); a faster `VirtualQuery` line scan. Nothing outside `tests/` changed.
+
+### Mutation check
+
+Done on 2026-11-16 in scratch copies outside the repository: one change at a time in `src/camera_helper.c`, the whole test run against each. **187 mutations, 164 killed, 23 survive.** The first round killed 91 of 123; each survivor was either explained or answered with a new script (the wobbling weapon, the 16 ms gap, the 512-node graph, the leaning and jerking head that makes the float sums differ, the 21 weapons, the guard-grace probes, the second `set_presentation`, ...), and 64 more mutations were added.
+
+Killed, by kind: 20 of 22 timing constants and thresholds (250, 2500, 300, 70, 80, 180, 150, 50 ms; 8 m, 10 m, 6 cm, 0.8 m, 5 mm, ...); 9 of 9 `<`/`<=` changes; 19 of 21 dropped resets; 9 of 14 dropped counter increments; all 11 float/double and reassociation changes; 19 of 21 changes to this build's constants and the layout numbers; 21 of 25 logic changes (among them the policy lock released before the forwarded call, caught by the order of steps); 56 of the 64 added later (begin/end/slot bookkeeping, the owner and graph proofs, the eases, `tfp_camera_reset_for_tests`).
+
+The 23 survivors, none of them a gap the test can close:
+
+| survivor | why it cannot be seen |
+|---|---|
+| counters `eye_glides`, `eye_hold_frames`, `guard_grace_frames`, `ads_learned` not incremented | no export reads them (retail neither) |
+| `L_FLAG_FIRE` 12 -> 11, `L_FLAG_SHOULDER_A` 10 -> 9 | Open 1: they feed `Policy.fire`/`shoulder`, which nothing reads; the 24 flag bytes are read either way |
+| `policy_init` without the identity `seated_q`; without the correction's start values | `seated_q` is assigned before every use; the correction's `progress` is never read and its duration is set when it starts |
+| anchor weight `age <= 50` -> `< 50` | at exactly 50 ms the other branch gives exp(0) = 1 too |
+| native frame without `eye_delta_active = false` | the next normal frame clears it on both of its paths (fresh start, or coming from native) |
+| normal frame without the entry ease reset | every later native frame begins the ease anew or finds the gap exceeded |
+| entry trace without the "skipped frame" count | frame and row count always move together; the branch is dead |
+| `READ_FAILED` although unsafe; `pointer()` not marking unsafe | a proof stops at its first failed read, so transport and unsafe never meet in one proof |
+| failed begin keeping `callback_generation` | it is 0 whenever a begin fails |
+| begin without priming `display_cache`; diagnostics published for a foreign camera | the cache is overwritten by the first read, the values republished are unchanged: visible only to a second thread |
+| owner loss in `remember_native` keeping the correction | the hook's full reset follows at once |
+| `anchor_stats` copying `ads` of an unknown weapon | `ads` is zero until it is known |
+| `read` refusing 4096 bytes | no read is longer than 264 |
+| eye "further than 1 m": `<=` -> `<` | needs a squared distance of exactly 1.0f |
+| begin without "the recorded original differs from the target" | needs the executable at two bases in one process |
+| the `side` term dropped | `side` is always 0 (section 3); differs only for a target of exactly -0.0 |
+
+Each survivor was also run against 400 extra random walks. That soak refuted one of my explanations ("exit hold without renewing `last_native_tick`" differs when the clock steps back) and the exit-hold script now has that frame; the 23 above survived it.

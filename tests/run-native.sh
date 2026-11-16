@@ -61,3 +61,15 @@ if [ -f "$TFP_RETAIL_NATIVE/camera_handoff.h" ] && command -v g++ >/dev/null; th
 else
   echo "Camera math: differential test skipped (retail source or g++ not found)"
 fi
+# Camera helper: the C translation against the retail source, compared after every call (about 60,000 child
+# processes over all cores, some tens of seconds). Needs the retail tree, g++ and Linux (process_vm_readv).
+if [ -f "$TFP_RETAIL_NATIVE/native_ads_camera.cpp" ] && command -v g++ >/dev/null && [ "$(uname -s)" = Linux ]; then
+  "$TFP_CC" -std=c11 -O1 -ffp-contract=off -Wall -Wextra -Werror -I "$TFP_ROOT/src" -c "$TFP_ROOT/src/camera_helper.c" \
+    -o "$TFP_ROOT/work/tests/camera_helper_under_test.o"
+  g++ -std=c++17 -O1 -ffp-contract=off -w -fpermissive -I "$TFP_ROOT/tests/winshim" -I "$TFP_RETAIL_NATIVE" -I "$TFP_ROOT/src" \
+    -I "$TFP_ROOT/tests" "$TFP_ROOT/tests/diff_camera_helper.cpp" "$TFP_ROOT/work/tests/camera_helper_under_test.o" \
+    -lm -lpthread -o "$TFP_ROOT/work/tests/diff_camera_helper"
+  "$TFP_ROOT/work/tests/diff_camera_helper"
+else
+  echo "Camera helper: differential test skipped (retail source, g++ or Linux not found)"
+fi
