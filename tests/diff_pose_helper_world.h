@@ -251,6 +251,7 @@ struct World {
       const Pin &pin = L->pins[i]; const uint64_t base = a[pin.exe ? A_EXE : A_GAME] + pin.offset;
       if (address >= base && address - base < pin.length) return {PIN_NAMES[i], address - base};
     }
+    if (r.id == A_WORLD && address >= a[A_W_ENTITY_AVATAR]) return {A_W_ENTITY_AVATAR, address - a[A_W_ENTITY_AVATAR]}; // the entity rows, the last table of the world
     if (r.id == A_GAME && address >= a[A_G_PRESETS] && address - a[A_G_PRESETS] < 256 * 144) return {A_G_PRESETS, address - a[A_G_PRESETS]};
     int best = r.id; uint64_t distance = 0x4000;
     for (int id : inside[r.id]) {
@@ -269,7 +270,7 @@ struct World {
     region(A_RIG2, 0x1000); region(A_ALT, 0x4000); region(A_WOBJ, 0x1000); region(A_WOBJ2, 0x1000);
     region(A_API_ROOT, 0x1000); region(A_API, 0x1000); region(A_STACK, 0x1000); region(A_ARG, 0x1000);
     region(A_POOL, 0x1000); region(A_PRIMARY, 0x1000); region(A_OVERRIDES, 0x1000); region(A_DESCRIPTORS, 0x8000); region(A_PARAMS, 0x400000);
-    region(A_PACKED, 0x10000); region(A_DATA, 0x500000); region(A_WORLD, 0xF40000); region(A_TABLE, 0x100000); region(A_SETTINGS, 0xAD000);
+    region(A_PACKED, 0x10000); region(A_DATA, 0x500000); region(A_WORLD, 0x2740000); region(A_TABLE, 0x100000); region(A_SETTINGS, 0xAD000);
     region(A_INPUT_OWNER, 0xA8000); region(A_TIME, 0x1000); region(A_PLAYER, 0x1000); region(A_AVMAP, 0x1000); region(A_ENTMAP, 0x1000);
     region(A_IO, 0x2000);
     std::sort(regions.begin(), regions.end(), [](const Region &x, const Region &y) { return x.base < y.base; });

@@ -141,6 +141,33 @@ static void script_rotation_gates(Run &r) {
   r.branch(ROTATION_CALLER, r.viewmodel, 7, ROTATION_POSE); r.branch(ROTATION_CALLER, OTHER_RIG, 5, ROTATION_POSE); r.branch(ROTATION_CALLER, r.viewmodel, 5, NOWHERE);
   need(NADSE_Error() == POSE_INVALID && !::armed.load(), "a null rotation refused as an invalid pose");
   r.end(r.gen);
+  // The game's rotation is held to 0.02 of unit length and the product to 0.025: a rotation just inside its own
+  // tolerance whose product with the delta rounds to just outside 0.02 is still applied.
+  {
+    auto norm_of = [](const float *v) { float norm = 0; for (int i = 0; i < 4; ++i) norm += v[i] * v[i]; return norm; };
+    const Q base = turn(.3f, 1, .2f, 40); bool found = false; float a[4] = {}, b[4] = {}; Q delta{};
+    for (int step = 0; step < 400 && !found; ++step) {
+      delta = turn(1, .1f * step, .37f, 3 + .08f * step);
+      // the delta as set_transform stores it: divided by its length
+      const float given[4] = {delta.x, delta.y, delta.z, delta.w};
+      const float length = std::sqrt(given[0] * given[0] + given[1] * given[1] + given[2] * given[2] + given[3] * given[3]);
+      for (int i = 0; i < 4; ++i) a[i] = given[i] / length;
+      for (float scale = 1.00990f; scale < 1.01000f && !found; scale = std::nextafter(scale, 2.0f)) {
+        const float c[4] = {base.x * scale, base.y * scale, base.z * scale, base.w * scale};
+        const float product[4] = {a[3] * c[0] + a[0] * c[3] + a[1] * c[2] - a[2] * c[1], a[3] * c[1] - a[0] * c[2] + a[1] * c[3] + a[2] * c[0],
+                                  a[3] * c[2] + a[0] * c[1] - a[1] * c[0] + a[2] * c[3], a[3] * c[3] - a[0] * c[0] - a[1] * c[1] - a[2] * c[2]};
+        if (std::fabs(norm_of(c) - 1.0f) <= .02f && std::fabs(norm_of(product) - 1.0f) > .02f) { std::memcpy(b, c, 16); found = true; }
+      }
+    }
+    need(found, "a rotation inside 0.02 whose product is outside it");
+    arm(r); r.transform(r.gen, 0, 0, 0, delta.x, delta.y, delta.z, delta.w); frames(r, 2, 16);
+    need(!std::memcmp(a, ::policy.rotation, 16), "the stored delta is the one the search used");
+    set_rotation(r, {b[0], b[1], b[2], b[3]});
+    const uint64_t updates = ::weapon_updates.load();
+    frame(r, 16, F_BRANCH);
+    need(::armed.load() && ::weapon_updates.load() == updates + 1, "the product applied inside its own 0.025");
+    r.end(r.gen);
+  }
   // the game's rotation invalid, or the product out of tolerance
   for (int bad = 0; bad < 4; ++bad) {
     arm(r); r.transform(r.gen, 0, 0, 0, q.x, q.y, q.z, q.w); frames(r, 3, 16);
@@ -223,7 +250,7 @@ static void script_entry(Run &r, int kind, int64_t dt, int variant) {
 // ---- the entry rotation guard ----
 static void settle(Run &r, Q q, int count = 9) { set_rotation(r, q); for (int i = 0; i < count; ++i) { r.tick(16); r.branch(ROTATION_CALLER, r.viewmodel, 5, ROTATION_POSE); } }
 static void script_guard(Run &r, int variant) {
-  const Q settled = turn(0, 0, 1, 12);
+  const Q settled = variant == 11 ? Q{0, 0, 0, 1} : turn(0, 0, 1, 12);
   arm(r, 1); r.tick(400);                     // the first lease on a rig has no reference and is not guarded
   set_rotation(r, turn(0, 0, 1, 80)); r.tick(10); r.branch(ROTATION_CALLER, r.viewmodel, 5, ROTATION_POSE);
   settle(r, settled, variant == 6 ? 7 : 9);   // eight unchanged writes make the reference (seven do not)
@@ -235,6 +262,8 @@ static void script_guard(Run &r, int variant) {
   int held = 0;
   for (int i = 0; i < 14; ++i) {
     set_rotation(r, turn(0, 0, 1, 12 + error)); r.tick(variant == 3 ? 40 : 16);
+    // exactly at the limit (the cosine of half of 1.5 degrees, against an identity reference): not held; one float step further: held
+    if (variant == 11 && i < 2) { const float w = i == 1 ? .99991f : std::nextafter(.99991f, 0.0f); set_rotation(r, {std::sqrt(1 - w * w), 0, 0, w}); }
     if (variant == 8 && i == 2) { r.rotation_guard(0); }
     if (variant == 8 && i == 4) { r.rotation_guard(1); }
     if (variant == 9 && i == 3) { r.s.flags[14] = 4; }   // the owner proof fails inside the window: no hold, and no disarm either
@@ -242,15 +271,18 @@ static void script_guard(Run &r, int variant) {
     const uint32_t before = ::policy.guarded;
     r.branch(ROTATION_CALLER, r.viewmodel, 5, ROTATION_POSE);
     r.rotation(GAME_OTHER, r.viewmodel, 5, ROTATION_POSE); r.rotation(EXE_OTHER, r.viewmodel, 5, ROTATION_POSE); r.rotation(OUTSIDE, r.viewmodel, 5, ROTATION_POSE);
+    if (i == 5) { r.rotation({A_GAME, 0}, r.viewmodel, 5, ROTATION_POSE); r.rotation({A_EXE, 0}, r.viewmodel, 5, ROTATION_POSE); r.rotation({A_GAME, 0x3381fff}, r.viewmodel, 5, ROTATION_POSE); } // the images' first and last bytes as callers
     held += ::policy.guarded != before;
     error /= 2;
   }
-  if (variant == 4) { r.tick(300 - 14 * 16); set_rotation(r, turn(0, 0, 1, 60)); r.branch(ROTATION_CALLER, r.viewmodel, 5, ROTATION_POSE); r.tick(1); r.branch(ROTATION_CALLER, r.viewmodel, 5, ROTATION_POSE); }
+  if (variant == 4) { r.tick(300 - 14 * 16); set_rotation(r, turn(0, 0, 1, 60)); r.branch(ROTATION_CALLER, r.viewmodel, 5, ROTATION_POSE); r.rotation(PAIR_CALLER, r.viewmodel, 5, ROTATION_POSE);
+                      r.tick(1); r.branch(ROTATION_CALLER, r.viewmodel, 5, ROTATION_POSE); r.rotation(PAIR_CALLER, r.viewmodel, 5, ROTATION_POSE); }
   if (variant == 5) { r.tick(-2000); set_rotation(r, turn(0, 0, 1, 60)); r.branch(ROTATION_CALLER, r.viewmodel, 5, ROTATION_POSE); r.rotation(ROTATION_CALLER, r.viewmodel, 5, ROTATION_POSE); r.tick(2000); }
   settle(r, turn(1, 0, 0, 30), 10);           // a new settled rotation elsewhere, for the lease after this
   r.end(r.gen);
   const bool expect = variant == 0 || variant == 1 || variant == 3 || variant == 4 || variant == 5 || variant == 8 || variant == 9 || variant == 10;
-  need((held > 0) == expect, "the guard held exactly when it should");
+  if (variant == 11) need(held == 1, "held one step beyond the limit, not held at the limit itself");
+  else need((held > 0) == expect, "the guard held exactly when it should");
   arm(r, 1);
   for (int i = 0; i < 30; ++i) { set_rotation(r, turn(1, 0, 0, 30 + (i < 3 ? 40.0f : 0.0f))); r.tick(8); r.branch(ROTATION_CALLER, r.viewmodel, 5, ROTATION_POSE); r.rotation(PAIR_CALLER, r.viewmodel, 5, ROTATION_POSE); r.rotation(PAIR_CALLER, r.viewmodel, 5, ROTATION_POSE); }
   need(::policy.trace_count == NADSE_ROTATION_TRACE_ROWS, "the trace filled all its rows");
@@ -293,12 +325,18 @@ static void script_depth(Run &r, int kind, int64_t dt, int variant) {
   if (variant == 4) { r.offset[0] = .1f; r.offset[1] = .05f; }                      // with a saved placement as well
   if (variant == 7) { r.s.depth.shift = 3; r.s.depth.resource_shift = 21; r.s.depth.resource_di = -1; } // collisions in both tables, the last record of the table
   if (variant == 8) { r.s.resource = 272290ull * 7 - 6; r.s.depth.resource_shift = 9; r.s.depth.resource_di = 5; } // the row search wraps round the end of the table
+  if (variant == 10) { r.weapon = 0x445; r.s.depth.capacity = 128; r.s.depth.multiplier = 37; r.s.depth.shift = 63; } // probing starts 7 rows before the end: found by the 64th and last probe
   if (variant == 9) { r.s.depth.capacity = 128; r.s.depth.multiplier = 0x9E3779B1u; r.s.depth.shift = 40; r.s.depth.in_overrides = true; r.s.depth.override_shift = 63; r.s.depth.di = 4095; r.s.depth.wi = 4095; }
   arm(r, kind);
   optic(r, 0);
   frames(r, 6, dt, F_FULL);
   zoom_to(r, 1, 6, dt); frames(r, 4, dt, F_FULL);
   zoom_to(r, 2, 5, dt); frames(r, 40, dt, F_FULL);          // long enough for the 500 ms revalidation
+  // the live lens overshoots the prior one (the share is clamped to 1), and a lens span of exactly one float step (taken as no span)
+  zoom_event(r, 1); lens_frame(r, 1.4f); animate(r, 1); frame(r, dt, F_FULL); lens_frame(r, .5f); animate(r, 2); frame(r, dt, F_FULL); lens_frame(r, 0); frames(r, 2, dt, F_FULL);
+  { zoom_event(r, 0); const float target = 1.0f, prior = std::nextafter(1.0f, 2.0f);
+    r.optic_target = target; r.req(0xA0, prior); std::memcpy(r.s.frame + 0x18, &target, 4); std::memcpy(r.s.frame + 0x1C, &prior, 4); r.req(0x84, prior);
+    animate(r, 3); frame(r, dt, F_FULL); animate(r, 4); frame(r, dt, F_FULL); }
   zoom_to(r, 0, 4, dt); zoom_to(r, 2, 3, dt);
   if (variant == 5) { r.req<uint8_t>(0x8D, 1); r.req<float>(0x88, .6f); frames(r, 5, dt, F_FULL); r.req<float>(0x88, 1); frames(r, 2, dt, F_FULL); r.req<float>(0x88, 0); frames(r, 2, dt, F_FULL); r.req<uint8_t>(0x8D, 0); }
   if (variant == 6) { r.s.controller[4] = 1; frames(r, 4, dt, F_FULL); r.s.controller[4] = 0; frames(r, 4, dt, F_FULL); }
@@ -317,8 +355,8 @@ static const char *const DEPTH_REJECTS[] = {
     "sight coupling not zero", "lens words differ", "target lens too small", "target lens too large", "current lens not finite", "prior lens negative", "distance beyond 4 m",
     "previous distance not finite", "mix out of range", "correction above 1 m", "zoom policy active", "no lens observation", "depth code changed", "table pointer cells unreadable",
     "angle above 1.48", "reference beyond 4 m", "descriptor table address invalid", "parameter table address invalid", "override data address invalid", "lens observed on another thread",
-    "request changed between getter and setter", "getter for another node", "getter from another caller", "no stack frame"};
-static void script_depth_reject(Run &r, int what, int when) {
+    "request changed between getter and setter", "getter for another node", "getter from another caller", "no stack frame", "correction between 1 and 2 m"};
+static void script_depth_reject(Run &r, int what, int when, int64_t dt = 16) {
   r.offset[0] = r.offset[1] = r.offset[2] = 0;
   if (what == 39) r.s.depth.in_overrides = false;
   arm(r);
@@ -348,12 +386,13 @@ static void script_depth_reject(Run &r, int what, int when) {
     case 44: d.coefficient[1] = 90; d.coefficient[0] = .001f; r.req<float>(0x90, 3.9f); break;
     case 45: r.poke(A_POOL, 0x30 + 0x18, bytes_value(0x100, 8)); break; case 46: r.poke(A_POOL, 0x30 + 0x28, bytes_value(0x800000000000ull, 8)); break;
     case 47: d.in_overrides = true; r.poke(A_POOL, 0x30 + 0x80, bytes_value(7, 8)); break;
+    case 53: d.coefficient[0] = .1f; d.coefficient[1] = .769f; r.req<float>(0x90, 1.0f); break; // reference 2.5 m for a distance of 1 m
     default: break;
     }
   };
   auto one = [&](int i) {
-    animate(r, i); r.tick(16);
-    if (what == 40 || what < 48) { if (parts & F_GETTER) r.getter(OBSERVE_CALLER, r.viewmodel, 50); }
+    animate(r, i); r.tick(dt);
+    if (what == 40 || what < 48 || what == 53) { if (parts & F_GETTER) r.getter(OBSERVE_CALLER, r.viewmodel, 50); }
     else if (what == 48) { r.getter(OBSERVE_CALLER, r.viewmodel, 50); shim_thread_id = 2; }
     else if (what == 49) { r.getter(OBSERVE_CALLER, r.viewmodel, 50); r.req<float>(0x90, r.req_get<float>(0x90) + .001f * (i & 1 ? 1 : -1)); }
     else if (what == 50) { r.getter(OBSERVE_CALLER, r.viewmodel, 49); }
@@ -366,13 +405,13 @@ static void script_depth_reject(Run &r, int what, int when) {
   };
   if (when == 1) for (int i = 0; i < 12; ++i) one(i);      // first valid, then the trouble arrives
   const uint64_t applied = ::policy.depth.observed.applied;
-  if (what < 48) apply();
-  auto trouble = [&](int i) { if (what >= 48) one(i); else { animate(r, i); frame(r, 16, parts); } };
+  if (what < 48 || what == 53) apply();
+  auto trouble = [&](int i) { if (what >= 48 && what != 53) one(i); else { animate(r, i); frame(r, dt, parts); } };
   for (int i = 0; i < 40; ++i) trouble(i);
   if (when == 1 && what < 25) zoom_event(r, 2);              // a new distance event while the definition is unusable
   for (int i = 0; i < 40; ++i) trouble(i);
   // A changed definition is found by the next 500 ms revalidation or the next distance event; the code is proven once per lease.
-  const bool definition = what < 25 || what == 38 || (what >= 42 && what <= 47);
+  const bool definition = what < 25 || what == 38 || (what >= 42 && what <= 47) || what == 53;
   // (the selected zoom level and the pool's descriptor row are read at a distance event only)
   if (what != 49 && what != 39 && !(when == 1 && (what == 41 || what == 11 || what == 14)))
     need(::policy.depth.observed.applied == applied || (when == 1 && definition && ::policy.depth.observed.applied - applied < 35), "the depth term refused");
@@ -416,6 +455,9 @@ static void script_carrier(Run &r, int variant) {
     case 15: r.poke(A_RIG, 0x80, bytes_value(3, 8)); r.position(CARRIER_CALLER, r.viewmodel, 0, ROOT_POSE); r.unpoke(r.pokes.size() - 1); break; // no pose array
     case 16: r.position(CARRIER_CALLER, r.viewmodel, 0, ROOT_POSE); r.s.root_local[0] = 99; r.s.write_root_local = true; break; // someone else wrote the root after us
     case 17: set_root(r, {0, 0, 0, 1}, 1e30f, 1e30f, 1e30f); r.position(CARRIER_CALLER, r.viewmodel, 0, ROOT_POSE); break; // huge but finite
+    case 19: r.tick(16); r.position(RIG_CALLER, r.viewmodel, 5, r.request_sym(0x48)); r.position(CARRIER_CALLER, r.viewmodel, 0, ROOT_POSE); break; // a second rig call without a lens observation: the first one's root term is withdrawn
+    case 20: r.tick(16); r.getter(OBSERVE_CALLER, r.viewmodel, 50); r.position(CARRIER_CALLER, r.viewmodel, 0, ROOT_POSE); break; // a new observation before the root call: likewise
+    case 21: r.zoom_policy(r.gen, 1); r.position(CARRIER_CALLER, r.viewmodel, 0, ROOT_POSE); r.zoom_policy(r.gen, 0); break; // the zoom policy switched on in between
     default: break;
     }
     if (variant == 11) break;
@@ -426,6 +468,37 @@ static void script_carrier(Run &r, int variant) {
   setter_applies = true;
   // armed again: the code proof is made once per lease
   arm(r); optic(r, 2); frames(r, 3, 16, F_FULL); r.end(r.gen);
+}
+// ---- what retires the three cached baselines (rig position, rig rotation, rig root), seen by what the next restore replays ----
+static void script_retire(Run &r, int what, int after) {
+  r.offset[0] = .05f; r.duration = after == 1 ? 200 : 0; r.poll = after != 1;
+  arm(r, 1); optic(r, 1);
+  const Q q = turn(0, 1, 0, 9); r.transform(r.gen, .01f, 0, 0, q.x, q.y, q.z, q.w);
+  frames(r, 4, 16, F_FULL);
+  need(::policy.rig_shifted && ::policy.rotation_shifted && ::policy.carrier_shifted, "everything shifted first");
+  r.tick(16);
+  switch (what) {
+  case 1: r.position(RIG_CALLER, r.viewmodel, 5, POSITION_POSE); break;
+  case 2: r.branch(GAME_OTHER, r.viewmodel, 5, ROTATION_POSE); break;
+  case 3: r.position(GAME_OTHER, r.viewmodel, 0, POSITION_POSE); break;
+  case 4: r.position(RIG_CALLER, r.viewmodel, 0, r.request_sym(0x48)); break;
+  case 5: r.transform(r.gen, 0, 0, 0, 0, 0, 0, 1); break;                // the identity stored, the shifted rotation still cached
+  case 6: r.transform(r.gen, 0, 0, 0, 0, 0, 0, 1); r.branch(ROTATION_CALLER, r.viewmodel, 5, ROTATION_POSE); break;
+  case 7: r.s.controller[4] = 1; frame(r, 0, F_FULL); r.s.controller[4] = 0; break;
+  case 8: r.s.ring[0] = static_cast<uint32_t>((r.s.row + 31) % 32); r.branch(ROTATION_CALLER, r.viewmodel, 5, ROTATION_POSE); break; // (left in the ring: the restores need the request alone)
+  case 9: r.req<float>(0x98, 1); r.branch(ROTATION_CALLER, r.viewmodel, 5, ROTATION_POSE); r.req<float>(0x98, 0); break;
+  case 10: r.zoom_policy(r.gen, 1); frame(r, 0, F_FULL); break;
+  case 11: r.req<uint32_t>(0x18, 0); r.placement(r.gen, 0, 0, 0); r.req<uint32_t>(0x18, 3); break;
+  case 12: r.position(RIG_CALLER, r.viewmodel, 5, r.request_sym(0x48)); r.position(CARRIER_CALLER, r.viewmodel, 0, ROOT_POSE); break;
+  case 13: r.position(RIG_CALLER, r.viewmodel, 5, NOWHERE); break;
+  default: break;
+  }
+  const uint64_t before = ::zero_restores.load();
+  if (after == 0) r.end(r.gen);
+  else if (after == 1) { r.tick(400); r.stats_call(0, r.gen); }
+  else { r.req<uint32_t>(0x18, 0); r.placement(r.gen, 0, 0, 0); r.req<uint32_t>(0x18, 3); }
+  if (what == 0) need(::zero_restores.load() == before + 3, "rig position, rotation and root replayed");
+  r.poll = true; r.end(r.gen);
 }
 // ---- node 0 / node 5 / node 50 calls from the game's call sites and from other callers ----
 static void script_callers(Run &r, int kind, bool armed_first) {
@@ -985,7 +1058,7 @@ static void script_input_case(Run &r, int what) {
   case 40: evaluate(r, true, false); r.getter(OBSERVE_CALLER, r.viewmodel, 49, true, r.request_sym()); break;
   case 41: r.input90(GAME_OTHER, r.weapon_unit, 0, r.request_sym()); r.input90(INPUT_CALLER, r.weapon_unit, 0, {A_CONTEXT, 0x200}); r.input90(INPUT_CALLER, 0, 77, NOWHERE); break;
   case 42: r.fault_after_query(1); evaluate(r); r.fault_after_query(2); r.s.preset[21] ^= 1; evaluate(r); break;
-  case 43: r.s.player_count = 1; r.s.entity = 0x21; r.s.entity_row = 0x100001; evaluate(r); break;
+  case 43: r.s.player_count = 1; r.s.entity = 0x21; r.s.entity_row = 0x100001; evaluate(r); r.s.entity_row = 0x100000; evaluate(r); break; // the limit itself is still read
   case 44: r.s.raw[1] = 2e6f; evaluate(r); r.s.raw[1] = NAN; evaluate(r); break;
   case 45: r.s.player_count = 1; r.s.entity = 0xffffffffu; evaluate(r); break;
   default: break;
@@ -1180,17 +1253,25 @@ static void register_scripts() {
   for (int kind = 0; kind < 2; ++kind) for (int64_t dt : {5, 16}) for (int variant = 0; variant < 6; ++variant)
     add(named("entry (%s: %s), %s, step %lld ms", kind ? "steady, draw animation" : "blended over 150 ms", ENTRIES[variant], KINDS[kind], (long long)dt), [=](Run &r) { script_entry(r, kind, dt, variant); });
   static const char *const GUARDS[] = {"70 degrees off, halving", "1.6 degrees off", "1.4 degrees off", "40 ms steps to the end of the window", "the window's last millisecond", "clock stepped back",
-                                       "only seven settled writes", "guard switched off", "switched off and on inside the window", "owner proof fails inside the window", "write standing still"};
-  for (int variant = 0; variant < 11; ++variant) add(named("entry rotation guard: %s", GUARDS[variant]), [=](Run &r) { script_guard(r, variant); });
+                                       "only seven settled writes", "guard switched off", "switched off and on inside the window", "owner proof fails inside the window", "write standing still", "exactly at the limit"};
+  for (int variant = 0; variant < 12; ++variant) add(named("entry rotation guard: %s", GUARDS[variant]), [=](Run &r) { script_guard(r, variant); });
   static const char *const POSITIONS[] = {"four weapons", "nineteen weapons in sixteen places", "switched off, then on", "draw animation off", "armed in the sights", "another weapon in between"};
   for (int variant = 0; variant < 6; ++variant) add(named("remembered entry position: %s", POSITIONS[variant]), [=](Run &r) { script_entry_positions(r, variant); });
   static const char *const DEPTHS[] = {"resource definition", "override definition", "widest lens last", "near terms, 70 degrees", "with a saved placement", "mixed by the request", "through the sights",
-                                       "collisions, last record", "row search wraps", "128-row maps, 63 probes"};
-  for (int variant = 0; variant < 10; ++variant) for (int kind = 0; kind < 2; ++kind) for (int64_t dt : {16, 7})
+                                       "collisions, last record", "row search wraps", "128-row maps, 63 probes", "found by the 64th probe"};
+  for (int variant = 0; variant < 11; ++variant) for (int kind = 0; kind < 2; ++kind) for (int64_t dt : {16, 7, 25, 100})
     add(named("zoom depth and rig-root counter-shift: %s, %s, step %lld ms", DEPTHS[variant], KINDS[kind], (long long)dt), [=](Run &r) { script_depth(r, kind, dt, variant); });
-  for (int what = 0; what < 53; ++what) for (int when = 0; when < 2; ++when)
+  for (int what = 0; what < 54; ++what) for (int when = 0; when < 2; ++when)
     add(named("zoom depth refused: %s (%s)", DEPTH_REJECTS[what], when ? "after valid frames" : "from the first frame"), [=](Run &r) { script_depth_reject(r, what, when); });
-  for (int variant = 0; variant < 19; ++variant) add(named("rig-root counter-shift, gate %d", variant), [=](Run &r) { script_carrier(r, variant); });
+  // steps that land exactly on the 500 ms retry and revalidation times
+  for (int what : {0, 12, 16, 30, 38}) for (int when = 0; when < 2; ++when) for (int64_t dt : {25, 50, 125, 500})
+    add(named("zoom depth refused: %s (%s), step %lld ms", DEPTH_REJECTS[what], when ? "after valid frames" : "from the first frame", (long long)dt), [=](Run &r) { script_depth_reject(r, what, when, dt); });
+  for (int variant = 0; variant < 22; ++variant) add(named("rig-root counter-shift, gate %d", variant), [=](Run &r) { script_carrier(r, variant); });
+  static const char *const RETIRES[] = {"nothing", "another pose from the rig call site", "another caller's branch rotation", "another caller's root position", "a root position of the rig from the rig call site",
+                                        "the rig's own frame without the delta", "an identity delta", "full ADS", "a second request in the ring", "sight coupling", "the zoom policy", "a failed placement (no sight node)",
+                                        "the rig call without an observation", "a null pose from the rig call site"};
+  for (int what = 0; what < 14; ++what) for (int after = 0; after < 3; ++after)
+    add(named("caches retired by %s, then %s", RETIRES[what], after == 0 ? "end" : after == 1 ? "expiry in read_stats" : "a refused placement"), [=](Run &r) { script_retire(r, what, after); });
   for (int kind = 0; kind < 4; ++kind) for (int first = 0; first < 2; ++first) add(named("callers, units and nodes swept, %s, %s", KINDS[kind], first ? "armed first" : "unarmed first"), [=](Run &r) { script_callers(r, kind, first != 0); });
   static const char *const EXPIRIES[] = {"rig position call", "branch rotation call", "carrier call", "set_placement", "set_zoom_policy", "phase packet", "read_stats", "branch call, not alone", "input mode"};
   for (int where = 0; where < 9; ++where) for (uint32_t duration : {1u, 40u, 300u, 30500u})
@@ -1301,6 +1382,7 @@ int main(int argc, char **argv) {
     while (running) reap();
     return failed ? 1 : 0;
   }
+  if (std::getenv("TFP_DIFF_NO_PROBES")) failed += 1000; // (a quick pass for the mutation check: the plain scripts only)
   // Probes: one run counts the probed call's reads; then one run per read and kind of trouble.
   for (size_t i = 0; i < scripts.size() && failed < 20; ++i) {
     if (!scripts[i].probed || (only && scripts[i].name.find(only) == std::string::npos)) continue;
@@ -1320,6 +1402,7 @@ int main(int argc, char **argv) {
               "%llu translation-only host answers; %llu retail-only reads of pinned code; %llu hook calls skipped (before any begin)\n",
               label, plain, probe_runs, (unsigned long long)shared->calls, (unsigned long long)shared->hooks, (unsigned long long)shared->events,
               (unsigned long long)shared->translation_only, (unsigned long long)shared->retail_only_reads, (unsigned long long)shared->skipped);
+  if (std::getenv("TFP_DIFF_NO_PROBES")) failed -= 1000;
   if (failed) { std::printf("%s: %d script run(s) FAILED\n", label, failed); return 1; }
   std::printf("%s: the translation behaves as the retail helper in every compared call\n", label);
   return 0;

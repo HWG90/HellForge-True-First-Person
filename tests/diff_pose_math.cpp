@@ -118,6 +118,63 @@ int main() {
     same_pipeline(pa, pb, i);
   }
 
+  // The same helpers exactly at their limits (and one float step to either side).
+  stage = "limits";
+  {
+    const float limits[] = {ZoomGainMath::MIN_GAIN, ZoomGainMath::MAX_GAIN, ZoomInputMath::MAX_COMPONENT, ZoomInputMath::MIN_RATIO, ZoomInputMath::MAX_RATIO, 1.0f, 0.0f,
+                            ZoomGainMath::MIN_GAIN_RATIO, ZoomGainMath::MAX_GAIN_RATIO, 1.17549435e-38f, 3.40282347e38f, 1.5707963705062866f, 2.0f, 4096.0f};
+    unsigned long long i = 0;
+    for (float limit : limits) for (int step = -2; step <= 2; ++step) for (int sign = 0; sign < 2; ++sign) {
+      float a = limit; for (int k = 0; k < std::abs(step); ++k) a = ZoomInputMath::neighbour(a, step > 0);
+      if (sign) a = -a;
+      sameb(ZoomInputMath::ordinary(a), tfp_zoom_ordinary(a), "ordinary", i); sameb(ZoomInputMath::bounded(a), tfp_zoom_bounded(a), "bounded", i);
+      for (float other : limits) for (int other_step = -1; other_step <= 1; ++other_step) {
+        float b = other; if (other_step) b = ZoomInputMath::neighbour(b, other_step > 0);
+        ++i;
+        sameb(ZoomGainMath::gain_valid(a, b), tfp_gain_valid(a, b), "gain_valid", i);
+        // a gain exactly 4096 times, or one 4096th of, the original
+        sameb(ZoomGainMath::gain_valid(a * 4096, a), tfp_gain_valid(a * 4096, a), "gain_valid ratio", i);
+        sameb(ZoomGainMath::gain_valid(a, a * 4096), tfp_gain_valid(a, a * 4096), "gain_valid ratio", i);
+        same(ZoomGainMath::pitch_after_base(a, b), tfp_gain_pitch_after_base(a, b), "pitch_after_base", i);
+        same(std::max(a, b), tfp_std_maxf(a, b), "std::max", i); same(std::min(a, b), tfp_std_minf(a, b), "std::min", i);
+        for (unsigned axis = 0; axis < 2; ++axis) for (int gate = 0; gate < 2; ++gate) {
+          ZoomGainMath::Pipeline pa{}; TfpGainPipeline pb; std::memset(&pb, 0x5a, sizeof pb);
+          sameb(ZoomGainMath::pipeline(axis, a, b, .001f, 1.0f / 60, 1.0f / 60, gate != 0, pa), tfp_gain_pipeline(axis, a, b, .001f, 1.0f / 60, 1.0f / 60, gate != 0, &pb), "pipeline result", i);
+          same_pipeline(pa, pb, i);
+          sameb(ZoomGainMath::pipeline(axis, .5f, a, b, 1.0f / 60, 1.0f / 60, gate != 0, pa), tfp_gain_pipeline(axis, .5f, a, b, 1.0f / 60, 1.0f / 60, gate != 0, &pb), "pipeline result", i);
+          same_pipeline(pa, pb, i);
+          sameb(ZoomGainMath::pipeline(axis, .5f, 1, .001f, a, b, gate != 0, pa), tfp_gain_pipeline(axis, .5f, 1, .001f, a, b, gate != 0, &pb), "pipeline result", i);
+          same_pipeline(pa, pb, i);
+        }
+      }
+    }
+    // The preparation with each input exactly at each limit its checks name.
+    const float edges[] = {-1, 1, 0, 3.141592654f, 180, 1, ZoomInputMath::MAX_COMPONENT, ZoomGainMath::MIN_GAIN, ZoomGainMath::MAX_GAIN, -0.0f};
+    for (int field = 0; field < 12; ++field) for (float edge : edges) for (int step = -1; step <= 1; ++step) {
+      ZoomGainMath::Input in{}; in.raw[0] = .2f; in.raw[1] = -.1f; in.history[0] = .07f; in.dt_eval = 1.0f / 60; in.lens_radians = .5f; in.tpv_degrees = 90; in.device = 1.25f;
+      in.native_gain[0] = .3f; in.native_gain[1] = .4f; in.dt_global = 1.0f / 60;
+      float value = edge; if (step) value = ZoomInputMath::neighbour(value, step > 0);
+      float *fields[12] = {&in.dt_eval, &in.dt_global, &in.device, &in.lens_radians, &in.tpv_degrees, &in.raw[2], &in.history[1], &in.sign[0], &in.steering[1], &in.context[0], &in.native_gain[0], &in.native_gain[1]};
+      *fields[field] = value;
+      TfpGainInput cin; std::memcpy(&cin, &in, sizeof cin);
+      ZoomGainMath::Prepared a{}; TfpGainPrepared b; std::memset(&b, 0x5a, sizeof b);
+      exp_mode = 0; exp_side = 0; const uint32_t ra = static_cast<uint32_t>(ZoomGainMath::prepare(in, test_exp, a));
+      exp_side = 1; const uint32_t rb = tfp_gain_prepare(&cin, test_exp, &b);
+      same(ra, rb, "prepare result at a limit", ++i); same_prepared(a, b, i);
+    }
+    // A gain that comes out exactly at the smallest and largest allowed (original gain twice or half of it, ratio 2 or 1/2).
+    for (int high = 0; high < 2; ++high) for (int step = -1; step <= 1; ++step) {
+      ZoomGainMath::Input in{}; in.raw[0] = .2f; in.history[0] = .07f; in.dt_eval = 0; in.device = 1; in.dt_global = 1.0f / 60;
+      in.tpv_degrees = 45; in.lens_radians = (high ? 22.5f : 90.0f) / ZoomInputMath::RAD_TO_DEG;
+      float gain = high ? ZoomGainMath::MAX_GAIN / 2 : ZoomGainMath::MIN_GAIN * 2; if (step) gain = ZoomInputMath::neighbour(gain, step > 0);
+      in.native_gain[0] = in.native_gain[1] = gain;
+      TfpGainInput cin; std::memcpy(&cin, &in, sizeof cin);
+      ZoomGainMath::Prepared a{}; TfpGainPrepared b; std::memset(&b, 0x5a, sizeof b);
+      const uint32_t ra = static_cast<uint32_t>(ZoomGainMath::prepare(in, test_exp, a)), rb = tfp_gain_prepare(&cin, test_exp, &b);
+      same(ra, rb, "prepare result at a gain limit", ++i); same_prepared(a, b, i);
+    }
+  }
+
   // The published presentation phase: long random walks through publish / matches / step / reset.
   stage = "presentation phase";
   for (unsigned run = 0; run < 3000; ++run) {
