@@ -29,3 +29,9 @@ for tfp_test in smooth_meter request_log; do
     "$TFP_ROOT/src/$tfp_test.c" "$TFP_ROOT/tests/${tfp_test}_test.c" -lm -o "$TFP_ROOT/work/tests/$tfp_test"
   ASAN_OPTIONS=detect_leaks=0 "$TFP_ROOT/work/tests/$tfp_test"
 done
+
+# Retail smooth.66 translations.
+"$TFP_CC" -std=c11 -Wall -Wextra -Werror -Wno-unused-function -fsanitize=address,undefined -g -I "$TFP_ROOT/src" \
+  "$TFP_ROOT/src/backend.c" "$TFP_ROOT/src/scene.c" "$TFP_ROOT/src/presentation.c" "$TFP_ROOT/src/dispatch_lease.c" \
+  "$TFP_ROOT/src/snapshot.c" "$TFP_ROOT/tests/snapshot_test.c" -lm -o "$TFP_ROOT/work/tests/snapshot"
+ASAN_OPTIONS=detect_leaks=0 "$TFP_ROOT/work/tests/snapshot"
