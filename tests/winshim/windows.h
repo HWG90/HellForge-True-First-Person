@@ -9,6 +9,12 @@
 #include <sys/mman.h>
 #include <sys/uio.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <cstdio>
+#include <cstdlib>
+#include <condition_variable>
+#include <mutex>
+#include <chrono>
 
 typedef uint32_t DWORD;
 typedef int BOOL;
@@ -23,8 +29,8 @@ typedef uint64_t DWORD64;
 typedef union { struct { uint32_t LowPart; int32_t HighPart; }; int64_t QuadPart; } LARGE_INTEGER;
 typedef struct { void *BaseAddress, *AllocationBase; DWORD AllocationProtect; uint16_t PartitionId; SIZE_T RegionSize;
                  DWORD State, Protect, Type; } MEMORY_BASIC_INFORMATION;
-typedef struct { int unused; } SRWLOCK;
-#define SRWLOCK_INIT {0}
+typedef struct { pthread_rwlock_t lock; } SRWLOCK;
+#define SRWLOCK_INIT {PTHREAD_RWLOCK_INITIALIZER}
 #define WINAPI
 #define __declspec(x)
 #define __cdecl
@@ -38,6 +44,9 @@ typedef struct { int unused; } SRWLOCK;
 #define INFINITE 0xffffffffu
 enum : DWORD { PAGE_NOACCESS = 1, PAGE_READONLY = 2, PAGE_READWRITE = 4, PAGE_WRITECOPY = 8, PAGE_EXECUTE = 0x10,
                PAGE_EXECUTE_READ = 0x20, PAGE_EXECUTE_READWRITE = 0x40, PAGE_EXECUTE_WRITECOPY = 0x80, PAGE_GUARD = 0x100 };
+enum : DWORD { MEM_RELEASE = 0x8000, WAIT_OBJECT_0 = 0, WAIT_TIMEOUT = 258 };
+#define TRUE 1
+#define FALSE 0
 enum : DWORD { MEM_COMMIT = 0x1000, MEM_RESERVE = 0x2000, MEM_PRIVATE = 0x20000, MEM_MAPPED = 0x40000, MEM_IMAGE = 0x1000000 };
 enum : DWORD { GET_MODULE_HANDLE_EX_FLAG_PIN = 1, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS = 4 };
 #define IMAGE_DOS_SIGNATURE 0x5A4D
@@ -76,9 +85,18 @@ inline BOOL WriteProcessMemory(HANDLE, LPVOID at, LPCVOID in, SIZE_T size, SIZE_
   if (done) *done = n < 0 ? 0 : static_cast<SIZE_T>(n);
   return n == static_cast<ssize_t>(size);
 }
+// Pages: answered from /proc/self/maps, so protection changes and the test binary's own code are seen as they are.
+inline uint64_t shim_allocations[256][2];
+inline unsigned shim_allocation_count = 0;
+inline DWORD shim_protection(const char *perms) {
+  const bool r = perms[0] == 'r', w = perms[1] == 'w', x = perms[2] == 'x';
+  if (!r && !w && !x) return PAGE_NOACCESS;
+  if (x) return w ? PAGE_EXECUTE_READWRITE : PAGE_EXECUTE_READ;
+  return w ? PAGE_READWRITE : PAGE_READONLY;
+}
 inline SIZE_T VirtualQuery(LPCVOID at, MEMORY_BASIC_INFORMATION *out, SIZE_T size) {
   if (size < sizeof *out) return 0;
-  uint64_t a = reinterpret_cast<uint64_t>(at);
+  const uint64_t a = reinterpret_cast<uint64_t>(at);
   for (unsigned i = 0; i < shim_region_count; ++i) {
     const ShimRegion &r = shim_regions[i];
     if (a >= r.base && a - r.base < r.size) {
@@ -91,21 +109,103 @@ inline SIZE_T VirtualQuery(LPCVOID at, MEMORY_BASIC_INFORMATION *out, SIZE_T siz
       return sizeof *out;
     }
   }
+  FILE *maps = std::fopen("/proc/self/maps", "r");
+  if (!maps) return 0;
+  char line[512];
+  SIZE_T result = 0;
+  while (std::fgets(line, sizeof line, maps)) {
+    unsigned long long begin = 0, end = 0, offset = 0, inode = 0;
+    char perms[8] = "", device[16] = "";
+    if (std::sscanf(line, "%llx-%llx %7s %llx %15s %llu", &begin, &end, perms, &offset, device, &inode) < 6) continue;
+    if (a < begin || a >= end) continue;
+    std::memset(out, 0, sizeof *out);
+    out->BaseAddress = reinterpret_cast<void *>(begin);
+    out->AllocationBase = out->BaseAddress;
+    for (unsigned i = 0; i < shim_allocation_count; ++i)
+      if (a >= shim_allocations[i][0] && a - shim_allocations[i][0] < shim_allocations[i][1])
+        out->AllocationBase = reinterpret_cast<void *>(shim_allocations[i][0]);
+    out->RegionSize = end - begin;
+    out->State = MEM_COMMIT;
+    out->Protect = out->AllocationProtect = shim_protection(perms);
+    out->Type = inode ? MEM_IMAGE : MEM_PRIVATE;
+    result = sizeof *out;
+    break;
+  }
+  std::fclose(maps);
+  return result;
+}
+inline int shim_native_protection(DWORD protection) {
+  switch (protection & 0xff) {
+  case PAGE_NOACCESS: return PROT_NONE;
+  case PAGE_READONLY: return PROT_READ;
+  case PAGE_READWRITE: case PAGE_WRITECOPY: return PROT_READ | PROT_WRITE;
+  case PAGE_EXECUTE: case PAGE_EXECUTE_READ: return PROT_READ | PROT_EXEC;
+  default: return PROT_READ | PROT_WRITE | PROT_EXEC;
+  }
+}
+inline LPVOID VirtualAlloc(LPVOID, SIZE_T size, DWORD, DWORD protection) {
+  const SIZE_T rounded = (size + 4095) & ~static_cast<SIZE_T>(4095);
+  void *p = mmap(nullptr, rounded, shim_native_protection(protection), MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  if (p == MAP_FAILED) return nullptr;
+  if (shim_allocation_count < 256) {
+    shim_allocations[shim_allocation_count][0] = reinterpret_cast<uint64_t>(p);
+    shim_allocations[shim_allocation_count++][1] = rounded;
+  }
+  return p;
+}
+inline BOOL VirtualFree(LPVOID at, SIZE_T, DWORD) {
+  for (unsigned i = 0; i < shim_allocation_count; ++i)
+    if (shim_allocations[i][0] == reinterpret_cast<uint64_t>(at)) {
+      munmap(at, shim_allocations[i][1]);
+      shim_allocations[i][0] = shim_allocations[i][1] = 0;
+      return 1;
+    }
   return 0;
 }
-inline BOOL VirtualProtect(LPVOID, SIZE_T, DWORD, DWORD *old) { if (old) *old = PAGE_READWRITE; return 1; }
+inline BOOL VirtualProtect(LPVOID at, SIZE_T size, DWORD protection, DWORD *old) {
+  MEMORY_BASIC_INFORMATION before{};
+  if (!VirtualQuery(at, &before, sizeof before)) return 0;
+  const uint64_t begin = reinterpret_cast<uint64_t>(at) & ~4095ull;
+  const uint64_t end = (reinterpret_cast<uint64_t>(at) + size + 4095) & ~4095ull;
+  if (mprotect(reinterpret_cast<void *>(begin), end - begin, shim_native_protection(protection))) return 0;
+  if (old) *old = before.Protect;
+  return 1;
+}
+inline BOOL FlushInstructionCache(HANDLE, LPCVOID, SIZE_T) { return 1; }
+inline void Sleep(DWORD milliseconds) { usleep(milliseconds * 1000); }
+// Events.
+struct ShimEvent { std::mutex mutex; std::condition_variable changed; bool set = false, manual = false; };
+inline HANDLE CreateEventW(void *, BOOL manual, BOOL initial, LPCWSTR) {
+  ShimEvent *e = new ShimEvent;
+  e->manual = manual != 0;
+  e->set = initial != 0;
+  return e;
+}
+inline BOOL SetEvent(HANDLE h) {
+  ShimEvent *e = static_cast<ShimEvent *>(h);
+  { std::lock_guard<std::mutex> guard(e->mutex); e->set = true; }
+  e->changed.notify_all();
+  return 1;
+}
+inline DWORD WaitForSingleObject(HANDLE h, DWORD milliseconds) {
+  ShimEvent *e = static_cast<ShimEvent *>(h);
+  std::unique_lock<std::mutex> guard(e->mutex);
+  if (milliseconds == INFINITE) e->changed.wait(guard, [e] { return e->set; });
+  else if (!e->changed.wait_for(guard, std::chrono::milliseconds(milliseconds), [e] { return e->set; })) return WAIT_TIMEOUT;
+  if (!e->manual) e->set = false;
+  return WAIT_OBJECT_0;
+}
+inline BOOL CloseHandle(HANDLE h) { delete static_cast<ShimEvent *>(h); return 1; }
 inline HMODULE GetModuleHandleW(LPCWSTR) { return nullptr; }
 inline void *GetProcAddress(HMODULE, const char *) { return nullptr; }
 inline BOOL GetModuleHandleExW(DWORD, LPCWSTR, HMODULE *out) { if (out) *out = reinterpret_cast<HMODULE>(1); return 1; }
-inline void AcquireSRWLockExclusive(SRWLOCK *) {}
-inline void ReleaseSRWLockExclusive(SRWLOCK *) {}
-inline void AcquireSRWLockShared(SRWLOCK *) {}
-inline void ReleaseSRWLockShared(SRWLOCK *) {}
+inline void AcquireSRWLockExclusive(SRWLOCK *l) { pthread_rwlock_wrlock(&l->lock); }
+inline void ReleaseSRWLockExclusive(SRWLOCK *l) { pthread_rwlock_unlock(&l->lock); }
+inline void AcquireSRWLockShared(SRWLOCK *l) { pthread_rwlock_rdlock(&l->lock); }
+inline void ReleaseSRWLockShared(SRWLOCK *l) { pthread_rwlock_unlock(&l->lock); }
 inline BOOL QueryPerformanceFrequency(LARGE_INTEGER *f) { f->QuadPart = 1000000; return 1; }
 inline BOOL QueryPerformanceCounter(LARGE_INTEGER *c) { c->QuadPart = static_cast<int64_t>(shim_clock_ms * 1000); return 1; }
 inline uint64_t GetTickCount64() { return static_cast<uint64_t>(shim_clock_ms); }
-inline BOOL SetEvent(HANDLE) { return 1; }
-inline DWORD WaitForSingleObject(HANDLE, DWORD) { return 0; }
 inline void *InterlockedCompareExchangePointer(void *volatile *target, void *exchange, void *comparand) {
   return __sync_val_compare_and_swap(target, comparand, exchange);
 }
