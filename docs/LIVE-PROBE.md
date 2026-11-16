@@ -36,3 +36,15 @@ The log is `mod-goose.true-first-person-probe.log` in the session folder under t
 ## First session, 2026-11-16 (probe.1)
 
 The whole session logged one line: `Snapshot: error=Native ADS fingerprint mismatch: controller_exit`. The First Person Controller was loaded and its aim-keeper hook sits on that pinned function (`hooks.tsv`: `game.dll+0x12b2ae0 … goose.first-person-controller`), so the code in memory differed from the pin and every snapshot refused, as retail's would. probe.2 compares pins with the code as it was before HellForge's hooks (`read_code`) and marks such a pin as hooked. For the mod itself the rule stays retail's: the First Person Controller must be switched off when True First Person is installed, because a changed pin is a refusal.
+
+## Second session, 2026-11-16 (probe.2): the build data holds in the game
+
+Session `bea4e14a93cb4be99ae4bd21877dd4f3`, 1,230 log lines, First Person Controller loaded.
+
+- `Image: game.dll ok … helldivers2.exe ok`; `Pins: 39 ok, 0 mismatched, 0 unreadable`; `controller_exit` marked as hooked by another mod with matching original code.
+- 379 snapshot lines. Seen: normal camera safe at the hip (`kind=4 safe=1`), shoulder aim (`shoulder=1`), the game's sights (`kind=6 active=1 aim=1`), the Controller's hip rig (`kind=6 active=0`), weapon swap (`mask=2`, `safe=0`), `mask=32` and `mask=34` (vault or dive), `mask=16` once, `reload=1` once. Body and rig references stable through the mission (`body=4202204 rig=4202210`), a different pair on the ship.
+- Three weapons, each with a stable 16-digit key: `5663fbf6d81eee27`, `4253c7e8aa4ed873`, `33e4c47233056d41`.
+- Refusals are the expected ones: while loading, `Camera is not owned by local player` (4), `Empty entity` (2), `Local player unavailable` (1); during swaps the weapon part reports `Entity absent` (44) or `Equip a firearm before starting the camera test` (7) while the player part still reads.
+- Not seen in this session: a stim (`mask=64`), the guard byte, a seated interaction.
+
+So the player, avatar pool (flags, rig reference, stride), wield, weapon pool, entity maps, request queue and controller bytes are where `src/profile.h` says on this build.
