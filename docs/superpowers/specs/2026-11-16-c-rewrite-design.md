@@ -78,14 +78,24 @@ The user decided: C, retail's current state, features and all. A is my call for 
 
 **What this build needs that retail does not** (known so far): weapons can stay hidden after a swap because the game hides the whole unit; the earlier port's hide filter and redraw took about 1.5 s on one weapon. This is solved inside milestone 1 with a stated limit: the weapon is visible on the first frame the arms are shown. Anything else found is added to `docs/BUILD-DIFFERENCES.md` with evidence.
 
-## Milestones, each ending in a session with the user
+## Milestones
 
-1. **The view.** Profile and pins; backend snapshot; controller, recovery, transition; camera, fov, near, blur policies; head visibility, shadows, depth of field, vignette, aim markers; F11; diagnostics log. In game: F11 gives the game's first-person arms at the hip through the game's own camera; aiming in and out, swaps, stims, throws, dives and seats behave as retail (eye hold, exit hold, aim keeper, head camera in gaps); no invisible weapon. Behaviours covered are listed by number in the milestone plan.
-2. **Placement and motion.** Pose policy, motion, action placement, draw animation, entry rotation guard, remembered entry position, ADS placement, zoom depth, look-gain normalisation; F8 editor.
+The user judges against retail's feel. Retail's entry arms the pose helper before the game's own entry call, and its arms are corrected from the first frame, so a build without placement, the draw animation, the entry guards, sleeves and grips would fail that comparison by construction, as the two earlier attempts did. The first in-game session therefore comes after milestones 1 to 3. Until then each milestone is shown by its offline tests and a short report. (My call; the user may ask for an earlier look, knowing what is missing.)
+
+1. **The view.** Profile and pins; backend snapshot; controller, recovery, transition; camera, fov, near, blur policies; head visibility, shadows, depth of field, vignette, aim markers; F11; diagnostics log.
+2. **Placement and motion on the entry path.** Pose policy, motion, action placement, draw animation, entry rotation guard, remembered entry position, ADS placement, zoom depth, look-gain normalisation.
 3. **Arms.** Sleeves and hand grips, finger shapes, wrist-screen mesh, revolver spin, swap lookup.
-4. **Settings and the rest.** Overlay Host menu with every retail setting and default, movement policy, native ADS option, Photo Mode camera sharing.
+   **First session with the user:** F11 gives the game's first-person arms at the hip through the game's own camera; aiming in and out, swaps, stims, throws, dives and seats behave as retail; no invisible weapon; no stretched sleeves; hands on the weapon.
+4. **Editor, settings and the rest.** F8 placement editor; Overlay Host menu with every retail setting and default; movement policy; native ADS option; Photo Mode camera sharing (what `goose.photo-mode` exposes for camera ownership is looked up then; if it exposes nothing, that mod needs a change, which is a separate piece of work to raise with the user).
 
-Milestone 1 is the largest. It is planned in parts that each build and test offline; the in-game session comes when the whole view works, because a partial view layer would show exactly the jank this project is meant to end.
+## Decisions made after review (my calls unless marked)
+
+- **Retail is frozen at 1d0d453 (smooth.66) for this project.** Reference vectors and the 172-item list are cut from that commit. Later retail commits are folded in one at a time by reading their diff, on the user's word.
+- **The user's own retail values come across.** Per-weapon placements and the mode's settings are imported once from the retail install's stores, read only, when the weapon keys match between builds; otherwise retail's shipped defaults apply and the log says which weapons were not matched. Locating those stores and checking the keys is a task in milestone 2.
+- **The 0.5.34 port's `settings.ini` is not read.** This mod writes a new file; the old one is left alone.
+- **Weapon visibility after a swap:** the earlier port's hide filter and per-tick redraw did run in the game (2026-11-09: one weapon stayed hidden about 1.5 s after each swap) and is not the starting point. The First Person Controller showed weapons through every swap in the user's sessions of 2026-11-16; its handling (`src/native_body.h`, `src/native_camera_adapter.c` mesh passes, and the absence of a whole-unit hide filter) is read first and the cause of the earlier port's delay is established before anything is written.
+- **Other mods on the same API slots:** before milestone 1's hooks are written, the session folder's `hooks.tsv` and the installed mods are checked for anything that swaps the CameraAPI or Unit API slots this mod leases; the First Person Controller is switched off when this mod is installed. A slot already swapped by another mod is reported in the log by name, not refused silently.
+- **Overlay Host version:** the installed host's API is checked when the first panel is written and the oldest header that has what the panel needs is vendored.
 
 ## Size, said plainly
 
