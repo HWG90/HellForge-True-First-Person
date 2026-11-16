@@ -220,3 +220,101 @@ Nothing. The five-layer selection `{1,3,10,11,14}` is only requested by the park
 
 - `src/snapshot.c` prints the raw 64-bit value in its `Pointer unavailable` text; retail prints the double (see above). The two differ only for values above 2^53 that a double cannot hold. I did not change that file. The action-state test compares the value part of that text and has such scenes only for its own reads.
 - The executable fingerprints `exists` and `trigger` belong to retail's body-pose API. On this build they are the same code at the mapped addresses; whether this build's mode needs them as a gate at all is the backend's decision. They are checked because retail checks them.
+
+## 4. locomotion.lua → src/locomotion.c
+
+### Interface
+
+| Retail | C |
+|---|---|
+| `M.rotation_to_parent(value, camera, parent)` | `tfp_locomotion_rotation_to_parent(value, camera, parent, q, &error)` |
+| `M.to_parent(value, camera, parent)` | `tfp_locomotion_to_parent(value, camera, parent, &out, &error)` |
+| `M.sprinting(action, verified_lifecycle, flags)` | `tfp_locomotion_sprinting(action, verified_lifecycle, flags, flags_size)` |
+| `M.new(backend)` | nothing to keep: the Lua object holds only its float buffer |
+| `self:sample(lease)` | `tfp_locomotion_sample(backend, lease, &out, error, error_size)` |
+| `backend:_read`, `_ptr`, `_u32`, `_u8` | `backend->memory` (`FpMemory` / `fp_read`) |
+| `backend:player_snapshot()`, `_alignment_executable(profile.pose)`, `action_state(s)`, `on_foot(s, action)` | the four function pointers of `TfpLocomotionBackend` |
+| `backend.alignment_lease`, the lease's fields | `TfpLocomotionLease` (what lines 124-126 and 133 look at) |
+
+`tfp_locomotion_backend()` fills the struct with this repository's own methods: `tfp_snapshot`, `tfp_alignment_executable` and the action-state sampler of section 3, and `tfp_on_foot`, which is the translation of `backend.lua:351-372` and lives in this file. The action-state sampler is the backend's one sampler in retail, shared with its other users; the C takes the caller's `TfpActionStateReader`.
+
+**Doubles and floats.** All arithmetic is in double. The engine's matrices are 16 floats in memory; they are widened to double on reading (exact, as retail's `PORT51.number(floats[i])`). Nothing in this module narrows a double to float: `x, y, z, yaw, pitch`, both bases and the `to_parent` answer are doubles. The narrowing happens where the pose backend calls the helper (`set_pose_motion`), outside these four modules.
+
+### Build constants (game build 25480438)
+
+Named in one block at the top of `src/locomotion.c`; the same evidence classes as in section 3, and the image check of `gen_action_state.py --here-image` covers the three executable items.
+
+| Constant | Retail | Here | Evidence |
+|---|---|---|---|
+| unit registry global | exe+`0x1ab76f8` | exe+`0x1a100f0` | map; `profile.h` `FP_REGISTRY`; = `camera_helper.c` `B_EXE_REGISTRY` |
+| scene-graph getter | exe+`0x28d3c0` | exe+`0x2bd870` | map; `native_contract.h` `graph_getter`; image; = `camera_helper.c` `B_EXE_GRAPH_GETTER` |
+| world-pose wrapper | exe+`0x1f30e0`, 48 bytes | exe+`0x1fd220`, 48 bytes | map; `native_contract.h` `unit_world_matrix`; image. The bytes differ from retail's in the call displacement (`e2d5eaff` → `9206eaff`) and in byte 48, which lies after the function's `ret`: `c3` in retail, `cc` here. The first 47 = `camera_helper.c` `B_HEX_UNIT_WORLD` |
+| registry: objects, capacity, generations | +`0x88`, +`0x98`, +`0xA0` | same | layout; `backend.c` `fp_unit_object` |
+| graph getter's virtual-table slot | +`0xE8` | same | layout; `scene.c`; image (the table of section 3) |
+| unit scene graph; node count; world matrices; matrix size | object+`0x60`; +`0x10`; +`0x28`; `0x40` | same | layout; `scene.c`; `camera_helper.c` `L_UNIT_GRAPH`, `L_GRAPH_COUNT`, `L_GRAPH_WORLDS`, `L_MATRIX`; the getter is `lea rax,[rcx+0x60]`, the wrapper adds `[rax+0x28]` and shifts the index by 6 |
+| camera matrix | context+`0x0C` | same | layout; `camera_helper.c` `L_CONTEXT_BASIS` |
+| rig parent node; rig node count | 4; more than 50 | same | the 63-node rig `scene.c` reads on this build (`camera_helper.c` `L_RIG_NODES`) |
+| avatar flag row, stride (on_foot) | owner+`0x53e888`, `0x1240` | owner+`0x53e880`, `0x1238` | map; `profile.h`; = `camera_helper.c` `B_AVATAR_FLAGS`, `B_AVATAR_STRIDE` |
+| game state, scene number (on_foot) | game+`0x2ce1508`, +`0xac29c` | game+`0x3326340`, +`0xac21c` | map; `profile.h` `FP_STATE`, `FP_STATE_SCENE`; `action.c` reads both on this build; = `camera_helper.c` `B_GAME_STATE`, `B_STATE_SCENE` |
+| on-foot / bridge states of layer 14; sprint carry of layer 3 | 36 / 3; 71 | same | `action.c` reads these three numbers on this build; `camera_helper.c` `L_STATE_ON_FOOT`, `L_STATE_BRIDGE` |
+
+**Open (two), and what the C does about them.** No file of this repository and no record establishes these on build 25480438, so by the rule "do not guess" each is behind a named switch that is off, and the test it guards answers "no":
+
+1. `B_SPRINT_GAIT_ESTABLISHED`: **flag byte 9, bit value 4 = the native sprint gait** (retail's `sprint_gait`, labelled on retail on 2026-10-25: gait `0x84` sprint, `0x88` walk, `0x90` jog). The byte itself is the posture byte, which `placement.c` reads on this build; the meaning of its low bits is not known here.
+2. `B_BRIDGE_SPRINT_ESTABLISHED`: **layer 14 = 3 with layer 3 = 68 and layer 1 = 75 or 78**, the bridge graph's sprint (labelled on retail).
+
+As shipped, sprint is therefore seen through `l3 == 71` only (retail's comment says why that is not enough: that state is specific to primary and support weapons; secondaries have other states). Switching a `0` to `1` in `src/locomotion.c` restores retail's full test. The logic of both is proven against retail all the same: `tests/run-vectors-locomotion.sh` builds the file a second time with `-DTFP_LOCOMOTION_TEST_OPEN_CONSTANTS` (test only), where everything must equal retail; the shipped build must give retail's sprint answer narrowed to `l3 == 71` and everything else equal.
+
+### Lua-specific points
+
+- **`value.pitch or 0`**: nil and false are zero for the three angles; any other non-number is refused (`'Motion angle out of bounds'`). The angle check comes before any look at the matrices, and with all three angles zero the answer is the identity **without** the matrices being validated (line 37).
+- **`ipairs({value.dx, value.dy, value.dz})`** stops at the first nil: with `dx` nil nothing is checked or moved, with `dy` nil only `dx`. Kept (the `present` bits). `false` is not nil there and is refused.
+- **Order in `to_parent`**: camera basis, parent basis, the displacement bound, then the rotation. `pairs(q)` merges four distinct keys; its order does not matter.
+- **`basis()`** interleaves its checks per axis: axis 1 finite, axis 1 scale, axis 2 finite … then the three skew tests. Kept.
+- **A nil matrix entry** is not representable: retail's `ipairs` stops at it and the dot product then raises Lua's own "attempt to perform arithmetic on a nil value". Every matrix on the live path has 16 numbers. This was the one thing the first run showed (36 scripted operations with a nil entry, where my C answered `'Non-finite transform basis'`); those operations were removed and the header says so. An entry of another type (a string) is refused by `finite`, and NaN stands for it.
+- **`^2`** is `x*x` in LuaJIT; **`math.min` / `math.max`** as in section 1; **`math.rad(120)`** is `120 * 1.74532925199432957692e-2`.
+- **`math.floor(flags:byte(10)/4)%2==1`**: `flags[9] / 4 % 2` on a byte.
+- **`sprinting`** returns a boolean also for a non-table action (`false`); `resource_match` and `verified_lifecycle` must be exactly `true`; a layer that was not sampled is nil and equals no number.
+- **`pcall` boundary** of `sample`, the stripped `file:line:` prefixes and the pointer text: as in section 3. `assert(s, why)` passes the snapshot's own refusal text on.
+- **`on_foot`** runs its reads inside its own `pcall` and answers `false` for any refusal; so does the C, in the same read order.
+- **Lease.** `lease==backend.alignment_lease` is `current`; `lease.origin.player_identity==s.player_identity` is `tfp_same_player(origin, snapshot)`. A lease without an `origin` table raises an index error in retail; the C refuses it with the lease text.
+- The sample's `action_resource`, `action_verified`, `l1`, `l3`, `l14` are nil when `backend:action_state` answered nil (`has_action` false); the sample itself still succeeds, as in retail.
+
+### Dropped
+
+Nothing of the module. The two open sprint tests are present and proven but switched off (above).
+
+### Proof
+
+- Pure functions: 13,311 operations (the retail fixture `tests/first_person/locomotion.lua` statement by statement; every bound from both sides; every used matrix entry not finite; scale, skew and mirror cases per axis and per matrix; all sign combinations of the largest angles; 40 searched cases whose composed quaternion has a negative w; 7,000 seeded random conversions, half of them with matrices rounded to float as the engine gives them; 2,500 random `sprinting` calls). All doubles equal bit for bit.
+- Sampler: 9,350 samples (6,957 sampled, 2,393 refused with the same text) and 787 direct `on_foot` tests over 3,231 memory images; retail locomotion.lua over the unmodified backend.lua and action_state.lua on retail's layout, the C on this build's. 293,184 doubles compared in all; 632,058 memory reads with equal count and hash per sample.
+- Scripts for the sampler: flags, aim, sights, reload and the three ways to sprint; the bridge test of `on_foot` field by field; the view and the lease, each condition; the executable and the 48 world-pose bytes one by one; both Unit lookups (capacity, generation, getter, node counts, references with generation bits past eight bits and the largest index); each float of each of the three matrices not finite or out of shape; the root position and the facing limits; every record unreadable in turn; sequences on one backend (its action-state cache); memory that changes during the read: each of 30 scene variants swapped in before read 1 … 85, and back; 3,500 seeded random samples in sequences.
+- **Differences found between Lua and C: one** (the nil matrix entry, above; resolved by not scripting what C cannot express).
+- Coverage: 136 executable lines of locomotion.lua, 135 hit; the other is the constant field `sprint_evidence=` of the answer table (line 154), which LuaJIT builds without a line event.
+- Mutation check: 1,322 single changes, 261 did not compile, **961 killed, 100 survived**. The first pass left 127; added after it: `on_foot` called directly (787 tests, with the scene changing between its reads), the negative-w rotations, references with wide generation bits and the largest index, a registry of one, a flag row with its last byte set. The 100:
+  - sizes of local arrays and array parameters (37) and start values of locals that are always written before they are read (15);
+  - the two asserts retail can never fail (13): `'Motion rotation axis changed'` and `'Motion quaternion unavailable'`. An axis of one valid basis expressed in another valid basis has length 1 within the skew tolerance, and a product of unit quaternions is a unit quaternion; no input reaches them;
+  - the handedness limit `.95` (4): a basis that passes the skew test has handedness above .99 or below -.99;
+  - exact-equality boundaries (4): skew exactly at the limit, angle exactly at the cap, facing exactly .00001, w exactly 0;
+  - "first refusal wins" (7), as in section 3, including the value of the "read refused" code of the Unit re-check;
+  - the read-size guard and the 2^63 edge of `lua_hex` (5); `avatar_index < 8` in `on_foot` (3): an index of 8 or more never matches the snapshot's own flags address, so the answer is "no" either way;
+  - `math.min` / `math.max` ties (2); the skew loop bound (2: the extra round has no pair); one element past the end where the memory happens to agree (2); the value of the test switch (2: any non-zero is "on"); the layer-count argument next to a NULL layer list (2); the sign of w when it is negative (1: a negative w always exceeds the 120 degree cap, which then replaces w); clearing the error text at the start of `to_parent` (1: every path sets it again).
+
+### Open doubts
+
+- The two open sprint tests above. This is the largest known gap between the shipped C and retail: on this build the weapon will not show the sprint pose for weapons whose layer-3 sprint state is not 71 until the gait bit is established and its switch turned on.
+- `on_foot` accepts scene 3 or 4, as retail's Lua does. `src/camera_helper.c` (the translated camera DLL) accepts scene 3 only, as retail's DLL does. Both are faithful to their originals; they disagree with each other in retail too.
+- `atan2`, `sin`, `cos`, `acos`, `sqrt`: as for motion, proven with glibc; the Windows runtime's last bit was not run.
+- Other engineers' untracked `src/backend_ops.c` also declares `tfp_ops_alignment_context` and `tfp_ops_on_foot`. Mine are `tfp_alignment_context`, `tfp_alignment_executable` and `tfp_on_foot` (no name clash), and the two modules only use them through `TfpActionStateBackend` / `TfpLocomotionBackend`, so whoever joins the parts can bind either translation.
+
+## Open constants, all four modules
+
+| Where | What | State |
+|---|---|---|
+| `src/locomotion.c` `B_SPRINT_GAIT_ESTABLISHED` | flag byte 9, bit value 4 = sprint gait | open; the test answers "no" |
+| `src/locomotion.c` `B_BRIDGE_SPRINT_ESTABLISHED` | layer 14 = 3, layer 3 = 68, layer 1 = 75 / 78 = bridge sprint | open; the test answers "no" |
+| `src/action_placement_data.h` | the catalogue's weapon type ids on build 25480438 | taken from the kit (built for 26251122), not checked on this build; affects the menu label and the opt-in family defaults only |
+
+Everything else these modules read is established by the migration records, this build's executable image, or a file of this repository that reads the same field on this build; the tables in sections 3 and 4 say which.
+
+The posture bits `action_select.c` reads in the flag row (byte 9 bits 5-6, byte 10 bit 1, byte 12 bit 5) are the ones `src/placement.c` reads on this build.
