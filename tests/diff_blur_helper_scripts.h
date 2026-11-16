@@ -173,6 +173,40 @@ static void script_rows(Run &r) {
   r.set(A_GENERATIONS, 5, bytes_value(2, 1)); r.set(A_REGISTRY, 0x98, bytes_value(5)); r.validate(); r.set(A_REGISTRY, 0x98, bytes_value(6)); r.validate();
   r.body = (2u << 22) | 0x3fffffu; r.validate();
 }
+// The same content at another address: every captured address is part of the proof, not only what it holds.
+static void script_copies(Run &r) {
+  r.top(6);
+  r.set(A_SPARE, 0x1000 + 3 * 8, address_value(A_BODY));                                   // units
+  r.set(A_SPARE, 0x1100 + 3, bytes_value(1, 1));                                            // generations
+  r.set(A_SPARE, 0x1200 + 0x98, bytes_value(16)); r.set(A_SPARE, 0x1200 + 0x88, address_value(A_UNITS)); r.set(A_SPARE, 0x1200 + 0xA0, address_value(A_GENERATIONS)); // registry
+  r.set(A_SPARE, 0x1300 + 8, bytes_value(AVATAR)); r.set(A_SPARE, 0x1300 + 12, bytes_value(BODY_UNIT)); // descriptor
+  r.set(A_SPARE, 0x1500 + 8, bytes_value(16)); r.set(A_SPARE, 0x1500 + 12, bytes_value(17)); // parameter rows
+  r.set(A_SPARE, 0x1600 + 8, address_value(A_PDESC));                                       // parameter descriptor array
+  r.set(A_SPARE, 0x1700 + 8, bytes_value(WEAPON)); r.set(A_SPARE, 0x1700 + 20, bytes_value(1, 1)); // parameter descriptor
+  for (uint64_t at = 0; at < 0x100; at += 8) r.snapshot({A_SPARE, 0x1800 + at}, 8);
+  for (int w = 0; w < 2; ++w) std::memcpy(reinterpret_cast<void *>(W[w].a[A_SPARE] + 0x1800), reinterpret_cast<void *>(W[w].a[A_PROVIDER]), 0x100); // provider
+  struct Case { Change c; uint32_t error; };
+  const Case cases[] = {{P("units", A_REGISTRY, 0x88, A_SPARE, 0x1000), OWNER_MISMATCH}, {P("generations", A_REGISTRY, 0xA0, A_SPARE, 0x1100), OWNER_MISMATCH},
+                        {P("registry", A_E_REGISTRY, 0, A_SPARE, 0x1200), OWNER_MISMATCH}, {P("descriptor", A_OWNER, 0x110, A_SPARE, 0x1300), OWNER_MISMATCH},
+                        {P("controller", A_G_CONTROLLER, 0, A_SPARE, 0x1400), OWNER_MISMATCH}, {P("parameter rows", A_POOL, 0x298, A_SPARE, 0x1500), UNIT_MISMATCH},
+                        {P("parameter descriptor array", A_POOL, 0x290, A_SPARE, 0x1600), OK}, {P("parameter descriptor", A_PDESCS, 8, A_SPARE, 0x1700), UNIT_MISMATCH},
+                        {P("provider", A_SYSTEM, 0xDC8, A_SPARE, 0x1800), API_MISMATCH}};
+  for (const Case &k : cases) {
+    r.begin(); r.expect(r.result == 1, "armed");
+    const size_t m = r.mark(); r.set(k.c); r.sample();
+    r.expect(k.error == OK ? ::armed.load() == 1 : ::armed.load() == 0 && NADSB_Error() == k.error, "the same content at another address");
+    r.sample(H_NEAR); r.end(r.gen);
+    // With the copy in place from the start, everything works (a frame names the provider it was armed with).
+    r.validate(); r.expect(r.result == 1, "valid on the copy"); r.begin(); r.expect(r.result == 1, "armed on the copy");
+    Hook h; if (k.c.at.id == A_SYSTEM) { h.object_id = A_SPARE; h.object_offset = 0x1800; }
+    const uint64_t before = ::replaced.load(); r.sample(h); r.expect(::replaced.load() == before + 1, "replaced on the copy");
+    r.restore(m); r.sample(h); r.sample(); r.end(r.gen);
+  }
+  // Ring positions 32: neither head nor tail may be 32, though tail 32 would name record 31.
+  r.restore(); r.top(6, 32, 0); r.validate(); r.expect(r.result == 0, "tail 32"); r.begin(); r.expect(r.result == 0, "tail 32");
+  r.top(6, 2, 32); r.validate(); r.expect(r.result == 0, "head 32"); r.begin(); r.expect(r.result == 0, "head 32");
+  r.top(6, 31, 0); r.validate(); r.expect(r.result == 1, "tail 31"); r.top(6, 0, 31); r.validate(); r.expect(r.result == 1, "head 31");
+}
 // Every refused configuration.
 static void script_configs(Run &r) {
   r.top(6);
@@ -217,6 +251,7 @@ static void script_control(Run &r) {
   r.sample(); r.end(first); r.expect(r.result == 1, "end");
   r.end(first); r.expect(r.result == 1, "the retired generation ends again"); r.end(first + 1); r.end(0); r.read_stats(first); r.read_stats(0);
   r.begin(); const uint64_t second = r.gen; r.expect(second == 2, "second generation is 2");
+  r.read_stats(second, 80, 1, 3); r.expect(r.result == 0 && NADSB_Error() == OK, "stats that cannot be stored: 0, and no error code");
   r.end(first); r.expect(r.result == 0 && ::armed.load() == 1, "a stale generation cannot end a later lease"); r.read_stats(first);
   r.sample(); r.end(second); r.end(first); r.end(second);
   // A refused begin consumes no generation; a begin refused after the generation was written does.
@@ -583,6 +618,7 @@ static void register_scripts() {
   add("avatar rows and body units", script_rows);
   add("refused configurations and ring positions", script_configs);
   add("control calls in right and wrong orders", script_control);
+  add("the same content at another address; ring position 32", script_copies);
   const char *slots[] = {"read-only (fixture switch)", "foreign value at the swap", "swap faults", "begin answers 2", "foreign value at end", "game's setter returns under the helper",
                          "pin fails", "target not executable", "helper or foreign value before begin", "read-only page", "slot unreadable"};
   for (int which = 0; which < 11; ++which) add(std::string("slot: ") + slots[which], [=](Run &r) { script_slot(r, which); });

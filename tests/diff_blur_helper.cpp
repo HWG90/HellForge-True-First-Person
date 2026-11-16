@@ -430,8 +430,11 @@ struct Run {
   uint32_t read_stats(uint64_t g, uint32_t header_size = 80, uint32_t header_abi = 1, int where = 0) {
     for (int w = 0; w < 2; ++w) { std::memset(reinterpret_cast<void *>(W[w].a[A_IO] + IO_STATS2), 0xA5, 0x100); World::put<uint32_t>(W[w].a[A_IO] + IO_STATS2, header_size); World::put<uint32_t>(W[w].a[A_IO] + IO_STATS2 + 4, header_abi); }
     char t[96]; std::snprintf(t, sizeof t, "read_stats(%llu), header %u/%u, pointer %d", (unsigned long long)g, header_size, header_abi, where);
-    auto at = [&](int w) -> uint64_t { return where == 1 ? 0 : where == 2 ? W[w].a[A_IO] + 0x1000 : W[w].a[A_IO] + IO_STATS2; };
+    auto at = [&](int w) -> uint64_t { return where == 1 ? 0 : where == 2 ? W[w].a[A_IO] + 0x1000 : where == 3 ? W[w].a[A_SPARE] : W[w].a[A_IO] + IO_STATS2; };
+    // where 3: a page that can be read but not written (the header is there, the result cannot be stored).
+    if (where == 3) for (int w = 0; w < 2; ++w) { std::memcpy(reinterpret_cast<void *>(W[w].a[A_SPARE]), reinterpret_cast<void *>(W[w].a[A_IO] + IO_STATS2), 80); mprotect(reinterpret_cast<void *>(W[w].a[A_SPARE]), 4096, PROT_READ); }
     both(t, take_probe(), [&] { return NADSB_ReadStats(g, reinterpret_cast<NADSB_Stats *>(at(0))); }, [&] { return tfp_blur_read_stats(g, reinterpret_cast<TfpBlurStats *>(at(1))); });
+    if (where == 3) for (int w = 0; w < 2; ++w) { mprotect(reinterpret_cast<void *>(W[w].a[A_SPARE]), 4096, PROT_READ | PROT_WRITE); std::memset(reinterpret_cast<void *>(W[w].a[A_SPARE]), 0, 80); }
     compare_bytes("stats (script's call)", W[0].a[A_IO] + IO_STATS2, W[1].a[A_IO] + IO_STATS2, 0x100, STATS_NAMES, 20);
     return result;
   }
