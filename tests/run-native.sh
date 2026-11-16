@@ -73,3 +73,11 @@ if [ -f "$TFP_RETAIL_NATIVE/native_ads_camera.cpp" ] && command -v g++ >/dev/nul
 else
   echo "Camera helper: differential test skipped (retail source, g++ or Linux not found)"
 fi
+
+# Helper translations against the retail C++ (tests/run-diff-*.sh) and the modules that drive them against
+# the retail Lua (tests/run-vectors-*.sh). Each prints its own summary and skips itself when the retail
+# tree, g++ or luajit-made vectors are not available.
+for tfp_script in "$TFP_ROOT"/tests/run-diff-*.sh "$TFP_ROOT"/tests/run-vectors-*.sh; do
+  [ -f "$tfp_script" ] || continue
+  bash "$tfp_script"
+done
