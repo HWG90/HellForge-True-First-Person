@@ -222,7 +222,8 @@ static bool host_writable_slot(void *, uint64_t at, uint64_t exe) {
   if (exe != W[1].a[A_EXE]) fail("the translation asked whether the slot is writable in image %#llx, not in the executable", static_cast<unsigned long long>(exe));
   return ::writable_slot(at, 0); // the original's fixture answer: committed, writable, private (and fixture_slot_readonly)
 }
-static bool host_writable_request_field(void *, uint64_t at) { return ::writable_request_field(at); } // the original's own page question
+// The original's own page question; its alignment test is the translation's to make, so it is taken out here.
+static bool host_writable_request_field(void *, uint64_t at) { return ::writable_request_field(at & ~3ull); }
 static bool host_executable(void *, uint64_t at) {
   if (at == W[1].a[A_EXE] + HERE.getter) { ++counted.translation_only; return answer_getter_executable; }
   // The original (fixture build) asks this of the function standing in for the game's setter.

@@ -194,7 +194,10 @@ static void script_phase(Run &r, double fps, int variant) {
     ++epoch; r.aim(false); tick(dt); r.transition(r.gen, epoch, .2f, 0); r.frame(.9f); tick(dt); r.transition(r.gen, epoch, .9999999f, 0); r.frame(.9f); tick(dt); r.transition(r.gen, epoch, 1.0f, 0); r.frame(.9f);
     // the producer stops in mid-ease: the local ease takes over from where the lens is
     ++epoch; r.aim(true); tick(dt); r.transition(r.gen, epoch, .3f, 1); r.frame(.35f); tick(.3); r.frame(.35f); frames(r, 14, dt, .35f);
-    r.aim(false); frames(r, 3, dt, .35f); ++epoch; tick(dt); r.transition(r.gen, epoch, 0.0f, 0); frames(r, 3, dt, .35f); tick(dt); r.transition(r.gen, epoch, .7f, 0); frames(r, 3, dt, .35f); break;
+    r.aim(false); frames(r, 3, dt, .35f); ++epoch; tick(dt); r.transition(r.gen, epoch, 0.0f, 0); frames(r, 3, dt, .35f); tick(dt); r.transition(r.gen, epoch, .7f, 0); frames(r, 3, dt, .35f);
+    // the last sliver of an epoch: almost nothing of the curve is left to spend
+    for (float p : {.999f, .9995f, .9999f, .99999f, 1.0f}) { tick(dt); r.transition(r.gen, epoch, p, 0); r.frame(.9f); }
+    ++epoch; r.aim(true); for (float p : {.5f, .9990f, .9993f, .9999f}) { tick(dt); r.transition(r.gen, epoch, p, 1); r.frame(.35f); } break;
   case 8: // objections and a foreign request during the phase
     r.aim(true); tick(dt); r.transition(r.gen, epoch, .3f, 1); r.frame(.35f); r.controls(1, true); tick(dt); r.transition(r.gen, epoch, .5f, 1); r.frame(.35f);
     r.controls(0, true); tick(dt); r.transition(r.gen, epoch, .7f, 1); r.frame(.35f); r.row(1, 6, AVATAR, WEAPON_B, BODY); tick(dt); r.frame(.35f); r.row(1, 6, AVATAR, WEAPON, BODY);
@@ -219,6 +222,8 @@ static void script_bind(Run &r, uint64_t reserved_ms) {
   r.bind(r.gen, 2, WEAPON_B); need(r.result == 1 && r.got.binds == 1, "bind"); frames(r, 5, .016, .9f);
   r.shoulder(true); frames(r, 3, .016, .9f); r.ring(0, 2); r.row(1, 6, AVATAR, WEAPON, BODY); r.bind(r.gen, 1, WEAPON); frames(r, 12, .016, .9f); // bound in mid-tween
   r.aim(true); r.ring(0, 3); r.bind(r.gen, 2, WEAPON_B); frames(r, 3, .016, .35f); r.aim(false); frames(r, 14, .016, .9f);                  // bound in full sights: nothing applied
+  // bound in full sights in the middle of a shoulder tween, with no frame between: the tween is dropped by the bind itself
+  r.shoulder(true); frames(r, 2, .016, .9f); r.aim(true); r.bind(r.gen, 2, WEAPON_B); need(r.result == 1, "bind in full sights, mid-tween"); r.aim(false); frames(r, 12, .016, .9f); r.shoulder(false); frames(r, 10, .016, .9f);
   r.slot_holds(SLOT_FOREIGN); r.bind(r.gen, 2, WEAPON_B); need(NADSF_Error() == API_MISMATCH, "bind with a foreign slot"); r.slot_holds(SLOT_HELPER);
   r.row(2, 4, AVATAR, WEAPON_B, BODY); r.bind(r.gen, 2, WEAPON_B); frames(r, 2, .016, .9f); r.row(2, 6, AVATAR, WEAPON_B, BODY);
   set_u32(A_CONTEXT, 0x1F8, 32); r.bind(r.gen, 2, WEAPON_B); r.frame(.9f); set_u32(A_CONTEXT, 0x1F8, 0);
@@ -392,7 +397,10 @@ static void script_fird(Run &r, int v) {
   switch (v) {
   case 0: // plain: held, then restored at the end
     r.normal(); r.validate_fird(); arm_fird(r); need(r.got.ledger == 1 && r.got.immediate == 1, "ledger after begin"); fird_frames(r, 30, 0, 1.3f);
-    need(r.got.replaced == 30, "fird frames replaced"); r.lens(0, 1.3f); tick(.016); r.frame(1.3f); r.end(r.gen); need(r.result == 1, "end"); r.frame(1.3f); r.end(r.gen); break;
+    need(r.got.replaced == 30, "fird frames replaced"); r.lens(0, 1.3f); tick(.016); r.frame(1.3f); r.end(r.gen); need(r.result == 1, "end"); r.frame(1.3f); r.end(r.gen);
+    // other captured lenses: the statistics show them in degrees
+    for (float captured : {.5f, .7f, 1.3f, 2.0f, 2.5f, 2.9f, 10 * RAD, 170 * RAD}) { r.normal(); r.lens(0, 1.2f); r.begin_fird(captured); need(r.result == 1, "begin with another lens"); tick(.016); r.lens(0, 1.25f); r.frame(1.25f); r.end(r.gen); }
+    break;
   case 1: // the end finds the game's value, an equal value, a vanished request, a changed header
     arm_fird(r); r.lens(0, 1.25f); r.end(r.gen);
     arm_fird(r); tick(.016); r.frame(1.3f); r.end(r.gen);                 // the game returned early: nothing to restore
@@ -402,7 +410,9 @@ static void script_fird(Run &r, int v) {
     arm_fird(r); r.row(0, 6, AVATAR, 0, BODY); r.end(r.gen);
     arm_fird(r); set_u32(A_DESCRIPTOR, 8, 0x999); r.end(r.gen); set_u32(A_DESCRIPTOR, 8, AVATAR);
     arm_fird(r, CAPTURED); r.end(r.gen);                                  // the field already held the captured lens
-    arm_fird(r); r.controls(1); r.end(r.gen); r.controls(); break;        // an objection does not stop the restore
+    arm_fird(r); r.controls(1); r.end(r.gen); r.controls();               // an objection does not stop the restore
+    arm_fird(r); r.bind_fird(r.gen, 0); need(r.result == 1, "bind to the same request"); r.end(r.gen); // the bind keeps the value to restore
+    arm_fird(r); r.lens(0, 1.25f); r.bind_fird(r.gen, 0); r.end(r.gen); break;
   case 2: // several requests: the input source is the first normal one from the head, not the bound top
     r.normal(); r.ring(0, 3); r.row(0, 5, AVATAR, 0, BODY); r.row(1, 4, AVATAR, 0, BODY); r.row(2, 4, AVATAR, 0, BODY); r.lens(1, 1.2f); r.lens(2, 1.4f); r.request_row = 2;
     r.validate_fird(); r.begin_fird(CAPTURED); need(r.result == 1, "begin"); fird_frames(r, 6, 1, 1.3f);
@@ -443,7 +453,10 @@ static void script_fird(Run &r, int v) {
     r.bind_fird(r.gen, 1); r.end(r.gen); break;
   case 7: // the idle record as the request
     r.normal(); r.ring(4, 4); r.row(IDLE_ROW, 4, AVATAR, 0, BODY); r.lens(IDLE_ROW, 1.2f); r.request_row = IDLE_ROW; r.validate_fird(); r.begin_fird(CAPTURED); need(r.result == 1, "begin on the idle record");
-    fird_frames(r, 5, IDLE_ROW, 1.3f); r.lens(IDLE_ROW, 1.3f); tick(.016); r.frame(1.3f); r.end(r.gen); need(r.result == 1, "end"); break;
+    fird_frames(r, 5, IDLE_ROW, 1.3f); r.lens(IDLE_ROW, 1.3f); tick(.016); r.frame(1.3f); r.end(r.gen); need(r.result == 1, "end");
+    // the ring fills while the ledger is on the idle record: that record is no longer the live request, nothing is restored
+    r.lens(IDLE_ROW, 1.2f); r.begin_fird(CAPTURED); need(r.result == 1, "begin on the idle record again"); r.ring(4, 5); r.row(4, 6, AVATAR, WEAPON, BODY); r.end(r.gen);
+    r.ring(4, 4); r.lens(IDLE_ROW, 1.2f); r.begin_fird(CAPTURED); r.ring(4, 5); r.row(4, 4, AVATAR, 0, BODY); r.end(r.gen); break;
   case 8: // begin fails after its own data write: the field is restored by the failed begin
     r.normal(); r.lens(0, 1.2f); forward_pokes.push_back({1, {{A_CONTROLLER, 0}, raw_value(1)}}); r.begin_fird(CAPTURED); need(r.result == 0, "failed begin"); r.controls();
     r.normal(); r.lens(0, 1.2f); forward_pokes.push_back({1, {{A_CONTROLLER, 4}, raw_value(1, 1)}}); r.begin_fird(CAPTURED); need(r.result == 0, "full sights during a fird begin"); r.aim(false);
@@ -454,6 +467,17 @@ static void script_fird(Run &r, int v) {
   }
 }
 
+// A camera context that is not 4-aligned: the request's lens field cannot be swapped.
+static void script_fird_unaligned(Run &r) {
+  now(41); r.normal();
+  set({A_G_CONTEXT, 0}, address_value(A_CONTEXT, 1)); set({A_CONTEXT, 1}, address_value(A_CAMERA));
+  set_u32(A_CONTEXT, 0x1F9, 0); set_u32(A_CONTEXT, 0x1FD, 1);
+  set_u32(A_CONTEXT, 0x201, 4); set_u32(A_CONTEXT, 0x205, AVATAR); set_u32(A_CONTEXT, 0x209, 0); set_u32(A_CONTEXT, 0x20D, BODY); set_f32(A_CONTEXT, 0x201 + 0x3C, 1.2f);
+  r.context_delta = 1; r.request_delta = 1; r.request_row = 0;
+  r.validate(); need(r.result == 1, "the plain preflight accepts the shifted context");
+  r.validate_fird(); need(r.result == 0 && NADSF_Error() == REQUEST_FIELD_INVALID, "unaligned field refused");
+  r.begin_fird(CAPTURED); need(r.result == 0 && NADSF_Error() == REQUEST_FIELD_INVALID, "unaligned field refused at begin");
+}
 // ---- the hook's own arguments ----
 static void script_arguments(Run &r) {
   now(3); r.frame(.9f); r.fp(); r.read_stats(0);
@@ -532,50 +556,63 @@ static void script_walk(Run &r, uint32_t seed, int steps) {
     for (uint32_t i = 0; i < tail; ++i) r.row(static_cast<int>(i), pick(3) == 0 ? 4 : pick(6) == 0 ? 5 : 6, pick(12) == 0 ? 0x999 : AVATAR, pick(4) == 0 ? WEAPON_B : WEAPON, pick(15) == 0 ? 0x400009 : BODY);
     r.row(IDLE_ROW, pick(2) ? 4 : 6, AVATAR, WEAPON, BODY);
   };
+  int idle = 0, objection = 0;
+  auto top_row = [&] { uint32_t head, tail; std::memcpy(&head, reinterpret_cast<void *>(W[0].a[A_CONTEXT] + 0x1F8), 4); std::memcpy(&tail, reinterpret_cast<void *>(W[0].a[A_CONTEXT] + 0x1FC), 4);
+                       return head == tail ? static_cast<int>(IDLE_ROW) : static_cast<int>((tail + 31) % 32); };
   for (int i = 0; i < steps; ++i) {
-    switch (pick(24)) { case 0: tick(.3); break; case 1: tick(-.02); break; case 2: break; case 3: tick(.12); break; case 4: tick(1.0 / 30); break; case 5: tick(.25); break; default: tick(1.0 / 60 + pick(5) * .002); }
+    switch (pick(40)) { case 0: tick(.3); break; case 1: tick(-.02); break; case 2: break; case 3: tick(.12); break; case 4: tick(1.0 / 30); break; case 5: tick(.25); break; default: tick(1.0 / 60 + pick(5) * .002); }
     if (clock_bad && !--clock_bad) fixture_clock_ok = true;
     if (damaged && !--damaged) { for (int w = 0; w < 2; ++w) W[w].write_static(); }
-    const bool held = ::reserved.load() != 0, fird = held && ::policy.fird;
-    const uint32_t action = pick(100);
-    if (action < 52) {
-      if (fird && pick(3)) { uint32_t head, tail; std::memcpy(&head, reinterpret_cast<void *>(W[0].a[A_CONTEXT] + 0x1F8), 4); std::memcpy(&tail, reinterpret_cast<void *>(W[0].a[A_CONTEXT] + 0x1FC), 4);
-        r.lens(head == tail ? IDLE_ROW : static_cast<int>(pick(4)), lenses[pick(12)]); }
-      r.frame(pick(25) == 0 ? odd[pick(6)] : lenses[pick(12)]);
-    } else if (action < 58) { aiming = !aiming; r.aim(aiming); }
-    else if (action < 64) { shouldered = !shouldered; if (pick(6) == 0) set_u8(r.flags_id(), 10, shouldered ? 4 : 0); else r.shoulder(shouldered); }
-    else if (action < 69) {
+    if (objection && !--objection) { r.controls(0, aiming, false); r.seated(false); }
+    const bool held = ::reserved.load() != 0, fird = held && ::policy.fird, live = held && ::armed.load();
+    // A walk that sat without a working lease for a while starts a fresh one from a healthy world.
+    if (live) idle = 0; else if (++idle > 12) {
+      idle = 0; fixture_cas_fail_at = 0; fixture_foreign_cas_at = 0; fixture_clock_ok = true; clock_bad = 0; for (int w = 0; w < 2; ++w) W[w].write_static();
+      if (held) { r.end(r.gen); if (::reserved.load()) { r.slot_holds(SLOT_HELPER); r.end(r.gen); } }
+      r.slot_holds(SLOT_NATIVE); r.weapon = WEAPON; aiming = pick(4) == 0; shouldered = pick(4) == 0;
+      if (pick(5) == 0) { r.normal(); r.lens(0, 1.2f); r.aim(false); aiming = false; r.reserved_ms = 0; r.begin_fird(CAPTURED); }
+      else { r.fp(); r.aim(aiming); r.shoulder(shouldered); r.reserved_ms = reserves[pick(5)]; r.begin(); }
+      continue;
+    }
+    const uint32_t action = pick(200);
+    if (action < 130) {
+      if (fird && pick(3)) r.lens(top_row() == IDLE_ROW ? static_cast<int>(IDLE_ROW) : static_cast<int>(pick(3)), lenses[pick(12)]);
+      r.frame(pick(25) == 0 ? odd[pick(6)] : fird ? 1.3f : aiming ? (pick(6) ? .35f : .30f) : lenses[pick(12)]);
+    } else if (action < 140) { aiming = !aiming; r.aim(aiming); }
+    else if (action < 150) { shouldered = !shouldered; if (pick(6) == 0) set_u8(r.flags_id(), 10, shouldered ? 4 : 0); else r.shoulder(shouldered); }
+    else if (action < 156) {
       switch (pick(6)) {
       case 0: refresh_rows(); break;
       case 1: r.fp(); r.aim(aiming); r.shoulder(shouldered); break;
       case 2: r.normal(); r.lens(0, lenses[pick(12)]); r.aim(aiming); r.shoulder(shouldered); break;
-      case 3: set_u32(A_CONTEXT, row_offset(r.request_row) + 8, pick(2) ? WEAPON_B : WEAPON); break;
-      case 4: set_u32(A_CONTEXT, row_offset(r.request_row), pick(2) ? 4 : 6); break;
+      case 3: set_u32(A_CONTEXT, row_offset(top_row()) + 8, pick(2) ? WEAPON_B : WEAPON); break;
+      case 4: set_u32(A_CONTEXT, row_offset(top_row()), pick(2) ? 4 : 6); break;
       default: r.ring(0, 1 + pick(3)); break;
       }
-    } else if (action < 72) {
-      switch (pick(5)) { case 0: set_u32(A_CONTROLLER, 0, 2); break; case 1: set_u32(A_CONTROLLER, 0, pick(2) ? 1 : 0x20); break; case 2: set_u8(A_CONTROLLER, 5, static_cast<uint8_t>(pick(2))); break;
-                         case 3: r.seated(pick(2) != 0); break; default: r.controls(0, aiming, false); r.seated(false); break; }
-    } else if (action < 75) r.degrees(settings[pick(9)]);
-    else if (action < 82) {
-      if (pick(4) == 0) { ++epoch; progress = 0; } else progress = std::min(1.0f, progress + pick(5) * .11f);
+      // mostly the adapter follows the change at once
+      if (pick(3)) { uint32_t top[4]; std::memcpy(top, reinterpret_cast<void *>(W[0].a[A_CONTEXT] + row_offset(top_row())), 16);
+        if (fird) r.bind_fird(r.gen, top_row()); else r.bind(r.gen, top_row(), top[2]); }
+    } else if (action < 160) {
+      switch (pick(5)) { case 0: set_u32(A_CONTROLLER, 0, 2); break; case 1: set_u32(A_CONTROLLER, 0, pick(2) ? 1 : 0x20); break; case 2: set_u8(A_CONTROLLER, 5, 1); break;
+                         case 3: r.seated(true); break; default: break; }
+      objection = 1 + static_cast<int>(pick(4));
+    } else if (action < 164) r.degrees(settings[pick(9)]);
+    else if (action < 182) {
+      if (pick(5) == 0) { ++epoch; progress = 0; } else progress = std::min(1.0f, progress + pick(5) * .11f);
       r.transition(pick(30) == 0 ? r.gen + 1 : r.gen, pick(20) == 0 ? epoch - 1 : epoch, pick(30) == 0 ? progress - .2f : progress, pick(8) == 0 ? !aiming : aiming);
-    } else if (action < 86) {
-      uint32_t tail; std::memcpy(&tail, reinterpret_cast<void *>(W[0].a[A_CONTEXT] + 0x1FC), 4); uint32_t head; std::memcpy(&head, reinterpret_cast<void *>(W[0].a[A_CONTEXT] + 0x1F8), 4);
-      const int top_row = head == tail ? IDLE_ROW : static_cast<int>((tail + 31) % 32);
-      if (fird || pick(8) == 0) r.bind_fird(r.gen, pick(6) == 0 ? 0 : top_row); else r.bind(r.gen, pick(8) == 0 ? 0 : top_row, pick(3) ? WEAPON : WEAPON_B);
-    } else if (action < 89) r.end(pick(10) == 0 ? r.gen + 1 : r.gen);
-    else if (action < 94) {
-      uint32_t tail; std::memcpy(&tail, reinterpret_cast<void *>(W[0].a[A_CONTEXT] + 0x1FC), 4); uint32_t head; std::memcpy(&head, reinterpret_cast<void *>(W[0].a[A_CONTEXT] + 0x1F8), 4);
-      if (pick(3) == 0) { if (pick(4) == 0) r.fp(); else r.normal(); r.aim(aiming); r.shoulder(shouldered); }
-      else r.request_row = head == tail ? IDLE_ROW : static_cast<int>((tail + 31) % 32);
+    } else if (action < 186) {
+      if (fird || pick(8) == 0) r.bind_fird(r.gen, pick(6) == 0 ? 0 : top_row()); else r.bind(r.gen, pick(8) == 0 ? 0 : top_row(), pick(3) ? WEAPON : WEAPON_B);
+    } else if (action < 188) r.end(pick(10) == 0 ? r.gen + 1 : r.gen);
+    else if (action < 191) {
+      if (pick(3) == 0) { if (pick(4) == 0) r.normal(); else r.fp(); r.aim(aiming); r.shoulder(shouldered); }
+      else r.request_row = top_row();
       r.weapon = pick(5) == 0 ? WEAPON_B : WEAPON; r.reserved_ms = reserves[pick(5)];
       if (pick(4) == 0) { r.reserved_ms = 0; r.begin_fird(pick(10) == 0 ? .1f : CAPTURED); } else r.begin();
-    } else if (action < 95) { if (pick(2)) r.validate(); else r.validate_fird(); }
-    else if (action < 96) r.read_stats(pick(3) == 0 ? r.gen + 1 : held ? r.gen : 0, pick(8) == 0 ? 80 : 88);
-    else if (action < 97) { fixture_clock_ok = false; clock_bad = 1 + static_cast<int>(pick(2)); }
-    else if (action < 98) r.slot_holds(pick(3) == 0 ? SLOT_FOREIGN : pick(2) ? SLOT_NATIVE : held ? SLOT_HELPER : SLOT_NATIVE);
-    else if (action < 99) {
+    } else if (action < 193) { if (pick(2)) r.validate(); else r.validate_fird(); }
+    else if (action < 195) r.read_stats(pick(3) == 0 ? r.gen + 1 : held ? r.gen : 0, pick(8) == 0 ? 80 : 88);
+    else if (action < 197) { fixture_clock_ok = false; clock_bad = 1 + static_cast<int>(pick(2)); }
+    else if (action < 198) r.slot_holds(pick(3) == 0 ? SLOT_FOREIGN : pick(2) ? SLOT_NATIVE : held ? SLOT_HELPER : SLOT_NATIVE);
+    else if (action < 199) {
       static const Loss damage[] = {{"", {A_DESCRIPTOR, 8}, raw_value(0x999)}, {"", {A_GENERATIONS, 3}, raw_value(2, 1)}, {"", {A_API, 0x78}, raw_value(0x10000, 8)},
                                     {"", {A_G_CONTROLLER, 0}, raw_value(0, 8)}, {"", {A_G_CALL, 0}, raw_value(0, 1)}, {"", {A_EXE, 136}, raw_value(5)}, {"", {A_G_FIRD0 + 5, 3}, raw_value(0, 1)}};
       const Loss &d = damage[pick(7)]; set(d.at, d.bad); damaged = 1 + static_cast<int>(pick(3)); damage_at = d.at;
@@ -646,7 +683,7 @@ static std::vector<Poke> standard_values(const Run &r) {
   value(A_CONTEXT, top + 8, raw_value(WEAPON_B)); value(A_CONTEXT, top + 12, raw_value(0x400009));
   value(A_CONTEXT, top + 0x3C, raw_value(0x7fc00000)); value(A_CONTEXT, top + 0x3C, float_value(.5f));
   value(A_CONTEXT, row_offset(0), raw_value(4)); value(A_CONTEXT, row_offset(0), raw_value(6)); value(A_CONTEXT, row_offset(0) + 4, raw_value(0x999)); value(A_CONTEXT, row_offset(0) + 8, raw_value(77));
-  value(A_CONTEXT, row_offset(0) + 0x3C, float_value(.7f)); value(A_CONTEXT, row_offset(0) + 0x3C, raw_value(0)); value(A_CONTEXT, row_offset(IDLE_ROW), raw_value(6));
+  value(A_CONTEXT, row_offset(0) + 0x3C, float_value(.7f)); value(A_CONTEXT, row_offset(0) + 0x3C, float_value(CAPTURED)); value(A_CONTEXT, row_offset(0) + 0x3C, raw_value(0)); value(A_CONTEXT, row_offset(IDLE_ROW), raw_value(6));
   value(A_S_FOV, 0, float_value(100)); value(A_S_FOV, 0, raw_value(0x7fc00000)); value(A_G_STATE, 0, raw_value(0, 8));
   value(A_GENERATIONS, 3, raw_value(2, 1)); value(A_UNITS, 24, address_value(A_BODY1)); value(A_DESCRIPTOR, 8, raw_value(0x999)); value(A_DESCRIPTOR, 0, raw_value(7));
   value(A_OWNER, 0x6C, raw_value(0)); value(A_REGISTRY, 0x98, raw_value(2));
@@ -684,8 +721,8 @@ static void probe_script(Run &r, int which) {
   case 15: arm_fird(r); fird_frames(r, 2, 0, 1.3f); r.lens(0, 1.3f); values(); tick(.016); r.probe(); r.frame(1.3f); after(1.3f); break;
   case 16: r.normal(); r.ring(0, 3); r.row(0, 5, AVATAR, 0, BODY); r.row(1, 4, AVATAR, 0, BODY); r.row(2, 4, AVATAR, 0, BODY); r.lens(1, 1.2f); r.lens(2, 1.4f); r.request_row = 2;
     r.begin_fird(CAPTURED); fird_frames(r, 2, 1, 1.3f); r.row(0, 4, AVATAR, 0, BODY); r.lens(0, 1.1f); values(); tick(.016); r.probe(); r.frame(1.3f); after(1.3f); break;
-  case 17: arm_fird(r); r.lens(0, 1.3f); tick(.016); r.frame(1.3f); r.ring(0, 2); r.row(1, 4, AVATAR, 0, BODY); r.lens(1, 1.5f); r.row(0, 5, AVATAR, 0, BODY); r.row(0, 4, AVATAR, 0, BODY); r.ring(1, 2); r.ring(0, 2);
-    r.request_row = 1; values(); r.probe(); r.bind_fird(r.gen, 1); after(1.3f); break;
+  case 17: arm_fird(r); r.lens(0, 1.3f); tick(.016); r.frame(1.3f); r.ring(0, 2); r.row(1, 4, AVATAR, 0, BODY); r.lens(1, 1.5f);
+    r.lens(0, 1.3f); r.request_row = 1; values(); r.probe(); r.bind_fird(r.gen, 1); after(1.3f); break;
   case 18: arm_fird(r); r.lens(0, 1.3f); tick(.016); r.frame(1.3f); values(); r.probe(); r.end(r.gen); after(1.3f); break;
   case 19: arm_fird(r); fird_frames(r, 2, 0, 1.3f); r.ring(0, 2); r.row(1, 6, AVATAR, WEAPON, BODY); r.request_row = 1; values(); tick(.016); r.probe(); r.frame(.35f); r.request_row = 0; after(.35f); break;
   case 20: r.fp(); values(); forward_pokes.push_back({1, {{A_CONTROLLER, 0}, raw_value(1)}}); r.probe(); r.begin(); r.controls(); after(.9f); break;
@@ -716,6 +753,7 @@ static void register_scripts() {
   for (int part = 0; part < 16; ++part) { char name[64]; std::snprintf(name, sizeof name, "refusals, part %d", part); add(name, [=](Run &r) { script_refusals(r, part, 16); }); }
   for (int v = 0; v < 12; ++v) { char name[64]; std::snprintf(name, sizeof name, "dispatch slot, case %d", v); add(name, [=](Run &r) { script_slot(r, v); }); }
   for (int v = 0; v < 9; ++v) { char name[64]; std::snprintf(name, sizeof name, "fird policy, case %d", v); add(name, [=](Run &r) { script_fird(r, v); }); }
+  add("fird policy, unaligned request field", script_fird_unaligned);
   add("hook arguments", script_arguments);
   const std::vector<Loss> lost = losses();
   for (size_t which = 0; which < lost.size(); ++which) for (int state = 0; state < 3; ++state) {
