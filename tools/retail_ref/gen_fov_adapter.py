@@ -200,6 +200,8 @@ def adapter_only(clocked=True):
     s.step("a_stats", slot=0, sbase=54, clk=1); s.step("a_stats", slot=0, sbase=55); s.step("a_stats", slot=0, sbase=56, now=1.0)
     s.step("a_stats", slot=0, sbase=57, ssize=87); s.step("a_stats", slot=0, sbase=58, sabi=0)
     s.step("a_stats", slot=0, sbase=59); s.step("a_validate"); s.step("a_stats", slot=0, sbase=60)
+    s.step("a_stats", slot=0, dt=0.001, sbase=160, st=[ans(ret=0)], err=[3]); s.step("a_stats", slot=0, dt=0.001, sbase=161)   # a refused read drops the shared counters
+    s.step("a_stats", slot=0, dt=0.001, sbase=162, sabi=3); s.step("a_stats", slot=0, dt=0.001, sbase=163)
     s.step("a_begin", slot=1, begin_gen=8)                                # refused; slot 1 is the owned handle too
     s.step("a_stats", slot=1, sbase=61); s.step("a_stats", slot=FOREIGN)
     for call in ("a_stats", "a_finish", "a_bind", "a_transition"):

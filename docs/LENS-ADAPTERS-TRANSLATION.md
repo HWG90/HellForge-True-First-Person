@@ -43,7 +43,7 @@ Kept although the lease alone cannot reach it (reached by the direct adapter cal
 
 Coverage: of the retail file's executable statements the scripts miss 39 (`return self.library`: `library` is never set without `ffi`), 72 / 112 / 150 (helper raising, see above) and 179 (`collect()` is never called without a handle). Nothing else.
 
-Mutation: 180 single changes in three seeded batches, 165 killed. The 15 survivors (11 distinct) are all without effect: dead values under a false `has_*` flag (`stats_handle`, `stats_at`, `bound_request`, `bound_weapon`, the unused `cause` argument), a buffer size, `9007199254740992.0 -> .1` (same double), `text=NULL` initialisers the callback always overwrites, `stats->has` on a failed finish (callers do not read it), the cause passed to "disarmed while waiting" (collect has just stored the same number as the helper's last failure code), `stats_handle ~= handle` in the refresh test (a cache always belongs to the owned handle), `origin && origin_has_weapon` (the second flag is never set without the first), and the invalidation after End (the following read has no clock sample and invalidates anyway). Two real gaps were found and closed on the way: the refusal script shut the lease down in its first round (all later rounds only stopped), and the last counters before End were never read inside a 10 Hz tick with changed values.
+Mutation: 180 single changes in three seeded batches, 165 killed. The 15 survivors (11 distinct) are all without effect: dead values under a false `has_*` flag (`stats_handle`, `stats_at`, `bound_request`, `bound_weapon`, the unused `cause` argument), a buffer size, `9007199254740992.0 -> .1` (same double), `text=NULL` initialisers the callback always overwrites, `stats->has` on a failed finish (callers do not read it), the cause passed to "disarmed while waiting" (collect has just stored the same number as the helper's last failure code), `stats_handle ~= handle` in the refresh test (a cache always belongs to the owned handle), `origin && origin_has_weapon` (the second flag is never set without the first), and the invalidation after End (the following read has no clock sample and invalidates anyway). Two real gaps were found and closed on the way: the refusal script shut the lease down in its first round (all later rounds only stopped), and the last counters before End were never read inside a 10 Hz tick with changed values. A third (a refused read while the counters are shared) came from the blur batch and was added here too.
 
 Differences found while matching: none in behaviour. Two texts were wrong in the first C draft and corrected from the reference: assertion texts carry Lua's `chunk:line:` prefix, and a nil `request` / `weapon` at Bind raises `src/first_person/fov.lua:123: bad argument #2 to 'NADSF_Bind' (cannot convert 'nil' to 'uint64_t')`.
 
@@ -70,10 +70,46 @@ Dropped, with the reason:
 
 Kept: the profile switch `pull_sight_distance` both ways (shipped: true; the false branch is exercised through an adapter built on a copy of the retail profile with the switch off).
 
-Coverage: the scripts miss 39 (`return self.library`), 81 and 100 (helper raising) and the body of the default `options` function (119). Nothing else.
+Coverage: the scripts miss 38 (`return self.library`), 81 and 100 (helper raising) and the body of the default `options` function (119). Nothing else.
 
 Mutation: 180 single changes, 163 killed. One real gap found and closed: no script had a distance between 1 and 2, so `aim > 1` could become `aim > 2`. The other 16 survivors (11 distinct) are without effect: initialisers the callbacks overwrite, dead values under a false `has_*` flag (`next_collect`, `hip`, `aim`), `stats->has` on a failed finish, the loop bound over the six `missing` bits (bit 6 is never set), `memset` fill bytes of fully assigned structs, and the NULL-text paths of `stop_keeping` / `refuse` (a failed collect always carries a text).
 
 Differences found while matching: none; the first C draft passed all vectors.
 
 Open doubts: as for fov (chunk name of assertion texts, text cap, `nan` / `inf` texts). One more: `"Native near clip disarmed (code N)"` prints the helper's error as an integer; a `last` table without `error` cannot occur there.
+
+## blur (`src/blur_adapter.c`, `src/blur_adapter.h`)
+
+Interface: `TfpBlurHelperApi` (five pointers with the `tfp_blur_*` signatures), `TfpBlurIo` (`blur_config`, the controller's `result`, `is_enabled`, `lease`, the clock, the logger), `TfpBlurProfile` (abi 1). State: one `TfpBlurLease`. Calls: `tfp_blur_lease_update / stop / shutdown / preflight / result / status / is_clean`, and the public `tfp_blur_adapter_*`.
+
+Points of this module:
+- `Adapter:_error` returns the text and the helper's error number, so `validate` and `begin` hand a third result on. C: `TfpBlurCode {has, value}` out-parameter; 0 is a number (true in Lua), which matters in `fault()`: `self.failure_native_error or helper.failure_native_error` takes a stored 0 and does not fall through.
+- `update` can return `true, text` (a retirement after error 7 / 8 whose End is still owed). The C function returns true and leaves the text in `*why`.
+- `preflight` returns `done, reason` unfiltered, so it can return `nil` (a raised assertion inside `validate`). C: `TfpBlurAnswer` with `TFP_BLUR_NIL`.
+- `self:stop(); return fault(why)`: `stop()` may itself call `fault()` and store the End error; the second `fault()` then starts from that stored number. The C calls them in the same order with the text copied first.
+- The staggered tick `(floor((now-.0667)/.1)+1)*.1+.0667` is computed in separate statements so that no multiply-add contraction can change the last bit.
+
+Dropped, with the reason:
+
+| Retail | Why it cannot be reached |
+| --- | --- |
+| `_load` (15-49), `'unavailable'` in `_error` (52-54) | As for fov. |
+| `pcall` around `NADSB_ReadStats` and `NADSB_Begin`: `error(read,0)`, `'Blur arm result uncertain: …'`, `before=nil` (81, 115, 133) | A C function cannot raise a Lua error. |
+| `Adapter:now` (GetTickCount64, 122-127) and `pcall(helper.now,helper)` (155) | Only without a `monotonic` argument; `runtime.lua:684` always passes the clock. |
+| `Blur.new` asserts (145-149) and a caller-supplied `helper` | `runtime.lua:684` passes `backend, log, nil, clock`. |
+
+Coverage: the scripts miss 41 (`return self.library`), 81 / 115 / 133 (helper raising), 122-127 and 155 (the tick-count clock). Nothing else.
+
+Mutation: 180 single changes, 161 killed. One real gap found and closed (in fov too): a refused `ReadStats` while the display counters are shared must drop them; no script read again inside the same tick afterwards. The other 18 survivors (12 distinct) are without effect: initialisers and `memset` fill bytes that are overwritten, dead values under a false `has` flag (`bound_request`, `bound_weapon`, the value of an absent code), `code.has && value != 0` against `||` (a code without `has` is always 0), `stats->has` on a failed finish, the loop bound over the ten `missing` bits, `stats_handle ~= handle` in the refresh test (a cache always belongs to the owned handle), and the invalidation after End (the following read has no clock sample and invalidates anyway).
+
+Differences found while matching: none in the C file; the first draft passed (one mismatch was a buffer reused in the test's own printing).
+
+Open doubts: as for fov. One more: the Lua 5.1 runtime the kit ships on compares and prints numbers as LuaJIT does for everything reached here; the only runtime-dependent texts are the assertion prefix and `nan` / `inf`.
+
+## Least-sure places
+
+1. Assertion and nil-argument texts (all three): the `<chunk>:<line>:` prefix is real Lua behaviour, but the chunk name is the host loader's choice and the nil-argument text of `NADSF_Bind` is LuaJIT's (the kit's cffi words it differently). Reached only if the backend returns a config table with a field missing.
+2. The helper cannot raise in C. Retail has three `pcall`s for that (ReadStats, Begin, stats inside finish). If the real helpers can fault and the host turns that into a Lua error, the "arm result uncertain" handling has no C counterpart.
+3. near: a clock that raises ends `update` midway (`TFP_NEAR_RAISED`). The caller must treat it as retail's `attempt()` does (a failed, logged call), not as a refusal that stops the lease.
+4. The small model of the real helper used by the "calm" runs is my reading of the three helpers' contracts (generation tokens, error 17, error 18), not the helpers themselves; it only decides which paths the long runs spend their time in. Every answer is still compared against retail.
+5. Texts are capped at 255 bytes.
