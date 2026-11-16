@@ -283,6 +283,8 @@ def clocks():
     for at in (.0333, .1333, .13329999999999997, .2333, .23330000000000004, 1.0333, 1.0332999999999999, 1.0333000000000001, 10.0333,
                .0332, .0333, 0, -.0333, -1, -.0667, -.06670000000000001, 5, 5, 4.999, 5.1, 1e9, 1e9 + .05, 1e15, 1e15 + 1, 2 ** 53, 3, 3.1):
         r.op(dt=0, clock=[at], st=[live()])                 # exact grid points, time going backwards, large times
+    for at in (.3333, .34, .6333, .64, .7333, .9332999999999999, 1.3333, 2.2333, 5.7333):
+        r.op(dt=0, clock=[at], st=[live()])                 # where dividing by .1 and multiplying by 10 round apart
     for value in (NAN, 7.0, INF, 7.01, -INF, 7.02, "raise", 7.03, 7.04, NAN, NAN, 7.2):
         r.op(dt=0, clock=[value], st=[live()])              # a clock without a usable answer: nothing is kept
     for code in (14, 0, 0, 15, 15, 0, 16, 0, 18, 0):       # a gate code: fresh counters, the tick starts over
@@ -338,7 +340,7 @@ def walk(seed, count, calm):
     r = Run(("calm" if calm else "walk") + str(seed), start=1000.0 * seed)
     identity = dict(body=0x40013, avatar=0x40012, camera_unit=0x40777)
     unit, frames, away_until, off_until, gate_until = 0x40abc, 0, 0.0, 0.0, 0.0
-    for _ in range(count):
+    for step in range(count):
         dt = rng.choice((.004, .0083, .0167, .0167, .0333, .05)) if rng.random() < .995 else rng.choice((-.5, 2.0, .3))
         frames += 1
         roll = rng.random()
@@ -356,7 +358,7 @@ def walk(seed, count, calm):
             live = r.stat(seen=frames, forwarded=frames // 5, replaced=frames - frames // 5, native6=frames // 9, resets=frames // 400,
                           blend=min(1, (frames % 240) / 8), head=.1, dt=abs(dt), armed=0 if disarm else 1, error=code,
                           ret=1 if rng.random() > .004 else 0)
-            call = rng.choices(CALLS, weights=(93, 2.5, .3, .8, .02, 1, 1.2, 1.2))[0]
+            call = rng.choices(CALLS, weights=(93, 2.5, .3, .8, 0, 1, 1.2, 1.2))[0]
             config = r.conf(kind=12) if away and rng.random() < .5 else r.conf(ok=0, why=rng.choice((0, 3))) if away else \
                 r.conf(kind=rng.choice((4, 4, 6)), **identity)
             r.op(call, dt=dt, follow=rng.random() > .004, enabled=not off, mode=1 if rng.random() > .003 else 2, cfg=[config],
@@ -377,7 +379,7 @@ def walk(seed, count, calm):
                                r.conf(present=ALL & ~(1 << rng.randrange(14)))))
             good = lambda: r.conf(kind=rng.choice((4, 6)), body=rng.choice((1, 1, 1, 2)), camera=rng.choice((7, 7, 7, 8)), pres=rng.random() > .1)
             pick = lambda: fail if rng.random() < .08 else good()
-            call = rng.choices(CALLS, weights=(70, 8, 2, 5, .05, 5, 5, 5))[0]
+            call = rng.choices(CALLS, weights=(70, 8, 2, 5, 1 if step > count * .9 else 0, 5, 5, 5))[0]   # shutdown ends a session: late only
             now = lambda: rng.choice((r.t + dt, r.t + dt, r.t + dt, r.t + dt + rng.random() * .2, r.t - rng.random(), NAN, INF, "raise"))
             r.op(call, dt=dt, follow=rng.random() < .5, enabled=rng.random() > .06, mode=rng.choice((1,) * 12 + (0, 2)), cfg=[pick(), pick()],
                  snap=rng.choice((2, 2, 2, 2, 0, 1, 3, 4)), unit=rng.choice((1, 2, 2, 0, -1, 1.5, 4294967295, 4294967296, NAN)),

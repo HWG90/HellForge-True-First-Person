@@ -185,6 +185,8 @@ for _, op in ipairs(script.ops) do
   assert(not helper.stats_cache or (helper.stats_handle == helper.owned and helper.stats_handle), 'statistics cache of another handle')
   assert((helper.stats_cache ~= nil) == (helper.stats_due ~= nil), 'statistics cache without a due time')
   assert(helper.library == nil or helper.library == library)
+  assert(camera.bound == nil or camera.handle ~= nil, 'an identity is bound without a handle')
+  assert(not camera.handle or camera.phase == 'cleanup_pending' or (camera.phase == 'active' and camera.bound), 'a handle outside active or cleanup')
   local r, out = camera:result(), {}
   local function add(...) for _, value in ipairs({...}) do out[#out + 1] = tostring(value) end end
   add(first == nil and -1 or flag(first)); add(text(second))
