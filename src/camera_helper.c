@@ -1,0 +1,1267 @@
+/* native/first_person/native_ads_camera.cpp (0.5.41-smooth.66, 1,304 lines)
+ * in C11, for build 25480438. Native FPV is forwarded exactly. Qualified
+ * normal-camera eye correction only. No Unit writes.
+ *
+ * A translation, not a rewrite: every check, its order, every reset, counter
+ * and expression is retail's. "cpp:a-b" above a function is its line range in
+ * the retail file. What differs is in docs/CAMERA-HELPER-TRANSLATION.md. */
+#include "camera_helper.h"
+#include "camera_math.h"
+#include <stdatomic.h>
+
+/* ======================================================================
+ * Build constants, build 25480438. Each line: retail 26568081's value, and
+ * how this build's value was established.
+ *   build_map  = tools/build_map.py --to-here (the kit's migration records)
+ *   image      = bytes read from game-pre1020.dll / r6_reload_exe_20261017.bin
+ *   layout     = structure layout, same value in retail; the named file of
+ *                this repository reads the same field on this build
+ * ====================================================================== */
+/* -- image identity -- */
+#define B_GAME_STAMP        UINT32_C(0x6ab3b43f) /* retail 0x6af322c1; build_map; profile.h FP_GAME_STAMP; image PE header */
+#define B_GAME_SIZE         UINT32_C(0x4744000)  /* retail 0x3382000;  build_map; profile.h FP_GAME_SIZE; image PE header */
+#define B_EXE_STAMP         UINT32_C(0x6ab382e4) /* retail 0x6af2d5e6; build_map; profile.h FP_EXE_STAMP; image PE header */
+#define B_EXE_SIZE          UINT32_C(0x39e8000)  /* retail 0x29fe000;  build_map; profile.h FP_EXE_SIZE; image PE header */
+/* -- code addresses -- */
+#define B_EXE_SETTER        UINT32_C(0x30deb0)   /* retail SETTER 0x2dd5a0; build_map; native_contract.h camera_position */
+#define B_GAME_CALL         UINT32_C(0x127a135)  /* retail CALL 0x110bff5; build_map; native_contract.h camera_position_call */
+#define B_EXE_GRAPH_GETTER  UINT32_C(0x2bd870)   /* retail GRAPH_GETTER 0x28d3c0; build_map; native_contract.h graph_getter */
+#define B_EXE_ANIM_GETTER   UINT32_C(0x2bd9c0)   /* retail 0x28d510; build_map; native_contract.h anim_getter */
+#define B_EXE_UNIT_WORLD    UINT32_C(0x1fd220)   /* retail 0x1f30e0; build_map; native_contract.h unit_world_matrix */
+#define B_GAME_CALL_PAIR    UINT32_C(0x127a127)  /* retail 0x110bfe7; build_map; native_contract.h camera_scratch_pair (= B_GAME_CALL-14, as retail) */
+/* -- code bytes -- */
+#define B_HEX_CALL          "41ff5120"           /* retail the same; image at game+0x127a135; native_contract.h */
+#define B_HEX_SETTER        "48895c2408574883ec60488bd9498bf88bcae8f9f9d8ff4c8b4b184c8bd04c6343208b4708498bd048c1e206498b4920"
+                                                 /* 48 bytes as retail; retail call displacement 1931dcff, here f9f9d8ff; image at exe+0x30deb0 */
+#define B_HEX_UNIT_WORLD    "40534883ec204863dae89206eaff488bc84c8b0041ff90e8000000488bcb48c1e10648034828488bc14883c4205bc3"
+                                                 /* 47 bytes as retail; retail call displacement e2d5eaff, here 9206eaff; image at exe+0x1fd220 */
+#define B_HEX_GRAPH_GETTER  "488d4160c3"         /* retail the same; image at exe+0x2bd870; native_contract.h */
+#define B_HEX_ANIM_GETTER   "488b8178010000c3"   /* retail the same; image at exe+0x2bd9c0; native_contract.h */
+#define B_HEX_CALL_PAIR     "4c8d45c08b5308488b0b4c8b482041ff5120488b05c8c10a024c8d45008b5308488b0b4c8b482041ff5128"
+                                                 /* 43 bytes as retail; retail rip displacement c854bd01, here c8c10a02 (-> game+0x3326308); image at game+0x127a127 */
+/* -- globals -- */
+#define B_GAME_CONTEXT      UINT32_C(0x346d560)  /* retail 0x2e287d0; build_map; profile.h FP_CAMERA */
+#define B_GAME_AVATAR_OWNER UINT32_C(0x3326d20)  /* retail 0x2ce1ee0; build_map; profile.h FP_AVATAR */
+#define B_GAME_CONTROLLER   UINT32_C(0x347ce70)  /* retail 0x2e381a8; build_map; profile.h FP_CONTROLLER */
+#define B_EXE_REGISTRY      UINT32_C(0x1a100f0)  /* retail 0x1ab76f8; build_map; profile.h FP_REGISTRY */
+#define B_GAME_STATE        UINT32_C(0x3326340)  /* retail 0x2ce1508; build_map; profile.h FP_STATE */
+#define B_STATE_SCENE       UINT32_C(0xac21c)    /* retail 0xac29c;   build_map; profile.h FP_STATE_SCENE */
+#define B_GAME_API_ROOT     UINT32_C(0x3326308)  /* retail 0x2ce14c8; build_map; profile.h FP_API_ROOT; target of the rip load in B_HEX_CALL_PAIR */
+/* -- avatar owner rows -- */
+#define B_AVATAR_FLAGS      UINT32_C(0x53e880)   /* retail 0x53e888; build_map; profile.h FP_AVATAR_FLAGS */
+#define B_AVATAR_RIG        UINT32_C(0x53e9b8)   /* retail 0x53e9c0; build_map; profile.h FP_AVATAR_RIG */
+#define B_AVATAR_STRIDE     UINT32_C(0x1238)     /* retail 0x1240;   build_map; profile.h FP_AVATAR_STRIDE */
+/* -- structure layout shared by both builds -- */
+#define L_AVATAR_COUNT      0x6C   /* layout; snapshot.c (avatar_owner+0x6c) */
+#define L_AVATAR_ROWS       0x110  /* layout; snapshot.c (avatar_owner+0x110+index*8); descriptor: avatar +8, body +12 */
+#define L_FLAG_FIRE         12     /* flag byte 12 bit 0x40. No reader on this build; feeds only Policy.fire, which nothing reads (see Open) */
+#define L_FLAG_SHOULDER_A   10     /* layout; snapshot.c flags[10]&4 */
+#define L_FLAG_SHOULDER_B   15     /* layout; snapshot.c flags[15]&32 */
+#define L_FLAG_SEATED       14     /* layout; snapshot.c flags[14]&4 */
+#define L_REGISTRY_BLOCK    0x88   /* layout; backend.c (units +0x88, capacity +0x98, generations +0xa0) */
+#define L_REGISTRY_CAPACITY 0x98   /* layout; backend.c */
+#define L_API_CAMERA        0x20   /* CameraAPI table at root+0x20: image, "4c8b4820" mov r9,[rax+0x20] in B_HEX_CALL_PAIR */
+#define L_API_SETTER        0x20   /* position setter slot at api+0x20: image, "41ff5120" call [r9+0x20] */
+#define L_CONTEXT_RING      0x1F8  /* layout; snapshot.c, backend.c */
+#define L_CONTEXT_IDLE      0x1F00 /* layout; snapshot.c, backend.c */
+#define L_CONTEXT_RECORDS   0x200  /* layout; snapshot.c, backend.c */
+#define L_CONTEXT_RECORD    0xE8   /* layout; snapshot.c, backend.c */
+#define L_CONTEXT_BASIS     0x0C   /* layout; the 0.5.34 port read the camera matrix at context+0xc in the game (camera_policy.c:472) */
+#define L_VT_GRAPH_GETTER   0xE8   /* layout; scene.c fp_graph */
+#define L_VT_ANIM_GETTER    0x1B0  /* layout; action.c */
+#define L_UNIT_GRAPH        0x60   /* layout; scene.c (camera+0x18 == object+0x60) */
+#define L_UNIT_HEADER       0x70   /* layout; scene.c (count +0x70; in the 56-byte header: worlds +0x18, links +0x28, hashes +0x30) */
+#define L_UNIT_EXTERNAL     0x78   /* layout; scene.c (camera.object+0x78 == parent worlds) */
+#define L_UNIT_WORLDS       0x88   /* layout; scene.c */
+#define L_UNIT_LINKS        0x98   /* layout; scene.c */
+#define L_UNIT_HASHES       0xA0   /* layout; scene.c */
+#define L_UNIT_ANIM         0x178  /* layout; action.c */
+#define L_UNIT_PARENT       0x1D0  /* layout; scene.c */
+#define L_UNIT_RESOURCE     0x358  /* layout; action.c, backend.c */
+#define L_CAMERA_GRAPH      0x18   /* layout; scene.c */
+#define L_CAMERA_NODE       0x20   /* layout; scene.c */
+#define L_BODY_RESOURCE     UINT64_C(0x4D1C334D294DFA97) /* same; action.c */
+#define L_HEAD_HASH         UINT32_C(0x8C5570C9) /* same; scene.c */
+#define L_HEAD_PARENT_HASH  UINT32_C(0xE9ECCA21) /* same; scene.c */
+#define L_RIG_NODES         63     /* same; scene.c fp_graph_rig */
+#define L_RIG_CAMERA_NODE   50     /* same; scene.c */
+#define L_RIG_CAMERA_HASH   UINT32_C(0x60ED8C39) /* same; scene.c */
+#define L_RIG_CAMERA_LINK   UINT32_C(0x40001)    /* same; scene.c */
+#define L_CAMERA_RIG_LINK   UINT32_C(0x00320002) /* same; scene.c fp_camera_native_parent */
+#define L_ANIM_LAYERS       31     /* same; action.c */
+#define L_ANIM_LAYER        13     /* same; action.c (its layer 14, zero-based 13) */
+#define L_STATE_ON_FOOT     36     /* same; action.c */
+#define L_STATE_BRIDGE      3      /* same; action.c */
+#define L_SCENE_SHIP        3      /* same; action.c (which also accepts 4; retail's helper accepts 3 only, kept) */
+#define L_CONTEXT_CAMERA    0      /* layout; backend.c (camera pointer at context+0) */
+#define L_CONTEXT_UNIT      8      /* layout; backend.c (camera unit at context+8) */
+#define L_CONTROL_AIM       4      /* layout; snapshot.c controller byte 4 (bytes 0-3 are the mask) */
+#define L_CONTROL_GUARD     5      /* layout; snapshot.c controller byte 5 */
+#define L_ANIM_GRAPH        0x28   /* layout; action.c (instance+0x28) */
+#define L_ANIM_ACTIVE       0x50   /* layout; action.c (instance+0x50) */
+#define L_ANIM_LAYER_COUNT  4      /* layout; action.c (graph header word 1) */
+#define L_ANIM_TABLE        8      /* layout; action.c (graph header word 2) */
+#define L_GRAPH_COUNT       0x10   /* layout; scene.c (object+0x60+0x10 = its count at +0x70) */
+#define L_GRAPH_LOCALS      0x20   /* layout; scene.c (object+0x80) */
+#define L_GRAPH_WORLDS      0x28   /* layout; scene.c (object+0x88) */
+#define L_HEADER_WORLDS     0x18   /* layout; in the 56 bytes at L_UNIT_HEADER: = L_UNIT_WORLDS */
+#define L_HEADER_LINKS      0x28   /* layout; = L_UNIT_LINKS */
+#define L_HEADER_HASHES     0x30   /* layout; = L_UNIT_HASHES */
+#define L_MATRIX            0x40   /* layout; image: "48c1e106" (shl rcx,6) in unit_world_matrix and unit_local_position */
+#define L_MATRIX_POSITION   0x30   /* layout; scene.c (matrix floats 12-14) */
+#define L_LOCAL_POSITION    0x24   /* layout; image: "4883c124" in native_contract.h unit_local_position */
+#define L_ARGUMENT_ROTATION 64     /* bytes from the position argument to the rotation the game passes next: image, "4c8d45c0" lea r8,[rbp-0x40] then "4c8d4500" lea r8,[rbp+0] in B_HEX_CALL_PAIR */
+/* ====================================================================== */
+
+#define HIGH UINT64_C(0x800000000000)
+
+/* cpp:16-22 */
+static TfpCameraHost host;
+static _Atomic uintptr_t original;
+static _Atomic uint32_t installed, armed, reserved, last_error;
+static _Atomic uint64_t callback_generation;
+static _Atomic uint64_t seen, forwarded, replaced, native6_forwarded, resets, return_address;
+static uint64_t slot = 0, slot_image = 0, generation_counter = 0, owned_generation = 0, retired_generation = 0;
+static bool possible = false;
+enum { OK = 0, INVALID_CONFIG = 1, BUSY = 2, READ_FAILED = 3, IMAGE_MISMATCH = 4,
+       CODE_MISMATCH = 5, API_MISMATCH = 6, OWNER_MISMATCH = 7, UNIT_MISMATCH = 8, PIN_FAILED = 9,
+       SLOT_NOT_WRITABLE = 10, CAS_MISMATCH = 11, CAS_FAULT = 12, CLEANUP_PENDING = 13,
+       POSE_INVALID = 14, SPACE_INVALID = 15, GRAPH_MISMATCH = 16, TOKEN_MISMATCH = 17, ON_FOOT_REQUIRED = 18 };
+
+static void control_acquire(void) { host.lock_exclusive(host.user, TFP_CAMERA_LOCK_CONTROL); }
+static void control_release(void) { host.unlock_exclusive(host.user, TFP_CAMERA_LOCK_CONTROL); }
+static void policy_acquire(void) { host.lock_exclusive(host.user, TFP_CAMERA_LOCK_POLICY); }
+static void policy_release(void) { host.unlock_exclusive(host.user, TFP_CAMERA_LOCK_POLICY); }
+static void policy_acquire_shared(void) { host.lock_shared(host.user, TFP_CAMERA_LOCK_POLICY); }
+static void policy_release_shared(void) { host.unlock_shared(host.user, TFP_CAMERA_LOCK_POLICY); }
+
+/* cpp:28-76, without the fields only the retired features used (profile_*,
+ * motion, free_*, observe_*, kick_*). `side` stays: it is in the target
+ * expression, and is always 0 now that NADSC_SetOffsets is gone. */
+typedef struct Policy {
+  float side;
+  TfpCorrection correction;
+  float last_relative[3]; double last_relative_tick; bool relative_valid;
+  bool presentation_enabled; uint32_t current_weapon;
+  bool full_ads, shoulder, fire;
+  TfpCameraConfig c; uint64_t controller, descriptor, registry, units, generations;
+  uint64_t body_object, camera_object, hashes, links, sampled_worlds; uint32_t count, head_node;
+  uint64_t foot_instance, foot_graph, foot_array, foot_current, foot_definition;
+  uint8_t descriptor_bytes[20]; bool safe, fallback_safe, tracking, native6_seen; double previous, native6_at;
+  float relative_head[3], blend, head_distance, last_dt;
+  /* Opt-in handoff eases (tfp_camera_set_handoff); zero keeps both cuts exact. */
+  float handoff_entry_ms, handoff_rotation_ms;
+  TfpHandoffPosition entry; TfpHandoffRotation turn; TfpRotationProof rotation_proof;
+  TfpQ forwarded_q; double forwarded_q_tick; bool forwarded_q_valid;
+  uint64_t entry_started, entry_frames, entry_rejected, turn_started, turn_frames, turn_rejected;
+  /* The view the last native6 frame was rendered with (track_native_rotation). */
+  TfpQ native_q; double native_q_tick; bool native_q_valid;
+  uint32_t sample_reasons[8], entry_delay_frames, entry_last_delay, entry_max_delay; bool entry_waiting;
+  uint32_t pending_paths[4]; float turn_start_gap;
+  bool hold_exit, last_native_valid; float last_native[4], last_head_world[3];
+  bool hold_eye, native_eye_valid, eye_delta_active;
+  float native_eye[3], eye_delta[3]; double native_eye_tick, eye_hold_started, eye_swap_tick; uint32_t control_mask, eye_hold_frames;
+  uint32_t weapon_key, native_weapon_key, stretch_key, stretch_key_frames, eye_glides;
+  bool guard_only, guard_grace; double last_view_tick; uint32_t guard_grace_frames;
+  bool hold_seated, seated_now, anchor_ads, native_full_ads, ads_gap_active; double ads_gap_started; uint32_t ads_gap_frames, ads_learned; double last_native_tick; uint32_t exit_holds;
+  uint32_t seated_frames, entry_trace_frame; TfpQ seated_q; bool seated_q_valid; uint32_t entry_trace_pad, entry_trace_count; TfpCameraEntryTraceRow entry_trace[TFP_CAMERA_ENTRY_TRACE_ROWS];
+} Policy;
+/* Policy{}: the default member initialisers. Everything 0/false except the
+ * correction's (progress 1, duration 150) and the identity quaternions. */
+static void policy_init(Policy *p) {
+  memset(p, 0, sizeof *p);
+  tfp_correction_reset(&p->correction);
+  p->turn.last = tfp_q_identity();
+  p->forwarded_q = tfp_q_identity();
+  p->native_q = tfp_q_identity();
+  p->seated_q = tfp_q_identity();
+}
+/* cpp:77. The same start-up values, as a static initialiser. */
+static Policy policy = {
+  .correction = {.progress = 1, .handoff_duration_ms = 150},
+  .turn = {.last = {0, 0, 0, 1}},
+  .forwarded_q = {0, 0, 0, 1}, .native_q = {0, 0, 0, 1}, .seated_q = {0, 0, 0, 1},
+};
+
+/* cpp:78-86 */
+typedef struct EyeMemory {
+  uint32_t key; float delta[3];
+  bool ads_known; float ads[3], ads_candidate[3]; uint32_t ads_frames;
+  bool tpv_known; uint32_t tpv_node;
+} EyeMemory;
+static EyeMemory eye_memory[16]; static uint32_t eye_memory_next = 0; /* policy_lock; kept across leases */
+/* cpp:87-90 */
+static EyeMemory *eye_memory_find(uint32_t key) {
+  if (key) for (unsigned i = 0; i < 16; ++i) if (eye_memory[i].key == key) return &eye_memory[i];
+  return NULL;
+}
+/* cpp:91-96 */
+static EyeMemory *eye_memory_entry(uint32_t key) {
+  if (!key) return NULL;
+  EyeMemory *entry = eye_memory_find(key);
+  if (!entry) { entry = &eye_memory[eye_memory_next++ % 16]; memset(entry, 0, sizeof *entry); entry->key = key; }
+  return entry;
+}
+/* cpp:97-99 */
+static void eye_memory_store(uint32_t key, const float *delta) {
+  EyeMemory *entry = eye_memory_entry(key);
+  if (entry) memcpy(entry->delta, delta, 12);
+}
+
+/* cpp:100-122. The three display floats are kept as their bit patterns in
+ * lock-free 32-bit atomics (C has no always-lock-free guarantee for
+ * _Atomic float); the values read back are the values stored. */
+typedef struct Display { float blend, head_distance, last_dt; } Display;
+static Display display_cache; /* control_lock only; never touched by callbacks. */
+static _Atomic uint32_t display_sequence;
+static _Atomic uint32_t display_blend, display_head_distance, display_last_dt;
+_Static_assert(ATOMIC_INT_LOCK_FREE == 2 && sizeof(float) == 4, "Camera diagnostics require lock-free floats");
+static uint32_t float_bits(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
+static float bits_float(uint32_t u) { float f; memcpy(&f, &u, 4); return f; }
+/* cpp:107-113 */
+static void publish_diagnostics(const Policy *p) {
+  atomic_fetch_add_explicit(&display_sequence, 1, memory_order_seq_cst);
+  atomic_store_explicit(&display_blend, float_bits(p->blend), memory_order_seq_cst);
+  atomic_store_explicit(&display_head_distance, float_bits(p->head_distance), memory_order_seq_cst);
+  atomic_store_explicit(&display_last_dt, float_bits(p->last_dt), memory_order_seq_cst);
+  atomic_fetch_add_explicit(&display_sequence, 1, memory_order_seq_cst);
+}
+/* cpp:114-122 */
+static void read_diagnostics(TfpCameraStats *s) {
+  const uint32_t before = atomic_load_explicit(&display_sequence, memory_order_seq_cst);
+  if ((before & 1) == 0) {
+    Display next;
+    next.blend = bits_float(atomic_load_explicit(&display_blend, memory_order_seq_cst));
+    next.head_distance = bits_float(atomic_load_explicit(&display_head_distance, memory_order_seq_cst));
+    next.last_dt = bits_float(atomic_load_explicit(&display_last_dt, memory_order_seq_cst));
+    if (before == atomic_load_explicit(&display_sequence, memory_order_seq_cst)) display_cache = next;
+  }
+  s->blend = display_cache.blend; s->head_distance = display_cache.head_distance; s->last_dt = display_cache.last_dt;
+}
+/* cpp:139-151 */
+static double now(void) { return host.now(host.user); }
+
+/* cpp:152-163. Fault evidence belongs to one explicit owner-data guard.
+ * The constructor/destructor pair is written out in owner_status. */
+typedef struct OwnerReadProbe { struct OwnerReadProbe *previous; bool transport, unsafe; } OwnerReadProbe;
+static _Thread_local OwnerReadProbe *owner_read_probe = NULL;
+/* cpp:164-178 */
+static bool readable_span(uint64_t at, size_t length) { return host.readable_span(host.user, at, length); }
+/* cpp:179-204 */
+static bool read(uint64_t at, void *out, size_t length) {
+  if (at < 65536 || at >= HIGH || length == 0 || length > 4096 || at + length >= HIGH) {
+    if (owner_read_probe) owner_read_probe->unsafe = true;
+    return false;
+  }
+  const bool complete = host.read(host.user, at, out, length);
+  if (complete) return true;
+  if (owner_read_probe) {
+    if (readable_span(at, length)) owner_read_probe->transport = true;
+    else owner_read_probe->unsafe = true;
+  }
+  return false;
+}
+/* cpp:205 */
+#define value(at, out) read((at), &(out), sizeof(out))
+/* cpp:206-210 */
+static bool pointer(uint64_t at, uint64_t *out) {
+  if (!value(at, *out)) return false;
+  if (*out >= 65536 && *out < HIGH) return true;
+  if (owner_read_probe) owner_read_probe->unsafe = true;
+  return false;
+}
+/* cpp:211 */
+static void error(uint32_t code) { atomic_store_explicit(&last_error, code, memory_order_release); }
+/* cpp:212 */
+static uint32_t reject(uint32_t code) { error(code); return 0; }
+/* cpp:213-219. IMAGE_DOS_HEADER is 64 bytes (e_magic +0, e_lfanew +0x3c);
+ * IMAGE_NT_HEADERS64 is 264 (Signature +0, Machine +4, TimeDateStamp +8,
+ * OptionalHeader.Magic +24, SizeOfImage +80). Same two reads, same sizes. */
+static bool image(uint64_t base, uint32_t stamp, uint32_t length) {
+  uint8_t dos[64] = {0}, nt[264] = {0};
+  uint16_t e_magic = 0, machine = 0, magic = 0; int32_t e_lfanew = 0; uint32_t signature = 0, time_date_stamp = 0, size_of_image = 0;
+  if (!read(base, dos, sizeof dos)) return false;
+  memcpy(&e_magic, dos, 2); memcpy(&e_lfanew, dos + 0x3c, 4);
+  if (!(e_magic == 0x5A4D && e_lfanew >= 64 && e_lfanew <= 4096)) return false;
+  if (!read(base + (uint64_t)(int64_t)e_lfanew, nt, sizeof nt)) return false;
+  memcpy(&signature, nt, 4); memcpy(&machine, nt + 4, 2); memcpy(&time_date_stamp, nt + 8, 4);
+  memcpy(&magic, nt + 24, 2); memcpy(&size_of_image, nt + 80, 4);
+  return signature == 0x00004550 && machine == 0x8664 && magic == 0x20b
+      && time_date_stamp == stamp && size_of_image == length;
+}
+/* cpp:220-227 */
+static uint8_t hex_digit(char c) { return (uint8_t)(c <= '9' ? c - '0' : c - 'a' + 10); }
+static bool bytes(uint64_t at, const char *hex) {
+  uint8_t actual[64] = {0}; const size_t count = strlen(hex) / 2;
+  if (!count || count > sizeof actual || !read(at, actual, count)) return false;
+  for (size_t i = 0; i < count; ++i) {
+    if (actual[i] != (uint8_t)((hex_digit(hex[i*2]) << 4) | hex_digit(hex[i*2+1]))) return false;
+  }
+  return true;
+}
+/* cpp:228-232 */
+static bool executable(uint64_t at) { return host.executable(host.user, at); }
+/* cpp:233 */
+static bool finite3(const float *p) { return isfinite(p[0]) && isfinite(p[1]) && isfinite(p[2]); }
+/* cpp:234-236 */
+static float distance(const float *a, const float *b) {
+  const float x = a[0]-b[0], y = a[1]-b[1], z = a[2]-b[2]; return sqrtf(x*x+y*y+z*z);
+}
+/* cpp:237-244 */
+static float dot3(const float *a, const float *b) { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
+static bool orthonormal(const float *right, const float *forward, const float *up) {
+  if (!finite3(right) || !finite3(forward) || !finite3(up)) return false;
+  const float cross[3] = {right[1]*forward[2]-right[2]*forward[1], right[2]*forward[0]-right[0]*forward[2], right[0]*forward[1]-right[1]*forward[0]};
+  return fabsf(dot3(right, right)-1) < .02f && fabsf(dot3(forward, forward)-1) < .02f && fabsf(dot3(up, up)-1) < .02f
+      && fabsf(dot3(right, forward)) < .02f && fabsf(dot3(right, up)) < .02f && fabsf(dot3(forward, up)) < .02f
+      && dot3(cross, up) > .98f;
+}
+/* cpp:245-252. capacity 0 = read it from the registry (retail's default argument). */
+static bool resolve(const Policy *p, uint32_t ref, uint64_t *object, uint32_t capacity) {
+  const uint32_t index = ref & 0x3fffff; uint8_t first = 0, last = 0; uint64_t again = 0;
+  return (capacity || value(p->registry + L_REGISTRY_CAPACITY, capacity)) && capacity > 0 && capacity <= 0x400000 && index < capacity
+      && value(p->generations + index, first) && first == (uint8_t)(ref >> 22)
+      && pointer(p->units + (uint64_t)index*8, object)
+      && value(p->generations + index, last) && last == first
+      && pointer(p->units + (uint64_t)index*8, &again) && again == *object;
+}
+/* cpp:253-258 */
+typedef struct RegistryBlock { uint64_t units, padding; uint32_t capacity, padding2; uint64_t generations; } RegistryBlock;
+_Static_assert(sizeof(RegistryBlock) == 32, "registry read span");
+static bool registry_block(uint64_t registry, RegistryBlock *b) {
+  return read(registry + L_REGISTRY_BLOCK, b, sizeof *b) && b->units >= 65536 && b->units < HIGH
+      && b->generations >= 65536 && b->generations < HIGH && b->capacity > 0 && b->capacity <= 0x400000;
+}
+/* cpp:259-308 */
+static bool owner(Policy *p, bool capture) {
+  const TfpCameraConfig *c = &p->c; uint64_t ctx = 0, camera = 0, avatar_owner = 0, controller = 0, descriptor = 0, registry = 0, units = 0, generations = 0;
+  uint32_t count = 0, camera_unit = 0; uint8_t d[20] = {0}, flags[24] = {0}, controls[6] = {0}, context[12] = {0}; RegistryBlock block; memset(&block, 0, sizeof block);
+  if (!pointer(c->game + B_GAME_CONTEXT, &ctx) || ctx != c->context || !read(ctx, context, sizeof context)) return false;
+  memcpy(&camera, context + L_CONTEXT_CAMERA, 8); if (camera != c->camera) return false;
+  memcpy(&camera_unit, context + L_CONTEXT_UNIT, 4); if (camera_unit != c->camera_unit) return false;
+  if (!pointer(c->game + B_GAME_AVATAR_OWNER, &avatar_owner) || avatar_owner != c->avatar_owner
+      || !pointer(c->game + B_GAME_CONTROLLER, &controller) || !read(controller, controls, 6)
+      || !value(avatar_owner + L_AVATAR_COUNT, count) || count == 0 || count > 8 || c->avatar_index >= count
+      || !pointer(avatar_owner + L_AVATAR_ROWS + (uint64_t)c->avatar_index*8, &descriptor) || !read(descriptor, d, 20)
+      || !read(avatar_owner + B_AVATAR_FLAGS + (uint64_t)c->avatar_index*B_AVATAR_STRIDE, flags, 24)
+      || !pointer(c->exe + B_EXE_REGISTRY, &registry) || !registry_block(registry, &block)) return false;
+  units = block.units; generations = block.generations;
+  uint32_t avatar = 0, body = 0, mask = 0; memcpy(&avatar, d + 8, 4); memcpy(&body, d + 12, 4); memcpy(&mask, controls, 4);
+  p->control_mask = mask;
+  if (avatar != c->avatar || body != c->body) return false;
+  if (capture) { p->controller = controller; p->descriptor = descriptor; p->registry = registry; p->units = units; p->generations = generations; memcpy(p->descriptor_bytes, d, 20); }
+  else if (controller != p->controller || descriptor != p->descriptor || registry != p->registry || units != p->units
+      || generations != p->generations || memcmp(d, p->descriptor_bytes, 20) != 0) return false;
+  uint64_t body_object = 0, camera_object = 0;
+  if (!resolve(p, c->body, &body_object, block.capacity) || !resolve(p, c->camera_unit, &camera_object, block.capacity)) return false;
+  /* Both references used the single bounded header read. Close that header
+   * after their generation/object double-checks; never reuse a changed bound. */
+  RegistryBlock closing; memset(&closing, 0, sizeof closing);
+  if (!registry_block(registry, &closing) || closing.units != block.units || closing.generations != block.generations || closing.capacity != block.capacity) return false;
+  if (capture) { p->body_object = body_object; p->camera_object = camera_object; }
+  else if (body_object != p->body_object || camera_object != p->camera_object) return false;
+  p->fire = (flags[L_FLAG_FIRE] & 0x40) != 0; p->full_ads = controls[L_CONTROL_AIM] != 0; p->shoulder = !p->full_ads && (flags[L_FLAG_SHOULDER_A] & 4) != 0 && (flags[L_FLAG_SHOULDER_B] & 32) != 0;
+  const bool seated = (flags[L_FLAG_SEATED] & 4) != 0, available = controls[L_CONTROL_GUARD] == 0 && !seated;
+  p->safe = (mask == 0 || mask == 2) && available;
+  p->fallback_safe = (mask == 0 || mask == 2 || mask == 0x20) && available;
+  p->seated_now = seated;
+  if (p->hold_seated && seated && mask == 0 && controls[L_CONTROL_GUARD] == 0) p->fallback_safe = true;
+  p->guard_only = mask == 0 && controls[L_CONTROL_GUARD] != 0 && (flags[L_FLAG_SEATED] & 4) == 0;
+  return true;
+}
+/* cpp:309-315. OwnerReadProbe's constructor and destructor written out. */
+static uint32_t owner_status(Policy *p, bool capture) {
+  OwnerReadProbe probe; probe.previous = owner_read_probe; probe.transport = false; probe.unsafe = false;
+  owner_read_probe = &probe;
+  uint32_t result;
+  if (owner(p, capture)) result = OK;
+  else result = probe.transport && !probe.unsafe ? READ_FAILED : OWNER_MISMATCH;
+  owner_read_probe = probe.previous;
+  return result;
+}
+/* cpp:316-323 */
+static bool top(Policy *p, uint32_t *kind) {
+  uint32_t ring[2] = {0}, r[4] = {0};
+  if (!read(p->c.context + L_CONTEXT_RING, ring, sizeof ring) || ring[0] >= 32 || ring[1] >= 32) return false;
+  const uint32_t head = ring[0], tail = ring[1];
+  const uint64_t at = head == tail ? p->c.context + L_CONTEXT_IDLE : p->c.context + L_CONTEXT_RECORDS + ((tail+31)%32)*L_CONTEXT_RECORD;
+  if (!read(at, r, 16) || r[1] != p->c.avatar) return false;
+  *kind = r[0] & 0xffff; if (*kind == 6) p->current_weapon = r[2];
+  return *kind != 6 || (head != tail && r[3] == p->c.body);
+}
+/* cpp:324-344. The executable() test is retail's non-fixture path. */
+static bool graph(Policy *p, bool capture) {
+  uint64_t vt = 0, getter = 0, hashes = 0, links = 0; uint32_t count = 0; uint8_t header[56] = {0};
+  if (!pointer(p->body_object, &vt) || !pointer(vt + L_VT_GRAPH_GETTER, &getter) || getter != p->c.exe + B_EXE_GRAPH_GETTER
+      || !bytes(getter, B_HEX_GRAPH_GETTER) || !read(p->body_object + L_UNIT_HEADER, header, sizeof header)) return false;
+  memcpy(&count, header, 4); memcpy(&links, header + L_HEADER_LINKS, 8); memcpy(&hashes, header + L_HEADER_HASHES, 8);
+  if (count == 0 || count > 512 || links < 65536 || links >= HIGH || hashes < 65536 || hashes >= HIGH) return false;
+  if (!executable(getter)) return false;
+  if (capture) {
+    uint32_t found = UINT32_MAX;
+    for (uint32_t i = 0; i < count; ++i) { uint32_t h = 0; if (!value(hashes + (uint64_t)i*4, h)) return false;
+      if (h == L_HEAD_HASH) { if (found != UINT32_MAX) return false; found = i; } }
+    if (found == UINT32_MAX) return false;
+    p->hashes = hashes; p->links = links; p->count = count; p->head_node = found;
+  } else if (hashes != p->hashes || links != p->links || count != p->count) return false;
+  uint32_t head_hash = 0, link = 0, parent_hash = 0; const uint64_t offset = (uint64_t)p->head_node*4;
+  if (!value(hashes + offset, head_hash) || head_hash != L_HEAD_HASH || !value(links + offset, link)
+      || (link & 0xffff) != 1 || (link >> 16) >= count || !value(hashes + (uint64_t)(link >> 16)*4, parent_hash)
+      || parent_hash != L_HEAD_PARENT_HASH) return false;
+  return true;
+}
+/* cpp:345-352. root_basis may be NULL. */
+static bool points(Policy *p, float *root, float *head, float *root_basis) {
+  float matrix[16] = {0}; uint64_t matrices = 0;
+  if (!graph(p, false) || !pointer(p->body_object + L_UNIT_WORLDS, &matrices)
+      || !read(matrices, matrix, 64) || !read(matrices + (uint64_t)p->head_node*L_MATRIX + L_MATRIX_POSITION, head, 12)
+      || !orthonormal(matrix, matrix + 4, matrix + 8) || !finite3(matrix + 12) || !finite3(head)) return false;
+  p->sampled_worlds = matrices; memcpy(root, matrix + 12, 12);
+  if (root_basis) for (unsigned i = 0; i < 3; ++i) memcpy(root_basis + i*3, matrix + i*4, 12);
+  p->head_distance = distance(root, head); return isfinite(p->head_distance) && p->head_distance >= .05f && p->head_distance <= 3.0f;
+}
+/* cpp:353-405 */
+static bool on_foot(Policy *p) {
+  uint64_t vt = 0, getter = 0, resource = 0, instance = 0, g = 0, array = 0, current = 0;
+  uint32_t layers = 0, table_offset = 0, layer_offset = 0, count = 0, state_offset = 0;
+  if (!pointer(p->body_object, &vt) || !pointer(vt + L_VT_ANIM_GETTER, &getter) || getter != p->c.exe + B_EXE_ANIM_GETTER
+      || !bytes(getter, B_HEX_ANIM_GETTER) || !value(p->body_object + L_UNIT_RESOURCE, resource) || resource != L_BODY_RESOURCE
+      || !pointer(p->body_object + L_UNIT_ANIM, &instance) || !pointer(instance + L_ANIM_GRAPH, &g) || !value(g + L_ANIM_LAYER_COUNT, layers) || layers != L_ANIM_LAYERS
+      || !value(g + L_ANIM_TABLE, table_offset) || table_offset < 12 || table_offset > 0x10000) return false;
+  const uint64_t table = g + table_offset;
+  if (!value(table + 4 + L_ANIM_LAYER*4, layer_offset) || layer_offset < 12 || layer_offset > 0x1000000) return false;
+  const uint64_t definition = table + layer_offset;
+  if (!value(definition + 8, count) || count <= L_STATE_ON_FOOT || count > 2048 || !value(definition + 12 + L_STATE_ON_FOOT*4, state_offset)
+      || state_offset < 12 || state_offset > 0x1000000 || !pointer(instance + L_ANIM_ACTIVE, &array)
+      || !pointer(array + L_ANIM_LAYER*8, &current)) return false;
+  uint32_t state = L_STATE_ON_FOOT, role = 0; uint64_t settings = 0;
+  const uint64_t role_address = p->c.avatar_owner + B_AVATAR_FLAGS + (uint64_t)p->c.avatar_index*B_AVATAR_STRIDE;
+  if (current != definition + state_offset) {
+    state = L_STATE_BRIDGE;
+    uint32_t scene = 0;
+    if (!value(definition + 12 + L_STATE_BRIDGE*4, state_offset) || state_offset < 12 || state_offset > 0x1000000
+        || current != definition + state_offset || !value(role_address, role) || (role & 6) != 2
+        || !pointer(p->c.game + B_GAME_STATE, &settings) || !value(settings + B_STATE_SCENE, scene) || scene != L_SCENE_SHIP) return false;
+  }
+  /* Match the native first-index lookup even when resources alias states. */
+  uint32_t prefix[37] = {0};
+  if (!read(definition + 12, prefix, (state+1)*sizeof(uint32_t)) || prefix[state] != state_offset) return false;
+  for (uint32_t i = 0; i < state; ++i) if (prefix[i] < 12 || prefix[i] > 0x1000000 || prefix[i] == state_offset) return false;
+  uint64_t again = 0; uint32_t check = 0;
+  const bool stable = pointer(p->body_object + L_UNIT_ANIM, &again) && again == instance && pointer(instance + L_ANIM_GRAPH, &again) && again == g
+      && pointer(instance + L_ANIM_ACTIVE, &again) && again == array && pointer(array + L_ANIM_LAYER*8, &again) && again == current
+      && value(g + L_ANIM_LAYER_COUNT, check) && check == layers && value(g + L_ANIM_TABLE, check) && check == table_offset
+      && value(table + 4 + L_ANIM_LAYER*4, check) && check == layer_offset && value(definition + 8, check) && check == count
+      && value(definition + 12 + (uint64_t)state*4, check) && check == state_offset;
+  if (!stable) return false;
+  p->foot_instance = instance; p->foot_graph = g; p->foot_array = array; p->foot_current = current; p->foot_definition = definition;
+  if (state == L_STATE_ON_FOOT) return true;
+  /* The bridge exception is live state, never a cached mod toggle. Recheck
+   * the role, scene owner and current body generation before substituting. */
+  uint32_t current_role = 0, scene = 0; uint64_t current_resource = 0;
+  return value(role_address, current_role) && current_role == role
+      && pointer(p->c.game + B_GAME_STATE, &again) && again == settings && value(settings + B_STATE_SCENE, scene) && scene == L_SCENE_SHIP
+      && pointer(p->c.exe + B_EXE_REGISTRY, &again) && again == p->registry
+      && resolve(p, p->c.body, &again, 0) && again == p->body_object
+      && value(p->body_object + L_UNIT_RESOURCE, current_resource) && current_resource == resource;
+}
+/* cpp:406-415. Local/world coincidence is mandatory: native kind6 uses another parent space. */
+static bool unparented(const Policy *p) {
+  uint64_t parent = 1, g = 0, locals = 0, worlds = 0; uint32_t index = 0, count = 0; float a[3] = {0}, b[3] = {0};
+  if (!value(p->camera_object + L_UNIT_PARENT, parent) || parent != 0 || !pointer(p->c.camera + L_CAMERA_GRAPH, &g) || g != p->camera_object + L_UNIT_GRAPH
+      || !value(p->c.camera + L_CAMERA_NODE, index) || !value(g + L_GRAPH_COUNT, count) || count == 0 || count > 512 || index >= count
+      || !pointer(g + L_GRAPH_LOCALS, &locals) || !pointer(g + L_GRAPH_WORLDS, &worlds)
+      || !read(locals + (uint64_t)index*L_MATRIX + L_LOCAL_POSITION, a, 12)
+      || !read(worlds + (uint64_t)index*L_MATRIX + L_MATRIX_POSITION, b, 12) || !finite3(a) || !finite3(b)) return false;
+  return distance(a, b) <= .01f;
+}
+/* cpp:416-419 */
+static bool held_axes(TfpQ q, float *forward, float *up) {
+  const float y[3] = {0, 1, 0}, z[3] = {0, 0, 1}; tfp_q_rotate(q, y, forward); tfp_q_rotate(q, z, up);
+  return finite3(forward) && finite3(up);
+}
+/* cpp:420-425 */
+static bool basis(const Policy *p, float *forward, float *up) {
+  float frame[11] = {0};
+  if (!read(p->c.context + L_CONTEXT_BASIS, frame, sizeof frame)) return false;
+  memcpy(forward, frame + 4, 12); memcpy(up, frame + 8, 12);
+  return orthonormal(frame, forward, up);
+}
+/* cpp:426-431 */
+static void reset(Policy *p, bool keep_native6) {
+  p->tracking = false; p->blend = 0; p->last_dt = 0; p->forwarded_q_valid = false;
+  if (!keep_native6) { p->native6_seen = false; tfp_correction_reset(&p->correction); p->relative_valid = false; tfp_ease_reset(&p->entry.ease); tfp_ease_reset(&p->turn.ease); p->native_q_valid = false; p->entry_waiting = false;
+    p->native_eye_valid = false; p->eye_delta_active = false; }
+  atomic_fetch_add_explicit(&resets, 1, memory_order_relaxed);
+}
+/* cpp:432-445. The alignment test stays here; the page test is the host's. */
+static bool writable_slot(uint64_t at, uint64_t exe) {
+  if ((at & 7) != 0) return false;
+  return host.writable_slot(host.user, at, exe);
+}
+/* cpp:446-451 */
+static bool slot_read(uint64_t at, uint64_t *out) {
+  return value(at, *out);
+}
+/* cpp:452-464. On the global `slot`, as retail. */
+static bool cas(uint64_t expected, uint64_t desired, uint64_t *observed) {
+  return host.cas(host.user, slot, expected, desired, observed);
+}
+/* cpp:465, 1027 */
+static uint64_t callback(void) { return host.hook; }
+/* cpp:466-470 */
+static bool dispatch_owned(const Policy *p) {
+  uint64_t root = 0, api = 0, target = 0;
+  return pointer(p->c.game + B_GAME_API_ROOT, &root) && pointer(root + L_API_CAMERA, &api) && api + L_API_SETTER == slot
+      && slot_read(slot, &target) && target == callback();
+}
+/* cpp:476 */
+typedef struct ParentProof { uint64_t parent, poses, links, hashes, parent_links; uint32_t ref, link; } ParentProof;
+/* cpp:477-492 */
+static bool parent_current(const Policy *p, const ParentProof *proof) {
+  uint64_t again = 0; uint32_t check = 0;
+  return value(p->c.camera + L_CAMERA_NODE, check) && check == 0
+      && pointer(p->camera_object + L_UNIT_LINKS, &again) && again == proof->links
+      && value(proof->parent + L_UNIT_HEADER, check) && check == L_RIG_NODES
+      && pointer(p->camera_object + L_UNIT_PARENT, &again) && again == proof->parent
+      && pointer(p->camera_object + L_UNIT_EXTERNAL, &again) && again == proof->poses
+      && value(proof->links, check) && check == proof->link
+      && value(p->c.avatar_owner + B_AVATAR_RIG + (uint64_t)p->c.avatar_index*B_AVATAR_STRIDE, check) && check == proof->ref
+      && resolve(p, proof->ref, &again, 0) && again == proof->parent
+      && pointer(proof->parent + L_UNIT_WORLDS, &again) && again == proof->poses
+      && pointer(proof->parent + L_UNIT_LINKS, &again) && again == proof->parent_links
+      && pointer(proof->parent + L_UNIT_HASHES, &again) && again == proof->hashes
+      && value(proof->hashes + L_RIG_CAMERA_NODE*4, check) && check == L_RIG_CAMERA_HASH
+      && value(proof->parent_links + L_RIG_CAMERA_NODE*4, check) && check == L_RIG_CAMERA_LINK;
+}
+/* cpp:493-518. position, proof and matrix_basis may be NULL. */
+static bool direct_camera_parent(Policy *p, TfpQ *out, float *position, ParentProof *proof, float *matrix_basis) {
+  uint64_t links = 0, parent = 0, expected = 0, poses = 0, external = 0, hashes = 0, parent_links = 0;
+  uint32_t link = 0, ref = 0, count = 0, hash = 0, parent_link = 0, index = 0; uint8_t header[56] = {0};
+  if (!value(p->c.camera + L_CAMERA_NODE, index) || index != 0
+      || !pointer(p->camera_object + L_UNIT_LINKS, &links) || !value(links, link) || link != L_CAMERA_RIG_LINK
+      || !pointer(p->camera_object + L_UNIT_PARENT, &parent)
+      || !value(p->c.avatar_owner + B_AVATAR_RIG + (uint64_t)p->c.avatar_index*B_AVATAR_STRIDE, ref)
+      || !resolve(p, ref, &expected, 0) || expected != parent
+      || !read(parent + L_UNIT_HEADER, header, sizeof header)) return false;
+  memcpy(&count, header, 4); memcpy(&poses, header + L_HEADER_WORLDS, 8);
+  memcpy(&parent_links, header + L_HEADER_LINKS, 8); memcpy(&hashes, header + L_HEADER_HASHES, 8);
+  if (count != L_RIG_NODES || hashes < 65536 || hashes >= HIGH || parent_links < 65536 || parent_links >= HIGH
+      || poses < 65536 || poses >= HIGH || !value(hashes + L_RIG_CAMERA_NODE*4, hash) || hash != L_RIG_CAMERA_HASH
+      || !value(parent_links + L_RIG_CAMERA_NODE*4, parent_link) || parent_link != L_RIG_CAMERA_LINK
+      || !pointer(p->camera_object + L_UNIT_EXTERNAL, &external) || external != poses) return false;
+  float matrix[16] = {0};
+  if (!read(poses + L_RIG_CAMERA_NODE*L_MATRIX, matrix, 64) || !finite3(matrix + 12)) return false;
+  if (matrix_basis) {
+    if (!orthonormal(matrix, matrix + 4, matrix + 8)) return false;
+    for (unsigned axis = 0; axis < 3; ++axis) memcpy(matrix_basis + axis*3, matrix + axis*4, 12);
+  } else if (!tfp_matrix_q(matrix, out)) return false;
+  if (position) memcpy(position, matrix + 12, 12);
+  const ParentProof sampled = {parent, poses, links, hashes, parent_links, ref, link};
+  if (proof) { *proof = sampled; return true; } /* caller closes after its remaining sampled reads */
+  return parent_current(p, &sampled);
+}
+/* cpp:519-544 */
+typedef struct PendingParent { uint64_t parent, poses; uint32_t path; } PendingParent;
+static PendingParent pending_parent_default(void) { PendingParent v; v.parent = 0; v.poses = 0; v.path = 2; return v; }
+static bool pending_camera_parent(Policy *p, float *position, float *matrix_basis, PendingParent *out) {
+  uint64_t parent = 0, poses = 0, hashes = 0, parent_links = 0; uint32_t count = 0, hash = 0, parent_link = 0, index = 0, ref = 0; uint8_t header[56] = {0};
+  *out = pending_parent_default();
+  if (!value(p->c.camera + L_CAMERA_NODE, index) || index != 0 || !value(p->camera_object + L_UNIT_PARENT, parent)) return false;
+  uint32_t path = 1;
+  if (parent == 0) { path = 0;
+    if (!value(p->c.avatar_owner + B_AVATAR_RIG + (uint64_t)p->c.avatar_index*B_AVATAR_STRIDE, ref) || !resolve(p, ref, &parent, 0)) return false;
+  } else if (parent < 65536 || parent >= HIGH) return false;
+  if (!read(parent + L_UNIT_HEADER, header, sizeof header)) return false;
+  memcpy(&count, header, 4); memcpy(&poses, header + L_HEADER_WORLDS, 8);
+  memcpy(&parent_links, header + L_HEADER_LINKS, 8); memcpy(&hashes, header + L_HEADER_HASHES, 8);
+  float matrix[16] = {0};
+  if (count != L_RIG_NODES || hashes < 65536 || hashes >= HIGH || parent_links < 65536 || parent_links >= HIGH
+      || poses < 65536 || poses >= HIGH || !value(hashes + L_RIG_CAMERA_NODE*4, hash) || hash != L_RIG_CAMERA_HASH
+      || !value(parent_links + L_RIG_CAMERA_NODE*4, parent_link) || parent_link != L_RIG_CAMERA_LINK
+      || !read(poses + L_RIG_CAMERA_NODE*L_MATRIX, matrix, 64) || !finite3(matrix + 12) || !orthonormal(matrix, matrix + 4, matrix + 8)) return false;
+  for (unsigned axis = 0; axis < 3; ++axis) memcpy(matrix_basis + axis*3, matrix + axis*4, 12);
+  memcpy(position, matrix + 12, 12); out->parent = parent; out->poses = poses; out->path = path; return true;
+}
+/* cpp:545-551. The wielded weapon's root world position. Read-only. */
+static bool weapon_position(Policy *p, uint32_t ref, float *position) {
+  uint64_t object = 0, worlds = 0;
+  if (!ref || ref == UINT32_MAX || ref == p->c.body || ref == p->c.camera_unit || !resolve(p, ref, &object, 0)
+      || !pointer(object + L_UNIT_WORLDS, &worlds) || !read(worlds + L_MATRIX_POSITION, position, 12) || !finite3(position)) return false;
+  uint64_t again = 0; return resolve(p, ref, &again, 0) && again == object;
+}
+/* cpp:552-558 */
+static bool weapon_body_node(Policy *p, uint32_t ref, uint32_t *node) {
+  uint64_t object = 0, parent = 0, links = 0, again = 0; uint32_t link = 0;
+  if (!ref || ref == UINT32_MAX || !resolve(p, ref, &object, 0) || !value(object + L_UNIT_PARENT, parent) || parent != p->body_object
+      || !pointer(object + L_UNIT_LINKS, &links) || !value(links, link) || (link & 0xffff) != 2 || (link >> 16) >= p->count) return false;
+  *node = link >> 16; return resolve(p, ref, &again, 0) && again == object;
+}
+/* cpp:559-567 */
+static bool anchor_source(Policy *p, const EyeMemory *known, uint32_t ref, float *position) {
+  if (known->tpv_known && known->tpv_node < p->count) {
+    uint64_t matrices = 0;
+    if (pointer(p->body_object + L_UNIT_WORLDS, &matrices) && matrices == p->sampled_worlds
+        && read(matrices + (uint64_t)known->tpv_node*L_MATRIX + L_MATRIX_POSITION, position, 12) && finite3(position)) return true;
+  }
+  return weapon_position(p, ref, position);
+}
+/* cpp:568-637.
+ * reason: 1 input/root read, 2 parent proof, 3 owner, 4 unsafe mask, 5 request, 6 weapon/ADS changed, 7 late parent/root change. */
+typedef struct NativeSample { bool valid, allow_pending, pending; uint32_t reason; float relative[3], root[16], parent_position[3], parent_basis[9]; } NativeSample;
+static uint32_t remember_native(Policy *p, const float *native, double tick, bool capture, NativeSample *sample) {
+  TfpQ parent = tfp_q_identity(); float parent_position[3] = {0}, local[3] = {0}, root[16] = {0}, parent_basis[9] = {0}; uint64_t matrices = 0; ParentProof proof; memset(&proof, 0, sizeof proof);
+  const uint32_t weapon = p->current_weapon; uint8_t full_ads = 0;
+  const bool inputs = capture && value(p->controller + L_CONTROL_AIM, full_ads)
+      && read((uint64_t)(uintptr_t)native, local, 12) && finite3(local)
+      && pointer(p->body_object + L_UNIT_WORLDS, &matrices) && read(matrices, root, 64)
+      && orthonormal(root, root + 4, root + 8) && finite3(root + 12);
+  bool sampled = inputs && direct_camera_parent(p, &parent, parent_position, &proof, parent_basis);
+  PendingParent pending = pending_parent_default(); bool use_pending = false;
+  if (inputs && !sampled && sample && sample->allow_pending) {
+    use_pending = sampled = pending_camera_parent(p, parent_position, parent_basis, &pending);
+    ++p->pending_paths[pending.path & 3];
+  }
+  if (sample) sample->reason = !inputs ? 1 : !sampled ? 2 : 0;
+  /* Nothing is admitted until a single complete fresh owner/dispatch proof;
+   * passive owner-loss health is retained even when optional sampling fails. */
+  const uint32_t ownership = owner_status(p, false);
+  if (ownership != OK || !dispatch_owned(p)) { tfp_correction_reset(&p->correction); if (sample) sample->reason = 3; return ownership != OK ? ownership : OWNER_MISMATCH; }
+  uint64_t again = 0; uint32_t kind = 0;
+  if (sample && !sample->reason) {
+    if (!p->safe) sample->reason = 4;
+    else if (!top(p, &kind) || kind != 6) sample->reason = 5;
+    else if (p->current_weapon != weapon || p->full_ads != (full_ads != 0)) sample->reason = 6;
+    else if (!pointer(p->body_object + L_UNIT_WORLDS, &again) || again != matrices) sample->reason = 7;
+    else if (!use_pending && !parent_current(p, &proof)) sample->reason = 7;
+  }
+  if (use_pending) {
+    /* Close the single-frame rig read: same rig, same pose table, same node. */
+    PendingParent closing = pending_parent_default(); float ignored_position[3] = {0}, ignored_basis[9] = {0};
+    const bool same = pending_camera_parent(p, ignored_position, ignored_basis, &closing) && closing.parent == pending.parent && closing.poses == pending.poses;
+    if (!same) { ++p->pending_paths[3]; if (!sample->reason) sample->reason = 7; }
+    if (!same || !p->safe || !top(p, &kind) || kind != 6 || p->current_weapon != weapon || p->full_ads != (full_ads != 0)
+        || !pointer(p->body_object + L_UNIT_WORLDS, &again) || again != matrices) { tfp_correction_reset(&p->correction); return OK; }
+    float offset[3] = {0}, relative[3] = {0};
+    for (unsigned component = 0; component < 3; ++component) for (unsigned axis = 0; axis < 3; ++axis)
+      offset[component] += local[axis]*parent_basis[axis*3+component];
+    for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
+      relative[axis] += (parent_position[component]+offset[component]-root[12+component])*root[axis*4+component];
+    /* No history is recorded from an unproven link. */
+    tfp_correction_reset(&p->correction);
+    if (tfp_correction_finite(relative)) {
+      sample->valid = sample->pending = true; memcpy(sample->relative, relative, 12); memcpy(sample->root, root, 64);
+      memcpy(sample->parent_position, parent_position, 12); memcpy(sample->parent_basis, parent_basis, 36);
+    }
+    return OK;
+  }
+  if (!sampled || !p->safe || !top(p, &kind) || kind != 6 || p->current_weapon != weapon || p->full_ads != (full_ads != 0)
+      || !pointer(p->body_object + L_UNIT_WORLDS, &again) || again != matrices || !parent_current(p, &proof)) { tfp_correction_reset(&p->correction); return OK; }
+  float offset[3] = {0}, relative[3] = {0};
+  for (unsigned component = 0; component < 3; ++component) for (unsigned axis = 0; axis < 3; ++axis)
+    offset[component] += local[axis]*parent_basis[axis*3+component];
+  for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
+    relative[axis] += (parent_position[component]+offset[component]-root[12+component])*root[axis*4+component];
+  memcpy(p->native_eye, relative, 12); p->native_eye_tick = tick; p->native_eye_valid = tfp_correction_finite(relative);
+  if (sample && tfp_correction_remember(&p->correction, relative, p->current_weapon, tick)) {
+    sample->valid = true; memcpy(sample->relative, relative, 12); memcpy(sample->root, root, 64);
+    memcpy(sample->parent_position, parent_position, 12); memcpy(sample->parent_basis, parent_basis, 36);
+  } else if (!sample) tfp_correction_remember(&p->correction, relative, p->current_weapon, tick);
+  return OK;
+}
+/* cpp:638-660. Eye ease into native6. */
+static bool ease_native_entry(Policy *p, const NativeSample *sample, const float *native, double tick, bool from_head, const float *head_relative, float *adjusted) {
+  if (p->handoff_entry_ms <= 0 || !sample->valid || p->full_ads) {
+    if (p->entry.ease.active || from_head) ++p->entry_rejected;
+    tfp_ease_reset(&p->entry.ease); return false;
+  }
+  if (from_head) { if (tfp_handoff_position_begin(&p->entry, head_relative, tick, p->handoff_entry_ms)) ++p->entry_started; else ++p->entry_rejected; }
+  if (!p->entry.ease.active) return false;
+  float presented[3] = {0}, world[3] = {0}, local[3] = {0};
+  if (!tfp_handoff_position_apply(&p->entry, sample->relative, tick, p->c.max_gap_ms, presented, 1.0f)) return false;
+  for (unsigned component = 0; component < 3; ++component) { world[component] = sample->root[12+component];
+    for (unsigned axis = 0; axis < 3; ++axis) world[component] += presented[axis]*sample->root[axis*4+component]; }
+  for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
+    local[axis] += (world[component]-sample->parent_position[component])*sample->parent_basis[axis*3+component];
+  if (!read((uint64_t)(uintptr_t)native, adjusted, 16) || !finite3(local)) { tfp_ease_reset(&p->entry.ease); ++p->entry_rejected; return false; }
+  memcpy(adjusted, local, 12);
+  /* A quick exit continues from what was shown, not from the native eye. */
+  if (!sample->pending) tfp_correction_remember(&p->correction, presented, p->current_weapon, tick);
+  ++p->entry_frames; return true;
+}
+/* cpp:661-666 */
+static bool rendered_rotation(const Policy *p, TfpQ *rendered) {
+  float world[16] = {0}; uint64_t g = 0, worlds = 0; uint32_t index = 0, count = 0;
+  return pointer(p->c.camera + L_CAMERA_GRAPH, &g) && g == p->camera_object + L_UNIT_GRAPH && value(p->c.camera + L_CAMERA_NODE, index)
+      && value(g + L_GRAPH_COUNT, count) && count > 0 && count <= 512 && index < count && pointer(g + L_GRAPH_WORLDS, &worlds)
+      && read(worlds + (uint64_t)index*L_MATRIX, world, 64) && tfp_matrix_q(world, rendered);
+}
+/* cpp:667-676 */
+static void track_native_rotation(Policy *p, double tick) {
+  TfpQ rendered = tfp_q_identity();
+  if (!rendered_rotation(p, &rendered)) { p->native_q_valid = false; return; }
+  p->native_q = tfp_q_normalised(rendered); p->native_q_tick = tick; p->native_q_valid = true;
+}
+/* cpp:677-708. View-direction ease out of native6. */
+_Static_assert(sizeof(TfpQ) == 16, "quaternion argument layout");
+static void ease_normal_rotation(Policy *p, const float *native, double tick, bool from_native) {
+  if (p->handoff_rotation_ms <= 0) { tfp_ease_reset(&p->turn.ease); p->forwarded_q_valid = false; return; }
+  TfpQ desired = tfp_q_identity(), rendered = tfp_q_identity();
+  if (!read((uint64_t)(uintptr_t)native + L_ARGUMENT_ROTATION, &desired, 16) || !tfp_q_valid(desired)) {
+    if (p->turn.ease.active || from_native) ++p->turn_rejected;
+    tfp_ease_reset(&p->turn.ease); p->forwarded_q_valid = false; return;
+  }
+  const bool have_rendered = rendered_rotation(p, &rendered);
+  /* The camera's world matrix is not a reliable native6 record on the first
+   * normal4 frame; start from the view recorded on the last native6 frame. */
+  const bool have_native = p->native_q_valid && tick >= p->native_q_tick && tick-p->native_q_tick <= p->c.max_gap_ms;
+  if (p->forwarded_q_valid && have_rendered && tick >= p->forwarded_q_tick && tick-p->forwarded_q_tick <= p->c.max_gap_ms)
+    tfp_rotation_proof_sample(&p->rotation_proof, p->forwarded_q, rendered);
+  TfpQ out = desired;
+  if (!p->rotation_proof.proven) { if (from_native) ++p->turn_rejected; tfp_ease_reset(&p->turn.ease); }
+  else {
+    if (from_native) {
+      if (have_native && tfp_handoff_rotation_begin(&p->turn, p->native_q, tick, p->handoff_rotation_ms)) { ++p->turn_started;
+        p->turn_start_gap = have_rendered ? tfp_degrees_between(p->native_q, rendered) : -1; }
+      else ++p->turn_rejected;
+    }
+    if (p->turn.ease.active && tfp_handoff_rotation_apply(&p->turn, desired, tick, p->c.max_gap_ms, &out, 120.0f)) {
+      memcpy((float *)(uintptr_t)native + L_ARGUMENT_ROTATION/4, &out, 16); ++p->turn_frames;
+    } else out = desired;
+  }
+  p->forwarded_q = out; p->forwarded_q_tick = tick; p->forwarded_q_valid = true; p->native_q_valid = false;
+}
+/* cpp:709-732. Final mutable proof. */
+static bool commit_current(Policy *p, uint32_t expected_kind, uint32_t *failure) {
+  uint32_t kind = 0, count = 0, hash = 0, link = 0, parent_hash = 0; uint64_t hashes = 0, links = 0, matrices = 0, parent = 1;
+  uint8_t header[56] = {0}; uint64_t foot = 0; *failure = OWNER_MISMATCH;
+  if (!pointer(p->body_object + L_UNIT_ANIM, &foot) || foot != p->foot_instance
+      || !pointer(p->foot_instance + L_ANIM_GRAPH, &foot) || foot != p->foot_graph
+      || !pointer(p->foot_instance + L_ANIM_ACTIVE, &foot) || foot != p->foot_array
+      || !pointer(p->foot_array + L_ANIM_LAYER*8, &foot) || foot != p->foot_current) return false;
+  const uint32_t ownership = owner_status(p, false); if (ownership != OK) { *failure = ownership; return false; }
+  if (!(p->fallback_safe || (p->guard_grace && p->guard_only)) || !dispatch_owned(p) || !top(p, &kind) || kind != expected_kind
+      || !read(p->body_object + L_UNIT_HEADER, header, sizeof header)) return false;
+  memcpy(&count, header, 4); memcpy(&matrices, header + L_HEADER_WORLDS, 8);
+  memcpy(&links, header + L_HEADER_LINKS, 8); memcpy(&hashes, header + L_HEADER_HASHES, 8);
+  return count == p->count && matrices == p->sampled_worlds && links == p->links && hashes == p->hashes
+      && value(hashes + (uint64_t)p->head_node*4, hash) && hash == L_HEAD_HASH
+      && value(links + (uint64_t)p->head_node*4, link) && (link & 0xffff) == 1 && (link >> 16) < count
+      && value(hashes + (uint64_t)(link >> 16)*4, parent_hash) && parent_hash == L_HEAD_PARENT_HASH
+      && value(p->camera_object + L_UNIT_PARENT, parent) && parent == 0;
+}
+/* cpp:733-746 observe_camera_parent: retired (NADSC_ObserveParent), not translated. */
+
+/* The original setter, called as retail calls it (cpp:751, 1020). */
+static void call_original(void *camera, uint32_t unit, const float *output) {
+  const uintptr_t target = atomic_load_explicit(&original, memory_order_acquire);
+  if (host.forward) host.forward(host.user, (uint64_t)target, camera, unit, output);
+  else ((TfpCameraSetter)target)(camera, unit, output);
+}
+/* cpp:747-1026 setter_hook. `caller` replaces _ReturnAddress(). The policy
+ * lock is released at the single exit below (retail's Unlock guard). */
+void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const float *native) {
+  atomic_fetch_add_explicit(&seen, 1, memory_order_relaxed);
+  const uint64_t entered_generation = atomic_load_explicit(&callback_generation, memory_order_acquire);
+  if (!atomic_load_explicit(&armed, memory_order_acquire) || caller != atomic_load_explicit(&return_address, memory_order_relaxed)) {
+    atomic_fetch_add_explicit(&forwarded, 1, memory_order_relaxed); call_original(camera, unit, native); return;
+  }
+  policy_acquire();
+  const float *output = native; _Alignas(16) float adjusted[4] = {0}; bool diagnostics_changed = false;
+  if (entered_generation && entered_generation == atomic_load_explicit(&callback_generation, memory_order_acquire)
+      && atomic_load_explicit(&armed, memory_order_acquire) && (uint64_t)(uintptr_t)camera == policy.c.camera && unit == policy.c.camera_unit) {
+    diagnostics_changed = true;
+    uint32_t kind = 0; const double tick = now();
+    if (policy.native6_seen && (tick < policy.native6_at || tick-policy.native6_at > policy.c.max_gap_ms)) policy.native6_seen = false;
+    const bool supported = top(&policy, &kind) && (kind == 4 || kind == 6);
+    if (supported && kind == 6) {
+      /* Read-only sampling can precede the terminal lease proof because
+       * this branch ALWAYS forwards the game's entire native frame. */
+      NativeSample sample; memset(&sample, 0, sizeof sample); float head_relative[3] = {0};
+      const bool from_head_frame = policy.relative_valid && tick >= policy.last_relative_tick && tick-policy.last_relative_tick <= policy.c.max_gap_ms;
+      const bool handoff = policy.handoff_entry_ms > 0 || policy.handoff_rotation_ms > 0 || policy.anchor_ads;
+      const bool from_head = handoff && policy.relative_valid && tick >= policy.last_relative_tick
+          && tick-policy.last_relative_tick <= policy.c.max_gap_ms;
+      if (from_head) memcpy(head_relative, policy.last_relative, 12);
+      sample.allow_pending = from_head && policy.handoff_entry_ms > 0;
+      const uint32_t current = remember_native(&policy, native, tick, policy.presentation_enabled, handoff ? &sample : NULL);
+      atomic_fetch_add_explicit(&native6_forwarded, 1, memory_order_relaxed);
+      if (current != OK) { atomic_store_explicit(&armed, 0, memory_order_release); reset(&policy, false); error(current); }
+      else { reset(&policy, true); policy.native6_seen = true; policy.native6_at = tick; policy.relative_valid = false; tfp_ease_reset(&policy.turn.ease);
+        policy.eye_delta_active = false;
+        policy.native_full_ads = policy.full_ads; policy.ads_gap_active = false;
+        if (policy.anchor_ads && policy.full_ads && sample.valid && !sample.pending && policy.native_weapon_key
+            && policy.native_weapon_key == policy.weapon_key) {
+          float weapon[3] = {0}, seen_at[3] = {0};
+          if (weapon_position(&policy, policy.native_weapon_key, weapon)) {
+            /* In the native view the camera sits on the proven rig node: its basis rows are right, forward, up. */
+            for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
+              seen_at[axis] += (weapon[component]-sample.parent_position[component])*sample.parent_basis[axis*3+component];
+            EyeMemory *entry = eye_memory_entry(policy.native_weapon_key);
+            if (entry) {
+              float square = 0; for (unsigned axis = 0; axis < 3; ++axis) { const float d = seen_at[axis]-entry->ads_candidate[axis]; square += d*d; }
+              if (finite3(seen_at) && square <= .005f*.005f) { if (++entry->ads_frames >= 5 && seen_at[0]*seen_at[0]+seen_at[1]*seen_at[1]+seen_at[2]*seen_at[2] <= 1.0f) {
+                  if (!entry->ads_known) ++policy.ads_learned;
+                  memcpy(entry->ads, seen_at, 12); entry->ads_known = true; } }
+              else { memcpy(entry->ads_candidate, seen_at, 12); entry->ads_frames = 1; }
+            }
+          }
+        }
+        /* The weapon this native stretch belongs to: the key reported unchanged for five frames. */
+        if (policy.weapon_key != policy.stretch_key) { policy.stretch_key = policy.weapon_key; policy.stretch_key_frames = 1; }
+        else if (++policy.stretch_key_frames >= 5) policy.native_weapon_key = policy.stretch_key;
+        /* Read-only records for the exit hold and the entry trace. */
+        if (from_head_frame) { policy.entry_trace_frame = 0; policy.entry_trace_count = 0; }
+        if (policy.entry_trace_frame < 4 && policy.entry_trace_count < TFP_CAMERA_ENTRY_TRACE_ROWS) {
+          TfpCameraEntryTraceRow *row = &policy.entry_trace[policy.entry_trace_count++]; memset(row, 0, sizeof *row);
+          row->frame = policy.entry_trace_frame++; uint64_t parent = 0, g = 0, worlds = 0, locals = 0;
+          read((uint64_t)(uintptr_t)native, row->argument, 12);
+          row->linked = value(policy.camera_object + L_UNIT_PARENT, parent) && parent != 0 ? 1u : 0u;
+          if (pointer(policy.c.camera + L_CAMERA_GRAPH, &g) && pointer(g + L_GRAPH_WORLDS, &worlds) && pointer(g + L_GRAPH_LOCALS, &locals)) {
+            read(worlds + L_MATRIX_POSITION, row->camera_world, 12); read(locals + L_LOCAL_POSITION, row->camera_local, 12); }
+          PendingParent pending = pending_parent_default(); float rig_basis[9] = {0};
+          row->rig_known = pending_camera_parent(&policy, row->rig_world, rig_basis, &pending) ? 1u : 0u;
+          memcpy(row->head_world, policy.last_head_world, 12);
+        } else if (policy.entry_trace_frame < 4) ++policy.entry_trace_frame;
+        policy.last_view_tick = tick;
+        policy.last_native_valid = read((uint64_t)(uintptr_t)native, policy.last_native, 16) && finite3(policy.last_native);
+        policy.last_native_tick = tick;
+        if (handoff) {
+          if (from_head) { policy.entry_waiting = true; policy.entry_delay_frames = 0; }
+          if (!sample.valid) { ++policy.sample_reasons[sample.reason & 7]; if (policy.entry_waiting) ++policy.entry_delay_frames; }
+          else if (policy.entry_waiting) { policy.entry_waiting = false; policy.entry_last_delay = policy.entry_delay_frames;
+            if (policy.entry_delay_frames > policy.entry_max_delay) policy.entry_max_delay = policy.entry_delay_frames; }
+          if (policy.handoff_rotation_ms > 0) track_native_rotation(&policy, tick);
+          if (policy.handoff_entry_ms > 0 && ease_native_entry(&policy, &sample, native, tick, from_head, head_relative, adjusted)) output = adjusted;
+        }
+        /* cpp:823 observe_camera_parent(policy,tick): retired, dropped. */
+        error(OK); }
+    } else {
+      const uint32_t current = owner_status(&policy, false);
+      if (current != OK || !dispatch_owned(&policy)) {
+        atomic_store_explicit(&armed, 0, memory_order_release); reset(&policy, false); error(current != OK ? current : OWNER_MISMATCH);
+      } else if (!supported) { reset(&policy, false); }
+      else if (!policy.fallback_safe && !(policy.guard_grace = policy.guard_only && policy.last_view_tick > 0
+              && tick >= policy.last_view_tick && tick-policy.last_view_tick <= 250.0)) { reset(&policy, false); }
+      else if (!on_foot(&policy)) { reset(&policy, false); error(ON_FOOT_REQUIRED); }
+      else {
+        float root[3] = {0}, head[3] = {0}, forward[3] = {0}, up[3] = {0}, root_basis[9] = {0};
+        /* A seated interaction (turning a valve): with cut-hold bit 3 the view stays at the head. */
+        const bool seated_view = policy.hold_seated && policy.seated_now && policy.presentation_enabled;
+        if (!seated_view) policy.seated_q_valid = false;
+        else if (!policy.seated_q_valid) {
+          TfpQ seen_q = tfp_q_identity();
+          if (rendered_rotation(&policy, &seen_q) && tfp_q_valid(seen_q)) { policy.seated_q = tfp_q_normalised(seen_q); policy.seated_q_valid = true; }
+        }
+        const bool held_view = seated_view && policy.seated_q_valid;
+        if (!points(&policy, root, head, root_basis)) { reset(&policy, false); error(GRAPH_MISMATCH); }
+        else if (!unparented(&policy)) {
+          /* The request is already normal4 but the camera is still linked to the first-person rig.
+           * While that link is the proven one, repeat the last native6 argument. */
+          TfpQ parent = tfp_q_identity();
+          if (policy.hold_exit && policy.native6_seen && policy.last_native_valid && tick >= policy.last_native_tick
+              && tick-policy.last_native_tick <= policy.c.max_gap_ms && direct_camera_parent(&policy, &parent, NULL, NULL, NULL)
+              && read((uint64_t)(uintptr_t)native, adjusted, 16)) {
+            memcpy(adjusted, policy.last_native, 12); output = adjusted; ++policy.exit_holds;
+            policy.last_native_tick = tick;
+          }
+          reset(&policy, true); error(SPACE_INVALID);
+        }
+        else if (!read((uint64_t)(uintptr_t)native, adjusted, 16) || !finite3(adjusted)
+            || (held_view ? !held_axes(policy.seated_q, forward, up)
+                : (!basis(&policy, forward, up) || distance(adjusted, head) > 8 || distance(adjusted, root) > 10))) {
+          reset(&policy, false); error(POSE_INVALID);
+        } else {
+          /* The game's argument is not a usable start for the blend in the held view. */
+          if (held_view) { policy.blend = 1; memcpy(adjusted, head, 12); }
+          /* Remove current body-root rotation before damping animation.
+           * Fresh root translation/rotation is restored after filtering. */
+          float local_head[3] = {0};
+          for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
+            local_head[axis] += (head[component]-root[component])*root_basis[axis*3+component];
+          float dt = 0;
+          if (policy.tracking && tick >= policy.previous && tick-policy.previous <= policy.c.max_gap_ms) dt = (float)(tick-policy.previous)/1000;
+          else { reset(&policy, policy.native6_seen); memcpy(policy.relative_head, local_head, 12); }
+          policy.tracking = true; policy.previous = tick; policy.last_dt = dt;
+          const float k = policy.c.smoothing_ms > 0 ? 1-expf(-dt*1000/policy.c.smoothing_ms) : 1;
+          for (unsigned i = 0; i < 3; ++i) policy.relative_head[i] += (local_head[i]-policy.relative_head[i])*k;
+          float lag[3] = {0};
+          for (unsigned component = 0; component < 3; ++component) {
+            lag[component] = root[component]-head[component];
+            for (unsigned axis = 0; axis < 3; ++axis) lag[component] += policy.relative_head[axis]*root_basis[axis*3+component];
+          }
+          const float lag_length = sqrtf(lag[0]*lag[0]+lag[1]*lag[1]+lag[2]*lag[2]);
+          if (lag_length > .06f) for (unsigned i = 0; i < 3; ++i) lag[i] *= .06f/lag_length;
+          policy.blend = policy.c.blend_ms > 0 ? fminf(1, policy.blend+dt*1000/policy.c.blend_ms) : 1;
+          /* Native6 arguments are parent-local. Never reuse those values
+           * for a world-space bridge or expose a TPV frame on retirement. */
+          const bool from_native = policy.native6_seen; tfp_ease_reset(&policy.entry.ease);
+          if (policy.native6_seen) { policy.blend = 1; policy.native6_seen = false; }
+          const float weight = policy.blend*policy.blend*(3-2*policy.blend);
+          /* Pitching/rolling the look direction must not orbit the eye
+           * vertically into the helmet. At a vertical look use body yaw. */
+          float horizontal[3] = {forward[0], forward[1], 0};
+          float horizontal_length = sqrtf(horizontal[0]*horizontal[0]+horizontal[1]*horizontal[1]);
+          if (horizontal_length < .0001f) {
+            horizontal[0] = root_basis[3]; horizontal[1] = root_basis[4];
+            horizontal_length = sqrtf(horizontal[0]*horizontal[0]+horizontal[1]*horizontal[1]);
+          }
+          if (horizontal_length < .0001f) { reset(&policy, false); error(POSE_INVALID); }
+          else {
+            horizontal[0] /= horizontal_length; horizontal[1] /= horizontal_length;
+            for (unsigned i = 0; i < 3; ++i) {
+              const float target = head[i]+lag[i]+horizontal[i]*policy.c.forward+(i == 0 ? horizontal[1]*policy.side : i == 1 ? -horizontal[0]*policy.side : policy.c.up);
+              adjusted[i] += (target-adjusted[i])*weight;
+            }
+            float desired_relative[3] = {0}, relative[3] = {0};
+            for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
+              desired_relative[axis] += (adjusted[component]-root[component])*root_basis[axis*3+component];
+            bool eye_held = false;
+            if (policy.hold_eye && policy.presentation_enabled) {
+              if (from_native) {
+                policy.eye_delta_active = false;
+                if (policy.native_eye_valid && tick >= policy.native_eye_tick && tick-policy.native_eye_tick <= policy.c.max_gap_ms) {
+                  float square = 0;
+                  for (unsigned axis = 0; axis < 3; ++axis) { policy.eye_delta[axis] = policy.native_eye[axis]-desired_relative[axis]; square += policy.eye_delta[axis]*policy.eye_delta[axis]; }
+                  /* More than a metre apart is a different view, not the same eye. */
+                  if (isfinite(square) && square <= 1.0f) {
+                    policy.eye_delta_active = true; policy.eye_hold_started = tick; policy.eye_swap_tick = tick;
+                    eye_memory_store(policy.native_weapon_key, policy.eye_delta);
+                  }
+                }
+              }
+              if (policy.eye_delta_active) {
+                /* Kept through a weapon swap (mask 2) for at most 2500 ms, and for 300 ms of mask 0 around it. */
+                if (policy.control_mask == 2) policy.eye_swap_tick = tick;
+                const bool keep = tick-policy.eye_hold_started <= 2500.0 && (policy.control_mask == 2
+                    || (policy.control_mask == 0 && tick >= policy.eye_swap_tick && tick-policy.eye_swap_tick <= 300.0));
+                /* A different weapon is coming up and its eye is known: glide there during the swap. */
+                const EyeMemory *incoming = keep && policy.weapon_key != policy.native_weapon_key ? eye_memory_find(policy.weapon_key) : NULL;
+                if (incoming) {
+                  const float step = dt > 0 ? 1-expf(-dt/.07f) : 0; bool moved = false;
+                  for (unsigned axis = 0; axis < 3; ++axis) {
+                    const float change = (incoming->delta[axis]-policy.eye_delta[axis])*step;
+                    if (fabsf(change) > 1e-6f) moved = true;
+                    policy.eye_delta[axis] += change;
+                  }
+                  if (moved) ++policy.eye_glides;
+                }
+                if (!keep) {
+                  const float fade = dt > 0 ? expf(-dt/.08f) : 1; float square = 0;
+                  for (unsigned axis = 0; axis < 3; ++axis) { policy.eye_delta[axis] *= fade; square += policy.eye_delta[axis]*policy.eye_delta[axis]; }
+                  if (square < .002f*.002f) policy.eye_delta_active = false;
+                }
+              }
+              if (policy.eye_delta_active) {
+                for (unsigned axis = 0; axis < 3; ++axis) relative[axis] = desired_relative[axis]+policy.eye_delta[axis];
+                for (unsigned component = 0; component < 3; ++component) { adjusted[component] = root[component];
+                  for (unsigned axis = 0; axis < 3; ++axis) adjusted[component] += relative[axis]*root_basis[axis*3+component]; }
+                tfp_correction_reset(&policy.correction); eye_held = true; ++policy.eye_hold_frames;
+              }
+            }
+            if (eye_held) {}
+            else if (policy.presentation_enabled && tfp_correction_apply(&policy.correction, desired_relative, policy.current_weapon, tick, relative, 150, policy.c.max_gap_ms)) {
+              for (unsigned component = 0; component < 3; ++component) { adjusted[component] = root[component];
+                for (unsigned axis = 0; axis < 3; ++axis) adjusted[component] += relative[axis]*root_basis[axis*3+component]; }
+            } else memcpy(relative, desired_relative, 12);
+            if (policy.anchor_ads && policy.presentation_enabled) {
+              /* Learned on every normal4 frame, the first one after native6 included. */
+              const uint32_t keys[2] = {policy.weapon_key, policy.native_weapon_key};
+              for (unsigned n = 0; n < 2; ++n) {
+                const uint32_t key = keys[n];
+                uint32_t node = 0;
+                if (key && weapon_body_node(&policy, key, &node)) { EyeMemory *entry = eye_memory_entry(key); if (entry) { entry->tpv_node = node; entry->tpv_known = true; } }
+              }
+              if (from_native) {
+                const EyeMemory *known = policy.native_full_ads ? eye_memory_find(policy.native_weapon_key) : NULL;
+                policy.ads_gap_active = known && known->ads_known; policy.ads_gap_started = tick;
+              }
+              if (policy.ads_gap_active) {
+                /* Full strength for 50 ms (the kit re-enters in two frames), then it lets go. */
+                const double age = tick-policy.ads_gap_started;
+                const float anchor_weight = age <= 50 ? 1.0f : (float)exp(-(age-50)/50.0);
+                const EyeMemory *known = eye_memory_find(policy.native_weapon_key); float weapon[3] = {0}, right[3] = {0};
+                if (anchor_weight < .02f || !known || !known->ads_known || !anchor_source(&policy, known, policy.native_weapon_key, weapon)) policy.ads_gap_active = false;
+                else {
+                  right[0] = forward[1]*up[2]-forward[2]*up[1]; right[1] = forward[2]*up[0]-forward[0]*up[2]; right[2] = forward[0]*up[1]-forward[1]*up[0];
+                  float anchored[3] = {0}, square = 0;
+                  for (unsigned i = 0; i < 3; ++i) { anchored[i] = weapon[i]-(right[i]*known->ads[0]+forward[i]*known->ads[1]+up[i]*known->ads[2]);
+                    const float d = anchored[i]-adjusted[i]; square += d*d; }
+                  /* More than 0.8 m from the ordinary eye is not this view any more. */
+                  if (!finite3(anchored) || square > .8f*.8f) policy.ads_gap_active = false;
+                  else {
+                    for (unsigned i = 0; i < 3; ++i) adjusted[i] += (anchored[i]-adjusted[i])*anchor_weight;
+                    for (unsigned axis = 0; axis < 3; ++axis) { relative[axis] = 0; for (unsigned component = 0; component < 3; ++component)
+                      relative[axis] += (adjusted[component]-root[component])*root_basis[axis*3+component]; }
+                    ++policy.ads_gap_frames;
+                  }
+                }
+              }
+            }
+            /* Revalidate mutable ownership, request and graph after all
+             * sampling, directly before making a corrected native call. */
+            uint32_t commit_error = OWNER_MISMATCH;
+            if (!commit_current(&policy, kind, &commit_error)) { reset(&policy, false); if (commit_error == READ_FAILED) atomic_store_explicit(&armed, 0, memory_order_release); error(commit_error); }
+            else { memcpy(policy.last_relative, relative, 12); policy.last_relative_tick = tick; policy.relative_valid = true;
+              memcpy(policy.last_head_world, adjusted, 12);
+              if (policy.fallback_safe) policy.last_view_tick = tick; else ++policy.guard_grace_frames;
+              if (held_view) {
+                /* Follow the game's direction from the head, gliding there from the view the
+                 * interaction began with; an unreadable rotation holds. */
+                TfpQ wanted = tfp_q_identity();
+                if (read((uint64_t)(uintptr_t)native + L_ARGUMENT_ROTATION, &wanted, 16) && tfp_q_valid(wanted) && dt > 0) {
+                  const TfpQ next = tfp_slerp(policy.seated_q, tfp_q_normalised(wanted), 1-expf(-dt/.18f));
+                  if (tfp_q_valid(next)) policy.seated_q = next;
+                }
+                memcpy((float *)(uintptr_t)native + L_ARGUMENT_ROTATION/4, &policy.seated_q, 16);
+                tfp_ease_reset(&policy.turn.ease); policy.forwarded_q_valid = false; ++policy.seated_frames;
+              } else if (policy.presentation_enabled) ease_normal_rotation(&policy, native, tick, from_native);
+              output = adjusted; atomic_fetch_add_explicit(&replaced, 1, memory_order_relaxed); error(OK); }
+          }
+        }
+      }
+    }
+  }
+  /* Serialize actual adjusted call with End, not just the calculation. */
+  atomic_fetch_add_explicit(&forwarded, 1, memory_order_relaxed); call_original(camera, unit, output);
+  if (diagnostics_changed) publish_diagnostics(&policy);
+  policy_release();
+}
+/* cpp:1028-1042. The slot must hold exe+setter (retail's non-fixture path). */
+static bool contract(const TfpCameraConfig *c, uint64_t *setter, uint64_t *address) {
+  if (!image(c->game, B_GAME_STAMP, B_GAME_SIZE) || !image(c->exe, B_EXE_STAMP, B_EXE_SIZE)) return reject(IMAGE_MISMATCH) != 0;
+  if (!bytes(c->game + B_GAME_CALL, B_HEX_CALL) || !bytes(c->exe + B_EXE_SETTER, B_HEX_SETTER)
+      || !bytes(c->exe + B_EXE_UNIT_WORLD, B_HEX_UNIT_WORLD)
+      || !bytes(c->exe + B_EXE_GRAPH_GETTER, B_HEX_GRAPH_GETTER) || !bytes(c->exe + B_EXE_ANIM_GETTER, B_HEX_ANIM_GETTER)) return reject(CODE_MISMATCH) != 0;
+  uint64_t root = 0, api = 0, target = 0;
+  if (!pointer(c->game + B_GAME_API_ROOT, &root) || !pointer(root + L_API_CAMERA, &api) || !slot_read(api + L_API_SETTER, &target)) return reject(API_MISMATCH) != 0;
+  *address = api + L_API_SETTER; if (!writable_slot(*address, c->exe)) return reject(SLOT_NOT_WRITABLE) != 0;
+  if (target != c->exe + B_EXE_SETTER) return reject(API_MISMATCH) != 0;
+  if (!executable(target)) return reject(API_MISMATCH) != 0;
+  *setter = target; return true;
+}
+/* cpp:1043-1050 */
+static bool config(const TfpCameraConfig *input, TfpCameraConfig *c) {
+  if (!read((uint64_t)(uintptr_t)input, c, sizeof *c) || c->size != sizeof *c || c->abi != 1 || c->reserved != 0 || c->avatar_index >= 8
+      || !c->avatar || c->avatar == 0xffffffff || !c->body || c->body == 0xffffffff || !c->camera_unit || c->camera_unit == 0xffffffff
+      || c->context < 65536 || c->camera < 65536 || !isfinite(c->forward) || fabsf(c->forward) > .5f
+      || !isfinite(c->up) || fabsf(c->up) > .5f || !isfinite(c->smoothing_ms) || c->smoothing_ms < 0 || c->smoothing_ms > 500
+      || !isfinite(c->blend_ms) || c->blend_ms < 0 || c->blend_ms > 1000 || c->max_gap_ms < 16 || c->max_gap_ms > 1000) return reject(INVALID_CONFIG) != 0;
+  return true;
+}
+/* cpp:1051-1058 */
+static bool prepared(Policy *next) {
+  uint32_t kind = 0; float root[3] = {0}, head[3] = {0}, f[3] = {0}, u[3] = {0};
+  const uint32_t current = owner_status(next, true); if (current != OK) return reject(current) != 0;
+  if (!next->safe || !top(next, &kind) || (kind != 4 && kind != 6)) return reject(OWNER_MISMATCH) != 0;
+  if (!graph(next, true) || !points(next, root, head, NULL)) return reject(GRAPH_MISMATCH) != 0;
+  if (kind == 4 && !unparented(next)) return reject(SPACE_INVALID) != 0;
+  if (!basis(next, f, u)) return reject(POSE_INVALID) != 0;
+  return true;
+}
+/* cpp:1059-1062 */
+static bool pin(uint64_t address) { return host.pin(host.user, address); }
+/* cpp:1063-1072 */
+static bool restore_slot(void) {
+  if (possible) {
+    uint64_t current = 0; if (!slot_read(slot, &current)) return false;
+    if (current == callback()) {
+      if (!writable_slot(slot, slot_image)) return false;
+      uint64_t observed = 0; if (!cas(callback(), (uint64_t)atomic_load(&original), &observed)) return false;
+    }
+    possible = false;
+  }
+  atomic_store_explicit(&installed, 0, memory_order_release); retired_generation = owned_generation; owned_generation = 0; atomic_store_explicit(&reserved, 0, memory_order_release); return true;
+}
+/* cpp:1073-1075 */
+static bool output_generation(uint64_t *output, uint64_t generation) {
+  return host.write(host.user, output, &generation, 8);
+}
+/* cpp:1076-1079 */
+static uint32_t failed_begin(uint32_t cause, uint64_t *output) {
+  atomic_store_explicit(&armed, 0, memory_order_release); atomic_store_explicit(&callback_generation, 0, memory_order_release); policy_acquire(); policy_release();
+  if (!restore_slot()) { error(CLEANUP_PENDING); return 2; }
+  output_generation(output, 0); return reject(cause);
+}
+/* cpp:1080-1086. Each export: the body runs between retail's lock and its
+ * Unlock guard, so every return releases the control lock. */
+static uint32_t validate_locked(const TfpCameraConfig *input) {
+  TfpCameraConfig c; memset(&c, 0, sizeof c); if (!config(input, &c)) return 0; if (atomic_load(&reserved)) return reject(BUSY);
+  Policy next; policy_init(&next); next.c = c; uint64_t target = 0, address = 0;
+  if (!prepared(&next) || !contract(&c, &target, &address)) return 0;
+  const uint32_t current = owner_status(&next, false); if (current != OK) return reject(current);
+  error(OK); return 1;
+}
+uint32_t tfp_camera_validate(const TfpCameraConfig *input) {
+  control_acquire(); const uint32_t result = validate_locked(input); control_release(); return result;
+}
+/* cpp:1087-1121 */
+static uint32_t begin_locked(const TfpCameraConfig *input, uint64_t *output) {
+  if (!output_generation(output, 0)) return reject(INVALID_CONFIG);
+  TfpCameraConfig c; memset(&c, 0, sizeof c); if (!config(input, &c)) return 0; if (atomic_load(&reserved)) return reject(BUSY);
+  Policy next; policy_init(&next); next.c = c; uint64_t target = 0, address = 0;
+  if (!prepared(&next) || !contract(&c, &target, &address)) return 0;
+  if (atomic_load(&original) && (uint64_t)atomic_load(&original) != target) return reject(API_MISMATCH);
+  if (!pin((uint64_t)(uintptr_t)&tfp_camera_begin)) return reject(PIN_FAILED);
+  if (!pin(c.exe)) return reject(PIN_FAILED);
+  atomic_store_explicit(&original, (uintptr_t)target, memory_order_release); slot = address; slot_image = c.exe; possible = false;
+  if (++generation_counter == 0) ++generation_counter;
+  if (!output_generation(output, generation_counter)) return reject(INVALID_CONFIG);
+  owned_generation = generation_counter; atomic_store_explicit(&reserved, 1, memory_order_release); possible = true;
+  display_cache.blend = next.blend; display_cache.head_distance = next.head_distance; display_cache.last_dt = next.last_dt; publish_diagnostics(&next);
+  if (!writable_slot(slot, c.exe)) return failed_begin(SLOT_NOT_WRITABLE, output);
+  uint64_t observed = 0; if (!cas(target, callback(), &observed)) return failed_begin(CAS_FAULT, output);
+  if (observed != target) { possible = false; return failed_begin(CAS_MISMATCH, output); }
+  atomic_store_explicit(&installed, 1, memory_order_release);
+  policy_acquire(); uint32_t kind = 0;
+  const uint32_t current = owner_status(&next, false);
+  const bool stable = current == OK && top(&next, &kind) && (kind == 4 || kind == 6) && next.safe && graph(&next, false) && dispatch_owned(&next)
+      && (kind != 4 || unparented(&next));
+  if (stable) {
+    policy = next; atomic_store(&seen, 0); atomic_store(&forwarded, 0); atomic_store(&replaced, 0); atomic_store(&native6_forwarded, 0); atomic_store(&resets, 0);
+    publish_diagnostics(&policy);
+    atomic_store_explicit(&return_address, c.game + B_GAME_CALL + 4, memory_order_relaxed);
+    atomic_store_explicit(&callback_generation, owned_generation, memory_order_release); atomic_store_explicit(&armed, 1, memory_order_release);
+  }
+  policy_release(); if (!stable) return failed_begin(current != OK ? current : OWNER_MISMATCH, output);
+  error(OK); return 1;
+}
+uint32_t tfp_camera_begin(const TfpCameraConfig *input, uint64_t *output) {
+  control_acquire(); const uint32_t result = begin_locked(input, output); control_release(); return result;
+}
+/* cpp:1122-1129 */
+static uint32_t end_locked(uint64_t generation) {
+  if (!generation) return reject(TOKEN_MISMATCH);
+  if (!atomic_load(&reserved)) { if (generation != retired_generation) return reject(TOKEN_MISMATCH); error(OK); return 1; }
+  if (generation != owned_generation) return reject(TOKEN_MISMATCH);
+  atomic_store_explicit(&armed, 0, memory_order_release); atomic_store_explicit(&callback_generation, 0, memory_order_release); policy_acquire(); reset(&policy, false); publish_diagnostics(&policy); policy_release();
+  if (!restore_slot()) return reject(CLEANUP_PENDING);
+  error(OK); return 1;
+}
+uint32_t tfp_camera_end(uint64_t generation) {
+  control_acquire(); const uint32_t result = end_locked(generation); control_release(); return result;
+}
+/* cpp:1130-1138 */
+static uint32_t read_stats_locked(uint64_t generation, TfpCameraStats *output) {
+  if (atomic_load(&reserved) ? (!generation || generation != owned_generation) : generation != 0) return reject(TOKEN_MISMATCH);
+  TfpCameraStats s; memset(&s, 0, sizeof s); if (!read((uint64_t)(uintptr_t)output, &s, sizeof s) || s.size != sizeof s || s.abi != 1) return reject(INVALID_CONFIG);
+  read_diagnostics(&s);
+  s.reserved = 0; s.padding = 0; s.installed = atomic_load(&installed); s.armed = atomic_load(&armed); s.error = atomic_load(&last_error);
+  s.seen = atomic_load(&seen); s.forwarded = atomic_load(&forwarded); s.replaced = atomic_load(&replaced); s.native6_forwarded = atomic_load(&native6_forwarded); s.resets = atomic_load(&resets);
+  return host.write(host.user, output, &s, sizeof s) ? 1 : reject(INVALID_CONFIG);
+}
+uint32_t tfp_camera_read_stats(uint64_t generation, TfpCameraStats *output) {
+  control_acquire(); const uint32_t result = read_stats_locked(generation, output); control_release(); return result;
+}
+/* cpp:1139 */
+uint32_t tfp_camera_error(void) { return atomic_load_explicit(&last_error, memory_order_acquire); }
+
+/* cpp:1141-1211, 1225-1244: NADSC_SetOffsets, FreeAim, FreeAimStats,
+ * ObserveParent, ParentStats, SetKick46, KickStats46, SetCameraMotion47,
+ * Profile47, ProfileStats47 are retired and not translated. */
+
+/* cpp:1213-1223 */
+static uint32_t set_presentation_locked(uint64_t generation) {
+  if (!atomic_load(&reserved) || !atomic_load(&armed) || generation != owned_generation) return reject(TOKEN_MISMATCH);
+  policy_acquire();
+  const uint32_t current = owner_status(&policy, false);
+  uint32_t failure = current;
+  if (failure == OK && !dispatch_owned(&policy)) failure = API_MISMATCH;
+  if (failure == OK && !bytes(policy.c.game + B_GAME_CALL_PAIR, B_HEX_CALL_PAIR)) failure = CODE_MISMATCH;
+  if (failure == OK) { policy.presentation_enabled = true; tfp_correction_reset(&policy.correction); }
+  policy_release(); return failure == OK ? 1 : reject(failure);
+}
+uint32_t tfp_camera_set_presentation(uint64_t generation) {
+  control_acquire(); const uint32_t result = set_presentation_locked(generation); control_release(); return result;
+}
+/* cpp:1246-1257 */
+static uint32_t set_handoff_locked(uint64_t generation, float entry_ms, float rotation_ms) {
+  if (!atomic_load(&reserved) || !atomic_load(&armed) || generation != owned_generation) return reject(TOKEN_MISMATCH);
+  policy_acquire();
+  const bool allowed = policy.presentation_enabled || (entry_ms == 0 && rotation_ms == 0);
+  if (allowed) { policy.handoff_entry_ms = entry_ms; policy.handoff_rotation_ms = rotation_ms; tfp_ease_reset(&policy.entry.ease); tfp_ease_reset(&policy.turn.ease); policy.forwarded_q_valid = false; }
+  policy_release(); if (!allowed) return reject(INVALID_CONFIG);
+  error(OK); return 1;
+}
+uint32_t tfp_camera_set_handoff(uint64_t generation, float entry_ms, float rotation_ms) {
+  if (!isfinite(entry_ms) || entry_ms < 0 || entry_ms > 500 || !isfinite(rotation_ms) || rotation_ms < 0 || rotation_ms > 500) return reject(INVALID_CONFIG);
+  control_acquire(); const uint32_t result = set_handoff_locked(generation, entry_ms, rotation_ms); control_release(); return result;
+}
+/* cpp:1258-1267 */
+static uint32_t handoff_stats_locked(uint64_t generation, TfpCameraHandoffData *out) {
+  if (!atomic_load(&reserved) || generation != owned_generation) return reject(TOKEN_MISMATCH);
+  policy_acquire_shared();
+  TfpCameraHandoffData s; memset(&s, 0, sizeof s);
+  s.size = sizeof(TfpCameraHandoffData); s.rotation_proven = policy.rotation_proof.proven ? 1U : 0U; s.entry_ms = policy.handoff_entry_ms; s.rotation_ms = policy.handoff_rotation_ms;
+  s.entry_started = policy.entry_started; s.entry_frames = policy.entry_frames; s.entry_rejected = policy.entry_rejected; s.rotation_started = policy.turn_started; s.rotation_frames = policy.turn_frames; s.rotation_rejected = policy.turn_rejected; s.proof_mismatches = policy.rotation_proof.mismatches;
+  s.native_mismatches = 0; s.native_proven = policy.native_q_valid ? 1U : 0U; s.entry_last_delay = policy.entry_last_delay; s.entry_max_delay = policy.entry_max_delay; s.padding = 0; s.rotation_start_gap = policy.turn_start_gap; s.padding2 = 0;
+  memcpy(s.sample_reasons, policy.sample_reasons, sizeof s.sample_reasons); memcpy(s.pending_paths, policy.pending_paths, sizeof s.pending_paths);
+  policy_release_shared(); return host.write(host.user, out, &s, sizeof s) ? 1 : reject(INVALID_CONFIG);
+}
+uint32_t tfp_camera_handoff_stats(uint64_t generation, TfpCameraHandoffData *out) {
+  control_acquire(); const uint32_t result = handoff_stats_locked(generation, out); control_release(); return result;
+}
+/* cpp:1269-1278 */
+static uint32_t set_cut_hold_locked(uint64_t generation, uint32_t mode) {
+  if (!atomic_load(&reserved) || !atomic_load(&armed) || generation != owned_generation) return reject(TOKEN_MISMATCH);
+  policy_acquire();
+  const bool allowed = mode <= 15 && (policy.presentation_enabled || !mode);
+  if (allowed) { policy.hold_exit = (mode & 1) != 0; policy.hold_eye = (mode & 2) != 0; policy.anchor_ads = (mode & 4) != 0; policy.hold_seated = (mode & 8) != 0;
+    if (!policy.hold_eye) policy.eye_delta_active = false;
+    if (!policy.anchor_ads) policy.ads_gap_active = false; }
+  policy_release(); if (!allowed) return reject(INVALID_CONFIG);
+  error(OK); return 1;
+}
+uint32_t tfp_camera_set_cut_hold(uint64_t generation, uint32_t mode) {
+  control_acquire(); const uint32_t result = set_cut_hold_locked(generation, mode); control_release(); return result;
+}
+/* cpp:1279-1286 */
+uint32_t tfp_camera_entry_trace(TfpCameraEntryTraceData *out) {
+  control_acquire();
+  TfpCameraEntryTraceData data; memset(&data, 0, sizeof data); data.size = sizeof data;
+  policy_acquire_shared();
+  data.count = policy.entry_trace_count; data.exit_holds = policy.exit_holds; data.hold_exit = (policy.hold_exit ? 1u : 0u)|(policy.hold_eye ? 2u : 0u)|(policy.anchor_ads ? 4u : 0u)|(policy.hold_seated ? 8u : 0u);
+  memcpy(data.rows, policy.entry_trace, sizeof data.rows);
+  policy_release_shared();
+  const uint32_t result = host.write(host.user, out, &data, sizeof data) ? 1 : 0;
+  control_release(); return result;
+}
+/* cpp:1288-1293 */
+static uint32_t set_weapon_key_locked(uint64_t generation, uint32_t key) {
+  if (!atomic_load(&reserved) || !atomic_load(&armed) || generation != owned_generation) return reject(TOKEN_MISMATCH);
+  policy_acquire(); policy.weapon_key = key; policy_release(); return 1;
+}
+uint32_t tfp_camera_set_weapon_key(uint64_t generation, uint32_t key) {
+  control_acquire(); const uint32_t result = set_weapon_key_locked(generation, key); control_release(); return result;
+}
+/* cpp:1295-1304 */
+uint32_t tfp_camera_anchor_stats(TfpCameraAnchorData *out) {
+  control_acquire();
+  TfpCameraAnchorData data; memset(&data, 0, sizeof data); data.size = sizeof data;
+  policy_acquire_shared();
+  data.enabled = policy.anchor_ads ? 1u : 0u; data.frames = policy.ads_gap_frames;
+  for (unsigned i = 0; i < 16; ++i) if (eye_memory[i].key && eye_memory[i].ads_known) ++data.known;
+  const EyeMemory *current = eye_memory_find(policy.native_weapon_key);
+  if (current) if (current->ads_known) memcpy(data.current, current->ads, 12);
+  policy_release_shared();
+  const uint32_t result = host.write(host.user, out, &data, sizeof data) ? 1 : 0;
+  control_release(); return result;
+}
+
+/* ---- not in retail: the host and the test reset ---- */
+void tfp_camera_set_host(const TfpCameraHost *supplied) {
+  if (supplied) host = *supplied; else memset(&host, 0, sizeof host);
+ 
+}
+void tfp_camera_reset_for_tests(void) {
+  atomic_store(&original, 0);
+  atomic_store(&installed, 0); atomic_store(&armed, 0); atomic_store(&reserved, 0); atomic_store(&last_error, 0);
+  atomic_store(&callback_generation, 0);
+  atomic_store(&seen, 0); atomic_store(&forwarded, 0); atomic_store(&replaced, 0); atomic_store(&native6_forwarded, 0); atomic_store(&resets, 0); atomic_store(&return_address, 0);
+  slot = 0; slot_image = 0; generation_counter = 0; owned_generation = 0; retired_generation = 0; possible = false;
+  policy_init(&policy);
+  memset(eye_memory, 0, sizeof eye_memory); eye_memory_next = 0;
+  display_cache.blend = 0; display_cache.head_distance = 0; display_cache.last_dt = 0;
+  atomic_store(&display_sequence, 0); atomic_store(&display_blend, 0); atomic_store(&display_head_distance, 0); atomic_store(&display_last_dt, 0);
+  owner_read_probe = NULL;
+}
