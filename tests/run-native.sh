@@ -40,3 +40,6 @@ for tfp_test in transition recovery; do
     "$TFP_ROOT/src/$tfp_test.c" "$TFP_ROOT/tests/${tfp_test}_test.c" -lm -o "$TFP_ROOT/work/tests/$tfp_test"
   "$TFP_ROOT/work/tests/$tfp_test"
 done
+"$TFP_CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g -I "$TFP_ROOT/src" -I "$TFP_ROOT/tests" \
+  "$TFP_ROOT/src/controller.c" "$TFP_ROOT/tests/controller_test.c" -lm -o "$TFP_ROOT/work/tests/controller"
+"$TFP_ROOT/work/tests/controller"

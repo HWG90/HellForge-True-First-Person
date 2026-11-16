@@ -31,7 +31,7 @@ class Vectors(unittest.TestCase):
             self.assertEqual(hashlib.sha256(blob).hexdigest(), want, name)
 
     def test_a_c_test_refuses_vectors_from_another_commit(self):
-        for name in ("transition", "recovery"):
+        for name in ("transition", "recovery", "controller"):
             program = ROOT / "work/tests" / name
             if program.exists():
                 self.assertEqual(subprocess.run([str(program), "0000000"], capture_output=True).returncode, 2)
