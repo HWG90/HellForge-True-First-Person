@@ -256,6 +256,7 @@ static void script_guard(Run &r, int variant) {
   settle(r, settled, variant == 6 ? 7 : 9);   // eight unchanged writes make the reference (seven do not)
   r.end(r.gen);
   if (variant == 7) r.rotation_guard(0);
+  if (variant == 12) r.viewmodel = OTHER_RIG;   // the settled rotation belongs to the first rig only
   arm(r, 1);
   // The game's write starts far off and halves its error each frame.
   float error = variant == 1 ? 1.6f : variant == 2 ? 1.4f : 70;
@@ -328,15 +329,22 @@ static void script_depth(Run &r, int kind, int64_t dt, int variant) {
   if (variant == 10) { r.weapon = 0x445; r.s.depth.capacity = 128; r.s.depth.multiplier = 37; r.s.depth.shift = 63; } // probing starts 7 rows before the end: found by the 64th and last probe
   if (variant == 9) { r.s.depth.capacity = 128; r.s.depth.multiplier = 0x9E3779B1u; r.s.depth.shift = 40; r.s.depth.in_overrides = true; r.s.depth.override_shift = 63; r.s.depth.di = 4095; r.s.depth.wi = 4095; }
   arm(r, kind);
-  optic(r, 0);
+  optic(r, variant == 11 ? 1 : 0);
+  // a lens still on its way when the lease begins, with no previous distance on record (0 stands for "none", and is known)
+  if (variant == 11) { r.req(0xA0, lens_of(r, 0)); for (int i = 4; i >= 0; --i) { lens_frame(r, i / 4.0f); animate(r, i); frame(r, dt, F_FULL); } }
   frames(r, 6, dt, F_FULL);
   zoom_to(r, 1, 6, dt); frames(r, 4, dt, F_FULL);
+  // only the prior lens of the request changes: a new distance event all the same
+  r.req<float>(0xA0, r.req_get<float>(0xA0) + .01f); frames(r, 2, dt, F_FULL);
   zoom_to(r, 2, 5, dt); frames(r, 40, dt, F_FULL);          // long enough for the 500 ms revalidation
   // the live lens overshoots the prior one (the share is clamped to 1), and a lens span of exactly one float step (taken as no span)
   zoom_event(r, 1); lens_frame(r, 1.4f); animate(r, 1); frame(r, dt, F_FULL); lens_frame(r, .5f); animate(r, 2); frame(r, dt, F_FULL); lens_frame(r, 0); frames(r, 2, dt, F_FULL);
   { zoom_event(r, 0); const float target = 1.0f, prior = std::nextafter(1.0f, 2.0f);
     r.optic_target = target; r.req(0xA0, prior); std::memcpy(r.s.frame + 0x18, &target, 4); std::memcpy(r.s.frame + 0x1C, &prior, 4); r.req(0x84, prior);
     animate(r, 3); frame(r, dt, F_FULL); animate(r, 4); frame(r, dt, F_FULL); }
+  // the zoom policy switched on and off: what was known about the previous distance is forgotten, so a zoom change right after it is not bridged
+  zoom_to(r, 1, 2, dt); r.zoom_policy(r.gen, 1); frame(r, dt, F_FULL); r.zoom_policy(r.gen, 0); zoom_to(r, 2, 3, dt); frames(r, 2, dt, F_FULL);
+  r.zoom_policy(r.gen, 1); r.zoom_policy(r.gen, 0); zoom_to(r, 1, 3, dt);
   zoom_to(r, 0, 4, dt); zoom_to(r, 2, 3, dt);
   if (variant == 5) { r.req<uint8_t>(0x8D, 1); r.req<float>(0x88, .6f); frames(r, 5, dt, F_FULL); r.req<float>(0x88, 1); frames(r, 2, dt, F_FULL); r.req<float>(0x88, 0); frames(r, 2, dt, F_FULL); r.req<uint8_t>(0x8D, 0); }
   if (variant == 6) { r.s.controller[4] = 1; frames(r, 4, dt, F_FULL); r.s.controller[4] = 0; frames(r, 4, dt, F_FULL); }
@@ -355,7 +363,8 @@ static const char *const DEPTH_REJECTS[] = {
     "sight coupling not zero", "lens words differ", "target lens too small", "target lens too large", "current lens not finite", "prior lens negative", "distance beyond 4 m",
     "previous distance not finite", "mix out of range", "correction above 1 m", "zoom policy active", "no lens observation", "depth code changed", "table pointer cells unreadable",
     "angle above 1.48", "reference beyond 4 m", "descriptor table address invalid", "parameter table address invalid", "override data address invalid", "lens observed on another thread",
-    "request changed between getter and setter", "getter for another node", "getter from another caller", "no stack frame", "correction between 1 and 2 m"};
+    "request changed between getter and setter", "getter for another node", "getter from another caller", "no stack frame", "correction between 1 and 2 m", "observation followed by a getter call for another node",
+    "observation followed by a getter call without a frame", "observation followed by a getter call for another unit"};
 static void script_depth_reject(Run &r, int what, int when, int64_t dt = 16) {
   r.offset[0] = r.offset[1] = r.offset[2] = 0;
   if (what == 39) r.s.depth.in_overrides = false;
@@ -398,6 +407,9 @@ static void script_depth_reject(Run &r, int what, int when, int64_t dt = 16) {
     else if (what == 50) { r.getter(OBSERVE_CALLER, r.viewmodel, 49); }
     else if (what == 51) { r.getter(GAME_OTHER, r.viewmodel, 50); }
     else if (what == 52) { r.stack_on = false; r.getter(OBSERVE_CALLER, r.viewmodel, 50); }
+    else if (what == 54) { r.getter(OBSERVE_CALLER, r.viewmodel, 50); r.getter(OBSERVE_CALLER, r.viewmodel, 49); }   // a good observation, withdrawn by the next getter call from the same site
+    else if (what == 55) { r.getter(OBSERVE_CALLER, r.viewmodel, 50); r.stack_on = false; r.getter(OBSERVE_CALLER, r.viewmodel, 50); r.stack_on = true; }
+    else if (what == 56) { r.getter(OBSERVE_CALLER, r.viewmodel, 50); r.getter(OBSERVE_CALLER, OTHER_RIG, 50); }
     r.position(RIG_CALLER, r.viewmodel, 5, r.request_sym(0x48));
     r.position(CARRIER_CALLER, r.viewmodel, 0, ROOT_POSE);
     r.branch(ROTATION_CALLER, r.viewmodel, 5, ROTATION_POSE);
@@ -458,6 +470,11 @@ static void script_carrier(Run &r, int variant) {
     case 19: r.tick(16); r.position(RIG_CALLER, r.viewmodel, 5, r.request_sym(0x48)); r.position(CARRIER_CALLER, r.viewmodel, 0, ROOT_POSE); break; // a second rig call without a lens observation: the first one's root term is withdrawn
     case 20: r.tick(16); r.getter(OBSERVE_CALLER, r.viewmodel, 50); r.position(CARRIER_CALLER, r.viewmodel, 0, ROOT_POSE); break; // a new observation before the root call: likewise
     case 21: r.zoom_policy(r.gen, 1); r.position(CARRIER_CALLER, r.viewmodel, 0, ROOT_POSE); r.zoom_policy(r.gen, 0); break; // the zoom policy switched on in between
+    case 24: r.s.ring[0] = static_cast<uint32_t>((r.s.row + 1) % 32); r.s.ring[1] = static_cast<uint32_t>((r.s.row + 2) % 32);        // one request in the ring, but not ours: passive, and still armed
+             r.position(CARRIER_CALLER, r.viewmodel, 0, ROOT_POSE); need(::armed.load() != 0, "armed"); r.s.ring[0] = static_cast<uint32_t>(r.s.row); r.s.ring[1] = static_cast<uint32_t>((r.s.row + 1) % 32); break;
+    case 22: r.zoom_policy(r.gen, 1); r.zoom_policy(r.gen, 0); r.position(CARRIER_CALLER, r.viewmodel, 0, ROOT_POSE); break; // switched on and off again: the pending root term is gone all the same
+    case 23: r.tick(16); r.getter(OBSERVE_CALLER, r.viewmodel, 50); r.zoom_policy(r.gen, 1); r.zoom_policy(r.gen, 0);                                 // and so is a lens observation
+             r.position(RIG_CALLER, r.viewmodel, 5, r.request_sym(0x48)); r.position(CARRIER_CALLER, r.viewmodel, 0, ROOT_POSE); break;
     default: break;
     }
     if (variant == 11) break;
@@ -594,6 +611,22 @@ static void script_controls(Run &r) {
   r.validate(); r.validate(true);
 }
 
+// ---- a caller's memory that stops being writable in the middle of a call: begin's second write of the generation, the statistics ----
+static void script_unwritable(Run &r, int kind) {
+  r.normal();
+  // Begin writes the generation twice: 0 before anything is read, and the new one after its proofs, before the slots are
+  // touched. Losing write access before the second write refuses the begin with nothing reserved; after it, nothing more is written.
+  int refused = 0;
+  for (int at_read = 0; at_read < 200 && !::reserved.load(); at_read += (at_read < 6 ? 1 : 7)) {
+    readonly_at_read = at_read; r.begin(kind);
+    if (r.result == 0) { need(NADSE_Error() == INVALID_CONFIG && !::reserved.load(), "begin refused, nothing reserved, when the generation cannot be written"); ++refused; }
+  }
+  // (each refused begin has already taken a generation number: both helpers count before they write)
+  need(refused >= 8 && ::reserved.load() && r.gen == static_cast<uint64_t>(refused) + 1, "refused while the second write was still to come; then armed");
+  r.fpv(); frames(r, 2, 16, F_FULL);
+  readonly_at_read = 0; r.stats_call(0, r.gen); readonly_at_read = 0; r.stats_call(1, r.gen); readonly_at_read = 0; r.stats_call(2, r.gen);
+  r.end(r.gen);
+}
 // ---- refused configurations, images, code bytes and worlds ----
 static void script_refusals(Run &r, int kind) {
   int cases = 0;
@@ -700,7 +733,8 @@ static const char *const LOST[] = {"seated", "another avatar in the descriptor",
                                    "weapon descriptor names another weapon", "weapon resource changed", "request kind", "request weapon", "request body", "request of another avatar",
                                    "a newer request above ours", "ring emptied", "camera replaced", "controller replaced", "controller byte 0", "context cell", "avatar count",
                                    "descriptor bytes beyond the two ids", "graph count", "graph hash", "graph link", "links array replaced", "hashes array replaced", "vtable replaced",
-                                   "slot 0 foreign", "slot 1 foreign", "slot 2 foreign", "slot 3 foreign", "API table moved", "no sight node", "pose not finite", "pose unreadable"};
+                                   "slot 0 foreign", "slot 1 foreign", "slot 2 foreign", "slot 3 foreign", "API table moved", "no sight node", "pose not finite", "pose unreadable",
+                                   "weapon descriptor bytes beyond the two ids", "weapon unit in the descriptor", "another weapon unit object generation"};
 static void lose(Run &r, int what) {
   switch (what) {
   case 0: r.s.flags[14] = 4; break; case 1: r.s.descriptor[2] = 9; break; case 2: r.s.descriptor[3] = 9; break; case 3: r.s.rig_reference = OTHER_RIG; break;
@@ -712,6 +746,7 @@ static void lose(Run &r, int what) {
   case 22: r.s.hashes[30] ^= 1; break; case 23: r.s.links[50] ^= 0x10000; break; case 24: r.s.links_at = 1; break; case 25: r.s.hashes_at = 1; break; case 26: r.s.vtable_at = 1; break;
   case 27: case 28: case 29: case 30: r.poke(A_API, W[0].slot(what - 27) - W[0].a[A_API], slot_value(what - 27, SLOT_FOREIGN)); break;
   case 31: r.poke(A_API_ROOT, 0x18, address_value(A_ALT, 0x100)); break; case 32: r.req<uint32_t>(0x18, 0); break; case 33: r.req<float>(0x4c, INFINITY); break;
+  case 35: r.s.wdesc[2] = 0x01000000; break; case 36: r.s.wdesc[1] = OTHER_WEAPON; break; case 37: r.s.generations[4] = 3; break;
   default: break;
   }
 }
@@ -810,6 +845,7 @@ static void script_rows(Run &r, int variant) {
   if (variant == 2) { r.s.row = 0; }       // the row before it is 31
   r.offset[1] = .03f;
   arm(r, 1); optic(r, 1);
+  r.req<uint32_t>(0, 0x50006);              // only the low half of the request's kind word is the kind
   frames(r, 6, 16, F_FULL);
   { const Q q = turn(0, 1, 0, 9); r.transform(r.gen, .01f, 0, 0, q.x, q.y, q.z, q.w); }
   frames(r, 6, 16, F_FULL);
@@ -920,6 +956,7 @@ static void script_reset(Run &r) {
     ::seen[0].store(1); ::seen[1].store(2); ::forwarded[0].store(1); ::forwarded[1].store(2); } // the original is given the same counts
   ++counted.translation_only;
   arm(r, 3); if (r.gen != 1) fail("after the reset begin gave generation %llu, not 1", (unsigned long long)r.gen);
+  set_rotation(r, turn(0, 0, 1, 50)); r.tick(16); r.branch(ROTATION_CALLER, r.viewmodel, 5, ROTATION_POSE); // far from any rotation settled before the reset: not held
   optic(r, 1); frames(r, 20, 16, F_FULL | F_INPUT);
   r.end(r.gen); r.end(r.gen);
   arm(r, 1); frames(r, 20, 16, F_FULL); r.end(r.gen);
@@ -970,6 +1007,10 @@ static void script_input_basic(Run &r, int kind, int variant) {
   if (variant == 4) { r.s.steering[0] = .01f; r.s.steering[1] = -.02f; }                         // steering: the gain depends on the input
   if (variant == 5) { r.s.look[0] = .002f; r.s.look[1] = -.001f; }
   if (variant == 6) { r.req<uint8_t>(0x8c, 1); }
+  // with steering the signs matter: each invert flag of each device on its own
+  if (variant >= 7 && variant <= 14) { r.s.steering[0] = .011f; r.s.steering[1] = -.017f; r.s.device = variant < 11 ? 1u : 0u; r.s.input_flags[(variant < 11 ? (variant - 7 < 2 ? 0 : 2) : (variant - 11 < 2 ? 2 : 6)) + variant - (variant < 11 ? 7 : 11)] = 1; }
+  if (variant == 15) { r.s.steering[0] = .011f; r.s.device = 2; std::memset(r.s.input_flags, 1, 10); }
+  if (variant == 16) { r.s.steering[1] = .013f; r.s.device = 3; std::memset(r.s.input_flags, 1, 10); r.s.look[1] = .0007f; }
   arm_input(r, kind);
   if (variant == 6) { r.req<uint8_t>(0x8c, 1); r.s.steering[1] = .05f; }
   const float rates[] = {1.0f / 60, 0.0f, 1.0f / 30, 1.0f / 144, 1.0f / 240, 1.0f / 60};
@@ -979,7 +1020,8 @@ static void script_input_basic(Run &r, int kind, int variant) {
     r.position(RIG_CALLER, r.viewmodel, 5, r.request_sym(0x48)); r.branch(ROTATION_CALLER, r.viewmodel, 5, ROTATION_POSE);
     assert_refusal(r, "after an evaluation");
   }
-  if (input_build) need(::input_state.stats.normalized >= 10 && blocks[0].size() >= 1, "evaluations normalised through a private record");
+  // (with steering and some sign combinations the bounded inverse declines: compared like everything else, not required)
+  if (input_build) need(variant >= 7 || (::input_state.stats.normalized >= 10 && blocks[0].size() >= 1), "evaluations normalised through a private record");
   else need(::input_state.stats.reason == INPUT_CODE_UNAVAILABLE && ::input_state.stats.observed >= 18, "both refuse for lack of the code proof");
   r.end(r.gen);
   need(!::reserved.load(), "ended");
@@ -1253,20 +1295,20 @@ static void register_scripts() {
   for (int kind = 0; kind < 2; ++kind) for (int64_t dt : {5, 16}) for (int variant = 0; variant < 6; ++variant)
     add(named("entry (%s: %s), %s, step %lld ms", kind ? "steady, draw animation" : "blended over 150 ms", ENTRIES[variant], KINDS[kind], (long long)dt), [=](Run &r) { script_entry(r, kind, dt, variant); });
   static const char *const GUARDS[] = {"70 degrees off, halving", "1.6 degrees off", "1.4 degrees off", "40 ms steps to the end of the window", "the window's last millisecond", "clock stepped back",
-                                       "only seven settled writes", "guard switched off", "switched off and on inside the window", "owner proof fails inside the window", "write standing still", "exactly at the limit"};
-  for (int variant = 0; variant < 12; ++variant) add(named("entry rotation guard: %s", GUARDS[variant]), [=](Run &r) { script_guard(r, variant); });
+                                       "only seven settled writes", "guard switched off", "switched off and on inside the window", "owner proof fails inside the window", "write standing still", "exactly at the limit", "second lease on another rig"};
+  for (int variant = 0; variant < 13; ++variant) add(named("entry rotation guard: %s", GUARDS[variant]), [=](Run &r) { script_guard(r, variant); });
   static const char *const POSITIONS[] = {"four weapons", "nineteen weapons in sixteen places", "switched off, then on", "draw animation off", "armed in the sights", "another weapon in between"};
   for (int variant = 0; variant < 6; ++variant) add(named("remembered entry position: %s", POSITIONS[variant]), [=](Run &r) { script_entry_positions(r, variant); });
   static const char *const DEPTHS[] = {"resource definition", "override definition", "widest lens last", "near terms, 70 degrees", "with a saved placement", "mixed by the request", "through the sights",
-                                       "collisions, last record", "row search wraps", "128-row maps, 63 probes", "found by the 64th probe"};
-  for (int variant = 0; variant < 11; ++variant) for (int kind = 0; kind < 2; ++kind) for (int64_t dt : {16, 7, 25, 100})
+                                       "collisions, last record", "row search wraps", "128-row maps, 63 probes", "found by the 64th probe", "a lens on its way at the start"};
+  for (int variant = 0; variant < 12; ++variant) for (int kind = 0; kind < 2; ++kind) for (int64_t dt : {16, 7, 25, 100})
     add(named("zoom depth and rig-root counter-shift: %s, %s, step %lld ms", DEPTHS[variant], KINDS[kind], (long long)dt), [=](Run &r) { script_depth(r, kind, dt, variant); });
-  for (int what = 0; what < 54; ++what) for (int when = 0; when < 2; ++when)
+  for (int what = 0; what < 57; ++what) for (int when = 0; when < 2; ++when)
     add(named("zoom depth refused: %s (%s)", DEPTH_REJECTS[what], when ? "after valid frames" : "from the first frame"), [=](Run &r) { script_depth_reject(r, what, when); });
   // steps that land exactly on the 500 ms retry and revalidation times
   for (int what : {0, 12, 16, 30, 38}) for (int when = 0; when < 2; ++when) for (int64_t dt : {25, 50, 125, 500})
     add(named("zoom depth refused: %s (%s), step %lld ms", DEPTH_REJECTS[what], when ? "after valid frames" : "from the first frame", (long long)dt), [=](Run &r) { script_depth_reject(r, what, when, dt); });
-  for (int variant = 0; variant < 22; ++variant) add(named("rig-root counter-shift, gate %d", variant), [=](Run &r) { script_carrier(r, variant); });
+  for (int variant = 0; variant < 25; ++variant) add(named("rig-root counter-shift, gate %d", variant), [=](Run &r) { script_carrier(r, variant); });
   static const char *const RETIRES[] = {"nothing", "another pose from the rig call site", "another caller's branch rotation", "another caller's root position", "a root position of the rig from the rig call site",
                                         "the rig's own frame without the delta", "an identity delta", "full ADS", "a second request in the ring", "sight coupling", "the zoom policy", "a failed placement (no sight node)",
                                         "the rig call without an observation", "a null pose from the rig call site"};
@@ -1277,8 +1319,9 @@ static void register_scripts() {
   for (int where = 0; where < 9; ++where) for (uint32_t duration : {1u, 40u, 300u, 30500u})
     add(named("lease of %u ms expires, found by: %s", duration, EXPIRIES[where]), [=](Run &r) { script_expiry(r, where, duration); });
   add("control calls in right and wrong orders", script_controls);
+  for (int kind = 0; kind < 4; ++kind) add(named("the caller's memory stops being writable in mid-call, %s", KINDS[kind]), [=](Run &r) { script_unwritable(r, kind); });
   for (int kind = 0; kind < 4; ++kind) add(named("refused configurations and worlds, %s", KINDS[kind]), [=](Run &r) { script_refusals(r, kind); });
-  for (int what = 0; what < 35; ++what) for (int where = 0; where < 6; ++where)
+  for (int what = 0; what < 38; ++what) for (int where = 0; where < 6; ++where)
     add(named("owner lost (%s), found by %s", LOST[what], where == 0 ? "the rig position call" : where == 1 ? "the branch rotation call" : where == 2 ? "set_placement" : where == 3 ? "set_zoom_policy" : where == 4 ? "the carrier call" : "end"),
         [=](Run &r) { script_owner_lost(r, what, where); });
   static const char *const SLOTS[] = {"swap faults at begin", "foreign value arrives at begin", "foreign value during the lease", "swap faults at end", "table read-only at end", "rollback faults", "game's value back before end"};
@@ -1289,8 +1332,10 @@ static void register_scripts() {
   add("checks only the translation makes", script_translation_only);
   add("after tfp_pose_reset_for_tests", script_reset);
   // look gain
-  static const char *const DEVICES[] = {"mouse", "pad kind 1, inverted", "pad kind 2, inverted", "mouse, inverted", "steering", "look context", "pitch gate"};
-  for (int kind = 2; kind < 4; ++kind) for (int variant = 0; variant < 7; ++variant) add(named("look gain: evaluations at five frame rates, %s, %s", DEVICES[variant], KINDS[kind]), [=](Run &r) { script_input_basic(r, kind, variant); });
+  static const char *const DEVICES[] = {"mouse", "pad kind 1, inverted", "pad kind 2, inverted", "mouse, inverted", "steering", "look context", "pitch gate",
+                                        "steering, pad flag 0", "steering, pad flag 1", "steering, pad flag 4", "steering, pad flag 5", "steering, mouse flag 2", "steering, mouse flag 3",
+                                        "steering, mouse flag 8", "steering, mouse flag 9", "steering, pad kind 2, every flag", "steering, device kind 3, every flag"};
+  for (int kind = 2; kind < 4; ++kind) for (int variant = 0; variant < 17; ++variant) add(named("look gain: evaluations at five frame rates, %s, %s", DEVICES[variant], KINDS[kind]), [=](Run &r) { script_input_basic(r, kind, variant); });
   for (int what = 0; what < 46; ++what) add(named("look gain: %s", INPUT_CASES[what]), [=](Run &r) { script_input_case(r, what); });
   add("look gain: more presets than private records", script_input_pool);
   static const char *const COLDS[] = {"evaluator page unreadable", "third pin unreadable", "a byte of the solver differs", "a constant differs", "the double constant differs", "an executable pin differs"};

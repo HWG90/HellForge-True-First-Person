@@ -129,6 +129,7 @@ static struct {
   Sym at{0, 0}; Value value;
   uint64_t kept_at[2] = {0, 0}; size_t kept_length[2] = {0, 0};
 } inject;
+static int readonly_at_read = -1; // the io page (configuration, generation, statistics) loses write access just before this read of the next call
 static uint64_t fault_at[2]; // a page made unwritable by the "fault after the query" seam, to be put back after the call
 static uint32_t translation_fault_after_query = 0;
 
@@ -140,6 +141,7 @@ static bool retail_only_read(int w, uint64_t at, size_t size) {
 static void on_read(int w, uint64_t at, size_t size, int after, bool complete) {
   if (retail_only_read(w, at, size)) { if (after) ++counted.retail_only_reads; return; }
   const bool chosen = inject.active && reads_in_call[w] == inject.index;
+  if (!after && reads_in_call[w] == readonly_at_read) protect(W[w].a[A_IO], 0x2000, PROT_READ);
   if (!after) {
     if (!chosen) return;
     if (inject.mode == INJECT_VALUE) { store(w, inject.at, inject.value); return; }
@@ -291,7 +293,8 @@ static void compare_trace(const char *what, uint64_t retail, uint64_t translatio
       return value & 0x80000000u ? W[w].name(W[w].a[A_EXE] + (value & 0x7fffffffu)) : W[w].name(W[w].a[A_GAME] + value);
     };
     const Sym p = caller(0, x.caller), q = caller(1, y.caller);
-    if (p.id != q.id || p.offset != q.offset)
+    // (also which of the three forms the row uses: an offset into the game image, into the executable, or neither)
+    if (p.id != q.id || p.offset != q.offset || (x.caller == 0xffffffffu) != (y.caller == 0xffffffffu) || ((x.caller ^ y.caller) & 0x80000000u))
       fail("%s row %u: the caller differs: retail %#x (%s+%#llx), translation %#x (%s+%#llx)", what, i, x.caller, p.id < A_NAMES_COUNT ? A_NAMES[p.id] : "neither image",
            (unsigned long long)p.offset, y.caller, q.id < A_NAMES_COUNT ? A_NAMES[q.id] : "neither image", (unsigned long long)q.offset);
   }
@@ -614,6 +617,7 @@ struct Run {
     shim_allocate_failures = 0; allocation_failures = 0;
     for (int w = 0; w < 2; ++w) for (const auto &b : blocked) protect(W[w].at(b.first), b.second, PROT_READ | PROT_WRITE);
     blocked.clear();
+    if (readonly_at_read >= 0) { for (int w = 0; w < 2; ++w) protect(W[w].a[A_IO], 0x2000, PROT_READ | PROT_WRITE); readonly_at_read = -1; }
     if (!::fixture_input_fault_after_query && !translation_fault_after_query) fault_pending = false;
     inject.active = false;
     if (probe_here) { if (discovering) shared->probe_reads = static_cast<uint64_t>(reads_in_call[0]); inject.mode = INJECT_NONE; }
