@@ -51,3 +51,29 @@ Open doubts:
 - The chunk-name prefix of assertion texts depends on how the host's `mod.require` names the chunk; the reference uses the required path. The retail kit runs on Lua 5.1 with cffi, where the nil-argument text of Bind is cffi's, not LuaJIT's. Both only appear if `backend:fov_config` returns a table with a field missing, which `backend.lua:417` never does.
 - Texts are capped at 255 bytes (`TFP_FOV_TEXT`); Lua has no cap. The longest retail text is under 100; a backend text could be longer.
 - `tostring` of `nan` / `inf` follows LuaJIT; Lua 5.1 on Windows prints them differently. They only appear if the helper reports such a float.
+
+## near (`src/near_adapter.c`, `src/near_adapter.h`)
+
+Interface: `TfpNearHelperApi` (five pointers with the `tfp_near_*` signatures; `tfp_near_read_sites` is not called by the Lua), `TfpNearIo` (`fov_config`, the controller's `result`, `is_enabled`, `lease`, the menu's `options`, the clock, the logger), `TfpNearProfile` (abi 1, pull_sight_distance true). State: one `TfpNearLease`. Calls: `tfp_near_lease_update / stop / shutdown / result / status / is_clean`, and the public `tfp_near_adapter_*`.
+
+`update` has three answers: true, false, and `TFP_NEAR_RAISED`. Retail calls the clock unprotected (near_clip.lua:194, 203) and the runtime's clock raises on a bad engine sample (`runtime.lua:167-169`), so the update ends at that point with everything done before it kept (a Set already sent, the new distances remembered). The clock callback returns false with the message; `runtime.lua` catches it in `attempt()`.
+
+Dropped, with the reason:
+
+| Retail | Why it cannot be reached |
+| --- | --- |
+| `_load` (12-46), `'unavailable'` in `_error` (49) | As for fov. |
+| `pcall` around `NADSN_Begin` (`'Near clip arm result uncertain: …'`, 81) and around `stats` in `finish` (`before=nil`, 100) | A C function cannot raise a Lua error. |
+| `clock or os.clock` and the default `options` (119) | `runtime.lua:713-716` passes both. |
+| `Near.new` asserts (114-117) | Constructor preconditions. |
+| `options()` raising, a clock returning something that is not a number | The menu getter and the clock are C; the runtime clock returns a finite number or raises. NaN, infinities and a clock stepping back are kept and compared. |
+
+Kept: the profile switch `pull_sight_distance` both ways (shipped: true; the false branch is exercised through an adapter built on a copy of the retail profile with the switch off).
+
+Coverage: the scripts miss 39 (`return self.library`), 81 and 100 (helper raising) and the body of the default `options` function (119). Nothing else.
+
+Mutation: 180 single changes, 163 killed. One real gap found and closed: no script had a distance between 1 and 2, so `aim > 1` could become `aim > 2`. The other 16 survivors (11 distinct) are without effect: initialisers the callbacks overwrite, dead values under a false `has_*` flag (`next_collect`, `hip`, `aim`), `stats->has` on a failed finish, the loop bound over the six `missing` bits (bit 6 is never set), `memset` fill bytes of fully assigned structs, and the NULL-text paths of `stop_keeping` / `refuse` (a failed collect always carries a text).
+
+Differences found while matching: none; the first C draft passed all vectors.
+
+Open doubts: as for fov (chunk name of assertion texts, text cap, `nan` / `inf` texts). One more: `"Native near clip disarmed (code N)"` prints the helper's error as an integer; a `last` table without `error` cannot occur there.
