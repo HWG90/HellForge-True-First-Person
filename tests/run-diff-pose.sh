@@ -9,6 +9,8 @@
 #   tests/run-diff-pose.sh ["part of a script's name" | --list]
 # TFP_RETAIL: the retail kit folder. TFP_POSE_SOURCE / TFP_POSE_WORK: another C source / build folder (the
 # mutation check uses them). TFP_POSE_KEEP_TEST_OBJECT=1: reuse the compiled test. TFP_POSE_ONLY=production|input.
+# TFP_DIFF_STOP=1: stop at the first difference. TFP_DIFF_NO_PROBES=1: the plain scripts only (a quick pass).
+# TFP_DIFF_EXTRA_WALKS=n: n more random walks. TFP_INPUT_CAPTURE_DIR / TFP_HERE_IMAGE_DIR: the two builds' images.
 set -euo pipefail
 TFP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TFP_CC="${CC:-cc}"

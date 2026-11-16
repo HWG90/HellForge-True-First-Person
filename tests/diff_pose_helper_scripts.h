@@ -168,6 +168,22 @@ static void script_rotation_gates(Run &r) {
     need(::armed.load() && ::weapon_updates.load() == updates + 1, "the product applied inside its own 0.025");
     r.end(r.gen);
   }
+  // The squared length is summed in single precision: a rotation whose length passes the 0.02 that way and would not
+  // pass if the sum were carried in double precision (or the other way round) is judged as the single-precision sum says.
+  {
+    bool found = false, passes = false; float b[4] = {};
+    for (int k = 0; k < 4000 && !found; ++k) for (float scale = 1.00990f; scale < 1.01000f && !found; scale = std::nextafter(scale, 2.0f)) {
+      const Q base = turn(.3f + .001f * k, 1, .2f, 40 + .01f * k);
+      const float c[4] = {base.x * scale, base.y * scale, base.z * scale, base.w * scale};
+      float single = 0; double wide = 0; for (int i = 0; i < 4; ++i) { single += c[i] * c[i]; wide += static_cast<double>(c[i]) * c[i]; }
+      if ((std::fabs(single - 1.0f) <= .02f) != (std::fabs(static_cast<float>(wide) - 1.0f) <= .02f)) { std::memcpy(b, c, 16); passes = std::fabs(single - 1.0f) <= .02f; found = true; }
+    }
+    need(found, "a rotation at the edge of the 0.02 tolerance where the precision of the sum decides");
+    arm(r); r.transform(r.gen, 0, 0, 0, q.x, q.y, q.z, q.w); frames(r, 2, 16);
+    set_rotation(r, {b[0], b[1], b[2], b[3]}); frame(r, 16, F_BRANCH);
+    need((::armed.load() != 0) == passes, "judged by the single-precision sum");
+    r.end(r.gen);
+  }
   // the game's rotation invalid, or the product out of tolerance
   for (int bad = 0; bad < 4; ++bad) {
     arm(r); r.transform(r.gen, 0, 0, 0, q.x, q.y, q.z, q.w); frames(r, 3, 16);
@@ -1039,7 +1055,8 @@ static const char *const INPUT_CASES[] = {
     "player entity is the host's", "player entity found in the world map", "player entity not in the world map", "entity's avatar is another one", "no avatar at all", "avatar not in the owner's map",
     "avatar at another row of the owner's map", "player cell unreadable", "evaluator's context is another one", "evaluator's avatar index is another", "delta time out of range",
     "ratio out of range", "gain out of range", "request state changes between the two samples", "published selector replaced before the swap", "another caller, another request",
-    "page not writable when publishing", "entity row beyond the limit", "raw input unbounded", "entity is the map's empty value"};
+    "page not writable when publishing", "entity row beyond the limit", "raw input unbounded", "entity is the map's empty value",
+    "the ring moves past the request before end"};
 static void script_input_case(Run &r, int what) {
   arm_input(r, 3);
   const Scene good = r.s;
@@ -1103,6 +1120,9 @@ static void script_input_case(Run &r, int what) {
   case 43: r.s.player_count = 1; r.s.entity = 0x21; r.s.entity_row = 0x100001; evaluate(r); r.s.entity_row = 0x100000; evaluate(r); break; // the limit itself is still read
   case 44: r.s.raw[1] = 2e6f; evaluate(r); r.s.raw[1] = NAN; evaluate(r); break;
   case 45: r.s.player_count = 1; r.s.entity = 0xffffffffu; evaluate(r); break;
+  case 46: evaluate(r, false, false); r.s.ring[0] = static_cast<uint32_t>((r.s.row + 1) % 32); r.s.ring[1] = static_cast<uint32_t>((r.s.row + 2) % 32); r.end(r.gen);
+           need(!input_build || (::input_state.pending.ready && ::input_clones[::input_state.pending.clone].quarantined), "quarantined: the row is no longer one of the ring's live rows");
+           { float history[3]; std::memcpy(history, ::input_state.pending.expected_history, 12); r.req(0x3c, history); } r.getter(OBSERVE_CALLER, r.viewmodel, 50, true, r.request_sym()); break;
   default: break;
   }
   assert_refusal(r, "after the case");
@@ -1336,7 +1356,7 @@ static void register_scripts() {
                                         "steering, pad flag 0", "steering, pad flag 1", "steering, pad flag 4", "steering, pad flag 5", "steering, mouse flag 2", "steering, mouse flag 3",
                                         "steering, mouse flag 8", "steering, mouse flag 9", "steering, pad kind 2, every flag", "steering, device kind 3, every flag"};
   for (int kind = 2; kind < 4; ++kind) for (int variant = 0; variant < 17; ++variant) add(named("look gain: evaluations at five frame rates, %s, %s", DEVICES[variant], KINDS[kind]), [=](Run &r) { script_input_basic(r, kind, variant); });
-  for (int what = 0; what < 46; ++what) add(named("look gain: %s", INPUT_CASES[what]), [=](Run &r) { script_input_case(r, what); });
+  for (int what = 0; what < 47; ++what) add(named("look gain: %s", INPUT_CASES[what]), [=](Run &r) { script_input_case(r, what); });
   add("look gain: more presets than private records", script_input_pool);
   static const char *const COLDS[] = {"evaluator page unreadable", "third pin unreadable", "a byte of the solver differs", "a constant differs", "the double constant differs", "an executable pin differs"};
   for (int variant = 0; variant < 6; ++variant) add(named("look gain: code proof made late, %s", COLDS[variant]), [=](Run &r) { script_input_cold(r, variant); });

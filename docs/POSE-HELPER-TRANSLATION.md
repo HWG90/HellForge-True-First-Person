@@ -2,7 +2,7 @@
 
 `src/pose_helper.c`, `src/pose_helper.h` and `src/pose_math.h` are `native/first_person/native_ads_editor.cpp` and `native_ads_editor.h` of the retail kit at 0.5.41-smooth.66, with `presentation_phase.h`, `zoom_gain_math.h` and the helpers of `zoom_input_math.h`, in C11, for build 25480438. "cpp:N" is a line of the retail file, "c:N" a line of `src/pose_helper.c`, "m:N" a line of `src/pose_math.h`. `src/camera_math.h` is not used: the editor needs none of its functions.
 
-Both compile checks pass with no warnings: `cc -std=c11 -Wall -Wextra -Werror` and `zig cc -std=c11 -target x86_64-windows-gnu -Wall -Wextra -Werror`; `src/pose_math.h` also compiles as C++17. **Nothing has been run.** No test was written: the translation has not been compared with the original.
+Both compile checks pass with no warnings: `cc -std=c11 -Wall -Wextra -Werror` and `zig cc -std=c11 -target x86_64-windows-gnu -Wall -Wextra -Werror`; `src/pose_math.h` also compiles as C++17. Sections 1 to 6 were written before anything had been run. The translation has since been compared with the original call by call: section 7, "Differential test". That test added nine lines to `src/pose_helper.c` after the constant block (a test-only include, section 7), so a "c:N" above 213 in sections 1 to 6 is now nine lines further down.
 
 All 1,707 source lines are translated. The look-gain normalisation is translated in full but refuses on this build (section 6, Open 1).
 
@@ -193,3 +193,138 @@ The three plain hooks need no assembly in retail (`_ReturnAddress()`, `_AddressO
 11. **Hook before `tfp_pose_set_host`** dereferences NULL; a hook before any begin calls a null original, as in retail. No guard added.
 12. **`B_HEX_LOCAL_POSITION` is 51 bytes** as in retail; `native_contract.h` holds the first 48 of them.
 13. **Not re-read line by line a second time in full.** I re-checked `begin_pose`, the five hooks, `restore_slots`, `set_offsets`, `depth_delta` and the input call against the source after writing; `depth_data`, `depth_map`, `input_sample`, `input_clone` and the statistics exports were checked once while writing. A frame-by-frame comparison is still needed.
+
+## 7. Differential test
+
+`tests/run-diff-pose.sh` builds and runs three programs and prints one summary line for each; it exits non-zero on any difference, and says "skipped" and exits 0 when the retail tree, g++ or Linux is missing. `tests/run-diff-pose.sh "<part of a script's name>"` runs only those scripts, `--list` names them, `TFP_DIFF_REACHED=1` prints what each script reached, `TFP_DIFF_JOB=mode,index,value` runs one probe run.
+
+1. `tests/diff_pose_math.cpp`: `src/pose_math.h` against `presentation_phase.h`, `zoom_input_math.h` and `zoom_gain_math.h`, bit for bit.
+2. `tests/diff_pose_helper.cpp` (with `diff_pose_helper_world.h`, `diff_pose_helper_scripts.h`, `diff_pose_helper_open.h` and `tests/winshim/pose_extra.h`) linked with the **production** object of `src/pose_helper.c` (`cc -std=c11 -O1 -ffp-contract=off -Wall -Wextra -Werror`). The retail `native_ads_editor.cpp` is compiled natively over `tests/winshim` with `NADSE_FIXTURE`.
+3. The same test source linked with a second object of `src/pose_helper.c` built with `-DTFP_POSE_TEST_OPEN_CONSTANTS='"diff_pose_helper_open.h"'`, in which the look-gain normalisation is not refused (below, "Look-gain normalisation"). This program also needs the captured images of both builds; without them it says "skipped".
+
+**Result: no difference between the original and the translation was found. No fix to the behaviour of `src/pose_helper.c`, `src/pose_helper.h` or `src/pose_math.h` was needed; the only change to the source is the test-only include described below.**
+
+| program | compared |
+|---|---|
+| arithmetic | 125,203,576 results identical bit for bit: the SSE scalar helpers, `gain_valid`, the gain pipeline, the presentation phase in random walks, and 1.5 million look-gain preparations with every field sometimes out of range, the `exp` misbehaving in eight ways and MXCSR in six states; every one of the twelve result codes reached; every limit also taken exactly and one float step to either side |
+| helper, production object | 818 scripts and 38,942 probe runs; 1,249,146 calls compared, 1,090,685 of them hook calls; 63,113,214 reads, writes, swaps, lock steps, allocations and forwarded calls matched one for one |
+| helper, look-gain object | 818 scripts and 61,236 probe runs; 1,586,297 calls compared, 1,361,026 of them hook calls; 84,368,214 steps matched one for one |
+
+About 32 seconds for all three on 16 cores (roughly five and a half minutes of processor time). A soak of 600 further random walks in each helper program (`TFP_DIFF_EXTRA_WALKS=600`, 5.07 million calls each) found no difference either. 55,630 hook calls in each helper program were skipped (a hook before any begin: below).
+
+### How the two are made comparable
+
+- One logical scene (`Scene`) is written into two sets of real pages: one with retail's addresses and offsets (from `native_ads_editor.cpp`), one with this build's (the tables of section 2). Structure layout numbers both builds share are written once, as retail has them. Every region has an unreadable page on each side.
+- An address in one world is compared with an address in the other by name and offset ("rig+0x70", "game:api_root+0", "owner:flags[1]+0", "game:pin_solver+0x400"). Three kinds of place are named by what they are, because their offsets legitimately differ: a weapon definition record by its index (records are 0x4D8 bytes in retail, 0x4D0 here), a resource row by its distance from the weapon's own bucket (746 buckets against 730), and a read of a whole depth pin (the second pin is 24 bytes in retail, 36 here: Open 2).
+- The original reads through the stand-in `ReadProcessMemory`; the translation's `host.read` makes the same `process_vm_readv` call. Clock: both read the original's `fixture_now`. Thread: one test variable. The page questions (`writable_slot`, `executable`, `writable32`, `region`) are answered for the translation by the original's own functions or by the routine the original's stand-in `VirtualQuery` uses. The compare-and-swap of a dispatch slot is real in both, with the original's fixture seams (`fixture_cas_fail_at`, `fixture_foreign_cas_at`, `fixture_fail_rollback`, `fixture_slot_readonly`) repeated on the translation's own call count.
+- The five dispatch slots are compared by what they hold: the game's function (original: the test's functions, as `fixture_targets`; translation: `exe + wrapper`), one of the helper's six values (original: its four hook functions and the two thunk addresses; translation: `host.hooks`), or a raw foreign value.
+- The hooks are called directly: the original's `position_hook`, `rotation_hook`, `branch_rotation_hook`, `position_getter_hook` with `_ReturnAddress()` answering the call site of its world and `fixture_depth_frame` the evaluator's stack frame, and `NADSE_Input90Call` / `NADSE_Input00Call` with the values the thunks capture; the translation's five `tfp_pose_*_from` entries with the same values of its own world. Forwarding goes to the test's "game functions" in both (`fixture_targets`, `host.forward_setter`, `host.forward_getter`); the position setter on the rig's node 0 writes that node's local position, which the helper reads back before it restores the root.
+- **The assembly.** `native_ads_input.S` is not assembled. Its two thunks only capture R15, the stack pointer and the return address and call `NADSE_Input90Call` / `NADSE_Input00Call`; the test calls those two directly, as retail's own `input_fixture.cpp` does, and defines the two thunk symbols only for their addresses (what the original stores in a slot). `NADSE_InputCompareExchange` with its fault handler is one C++ routine (`cas32` in the test) that serves the original and, as `host.cas32`, the translation: the swap and the value found, or 0 when the four bytes cannot be written. Nothing in the original was left out for lack of the assembly.
+- The fixture build of the original starts with the draw animation off and the entry position off (cpp:1016, 1178); the test sets the shipped values (220 ms, on) in the original only and leaves the translation at its own start-up values, which is where those are compared.
+- Every script runs in a child process forked from a parent that has built the two worlds and given the translation its host, and has made no other call to either helper.
+
+### What is compared, after every call
+
+The return value (for the two getters: that the game's own result pointer came back); the floating-point control word; the full ordered record of what the helper did: every memory read (place, length, complete or failed), every write through `WriteProcessMemory`/`host.write`, every compare-and-swap of a slot (what was stored, expected, found), every 32-bit compare-and-swap of the request's preset selector, every lock and unlock of the two locks, every allocation near the preset table, every call of the game's `exp` with its argument, and every forwarded setter or getter call (slot, unit, node, whether the pointer forwarded was the game's own argument, the helper's buffer or null, and the 16 bytes of the position or quaternion bit for bit); the five slots; the request's preset selector and the 144 bytes of every private preset record; the generation written by a begin; the error code; then `read_stats` (unless the script has switched polling off: that call can itself end a timed lease), `read_depth_stats`, `read_input_stats`, `rotation_trace` (each row's caller by name) and `entry_position_stats`, byte for byte, and the record of those five calls themselves. The translation's locks must be balanced at each return, and both helpers must have attempted the same number of slot swaps.
+
+### Scripts
+
+| group | scripts |
+|---|---|
+| placement set and changed live: the four begins, three frame steps, the bounds and beyond them | 12 |
+| motion: offsets and the rotation delta within and outside their bounds (0.15 m, 120 degrees, length tolerance, negative w); the delta's gates (coupling, a second request, full ADS, authored, other writers, null and invalid rotations, the 0.02 and 0.025 tolerances) | 3 |
+| ADS placement and the hip weight fading into the sights and back: blended and steady, two steps, blend 150, 1 and 1000 ms | 12 |
+| the presentation phase packet: epochs, progress, ads, repeated, regressing, older, stale at 250/251 ms, published "in the future", a new epoch in mid-fade, wrong generations | 6 |
+| entry: blended over 150 ms and steady with the draw animation (default, off, 1000 ms and 1 m, refused settings, no placement, into the sights), the clock stepping back | 24 |
+| the entry rotation guard: 70 degrees halving, 1.6 and 1.4 degrees, the limit itself and one float step beyond it, the window's last millisecond, the clock stepping back, seven settled writes, switched off, switched inside the window, owner lost inside the window, a write standing still, a second lease on another rig; the trace filling its 64 rows with callers from both images (their first and last bytes too) and from neither | 13 |
+| the remembered entry position: four weapons, nineteen weapons in sixteen places, switched off and on, animation off, armed in the sights, another weapon in between | 6 |
+| zoom depth and the rig-root counter-shift: resource and override definitions, widest lens last, near terms, with a placement, mixed by the request, through the sights, collisions, the last record, a row search that wraps, 128-row maps, the 64th probe, a lens on its way when the lease begins; every zoom level and the transitions between them, an overshooting lens, a lens span of one float step, a change of the prior lens alone, the zoom policy switched in mid-transition; two begins, four frame steps (two of them landing on the 500 ms times) | 96 |
+| zoom depth refused: 57 causes (definitions, maps, the request's zoom state, the lens locals, the code pins, the observation and what withdraws it), each from the first frame and after valid frames, then lifted; five of them again at 25, 50, 125 and 500 ms steps | 154 |
+| the rig-root counter-shift's own gates (pose pointer, frame, thread, another writer, not alone, quaternion, request changed, full ADS, owner lost, pose array replaced, write not applied, consumed once, code changed, withdrawn by a later rig call, getter call or zoom-policy switch, one request in the ring that is not ours) | 25 |
+| what retires the three cached baselines, seen by what end, expiry or a refused placement then replays | 42 |
+| node 0 / 5 / 50 / other from the game's five call sites and from five other callers, on the rig, another rig, the weapon and no unit, with each pose pointer, armed and unarmed, the four begins | 8 |
+| the lease duration (1, 40, 300, 30500 ms) expiring, found by each of nine paths, one millisecond before and at the deadline | 36 |
+| control calls in right and wrong orders; statistics with wrong generations, headers, null and read-only pointers; the caller's memory losing write access in mid-call (begin's second write of the generation, the statistics), the four begins | 5 |
+| refused configurations, owners, graphs, images, code bytes and slots (about 170 cases, each with the error code it must be refused with), the four begins | 4 |
+| the owner lost while a lease runs: 38 causes, found by each of six paths | 228 |
+| the five dispatch slots: swap faulting at begin and at end, a foreign value arriving at begin and during the lease, the table read-only at end, the rollback faulting (begin answers 2), the game's value back before end | 35 |
+| time: gaps, standstill, steps back, a lease armed at time 0, a clock about to wrap, blend 1 ms | 8 |
+| second avatar row; request rows 31 and 0 (a request kind with high bits set); checks only the translation makes; after `tfp_pose_reset_for_tests` | 5 |
+| look gain: evaluations at five frame rates with mouse, two pads, inverted axes, steering, look context, pitch gate, and each invert flag of each device on its own with steering; 47 cases around one evaluation (retail's input-fixture cases among them); more presets than private records; the code proof made late in six ways | 88 |
+| seeded random walks, 2,500 steps each, mixing all of the above with time steps of every kind and one-frame damage | 8 |
+| probes (21 calls: rig position call plain, with a definition refresh and with the revalidation, lens observation, carrier call, branch rotation call, the same inside the entry window and at the deadline, end, set_placement, set_zoom_policy, begin_steady, validate, read_stats at the deadline, read_input_stats; a look-gain evaluation, its completion, end with a published selector, begin_steady_input, a re-entry, the first evaluation): for every single read the call makes, one run in which that read fails and heals, one in which it stays unreadable to the end of the call, and one for each of 45 (look gain: 69) values changing just before that read | see the numbers above |
+
+Each script also checks, from the original's state, that it reached what it is for.
+
+### Look-gain normalisation
+
+`src/pose_helper.c` has, after the constant block, `#ifdef TFP_POSE_TEST_OPEN_CONSTANTS` / `#include TFP_POSE_TEST_OPEN_CONSTANTS` / `#endif`: test only, off by default, never defined in a shipped build. `tests/diff_pose_helper_open.h` redefines the 27 open names and `B_INPUT_ESTABLISHED` with places in the test's fake game image (chosen at offsets unlike retail's) and, for the nine open code pins, the hashes of the retail bytes the test copies there. They are **not** this build's values.
+
+- Retail world: the sixteen pinned ranges hold retail's own bytes, read from the captures the retail input fixture uses (`TFP_INPUT_CAPTURE_DIR`).
+- This build's world: the seven established pins hold **this build's own bytes**, read from `game-pre1020.dll` and `exe-25480438.bin` (`TFP_HERE_IMAGE_DIR`), and are proven with the production hashes of section 2, which the test therefore confirms against the image; the nine open pins hold retail's bytes at the test's places. At load the test also checks, in both images, the call sites, the depth pins 5 to 9, the three carrier pins, the two getters and the graph getter against the literals of both builds.
+- **Result: with the constants supplied, `input_code`, `input_sample`, `input_same`, `input_steering`, `input_map`, `input_clone`, `input_cas32`, `input_row`, `input_abort`, `input_quarantine`, `input_complete`, the 0x90 entry and the gain arithmetic behave as retail's in every compared call**, including the allocation of the private records (compared by content and as "private record k", since the index a helper stores depends on where the block lies), the 32 records filling up, allocation refused, the selector page losing write access between the query and the swap, and every read failing or value changing in six probed calls.
+- The production program runs the same look-gain scripts. There the translation refuses the code proof without reading (`B_INPUT_ESTABLISHED 0`) and the original, whose fake image holds no retail code in that program, hashes its first pin and refuses too; those reads of the original are the only steps without a counterpart and are counted as "retail-only reads of pinned code". Everything else is compared, and after every evaluation the scripts assert on the translation itself: reason `INPUT_CODE_UNAVAILABLE`, not active, nothing normalised, pending or cached, no private block allocated, the request's selector and the game's preset table untouched.
+
+### Checks only the translation makes
+
+The reference is the fixture build of the original, which compiles some shipped checks out (section 1, Open 7). The translation has them; they are answered through the host and asserted separately (script "checks only the translation makes", expected results read off the original's non-fixture lines):
+
+- `executable(graph getter)` in `graph` (cpp:237-239): answered true in every compared call; answered false at validate and begin (expected and got: 0, error 15, generation 0, slots untouched) and in a rig position call (error 15, the game's own argument forwarded, disarmed).
+- `pin(exe)` in begin (cpp:1434): answered false once (expected and got: 0, error 9, generation 0, slots untouched). `pin(game)` (cpp:1435): answered false once (expected and got: armed, the 0x90 slot untouched, the plain getter hook in slot 3, input statistics "not installed", reason 3).
+- `writable_slot`'s image test: the host checks that the image asked about is the executable and answers with the original's fixture test.
+- Each slot must hold `exe + wrapper` (cpp:323, 634): compared through the slot classes.
+- `tfp_pose_reset_for_tests`: after it (with the original's statics put back by hand) both agree again from generation 1; right after it the translation hands the host a null original for all five hooks.
+
+### Not compared, and why
+
+- **Concurrency.** One thread. The order of lock operations relative to reads, swaps and forwarded calls is compared; End waiting for a hook in flight, or a re-arm while a hook waits for the lock, is not exercised.
+- **The assembly's own instructions**: the register capture of the two thunks and the exception handler of the 32-bit compare-exchange (above).
+- **Direct calls of the game's functions** (`host.forward_setter`, `host.forward_getter`, `host.native_exp` NULL). The fake `exe + wrapper` is not code.
+- **The host's own page logic.** `writable_slot`, `executable`, `writable32`, `region` and `allocate` are answered from the same routines for both sides.
+- **A hook call before any begin recorded the game's functions.** The original calls a null pointer there. Such calls are skipped and counted.
+- **A later begin finding another function behind a slot than an earlier lease recorded** (cpp:1431): needs the executable at two bases in one process.
+- **The generation counter wrapping past 2^64.**
+- **Whether the constants of section 2 are right for build 25480438.** The test proves the translation reads the places the tables name. It confirms the seven established pin hashes and the literals listed above against this build's image; it says nothing about the 27 open names.
+- **The Windows build of the C** (MinGW's `tanf`, `sqrtf`): natively both sides use glibc, with `-ffp-contract=off`.
+- **Internal state no export or later behaviour shows**: `Policy.shoulder_aiming`, `InputPending.camera`, `InputState.requested`, and what `End` leaves in a policy that the next begin replaces.
+
+### Test-only additions
+
+`src/pose_helper.c`: the nine-line `TFP_POSE_TEST_OPEN_CONSTANTS` block. `tests/winshim/pose_extra.h`: the exception types the original's fault handler names, `GetCurrentThreadId`, `_AddressOfReturnAddress`, a `VirtualQuery` that describes unmapped address space as free, a `VirtualAlloc` that honours the requested address, an allocation observer and a switch that makes allocations fail. `tests/winshim/windows.h`, `intrin.h` and `tests/run-native.sh` are unchanged.
+
+### Things the test showed about the original (the translation does the same)
+
+Not differences; noted because they surprised the test's author.
+
+- The entry rotation guard has one limit, 1.5 degrees (`ENTRY_GUARD_COSINE_HALF`): it holds while the game's write is further than that from the settled rotation and lets go for the rest of the lease the first time it is not, or when two successive writes are within a quarter of a degree, or after 300 ms. There is no separate 12 degree trigger in smooth.66 (the source comment says the 12 degree limit was replaced).
+- A begin whose second write of the generation fails has already taken a generation number.
+- The selected zoom level and the pool's descriptor row are read at a distance event only; the 500 ms revalidation does not look at them.
+- Zero stands for "no previous distance" and is taken as known, so a lens transition that is under way when a lease begins is bridged from 0.
+- An evaluation whose 0x90 call is repeated on the same frame without its 0x00 call in between is poisoned for good: the lease then stays reserved until the process ends (End answers 0, `CLEANUP_PENDING`).
+- With steering, some combinations of invert flags make the bounded inverse decline (reason 0x100 + a gain code); nothing is published then.
+
+### Mutation check
+
+Done on 2026-11-16 in scratch copies outside the repository: one change at a time in `src/pose_helper.c` or `src/pose_math.h`, the arithmetic program (for the header), then both helper programs run against each. **283 mutations, 260 killed, 23 survive.** The first complete round killed 241 of 274 valid mutations (nine did not compile and were rewritten); each survivor was either explained or answered with new scripts (the retired caches, the limits taken exactly, frame steps landing on the 500 ms times, the 64th probe, the withdrawn observation, sign flags with steering, the caller's memory losing write access, a lease on another rig, the prior lens alone, the form of a trace row's caller, a row the ring has moved past, the single-precision length sum), and the survivors and rewritten mutations were run again. 200 were killed by the plain scripts of the production program, 44 only by the look-gain program's, 9 by the arithmetic program and 7 only by probe runs.
+
+Killed, by kind: 28 of 29 timing constants and thresholds (500, 250, 300, 220 ms; 0.35 and 0.06 m; the guard's three cosines and its count of eight; 0.15, 0.5 m; 0.02, 0.025, 0.002; 4 m, 1 m, 2.96; 30500, 1000; ...); 27 of 28 `<`/`<=` changes; 27 of 36 dropped resets; 21 of 21 dropped counter increments; 14 of 16 float/double and reassociation changes; 47 of 48 changes to this build's constants and the layout numbers; 9 of 13 lock placements (among them the policy lock released before the forwarded call, and the lock taken before the original getter, both caught by the order of steps); 87 of 92 logic changes.
+
+The 23 survivors, none of them a gap this test can close:
+
+| survivor | why it cannot be seen |
+|---|---|
+| depth angle bound 1.48 -> 1.5 | the widest lens's angle is never smaller than the selected one's, and its own 1.48 bound is tested in the same condition |
+| draw animation `t >= 1` -> `> 1` | at exactly 1 the other branch gives (1 - 1) cubed = 0 too |
+| End without clearing `motion`; without resetting `rotation`; without clearing the observation and `depth.valid`; without clearing `active_generation` | after End the lease is disarmed and every reader of these tests `armed` first; the next begin replaces the whole policy |
+| begin without priming `display_cache` | the cache is overwritten by the first statistics read: visible only to a second thread |
+| zoom policy change without clearing `signature_set`; without clearing `retry_at` | each alone still forces the refresh: the other one does |
+| slots restored without `owned_generation = 0`; without `input_lease_generation = 0` | read only while a lease is reserved, or while input mode is on; the next begin sets both |
+| blend share computed in double | for a blend time of at most 1000 ms the quotient of two small integers rounds the same either way; beyond 1 it is clamped |
+| `tanf(x)` -> `(float)tan((double)x)` | equal on every angle the scripts reach with this C library |
+| `L_FLAG_SHOULDER_A` 10 -> 9 | feeds `Policy.shoulder_aiming`, which nothing reads (section 3); the 24 flag bytes are read either way |
+| diagnostics published after the lock is released; the unarmed re-check forwarding after the release; `watched_viewmodel` cleared under the lock; begin's input state reset before the lock | no read, write, swap or forwarded call moves relative to a lock step, or the path needs a second thread to be reached |
+| branch call without the generation re-check after the lock; rotation hook tracing without the unit re-check | the value loaded before the lock cannot have changed without a second thread |
+| `input_same` comparing three of the four adjacent floats | the fourth is the device's scope gain, which is part of the flag bytes compared just before |
+| a busy private record reused | a record is busy exactly while an evaluation is pending, and a pending evaluation ends the next 0x90 call before any record is chosen |
+| steering not zeroed for the "no avatar" id | the sample starts zeroed |
+
