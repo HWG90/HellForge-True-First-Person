@@ -117,6 +117,86 @@ def scripted():
     return ops
 
 
+def edges():
+    """Decisions the walks do not reach on their own (found by line coverage in review)."""
+    nan, inf = float("nan"), float("inf")
+    ops = []
+    t = [300.0]
+
+    def step(dt=0.01, **kw):
+        t[0] += dt
+        ops.append(world(t[0], **kw))
+
+    rig = snap(kind=6, record=7)
+    lost = dict(ok=True, armed=False, expired=False, tw=1, blend=1, error=0, why=0, retire=False)
+    expired = dict(ok=True, armed=True, expired=True, tw=1, blend=1, error=0, why=0, retire=False)
+    silent = dict(ok=False, armed=False, expired=False, tw=1, blend=1, error=0, why=0, retire=False)
+
+    def enter():
+        step(dt=0.4)
+        step(snap=rig)
+
+    # Start refusals: no player at all; no player with only the full snapshot's text; pose and entry refused without a text.
+    step(call="start", snap=snap(ok=False, err=1), psnap=snap(ok=False, err=4))
+    step(call="start", snap=snap(ok=False, err=1), psnap=snap(ok=False))
+    step(call="start", snap=snap(ok=False), psnap=snap(ok=False))
+    step(call="start", prepare=-1)
+    step(call="start", enter=-1)
+    step(call="start", enter=12)
+    # A clock that is not a number: at start (both ways in) and during an update.
+    ops.append(world(nan, call="start"))
+    ops.append(world(inf, call="start", snap=snap(safe=False)))
+    ops.append(world(-inf, call="start", hammer=True))
+    step(call="start"); step(snap=rig)
+    ops.append(world(nan, snap=rig))
+    step(call="start", snap=snap(safe=False), psnap=snap(safe=False))
+    ops.append(world(inf))
+    # A lease that only needs cleanup: at start (its own first update stops) and on a later entry (it waits).
+    step(call="start", lease_cleanup_only=True, snap2=rig)
+    step(call="start", snap=snap(safe=False)); step(dt=0.4, lease_cleanup_only=True)
+    step(dt=0.4); step(snap=rig)
+    # The helper is no longer armed while the first snapshot still looked like ours. The second look decides.
+    for label, change in (("stable unavailable", dict(snap2=snap(ok=False, err=1), psnap=snap(ok=False, err=1))),
+                          ("other player", dict(snap2=snap(player=2, kind=6, record=7))),
+                          ("unsafe", dict(snap2=snap(kind=6, record=7, safe=False))),
+                          ("other kind", dict(snap2=snap(kind=10, record=7))),
+                          ("fresh invalid, player fine", dict(snap2=snap(ok=False, err=1), psnap=snap(kind=6))),
+                          ("fresh invalid, player elsewhere", dict(snap2=snap(ok=False, err=1), psnap=snap(player=2, kind=6))),
+                          ("fresh invalid, player unsafe", dict(snap2=snap(ok=False, err=1), psnap=snap(kind=6, safe=False))),
+                          ("fresh invalid, player on another camera", dict(snap2=snap(ok=False, err=1), psnap=snap(kind=10))),
+                          ("fresh identity", dict(snap2=snap(identity=2, kind=6, record=7))),
+                          ("fresh kind 4", dict(snap2=snap(kind=4))),
+                          ("fresh record", dict(snap2=snap(kind=6, record=8))),
+                          ("fresh record unknown", dict(snap2=snap(kind=6, record=0)))):
+        for status in (lost, expired, silent):
+            step(snap=rig, snap2=change.get("snap2"), psnap=change.get("psnap", snap()), status=status)
+            if ops[-1]["snap2"] is None:
+                ops[-1]["snap2"] = copy.deepcopy(rig)
+            step(call="start"); step(dt=0.4); step(snap=rig)
+    # Same owner on the second look: the session stops, with and without the helper's text; errors 7 and 8 mean the owner retired.
+    for status in (lost, expired, dict(silent, why=7), dict(lost, error=7), dict(lost, error=8), dict(lost, error=3),
+                   dict(silent, retire=True)):
+        step(snap=rig, snap2=copy.deepcopy(rig), status=status)
+        step(call="start"); step(dt=0.4); step(snap=rig)
+    # A lease whose request is unknown, and a snapshot without a record, still count as ours.
+    step(call="stop"); step(call="start", lease_request=0); step(snap=snap(kind=6, record=9)); step(snap=snap(kind=6, record=0))
+    # Stop while cleanup is pending, cleanup retried while not enabled, stop again once clean.
+    step(call="stop", release=8); step(call="stop", release=8); step(call="retry_cleanup", release=9)
+    step(release=8); step(call="retry_cleanup"); step(call="stop"); step(call="retry_cleanup"); step(call="suspend")
+    # Suspend with a lease whose release fails, then succeeds.
+    step(call="start"); step(snap=rig); step(call="suspend", arg=13, snap=rig, release=8); step(release=0)
+    # Shutdown while holding a lease whose release fails first.
+    enter()
+    step(call="shutdown", snap=rig, release=8); step(call="start"); step(release=9); step(); step(call="stop"); step(call="shutdown")
+    return ops
+
+
+def idle_shutdown():
+    ops = [world(50.0, call="update"), world(50.1, call="retry_cleanup"), world(50.2, call="suspend"),
+           world(50.3, call="stop", arg=13), world(50.4, call="shutdown"), world(50.5, call="start"), world(50.6)]
+    return ops
+
+
 def walk(seed, count):
     rng = random.Random(seed)
     ops = []
@@ -201,8 +281,17 @@ def calm(seed, count):
     return ops
 
 
+def cnum(value):
+    value = float(value)
+    if value != value: return "NAN"
+    if value in (float("inf"), float("-inf")): return "INFINITY" if value > 0 else "-INFINITY"
+    return repr(value)
+
+
 def lua(value):
     if isinstance(value, bool): return "true" if value else "false"
+    if isinstance(value, float) and value != value: return "(0/0)"
+    if isinstance(value, float) and value in (float("inf"), float("-inf")): return "math.huge" if value > 0 else "-math.huge"
     if isinstance(value, (int, float)): return repr(value)
     if isinstance(value, str): return '"%s"' % value
     if isinstance(value, dict): return "{" + ",".join(f"{k}={lua(v)}" for k, v in value.items()) + "}"
@@ -229,7 +318,8 @@ def main():
         sys.exit(f"Retail is at {commit}; this project is frozen at {FROZEN}.")
     source = args.retail / "src/first_person/controller.lua"
     digest = hashlib.sha256(source.read_bytes()).hexdigest()
-    runs = ([("scripted", scripted())] + [(f"walk{seed}", walk(seed, 3000)) for seed in (1, 2)]
+    runs = ([("scripted", scripted()), ("edges", edges()), ("idle_shutdown", idle_shutdown())]
+            + [(f"walk{seed}", walk(seed, 3000)) for seed in (1, 2)]
             + [(f"calm{seed}", calm(seed, 4000)) for seed in (1, 2, 3)])
     out = [f"/* Generated by tools/retail_ref/gen_controller.py. Do not edit.\n * Retail file: src/first_person/controller.lua at commit "
            f"{commit}, sha256 {digest}.\n * Each run starts a fresh controller; every operation carries what the scripted backend answers\n"
@@ -259,7 +349,7 @@ def main():
         for op, line in zip(ops, lines):
             parts = line.split("|", 12)
             s, p = op["status"], op["packet"]
-            fields = [index, CALLS.index(op["call"]), op["arg"], int(op["follow"]), repr(float(op["now"])), c_view(op["snap"]), c_view(op["snap2"]),
+            fields = [index, CALLS.index(op["call"]), op["arg"], int(op["follow"]), cnum(op["now"]), c_view(op["snap"]), c_view(op["snap2"]),
                       c_view(op["psnap"]), int(op["hammer"]), op["prepare"], op["enter"], op["lease_request"],
                       int(op["lease_cleanup_only"]), int(s["ok"]), int(s["armed"]), int(s["expired"]), repr(float(s["tw"])),
                       repr(float(s["blend"])), s["error"], s["why"], int(s["retire"]), op["release"], op["release_note"],

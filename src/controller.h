@@ -29,7 +29,10 @@ typedef struct TfpPoseStats { bool armed, expired; double target_weight, blend; 
 typedef struct TfpLease {
   uint64_t request;               /* the camera request it entered with; 0: unknown */
   bool cleanup_only, pose_owner_retired;
-  bool has_pose_error; int pose_error;      /* set by a successful pose_status */
+  /* The last error number the pose helper reported for this lease, from a status poll or from
+   * its final statistics when the backend disarmed it. Retail reads lease.pose_error and falls
+   * back to lease.pose_stats.error; the backend folds both into this pair. */
+  bool has_pose_error; int pose_error;
 } TfpLease;
 typedef struct TfpPhasePacket { bool available; uint64_t identity, player_identity, epoch; double progress; } TfpPhasePacket;
 

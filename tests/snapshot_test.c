@@ -58,6 +58,7 @@ static void request(uintptr_t at, uint32_t kind, uint32_t avatar, uint32_t weapo
 int main(void) {
   FpMemory m = setup();
   TfpSnapshot s, other;
+  { const uint8_t amd64[2] = {0x64, 0x86}; put(m.game + 68, amd64, 2); } /* the donor's fake header has no machine field */
 
   /* hip_rifle */
   s = take(&m, TFP_SNAPSHOT_FULL);
@@ -201,17 +202,8 @@ int main(void) {
   CHECK(fails(&m, TFP_SNAPSHOT_FULL, "Entity generation unavailable"));
   n32(WORLD + FP_ENTITY_ROWS + 24 + 20, 1);
 
-  /* wrong_stride_is_refused: retail's avatar row stride (0x1240) and field
-   * offsets on this build read the next slot's memory, which is not there. */
-  n32(POOL + 0x6c, 2);
-  map(POOL + 0xf8, POOL + 0x300, AVATAR, 1);
-  p64(POOL + 0x110 + 8, EP);
-  CHECK(fails(&m, TFP_SNAPSHOT_PLAYER, "Memory unavailable")); /* slot 1's flags are unmapped */
-  { uint8_t flags[24] = {0}; put(POOL + 0x1240 + 0x53e888, flags, 24); n32(POOL + 0x1240 + 0x53e9c0, 999); }
-  CHECK(fails(&m, TFP_SNAPSHOT_PLAYER, "Memory unavailable")); /* retail offsets do not satisfy this build */
-  map(POOL + 0xf8, POOL + 0x300, AVATAR, 0);
-  n32(POOL + 0x6c, 1);
-
+  /* A second avatar slot, the row stride and the flag and rig offsets are checked against the
+   * retail backend itself in tests/snapshot_vectors_test.c (scenes slot1, slot2, slot7). */
   /* unreadable_mid_snapshot: whichever read fails, the answer is a refusal */
   s = take(&m, TFP_SNAPSHOT_FULL);
   f.reads = 0;
@@ -234,15 +226,16 @@ int main(void) {
   CHECK(tfp_snapshot(&m, TFP_SNAPSHOT_FULL, &other, NULL, 0) && tfp_same_identity(&s, &other));
   CHECK(!tfp_snapshot(NULL, TFP_SNAPSHOT_FULL, &other, NULL, 0) && !tfp_snapshot(&m, TFP_SNAPSHOT_FULL, NULL, NULL, 0));
 
-  /* module identity: another build is refused; a changed pin is named; an unreadable pin is tolerated */
+  /* module identity runs inside every snapshot (texts checked against retail in the vector test) */
   char why[160] = "";
   CHECK(tfp_module_identity(&m, why, sizeof why)); /* no pin readable in the fake: tolerated */
-  { uint8_t code[4] = {0x41, 0xff, 0x51, 0x38}; put(m.game + 0x12887c9, code, 4); }
-  CHECK(tfp_module_identity(&m, why, sizeof why));
   { uint8_t code[4] = {0x41, 0xff, 0x51, 0x39}; put(m.game + 0x12887c9, code, 4); }
   CHECK(!tfp_module_identity(&m, why, sizeof why) && !strcmp(why, "Native ADS fingerprint mismatch: root_position_call"));
-  image(m.game, FP_GAME_STAMP + 1, FP_GAME_SIZE);
-  CHECK(!tfp_module_identity(&m, why, sizeof why) && !strcmp(why, "Unsupported game build"));
+  CHECK(fails(&m, TFP_SNAPSHOT_PLAYER, "Native ADS fingerprint mismatch: root_position_call"));
+  { uint8_t code[4] = {0x41, 0xff, 0x51, 0x38}; put(m.game + 0x12887c9, code, 4); }
+  CHECK(take(&m, TFP_SNAPSHOT_PLAYER).safe);
+  n32(m.game + 72, FP_GAME_STAMP + 1);
+  CHECK(fails(&m, TFP_SNAPSHOT_FULL, "Unsupported game build"));
 
   printf("Snapshot: %u checks; player and weapon fields, masks, aim and seat flags, queue rows, identities, refusals and unreadable memory passed\n", checks);
   return 0;

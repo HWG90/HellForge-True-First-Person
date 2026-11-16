@@ -46,3 +46,6 @@ done
 "$TFP_CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g -I "$TFP_ROOT/src" \
   "$TFP_ROOT/src/probe_log.c" "$TFP_ROOT/tests/probe_log_test.c" -o "$TFP_ROOT/work/tests/probe_log"
 "$TFP_ROOT/work/tests/probe_log"
+"$TFP_CC" -std=c11 -Wall -Wextra -Werror -g -I "$TFP_ROOT/src" -I "$TFP_ROOT/tests" \
+  "$TFP_ROOT/src/backend.c" "$TFP_ROOT/src/snapshot.c" "$TFP_ROOT/tests/snapshot_vectors_test.c" -lm -o "$TFP_ROOT/work/tests/snapshot_vectors"
+"$TFP_ROOT/work/tests/snapshot_vectors"

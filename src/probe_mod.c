@@ -104,11 +104,12 @@ static void tick(HfMod *mod, float dt, void *unused) {
   if (full && s.weapon_unit != keyed_unit) {
     uintptr_t object = fp_unit_object(&memory, s.weapon_unit);
     uint8_t key[8];
-    keyed_unit = s.weapon_unit;
-    if (object && fp_read(&memory, object + 0x358, key, sizeof key))
+    /* Remembered only once it was read: a key that cannot be read yet is tried again next update. */
+    if (object && fp_read(&memory, object + 0x358, key, sizeof key)) {
+      keyed_unit = s.weapon_unit;
       hf->log(owner, "Weapon: entity=%u unit=%u key=%02x%02x%02x%02x%02x%02x%02x%02x", s.weapon, s.weapon_unit, key[0],
               key[1], key[2], key[3], key[4], key[5], key[6], key[7]);
-    else hf->log(owner, "Weapon: entity=%u unit=%u key unavailable", s.weapon, s.weapon_unit);
+    }
   }
 }
 

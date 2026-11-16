@@ -84,8 +84,10 @@ def main():
             note = "ambiguous on the way back" if retail in clashes else ("" if here == retail else "yes")
             lines.append(f"| `{here:#x}` | `{retail:#x}` | {note} |")
         lines += ["", f"## Retail constants with no value here yet ({len(later)})", "",
-                  "These entered the retail mode after it left 25480438. Each one the live path uses has to be "
-                  "found on this build by hand before the code that needs it is written.", "",
+                  "These appear only in the later records. Most entered the retail mode after it left 25480438; "
+                  "some existed here and were first written down when they first changed. Either way the records "
+                  "give no value for this build: each one the live path uses has to be found by hand before the "
+                  "code that needs it is written.", "",
                   "| retail (26568081) | first seen in the move to |", "|---|---|"]
         for value in sorted(later):
             lines.append(f"| `{value:#x}` | {later[value]} |")

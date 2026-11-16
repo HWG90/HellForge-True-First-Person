@@ -23,7 +23,10 @@ typedef struct TfpSnapshot {
 typedef enum TfpSnapshotScope { TFP_SNAPSHOT_PLAYER, TFP_SNAPSHOT_FULL } TfpSnapshotScope;
 
 /* Game image identity and code pins, retail scope "identity": a pin that
- * cannot be read yet is tolerated, a readable one must match. */
+ * cannot be read yet is tolerated, a readable one must match. tfp_snapshot
+ * runs this first on every call, as retail's _snapshot does; a caller that
+ * takes many snapshots in one frame may cache nothing yet (retail caches the
+ * result per frame; that arrives with the backend). */
 bool tfp_module_identity(const FpMemory *memory, char *error, size_t error_size);
 /* true and *out filled, or false with retail's error text and *out untouched. */
 bool tfp_snapshot(const FpMemory *memory, TfpSnapshotScope scope, TfpSnapshot *out,

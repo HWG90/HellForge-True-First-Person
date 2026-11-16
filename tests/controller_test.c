@@ -1,4 +1,5 @@
 #include "controller.h"
+#include <math.h>
 #include "vectors/controller_vectors.h"
 #include <stdio.h>
 #include <string.h>

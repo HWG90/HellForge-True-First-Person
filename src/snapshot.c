@@ -8,10 +8,10 @@
 #define TFP_LOW UINT64_C(65536)
 #define TFP_HIGH UINT64_C(0x800000000000)
 
-typedef struct Reader { const FpMemory *m; const char *why; } Reader;
+typedef struct Reader { const FpMemory *m; char why[160]; } Reader;
 
 static bool refuse(Reader *r, const char *text) {
-  if (!r->why) r->why = text;
+  if (!*r->why) snprintf(r->why, sizeof r->why, "%s", text);
   return false;
 }
 static bool bytes(Reader *r, uintptr_t at, void *out, size_t size) { /* _read, :65 */
@@ -21,14 +21,19 @@ static bool u32(Reader *r, uintptr_t at, uint32_t *out) { return bytes(r, at, ou
 static bool ptr(Reader *r, uintptr_t at, uintptr_t *out) { /* _ptr, :81 */
   uint64_t value = 0;
   if (!bytes(r, at, &value, 8)) return false;
-  if (value < TFP_LOW || value >= TFP_HIGH) return refuse(r, "Pointer unavailable");
+  if (value < TFP_LOW || value >= TFP_HIGH) {
+    if (!*r->why)
+      snprintf(r->why, sizeof r->why, "Pointer unavailable at0x%llx (value0x%llx)", (unsigned long long)at,
+               (unsigned long long)value);
+    return false;
+  }
   *out = (uintptr_t)value;
   return true;
 }
 static bool valid_id(uint32_t id) { return id > 0 && id < UINT32_MAX; } /* :20 */
 
 /* _map, :132. Open-addressing table: buckets pointer, capacity (a power of
- * two), empty key, multiplier; rows of key and index. */
+ * two), empty key, multiplier; rows of key and index. Checks in retail's order. */
 static bool map(Reader *r, uintptr_t at, uint32_t id, uint32_t limit, uint32_t *index) {
   uint8_t header[20];
   uint64_t buckets;
@@ -39,9 +44,9 @@ static bool map(Reader *r, uintptr_t at, uint32_t id, uint32_t limit, uint32_t *
   memcpy(&capacity, header + 8, 4);
   memcpy(&empty, header + 12, 4);
   memcpy(&multiplier, header + 16, 4);
-  if (buckets < TFP_LOW || buckets >= TFP_HIGH || !capacity || capacity > 1048576 || (capacity & (capacity - 1)))
-    return refuse(r, "Invalid registry");
+  if (!capacity || capacity > 1048576 || (capacity & (capacity - 1))) return refuse(r, "Invalid registry");
   if (id == empty) return refuse(r, "Empty entity");
+  if (buckets < TFP_LOW || buckets >= TFP_HIGH) return refuse(r, "Pointer unavailable");
   uint32_t probes = capacity < 4096 ? capacity : 4096;
   for (uint32_t n = 0; n < probes; n++) {
     uint32_t row[2], slot = (id * multiplier + n) & (capacity - 1);
@@ -56,37 +61,55 @@ static bool map(Reader *r, uintptr_t at, uint32_t id, uint32_t limit, uint32_t *
   return refuse(r, "Entity lookup bound reached");
 }
 
-bool tfp_module_identity(const FpMemory *m, char *error, size_t error_size) { /* _module('identity'), :86 */
-  const char *why = NULL;
-  char pin[96];
-  if (!m || !fp_image(m, m->game, FP_GAME_STAMP, FP_GAME_SIZE)) why = "Unsupported game build";
-  else {
-    FpProof proof = fp_prove_profile(m);
-    if (proof.mismatched) {
-      /* proof.first is "name: reason"; retail names the first differing pin. */
-      for (size_t i = 0; i < FP_WITNESS_COUNT && !why; i++) {
-        const FpWitness *w = fp_witnesses + i;
-        uint8_t first;
-        if (fp_read(m, m->game + w->rva, &first, 1) && !fp_bytes(m, m->game + w->rva, w->hex)) {
-          snprintf(pin, sizeof pin, "Native ADS fingerprint mismatch: %s", w->name);
-          why = pin;
-        }
+static int hex_digit(char c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1; }
+/* _module('identity'), :86. The game image and its code pins. A pin that
+ * cannot be read yet (packed first-person pages) is tolerated; a readable one
+ * must match exactly. */
+static bool module_identity(Reader *r) {
+  const FpMemory *m = r->m;
+  uint8_t mz[2], h[96];
+  uint32_t pe = 0, stamp, size;
+  if (m->game < TFP_LOW) return refuse(r, "game.dll unavailable");
+  if (!bytes(r, m->game, mz, 2)) return false;
+  if (mz[0] != 'M' || mz[1] != 'Z') return refuse(r, "Invalid game module");
+  if (!u32(r, m->game + 0x3c, &pe)) return false;
+  if (pe < 0x40 || pe > 0x1000) return refuse(r, "Invalid PE header");
+  if (!bytes(r, m->game + pe, h, sizeof h)) return false;
+  if (memcmp(h, "PE\0\0", 4) || h[4] != 0x64 || h[5] != 0x86 || h[24] != 0x0b || h[25] != 0x02)
+    return refuse(r, "AMD64 PE32+ required");
+  memcpy(&stamp, h + 8, 4);
+  memcpy(&size, h + 80, 4);
+  if (stamp != FP_GAME_STAMP || size != FP_GAME_SIZE) return refuse(r, "Unsupported game build");
+  for (size_t i = 0; i < FP_WITNESS_COUNT; i++) {
+    const FpWitness *w = fp_witnesses + i;
+    uint8_t actual[64];
+    size_t n = strlen(w->hex) / 2;
+    if (n > sizeof actual || !fp_read(m, m->game + w->rva, actual, n)) continue;
+    for (size_t j = 0; j < n; j++)
+      if (actual[j] != (uint8_t)(hex_digit(w->hex[j * 2]) * 16 + hex_digit(w->hex[j * 2 + 1]))) {
+        if (!*r->why) snprintf(r->why, sizeof r->why, "Native ADS fingerprint mismatch: %s", w->name);
+        return false;
       }
-      if (!why) why = "Native ADS fingerprint mismatch";
-    }
   }
-  if (why && error && error_size) snprintf(error, error_size, "%s", why);
-  return !why;
+  return true;
+}
+
+bool tfp_module_identity(const FpMemory *m, char *error, size_t error_size) {
+  Reader r = {m, ""};
+  bool ok = m && module_identity(&r);
+  if (!ok && error && error_size) snprintf(error, error_size, "%s", *r.why ? r.why : "game.dll unavailable");
+  return ok;
 }
 
 bool tfp_snapshot(const FpMemory *m, TfpSnapshotScope scope, TfpSnapshot *out, char *error, size_t error_size) {
-  Reader r = {m, NULL};
+  Reader r = {m, ""};
   TfpSnapshot s = {0};
   uint32_t queue[2], request[5], d[6], count = 0, index = 0;
   uint8_t entry[20];
   bool ok = false;
   if (!m || !out) return false;
   do {
+    if (!module_identity(&r)) break; /* :168 */
     s.base = m->game;
     /* _top, :157 */
     if (!ptr(&r, m->game + FP_CAMERA, &s.context) || !bytes(&r, s.context + 0x1f8, queue, sizeof queue)) break;
@@ -164,13 +187,17 @@ bool tfp_snapshot(const FpMemory *m, TfpSnapshotScope scope, TfpSnapshot *out, c
     memcpy(s.weapon_descriptor, wd, 20);
     /* :262-265 */
     if (s.camera_kind == 6 && s.request_weapon != s.weapon) { refuse(&r, "ADS request belongs to another weapon"); break; }
-    if (s.camera_kind == 6 && s.request_body != s.body) { refuse(&r, "ADS request body changed"); break; }
+    if (s.camera_kind == 6) { /* :264 reads the record again */
+      uint32_t body = 0;
+      if (!u32(&r, s.record + 0xc, &body)) break;
+      if (body != s.body) { refuse(&r, "ADS request body changed"); break; }
+    }
     s.weapon_ready = true; /* :270 */
     s.full = true;
     ok = true;
   } while (0);
   if (!ok) {
-    if (error && error_size) snprintf(error, error_size, "%s", r.why ? r.why : "Memory unavailable");
+    if (error && error_size) snprintf(error, error_size, "%s", *r.why ? r.why : "Memory unavailable");
     return false;
   }
   if (error && error_size) *error = 0;
@@ -185,9 +212,12 @@ bool tfp_same_player(const TfpSnapshot *a, const TfpSnapshot *b) { /* player_ide
          a->avatar_index == b->avatar_index && a->avatar == b->avatar && a->body == b->body &&
          a->avatar_entry == b->avatar_entry && !memcmp(a->avatar_descriptor, b->avatar_descriptor, 20);
 }
-bool tfp_same_identity(const TfpSnapshot *a, const TfpSnapshot *b) { /* identity, :266-269 */
-  return tfp_same_player(a, b) && a->full && b->full && a->weapon == b->weapon &&
-         a->weapon_unit == b->weapon_unit && a->viewmodel == b->viewmodel &&
+bool tfp_same_identity(const TfpSnapshot *a, const TfpSnapshot *b) { /* identity, :266-269; a player snapshot's is its player identity, :233 */
+  if (!a || !b || a->full != b->full) return false;
+  if (!a->full) return tfp_same_player(a, b);
+  return a->base == b->base && a->context == b->context && a->camera == b->camera && a->world == b->world &&
+         a->controller == b->controller && a->avatar == b->avatar && a->body == b->body && a->weapon == b->weapon &&
+         a->weapon_unit == b->weapon_unit && a->viewmodel == b->viewmodel && a->avatar_entry == b->avatar_entry &&
          a->weapon_component_descriptor == b->weapon_component_descriptor &&
-         !memcmp(a->weapon_descriptor, b->weapon_descriptor, 20);
+         !memcmp(a->avatar_descriptor, b->avatar_descriptor, 20) && !memcmp(a->weapon_descriptor, b->weapon_descriptor, 20);
 }
