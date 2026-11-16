@@ -16,6 +16,11 @@
 #define FP_WIELD UINT32_C(0x3326420)
 #define FP_WEAPONS UINT32_C(0x3326ce0)
 #define FP_REGISTRY UINT32_C(0x1a100f0)
+/* Added 2026-11-16 for the smooth.66 rewrite; see docs/BUILD-DIFFERENCES.md. */
+#define FP_INVENTORY UINT32_C(0x3326738)   /* retail 0x2ce18e8: backpack slot rows */
+#define FP_STATE UINT32_C(0x3326340)       /* retail 0x2ce1508 */
+#define FP_STATE_SCENE UINT32_C(0xac21c)   /* retail state+0xac29c: scene 3 or 4 on foot */
+#define FP_API_ROOT UINT32_C(0x3326308)    /* retail 0x2ce14c8: engine API tables */
 #define FP_ENTRY UINT32_C(0x127ddb0)
 #define FP_EXIT UINT32_C(0x127e9d0)
 #define FP_ALLOWED UINT32_C(0x12b2d20)
