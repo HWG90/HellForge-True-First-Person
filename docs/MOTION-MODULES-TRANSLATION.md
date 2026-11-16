@@ -143,3 +143,80 @@ The translation keeps `configure_catalogue` and the family rules as code and car
 ### Open doubts
 
 - The catalogue is the kit's, built for game build 26251122. The type ids are resource-name hashes and should not depend on the build, but this was not checked against build 25480438. It matters only for the menu label and the opt-in family defaults.
+
+## 3. action_state.lua → src/action_state.c
+
+### Interface
+
+| Retail | C |
+|---|---|
+| `M.new(backend)` | `tfp_action_state_init(reader)`; the backend is passed to each call |
+| `self:sample(expected, layers)` | `tfp_action_state_sample(reader, backend, expected, layers, layer_count, &out, error, error_size)` |
+| `backend:_read`, `_ptr`, `_u32` | `backend->memory` (`FpMemory`, read with `fp_read` as `src/snapshot.c` does) |
+| `backend:player_snapshot()` | `backend->player_snapshot` |
+| `backend:_alignment_context(s)` | `backend->alignment_context` |
+
+`TfpActionStateBackend` is the one struct of function pointers. `tfp_action_state_backend(&backend, memory)` fills it with this repository's own two methods: `tfp_snapshot(TFP_SNAPSHOT_PLAYER)` of `src/snapshot.c`, and `tfp_alignment_context`, which is the translation of `backend.lua:783-803` (with `_alignment_executable`, `backend.lua:688-725`, exported as `tfp_alignment_executable`). Those two backend methods are translated in this file because no other file of the repository has them and locomotion needs them too. Retail remembers a passed executable check for the rest of the host frame; the C checks on every call (same answers, more reads).
+
+`TfpActionStateReader` is the sampler with retail's `cache` (about 260 KB: 32 layers of up to 2048 state offsets). The answer keeps the snapshot it was read for (`out.player`; retail returns its `player_identity` as `owner`). `states[layer]` with `has[layer]`: retail's `states` table holds only the layers asked for, so `l1`, `l3`, `l10`, `l11`, `l14` are nil unless asked for.
+
+No floats: the module reads integers and bytes only.
+
+### Build constants (game build 25480438)
+
+All are named in one block at the top of `src/action_state.c`. Evidence: **map** = `tools/build_map.py --retail <kit> --to-here`; **image** = this build's executable image `native-work/evidence/exe-25480438.bin` (PE stamp `0x6ab382e4`, image size `0x39e8000`); **layout** = same number in retail, and a named file of this repository reads the same field on this build. `python3 tools/retail_ref/gen_action_state.py --here-image <image>` re-checks every image claim below; it passed.
+
+| Constant | Retail | Here | Evidence |
+|---|---|---|---|
+| executable PE stamp, image size | `0x6af2d5e6`, `0x29fe000` | `0x6ab382e4`, `0x39e8000` | `profile.h` `FP_EXE_STAMP`, `FP_EXE_SIZE`; image header |
+| unit registry global | exe+`0x1ab76f8` | exe+`0x1a100f0` | map; `profile.h` `FP_REGISTRY`; the same VALUE as `camera_helper.c` `B_EXE_REGISTRY` |
+| fingerprint `exists` | exe+`0x1f75d0` | exe+`0x201710` | map; image: the same 32 bytes except the call displacement (`ef90eaff` → `9fc1e9ff`) |
+| fingerprint `trigger` | exe+`0x1f77c0` | exe+`0x201900` | map; image: the same 32 bytes except the call displacement (`fd8eeaff` → `adbfe9ff`) |
+| animation interface getter | exe+`0x28d510`, `48 8B 81 78 01 00 00 C3` | exe+`0x2bd9c0`, same bytes | map; `native_contract.h` `anim_getter`; image; the same VALUES as `camera_helper.c` `B_EXE_ANIM_GETTER`, `B_HEX_ANIM_GETTER` |
+| resource getter | exe+`0x28d520`, `48 8B 81 58 03 00 00 48 89 02 48 8B C2 C3` | exe+`0x2bd9d0`, same bytes | map; image (this constant was not in the repository before) |
+| virtual-table slots of the two getters | +`0x1B0`, +`0x1B8` | same | image: exactly one table holds exe+`0x2bd9c0`; it has it at +`0x1B0`, exe+`0x2bd9d0` at +`0x1B8`, and the scene-graph getter exe+`0x2bd870` at +`0xE8`. `0x1B0` = `camera_helper.c` `L_VT_ANIM_GETTER` |
+| unit object: state machine instance, resource id | +`0x178`, +`0x358` | same | layout; `camera_helper.c` `L_UNIT_ANIM`, `L_UNIT_RESOURCE`; the two getters' own code reads `[rcx+0x178]` and `[rcx+0x358]` |
+| instance: graph, active-state array | +`0x28`, +`0x50` | same | layout; `camera_helper.c` `L_ANIM_GRAPH`, `L_ANIM_ACTIVE` |
+| graph header and layer tables | count +4, table +8; table +4; definition +8, +12 | same | layout; `camera_helper.c` `L_ANIM_LAYER_COUNT`, `L_ANIM_TABLE` and its `on_foot` proof, which walks the same tables |
+| registry block | +`0x88` units, +`0x98` capacity, +`0xA0` generations | same | layout; `backend.c` `fp_unit_object`; `camera_helper.c` `L_REGISTRY_BLOCK` |
+| body state-machine resource, layer count | `4D1C334D294DFA97`, 31 | same | `camera_helper.c` `L_BODY_RESOURCE`, `L_ANIM_LAYERS` |
+
+The values shared with `src/camera_helper.c` (its `on_foot` proof reads the same structures) are reused as values, as asked; the names are local to each file. Nothing is open: no constant had to be guessed.
+
+### Lua-specific points
+
+- **`pcall` boundary.** The whole of `sample` runs inside one `pcall`; any `assert` or failed read ends it with `nil, text`. The C keeps the first refusal's text and answers false. Under LuaJIT each `assert` puts `file:line:` in front; an error that passes through two asserts carries two such prefixes. The runner cuts them all; the C texts are bare.
+- **Order of reads.** Every read is in retail's order, with retail's sizes (the state table in 1024-byte blocks), and short-circuits like retail's `and` chains (lines 54-57, 110-112, 114). The test proves it: see "Proof".
+- **`_read`'s own refusal.** `'Invalid read'` (address below 65536, or address + size reaching 2^47) comes before the memory is touched; `'Memory unavailable'` after.
+- **Pointer text.** `'Pointer unavailable at0x… (value0x…)'`: retail's value has gone through a double (`uint(b)+uint(b,4)*4294967296`) and is printed with `%x`. Above 2^53 it is the nearest double, and all-ones (2^64 as a double) prints as `0`. `lua_hex()` reproduces LuaJIT's conversion. This was the one difference the test found.
+- **The cache.** Retail keeps, per layer, the map from state address to index while the layer's definition address and state count are unchanged. A table whose entries change behind an unchanged address and count is not noticed, and the answer is then stale. Kept, and tested. A refused table read leaves the layer's old map. A replaced cache drops all maps.
+- **`map.indices[at]==nil`**: the first state at an address wins.
+- **`index or 0`**: an active pointer that is in no state answers 0 and the layer is listed in `unknown_layers`, in the order the layers were asked for; a null pointer answers -1 and is not listed.
+- **`assert(player(after),problem)`** with `problem` nil would print `assertion failed!`; kept in C, unreachable with this repository's snapshot (it never answers a body of 0).
+- **Identity.** Retail compares `player_identity` strings; the C uses `tfp_same_player` (the string's parts). An `expected` table whose `avatar_owner` / `avatar_index` fields contradict its own identity string cannot be expressed in C.
+- **Layers argument.** `nil` is NULL; a C `int` list cannot hold a non-number or a fraction (retail refuses both with the selection text).
+
+### Dropped
+
+Nothing. The five-layer selection `{1,3,10,11,14}` is only requested by the parked Fird Person code, but it is an argument, not code: any selection works and is tested.
+
+### Proof
+
+- 10,561 samples (6,840 answered, 3,721 refused with the same text) in sequences on one sampler, and 593 direct calls of the two backend methods; 2,504 memory images. The retail files (action_state.lua over the unmodified backend.lua, through its `io` seam) answered on retail's layout; the C on this build's layout.
+- **Read trace.** For every sample the count and a hash of the ordered `(address, size)` reads made outside the player snapshot must be equal (retail's executable addresses rewritten to this build's): 477,155 reads.
+- Scripts: every bound from both sides (layer count, table offset, definition and state offsets, state counts, block edges); null, unmatched and invalid state pointers; every layer selection kind; the two getters byte by byte; the executable image field by field and both fingerprints byte by byte; the registry (capacity, generation, pointers, references with generation bits); every record unreadable in turn; an expected snapshot that is fresh, stale or edited; what the cache keeps and drops over 3 to 8 samples; **memory that changes during the read**: each of 35 scene variants swapped in before read 1, 2, … 75 of a sample, and swapped back; 4,000 seeded random samples in sequences with random mutations and swaps.
+- The retail fixture `tests/first_person/action_state.lua` is not replayed as it stands (it brings its own fake backend); its eight situations are all among the hand-made scenes, here against the real backend.
+- **Differences found between Lua and C: one**, the pointer text above (6 of 9,758 samples in the first run); fixed in the C.
+- Coverage: 112 executable lines of action_state.lua, all hit.
+- Mutation check: 1,066 single changes, 193 did not compile, **810 killed, 63 survived**. The first pass left 108 (13 of them inside a comment, a fault of the tool); added after it: the two backend methods called directly, the repository's own backend as a second run of every unscripted sample, last-byte differences, block-edge tables, cross-sequence cache scripts, truncated images, missing error buffers. The 63:
+  - start values of locals that are always written before they are read (20) and sizes of buffers (20);
+  - compare or copy lengths one off where the extra or missing byte is always zero (3);
+  - block reading (4): `size > 1025`, `size - at <= 1024`, and the 1024 in the block length changed by one. The last two leave one byte of a block unread, which then holds what the previous call left on the stack (the same table);
+  - one state past the end in the lookup (1); the 2^63 edge of `lua_hex` (1);
+  - `tfp_action_state_init` (7): clearing `cached` and clearing the maps each make the other redundant, so no single change shows;
+  - "first refusal wins" (6): a removed `break` after a refusal, or always overwriting the text, changes nothing while a later check stops the read; and the unreachable `assertion failed!` branch (1).
+
+### Open doubts
+
+- `src/snapshot.c` prints the raw 64-bit value in its `Pointer unavailable` text; retail prints the double (see above). The two differ only for values above 2^53 that a double cannot hold. I did not change that file. The action-state test compares the value part of that text and has such scenes only for its own reads.
+- The executable fingerprints `exists` and `trigger` belong to retail's body-pose API. On this build they are the same code at the mapped addresses; whether this build's mode needs them as a gate at all is the backend's decision. They are checked because retail checks them.
