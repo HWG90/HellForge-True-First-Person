@@ -1,0 +1,16 @@
+{
+  "scope": "Offline exact byte/source verification; not semantic or runtime acceptance",
+  "evidence_files": {
+    "native-lifecycle-reentry-evidence.json": "ec3f9b709294f8d85062f616339af21c139fcf25900fec77304f54180d156492",
+    "native-viewmodel-render-routes.json": "0227aca49b122eae3f08b93ff18c081d768e876b8b1c7afd38188cd0abaa96c3",
+    "native-unzoom-ownership-evidence.json": "9b2822f049b184fd929e0533672bc9920579315386dca1cffdeca96e36fe0116"
+  },
+  "instruction_records_rechecked": {
+    "lifecycle": 8249,
+    "render": 1822,
+    "unzoom": 548
+  },
+  "contiguous_ranges_rechecked": 26,
+  "source_hashes_match": true,
+  "live_game_access": false
+}

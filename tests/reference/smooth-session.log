@@ -1,0 +1,16 @@
+[12:00:00.100] [goose.first-person-controller] Controller generation 3 accepted
+[12:00:01.000] [goose.first-person-controller] Request: t=1000 queue=[4*] base=4 mask=0 active=0 suppress=0 aim=0 ragdoll=0 seat=0 held=0
+[12:00:01.200] [goose.first-person-controller] Eye view trial: requesting primary submission after pose and lens readback
+[12:00:01.500] [goose.first-person-controller] Smooth: t=1500 ch=E eye=0.130 turn=0.4 fov=0.0 near=0.000 socket=0.004 owned=1 rig=0 dropped=0
+[12:00:02.000] [goose.first-person-controller] Request: t=2000 queue=[4*,6*] base=4 mask=0 active=1 suppress=0 aim=0 ragdoll=0 seat=0 held=0
+[12:00:02.100] [goose.first-person-controller] Weapon draw: eye follows weapon rig, selected=88 drawn=88
+[12:00:04.000] [goose.first-person-controller] Request: t=4000 queue=[4*] base=4 mask=2 active=1 suppress=0 aim=0 ragdoll=0 seat=0 held=0
+[12:00:04.100] [goose.first-person-controller] Smooth: t=4100 ch=ES eye=0.440 turn=2.0 fov=0.0 near=0.000 socket=0.371 owned=0 rig=0 dropped=0
+[12:00:04.200] [goose.first-person-controller] Smooth: t=4200 ch=T eye=0.003 turn=46.0 fov=0.0 near=0.000 socket=0.000 owned=0 rig=0 dropped=0
+[12:00:04.500] [goose.first-person-controller] Smooth: t=4500 ch=E eye=0.210 turn=1.0 fov=0.0 near=0.000 socket=0.010 owned=1 rig=0 dropped=3
+[12:00:05.000] [goose.first-person-controller] Request: t=5000 queue=[4*] base=4 mask=0 active=0 suppress=0 aim=0 ragdoll=0 seat=0 held=2
+[12:00:05.500] some other mod: Smoothie maker ready
+[12:00:06.000] [goose.first-person-controller] Request: t=6000 queue=[4*,6*] base=4 mask=0 active=1 suppress=0 aim=0 ragdoll=0 seat=0 held=0
+[12:00:07.000] [goose.first-person-controller] Smooth: t=7000 ch=F eye=0.000 turn=0.0 fov=30.0 near=0.000 socket=0.000 owned=1 rig=1 dropped=0
+[12:00:07.050] [goose.first-person-controller] Smooth: t=7050 ch=G eye=0.000 turn=0.0 fov=0.0 near=0.000 socket=0.000 owned=0 rig=0 dropped=0
+[12:00:07.100] [goose.first-person-controller] Smooth: t=71

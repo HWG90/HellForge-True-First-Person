@@ -1,0 +1,13 @@
+{
+  "scope": "Exact offline byte verification of selected live-confirmed SDK follow-ups; no live body reread or behavior acceptance",
+  "reports": {
+    "live-input-sdk-followup-evidence.json": {
+      "sha256": "91fc67322e638310c214e4fa71ec2758398878cf4149509024079282a0fd5ff8",
+      "instruction_records_rechecked": 578
+    },
+    "live-render-sdk-followup-evidence.json": {
+      "sha256": "1b6f31c0d7d313e647cad57afac45b371ee6ebb60fed787b1adf572b617d6437",
+      "instruction_records_rechecked": 2772
+    }
+  }
+}

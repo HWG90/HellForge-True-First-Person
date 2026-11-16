@@ -1,0 +1,1314 @@
+{
+  "scope": "Offline native input/sensitivity investigation for original HellForge build25480438; no live calls, hooks, attachments, memory reads or writes. Steam .40 SDK input remains experimental and is not qualified for HellForge by these mappings.",
+  "target_build": 25480438,
+  "sources": [
+    {
+      "role": "old_game",
+      "path": "/home/goose/Documents/ChatGPT/Linux HD2/native-work/evidence/game-pre1020.dll",
+      "bytes": 74727424,
+      "sha256": "642b0aac0b4f577054993a965054827455ef143ced9895b2dfd09d1ecd433a37"
+    },
+    {
+      "role": "old_exe",
+      "path": "/home/goose/Applications/HellForge/mods-retired/localappdata-1019/LocalAppData/LinksLinkToMemory/r6_reload_exe_20261017.bin",
+      "bytes": 60719104,
+      "sha256": "2b2c496218a5ce7e4f3453951acb8bd756bc4c2f281ce95eadef17b894e39c16"
+    },
+    {
+      "role": "steam_game",
+      "path": "/home/goose/Documents/ChatGPT/Linux HD2/native-work/evidence/game-26251122.dll",
+      "bytes": 54009856,
+      "sha256": "57baccc0cf4656580114c06a11ab2ffc6548b069ba25d8efab1ac89827d856c8"
+    },
+    {
+      "role": "steam_exe",
+      "path": "/home/goose/Documents/ChatGPT/Linux HD2/native-work/evidence/exe-26251122.bin",
+      "bytes": 44032000,
+      "sha256": "6e2751f8690b6aa49060ca4b8d3476d502232d89de93a1b478722b07cb18a92c"
+    },
+    {
+      "role": "experimental_editor",
+      "path": "/home/goose/Documents/Codex/2026-11-07/tr/work/gadget-kit-fp-input/native/first_person/native_ads_editor.cpp",
+      "bytes": 94056,
+      "sha256": "eb60b1709ff067ae5e9c9c541dba663a5b9b7b539129b98a1a94d53642760ac7"
+    },
+    {
+      "role": "gain_math",
+      "path": "/home/goose/Documents/Codex/2026-11-07/tr/work/gadget-kit-fp-input/native/first_person/zoom_gain_math.h",
+      "bytes": 8758,
+      "sha256": "5d990507a89693b43327a88d9321c278876064dc8dc9f1a0a63c050fcbc9291b"
+    },
+    {
+      "role": "filter_math",
+      "path": "/home/goose/Documents/Codex/2026-11-07/tr/work/gadget-kit-fp-input/native/first_person/zoom_input_math.h",
+      "bytes": 6272,
+      "sha256": "0147e561cb5af4ca1d601cec039d099f1c7b1fe2e647f43f1f89595f222ba923"
+    },
+    {
+      "role": "capture_thunk",
+      "path": "/home/goose/Documents/Codex/2026-11-07/tr/work/gadget-kit-fp-input/native/first_person/native_ads_input.S",
+      "bytes": 1387,
+      "sha256": "293f4f7a9090377b1904f5b4ffd4b3a9b7733e057132861f3984fd290d6eafde"
+    },
+    {
+      "role": "experiment_doc",
+      "path": "/home/goose/Documents/Codex/2026-11-07/tr/work/gadget-kit-fp-input/docs/first-person-zoom-input.md",
+      "bytes": 3946,
+      "sha256": "0e6cce624d89b98a980cf8c556a96c6707598495e229204d63805b319099f612"
+    },
+    {
+      "role": "feasibility",
+      "path": "/home/goose/Documents/Codex/2026-11-07/tr/work/tfp-private-preset-feasibility.md",
+      "bytes": 7103,
+      "sha256": "9d3a5e4c4521c12f833000c73f0d968a1ab8740eafb7571ab2f69b16ba8a26a1"
+    },
+    {
+      "role": "resume",
+      "path": "/home/goose/Documents/Codex/2026-11-07/tr/work/RESUME-TFP-POLISH-039.md",
+      "bytes": 29234,
+      "sha256": "d01af59f6cbf665f39e6fcf706bd433c52d855836c3ec590a2834d975f587845"
+    }
+  ],
+  "experimental_source_matches_packaged_0_5_40": true,
+  "user_constraints": {
+    "native_camera_authoritative": true,
+    "inline_optic_patch_excluded": true,
+    "sdk_pointer_hook_allowed_in_true_fpv_chat": true,
+    "shared_sensitivity_settings_preserved": true,
+    "product_language": "C"
+  },
+  "verified_old_mapping": {
+    "native6_evaluator": "game+0x1286330",
+    "pre_filter_UnitAPI_90_call": "game+0x12865FC",
+    "pre_filter_return": "game+0x12865FE",
+    "UnitAPI_90_native_target": "exe+0x1FD220",
+    "UnitAPI_root_cell": "game+0x3326308",
+    "UnitAPI_offset": "root+0x18",
+    "SDK_pointer_slot": "UnitAPI+0x90",
+    "input_owner_cell": "game+0x347CF18",
+    "avatar_owner_cell": "game+0x3326D20",
+    "settings_cell": "game+0x3326340",
+    "clock_cell": "game+0x3326348",
+    "raw_stride": "0xA7AEC",
+    "raw_offset": "0xA7C24",
+    "request_history": "0x3C,0x40,0x44",
+    "request_preset": "0x80",
+    "request_lens": "0x84",
+    "request_pitch_gate": "0x8C",
+    "tpv_fov_setting": "settings+0xAC408",
+    "mouse_scope_gain": "input_owner+0xA7B50",
+    "pad_scope_gain": "input_owner+0xA7B44",
+    "preset_table": "game+0x32F9990",
+    "preset_stride": 144,
+    "preset_yaw_pitch_gain_offsets": [
+      4,
+      8
+    ],
+    "native_exp": "game+0x21087D0",
+    "steering_consumer": "game+0x128D820",
+    "native_orientation_solver": "game+0x1277250",
+    "post_input_UnitAPI_00_call": "game+0x1287A41",
+    "post_input_return": "game+0x1287A44",
+    "steering_producer_xy": "game+0x82A7D4",
+    "steering_producer_z": "game+0x82A7DE",
+    "steering_components": "avatar_owner+index*0x1238+0x53E9A4/A8/AC"
+  },
+  "captured_preset_identity_domain": {
+    "inspected_indexes": "0..149",
+    "sequential_row_id_equals_index": "0..92 only",
+    "runtime_verified": false,
+    "native_index_bounds_check_in_consumer": false
+  },
+  "cross_build_comparisons": {
+    "native_orientation_solver": {
+      "old_rva": "0x1277250",
+      "steam_rva": "0x1108fb0",
+      "length": 1328,
+      "old_sha256": "a82996ce06b8e70e617eb222915519a875397f858ec2cc672d61ac2608fe4acd",
+      "steam_sha256": "293a88f3a7637c8f9b0d3d3e922b5c469635704f0809db1fdd1daf930fbb6806",
+      "old_instruction_records": 293,
+      "steam_instruction_records": 293,
+      "mask_rule": "Only relative branch/call immediates and RIP-relative displacements zeroed; all other bytes and instruction-relative offsets compared.",
+      "differences": [],
+      "complete_equal_after_mask": true
+    },
+    "native6_evaluator": {
+      "old_rva": "0x1286330",
+      "steam_rva": "0x1118210",
+      "length": 9688,
+      "old_sha256": "5dd2fd5f0ae425e02c414999fca9f49dc2a8bf9a18ee1d87ead8e4fc0c63f924",
+      "steam_sha256": "d130ad47332ea943b565d87bcf7b258dd818acaa1b0fe3c8f806ad2466db5006",
+      "old_instruction_records": 2051,
+      "steam_instruction_records": 2051,
+      "mask_rule": "Only relative branch/call immediates and RIP-relative displacements zeroed; all other bytes and instruction-relative offsets compared.",
+      "differences": [
+        {
+          "old_rva": "0x12864c7",
+          "old_instruction": "imul rcx, qword ptr [rsp + 0x48], 0x1238",
+          "new_rva": "0x11183a7",
+          "new_instruction": "imul rcx, qword ptr [rsp + 0x48], 0x1240"
+        },
+        {
+          "old_rva": "0x1286680",
+          "old_instruction": "mov ecx, dword ptr [r9 + rax*4 + 0x1288908]",
+          "new_rva": "0x1118560",
+          "new_instruction": "mov ecx, dword ptr [r9 + rax*4 + 0x111a7e8]"
+        },
+        {
+          "old_rva": "0x1286862",
+          "old_instruction": "divss xmm2, dword ptr [rax + 0xac408]",
+          "new_rva": "0x1118742",
+          "new_instruction": "divss xmm2, dword ptr [rax + 0xac488]"
+        },
+        {
+          "old_rva": "0x12868e2",
+          "old_instruction": "movups xmm0, xmmword ptr [rax + rcx*8 + 0x32f9990]",
+          "new_rva": "0x11187c2",
+          "new_instruction": "movups xmm0, xmmword ptr [rax + rcx*8 + 0x2cb2140]"
+        },
+        {
+          "old_rva": "0x12868ea",
+          "old_instruction": "movups xmm1, xmmword ptr [rax + rcx*8 + 0x32f99a0]",
+          "new_rva": "0x11187ca",
+          "new_instruction": "movups xmm1, xmmword ptr [rax + rcx*8 + 0x2cb2150]"
+        },
+        {
+          "old_rva": "0x12868f6",
+          "old_instruction": "movups xmm0, xmmword ptr [rax + rcx*8 + 0x32f99b0]",
+          "new_rva": "0x11187d6",
+          "new_instruction": "movups xmm0, xmmword ptr [rax + rcx*8 + 0x2cb2160]"
+        },
+        {
+          "old_rva": "0x1286902",
+          "old_instruction": "movups xmm1, xmmword ptr [rax + rcx*8 + 0x32f99c0]",
+          "new_rva": "0x11187e2",
+          "new_instruction": "movups xmm1, xmmword ptr [rax + rcx*8 + 0x2cb2170]"
+        },
+        {
+          "old_rva": "0x128690e",
+          "old_instruction": "movups xmm0, xmmword ptr [rax + rcx*8 + 0x32f99d0]",
+          "new_rva": "0x11187ee",
+          "new_instruction": "movups xmm0, xmmword ptr [rax + rcx*8 + 0x2cb2180]"
+        },
+        {
+          "old_rva": "0x128691a",
+          "old_instruction": "movups xmm1, xmmword ptr [rax + rcx*8 + 0x32f99e0]",
+          "new_rva": "0x11187fa",
+          "new_instruction": "movups xmm1, xmmword ptr [rax + rcx*8 + 0x2cb2190]"
+        },
+        {
+          "old_rva": "0x1286926",
+          "old_instruction": "movups xmm0, xmmword ptr [rax + rcx*8 + 0x32f99f0]",
+          "new_rva": "0x1118806",
+          "new_instruction": "movups xmm0, xmmword ptr [rax + rcx*8 + 0x2cb21a0]"
+        },
+        {
+          "old_rva": "0x1286932",
+          "old_instruction": "movups xmm1, xmmword ptr [rax + rcx*8 + 0x32f9a00]",
+          "new_rva": "0x1118812",
+          "new_instruction": "movups xmm1, xmmword ptr [rax + rcx*8 + 0x2cb21b0]"
+        },
+        {
+          "old_rva": "0x128693e",
+          "old_instruction": "movups xmm0, xmmword ptr [rax + rcx*8 + 0x32f9a10]",
+          "new_rva": "0x111881e",
+          "new_instruction": "movups xmm0, xmmword ptr [rax + rcx*8 + 0x2cb21c0]"
+        },
+        {
+          "old_rva": "0x1286a37",
+          "old_instruction": "movzx eax, byte ptr [rax + r13 + 0x547830]",
+          "new_rva": "0x1118917",
+          "new_instruction": "movzx eax, byte ptr [rax + r13 + 0x547870]"
+        },
+        {
+          "old_rva": "0x1286a76",
+          "old_instruction": "movss xmm1, dword ptr [rdi + 0xac408]",
+          "new_rva": "0x1118956",
+          "new_instruction": "movss xmm1, dword ptr [rdi + 0xac488]"
+        },
+        {
+          "old_rva": "0x1286ae9",
+          "old_instruction": "movss xmm0, dword ptr [rdi + 0xac408]",
+          "new_rva": "0x11189c9",
+          "new_instruction": "movss xmm0, dword ptr [rdi + 0xac488]"
+        },
+        {
+          "old_rva": "0x1286b59",
+          "old_instruction": "movss xmm6, dword ptr [rdi + 0xac408]",
+          "new_rva": "0x1118a39",
+          "new_instruction": "movss xmm6, dword ptr [rdi + 0xac488]"
+        },
+        {
+          "old_rva": "0x1286c03",
+          "old_instruction": "movups xmm0, xmmword ptr [rax + rcx*8 + 0x32f9990]",
+          "new_rva": "0x1118ae3",
+          "new_instruction": "movups xmm0, xmmword ptr [rax + rcx*8 + 0x2cb2140]"
+        },
+        {
+          "old_rva": "0x1286c0b",
+          "old_instruction": "movups xmm2, xmmword ptr [rax + rcx*8 + 0x32f99e0]",
+          "new_rva": "0x1118aeb",
+          "new_instruction": "movups xmm2, xmmword ptr [rax + rcx*8 + 0x2cb2190]"
+        },
+        {
+          "old_rva": "0x1286c13",
+          "old_instruction": "movups xmm3, xmmword ptr [rax + rcx*8 + 0x32f99f0]",
+          "new_rva": "0x1118af3",
+          "new_instruction": "movups xmm3, xmmword ptr [rax + rcx*8 + 0x2cb21a0]"
+        },
+        {
+          "old_rva": "0x1286c1b",
+          "old_instruction": "movups xmm1, xmmword ptr [rax + rcx*8 + 0x32f99a0]",
+          "new_rva": "0x1118afb",
+          "new_instruction": "movups xmm1, xmmword ptr [rax + rcx*8 + 0x2cb2150]"
+        },
+        {
+          "old_rva": "0x1286c27",
+          "old_instruction": "movups xmm0, xmmword ptr [rax + rcx*8 + 0x32f99b0]",
+          "new_rva": "0x1118b07",
+          "new_instruction": "movups xmm0, xmmword ptr [rax + rcx*8 + 0x2cb2160]"
+        },
+        {
+          "old_rva": "0x1286c37",
+          "old_instruction": "movups xmm0, xmmword ptr [rax + rcx*8 + 0x32f99d0]",
+          "new_rva": "0x1118b17",
+          "new_instruction": "movups xmm0, xmmword ptr [rax + rcx*8 + 0x2cb2180]"
+        },
+        {
+          "old_rva": "0x1286c47",
+          "old_instruction": "movups xmm0, xmmword ptr [rax + rcx*8 + 0x32f9a00]",
+          "new_rva": "0x1118b27",
+          "new_instruction": "movups xmm0, xmmword ptr [rax + rcx*8 + 0x2cb21b0]"
+        },
+        {
+          "old_rva": "0x1286c65",
+          "old_instruction": "movups xmm1, xmmword ptr [rax + rcx*8 + 0x32f99c0]",
+          "new_rva": "0x1118b45",
+          "new_instruction": "movups xmm1, xmmword ptr [rax + rcx*8 + 0x2cb2170]"
+        },
+        {
+          "old_rva": "0x1286c7b",
+          "old_instruction": "movups xmm1, xmmword ptr [rax + rcx*8 + 0x32f9a10]",
+          "new_rva": "0x1118b5b",
+          "new_instruction": "movups xmm1, xmmword ptr [rax + rcx*8 + 0x2cb21c0]"
+        },
+        {
+          "old_rva": "0x1287122",
+          "old_instruction": "mov edi, dword ptr [rdx + 0x1c4]",
+          "new_rva": "0x1119002",
+          "new_instruction": "mov edi, dword ptr [rdx + 0x1c8]"
+        },
+        {
+          "old_rva": "0x1287133",
+          "old_instruction": "mov esi, dword ptr [rdx + 0x1c8]",
+          "new_rva": "0x1119013",
+          "new_instruction": "mov esi, dword ptr [rdx + 0x1cc]"
+        },
+        {
+          "old_rva": "0x1287274",
+          "old_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9b8]",
+          "new_rva": "0x1119154",
+          "new_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x12872a7",
+          "old_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9b8]",
+          "new_rva": "0x1119187",
+          "new_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x12872c7",
+          "old_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9b8]",
+          "new_rva": "0x11191a7",
+          "new_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x1287339",
+          "old_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9b8]",
+          "new_rva": "0x1119219",
+          "new_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x1287359",
+          "old_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9b8]",
+          "new_rva": "0x1119239",
+          "new_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x1287443",
+          "old_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9b8]",
+          "new_rva": "0x1119323",
+          "new_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x1287468",
+          "old_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9b8]",
+          "new_rva": "0x1119348",
+          "new_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x1287488",
+          "old_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9b8]",
+          "new_rva": "0x1119368",
+          "new_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x1287a1d",
+          "old_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9b8]",
+          "new_rva": "0x11198fd",
+          "new_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x1287a34",
+          "old_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9b8]",
+          "new_rva": "0x1119914",
+          "new_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x1287b88",
+          "old_instruction": "movss xmm0, dword ptr [rsi + r13 + 0x53ea5c]",
+          "new_rva": "0x1119a68",
+          "new_instruction": "movss xmm0, dword ptr [rsi + r13 + 0x53ea64]"
+        },
+        {
+          "old_rva": "0x1287d74",
+          "old_instruction": "movsd xmm0, qword ptr [rsi + r13 + 0x53e994]",
+          "new_rva": "0x1119c54",
+          "new_instruction": "movsd xmm0, qword ptr [rsi + r13 + 0x53e99c]"
+        },
+        {
+          "old_rva": "0x1287d83",
+          "old_instruction": "mov eax, dword ptr [rsi + r13 + 0x53e99c]",
+          "new_rva": "0x1119c63",
+          "new_instruction": "mov eax, dword ptr [rsi + r13 + 0x53e9a4]"
+        },
+        {
+          "old_rva": "0x1287db0",
+          "old_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9b8]",
+          "new_rva": "0x1119c90",
+          "new_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x12883fd",
+          "old_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9b8]",
+          "new_rva": "0x111a2dd",
+          "new_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x1288418",
+          "old_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9b8]",
+          "new_rva": "0x111a2f8",
+          "new_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x12887bd",
+          "old_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9b8]",
+          "new_rva": "0x111a69d",
+          "new_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x12887db",
+          "old_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9b8]",
+          "new_rva": "0x111a6bb",
+          "new_instruction": "mov ecx, dword ptr [rsi + r13 + 0x53e9c0]"
+        }
+      ],
+      "complete_equal_after_mask": false
+    },
+    "steering_addition": {
+      "old_rva": "0x128d820",
+      "steam_rva": "0x111f700",
+      "length": 292,
+      "old_sha256": "4f132f70c5ee636da8e5c78497c83f2750eccbd058d165a1a710189ac36781a3",
+      "steam_sha256": "90e9c5b7eff54dd825486ea35838442d5f69573d3d80231a036d970cd54f9b87",
+      "old_instruction_records": 68,
+      "steam_instruction_records": 68,
+      "mask_rule": "Only relative branch/call immediates and RIP-relative displacements zeroed; all other bytes and instruction-relative offsets compared.",
+      "differences": [
+        {
+          "old_rva": "0x128d8f2",
+          "old_instruction": "imul rax, rcx, 0x1238",
+          "new_rva": "0x111f7d2",
+          "new_instruction": "imul rax, rcx, 0x1240"
+        },
+        {
+          "old_rva": "0x128d8f9",
+          "old_instruction": "movss xmm0, dword ptr [rax + r9 + 0x53e9a4]",
+          "new_rva": "0x111f7d9",
+          "new_instruction": "movss xmm0, dword ptr [rax + r9 + 0x53e9ac]"
+        },
+        {
+          "old_rva": "0x128d907",
+          "old_instruction": "movss xmm1, dword ptr [rax + r9 + 0x53e9a8]",
+          "new_rva": "0x111f7e7",
+          "new_instruction": "movss xmm1, dword ptr [rax + r9 + 0x53e9b0]"
+        },
+        {
+          "old_rva": "0x128d91a",
+          "old_instruction": "movss xmm0, dword ptr [rax + r9 + 0x53e9ac]",
+          "new_rva": "0x111f7fa",
+          "new_instruction": "movss xmm0, dword ptr [rax + r9 + 0x53e9b4]"
+        }
+      ],
+      "complete_equal_after_mask": false
+    },
+    "constructor": {
+      "old_rva": "0x127de20",
+      "steam_rva": "0x110fb90",
+      "length": 2992,
+      "old_sha256": "d685f7468f568d630a056d675dca177b7789a6f4da6ca250f1906882301ecf2a",
+      "steam_sha256": "4d917f10aa674c902203eb537bad34a04a232fb1975b481a22ea4a2c9f3a228f",
+      "old_instruction_records": 665,
+      "steam_instruction_records": 665,
+      "mask_rule": "Only relative branch/call immediates and RIP-relative displacements zeroed; all other bytes and instruction-relative offsets compared.",
+      "differences": [
+        {
+          "old_rva": "0x127e093",
+          "old_instruction": "lea r8d, [r10 + rdx]",
+          "new_rva": "0x110fe03",
+          "new_instruction": "lea r8d, [rdx + r10]"
+        },
+        {
+          "old_rva": "0x127e0c4",
+          "old_instruction": "imul rax, rcx, 0x1238",
+          "new_rva": "0x110fe34",
+          "new_instruction": "imul rax, rcx, 0x1240"
+        },
+        {
+          "old_rva": "0x127e4f2",
+          "old_instruction": "imul r15, rcx, 0x1238",
+          "new_rva": "0x1110262",
+          "new_instruction": "imul r15, rcx, 0x1240"
+        },
+        {
+          "old_rva": "0x127e504",
+          "old_instruction": "mov edx, dword ptr [r15 + rdi + 0x53e9b8]",
+          "new_rva": "0x1110274",
+          "new_instruction": "mov edx, dword ptr [r15 + rdi + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x127e546",
+          "old_instruction": "mov ecx, dword ptr [r15 + rdi + 0x53e9b8]",
+          "new_rva": "0x11102b6",
+          "new_instruction": "mov ecx, dword ptr [r15 + rdi + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x127e55a",
+          "old_instruction": "mov r9d, dword ptr [r15 + rdi + 0x53e9b8]",
+          "new_rva": "0x11102ca",
+          "new_instruction": "mov r9d, dword ptr [r15 + rdi + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x127e5bb",
+          "old_instruction": "mov ecx, dword ptr [r15 + rdi + 0x53e9b8]",
+          "new_rva": "0x111032b",
+          "new_instruction": "mov ecx, dword ptr [r15 + rdi + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x127e5e0",
+          "old_instruction": "mov ecx, dword ptr [r15 + rdi + 0x53e9b8]",
+          "new_rva": "0x1110350",
+          "new_instruction": "mov ecx, dword ptr [r15 + rdi + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x127e62b",
+          "old_instruction": "mov r9d, dword ptr [r15 + rdi + 0x53e9b8]",
+          "new_rva": "0x111039b",
+          "new_instruction": "mov r9d, dword ptr [r15 + rdi + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x127e782",
+          "old_instruction": "mov ecx, dword ptr [r15 + rdi + 0x53e9b8]",
+          "new_rva": "0x11104f2",
+          "new_instruction": "mov ecx, dword ptr [r15 + rdi + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x127e7b4",
+          "old_instruction": "mov ecx, dword ptr [r15 + rdi + 0x53e9b8]",
+          "new_rva": "0x1110524",
+          "new_instruction": "mov ecx, dword ptr [r15 + rdi + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x127e7ce",
+          "old_instruction": "mov r9d, dword ptr [r15 + rdi + 0x53e9b8]",
+          "new_rva": "0x111053e",
+          "new_instruction": "mov r9d, dword ptr [r15 + rdi + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x127e818",
+          "old_instruction": "mov ecx, dword ptr [r15 + rdi + 0x53e9b8]",
+          "new_rva": "0x1110588",
+          "new_instruction": "mov ecx, dword ptr [r15 + rdi + 0x53e9c0]"
+        },
+        {
+          "old_rva": "0x127e936",
+          "old_instruction": "mov edx, dword ptr [r15 + rdi + 0x53e9b8]",
+          "new_rva": "0x11106a6",
+          "new_instruction": "mov edx, dword ptr [r15 + rdi + 0x53e9c0]"
+        }
+      ],
+      "complete_equal_after_mask": false
+    },
+    "exit_block_not_equivalent": {
+      "old_rva": "0x127e9d0",
+      "steam_rva": "0x1110740",
+      "length": 7632,
+      "old_sha256": "6201d210dba49ad4da645f40c6ec7741bb6bef6be2cc8424002a816dcb5a9d52",
+      "steam_sha256": "2c3b29717211a02ca0ed1fe806b5058d2394315cddb3418a60e06ecd24c66d37",
+      "old_instruction_records": 1730,
+      "steam_instruction_records": 1711,
+      "mask_rule": "Only relative branch/call immediates and RIP-relative displacements zeroed; all other bytes and instruction-relative offsets compared.",
+      "differences": [
+        {
+          "old_rva": "0x127ea9e",
+          "old_instruction": "mov qword ptr [rsp + 0x70], r15",
+          "new_rva": "0x111080e",
+          "new_instruction": "mov qword ptr [rbp - 0x80], r15"
+        },
+        {
+          "old_rva": "0x127eaa3",
+          "old_instruction": "mov r9d, dword ptr [r15 + 0x100]",
+          "new_rva": "0x1110812",
+          "new_instruction": "mov r9d, dword ptr [r15 + 0x100]"
+        },
+        {
+          "old_rva": "0x127eaaa",
+          "old_instruction": "mov r10d, dword ptr [r15 + 0x108]",
+          "new_rva": "0x1110819",
+          "new_instruction": "mov r10d, dword ptr [r15 + 0x108]"
+        },
+        {
+          "old_rva": "0x127eab1",
+          "old_instruction": "imul r10d, eax",
+          "new_rva": "0x1110820",
+          "new_instruction": "imul r10d, eax"
+        },
+        {
+          "old_rva": "0x127eab5",
+          "old_instruction": "lea edi, [r9 - 1]",
+          "new_rva": "0x1110824",
+          "new_instruction": "lea edi, [r9 - 1]"
+        },
+        {
+          "old_rva": "0x127eab9",
+          "old_instruction": "test r9d, r9d",
+          "new_rva": "0x1110828",
+          "new_instruction": "test r9d, r9d"
+        },
+        {
+          "old_rva": "0x127eabc",
+          "old_instruction": "je 0x12805df",
+          "new_rva": "0x111082b",
+          "new_instruction": "je 0x1112394"
+        },
+        {
+          "old_rva": "0x127eac2",
+          "old_instruction": "mov r11, qword ptr [r15 + 0xf8]",
+          "new_rva": "0x1110831",
+          "new_instruction": "mov r11, qword ptr [r15 + 0xf8]"
+        },
+        {
+          "old_rva": "0x127eac9",
+          "old_instruction": "mov qword ptr [rsp + 0x258], rbx",
+          "new_rva": "0x1110838",
+          "new_instruction": "mov qword ptr [rsp + 0x258], rbx"
+        },
+        {
+          "old_rva": "0x127ead1",
+          "old_instruction": "mov ebx, dword ptr [r15 + 0x104]",
+          "new_rva": "0x1110840",
+          "new_instruction": "mov ebx, dword ptr [r15 + 0x104]"
+        }
+      ],
+      "complete_equal_after_mask": false,
+      "difference_count": 1650,
+      "differences_truncated": true
+    }
+  },
+  "witnesses": [
+    {
+      "name": "unit_api90_slot_load",
+      "module": "old_game",
+      "rva": "0x12865f2",
+      "length": 7,
+      "hex": "488b8190000000",
+      "instructions": [
+        {
+          "rva": "0x12865f2",
+          "text": "mov rax, qword ptr [rcx + 0x90]"
+        }
+      ]
+    },
+    {
+      "name": "pre_input_sdk_call",
+      "module": "old_game",
+      "rva": "0x12865fc",
+      "length": 2,
+      "hex": "ffd0",
+      "instructions": [
+        {
+          "rva": "0x12865fc",
+          "text": "call rax"
+        }
+      ]
+    },
+    {
+      "name": "pre_input_sdk_return",
+      "module": "old_game",
+      "rva": "0x12865fe",
+      "length": 7,
+      "hex": "488b3d13691f02",
+      "instructions": [
+        {
+          "rva": "0x12865fe",
+          "text": "mov rdi, qword ptr [rip + 0x21f6913]"
+        }
+      ]
+    },
+    {
+      "name": "native_exp_call",
+      "module": "old_game",
+      "rva": "0x128662a",
+      "length": 5,
+      "hex": "e8a121e800",
+      "instructions": [
+        {
+          "rva": "0x128662a",
+          "text": "call 0x21087d0"
+        }
+      ]
+    },
+    {
+      "name": "history_xy_write",
+      "module": "old_game",
+      "rva": "0x128673e",
+      "length": 6,
+      "hex": "f2410f114f3c",
+      "instructions": [
+        {
+          "rva": "0x128673e",
+          "text": "movsd qword ptr [r15 + 0x3c], xmm1"
+        }
+      ]
+    },
+    {
+      "name": "history_z_write",
+      "module": "old_game",
+      "rva": "0x1286744",
+      "length": 4,
+      "hex": "41894744",
+      "instructions": [
+        {
+          "rva": "0x1286744",
+          "text": "mov dword ptr [r15 + 0x44], eax"
+        }
+      ]
+    },
+    {
+      "name": "zoom_lens_read",
+      "module": "old_game",
+      "rva": "0x1286851",
+      "length": 9,
+      "hex": "f3410f109784000000",
+      "instructions": [
+        {
+          "rva": "0x1286851",
+          "text": "movss xmm2, dword ptr [r15 + 0x84]"
+        }
+      ]
+    },
+    {
+      "name": "zoom_base_fov_division",
+      "module": "old_game",
+      "rva": "0x1286862",
+      "length": 8,
+      "hex": "f30f5e9008c40a00",
+      "instructions": [
+        {
+          "rva": "0x1286862",
+          "text": "divss xmm2, dword ptr [rax + 0xac408]"
+        }
+      ]
+    },
+    {
+      "name": "mouse_scope_gain",
+      "module": "old_game",
+      "rva": "0x1286889",
+      "length": 8,
+      "hex": "f30f109f507b0a00",
+      "instructions": [
+        {
+          "rva": "0x1286889",
+          "text": "movss xmm3, dword ptr [rdi + 0xa7b50]"
+        }
+      ]
+    },
+    {
+      "name": "pad_scope_gain",
+      "module": "old_game",
+      "rva": "0x1286893",
+      "length": 8,
+      "hex": "f30f109f447b0a00",
+      "instructions": [
+        {
+          "rva": "0x1286893",
+          "text": "movss xmm3, dword ptr [rdi + 0xa7b44]"
+        }
+      ]
+    },
+    {
+      "name": "steering_add_call",
+      "module": "old_game",
+      "rva": "0x12868c4",
+      "length": 5,
+      "hex": "e8576f0000",
+      "instructions": [
+        {
+          "rva": "0x12868c4",
+          "text": "call 0x128d820"
+        }
+      ]
+    },
+    {
+      "name": "preset_selector_read",
+      "module": "old_game",
+      "rva": "0x12868c9",
+      "length": 7,
+      "hex": "418b8780000000",
+      "instructions": [
+        {
+          "rva": "0x12868c9",
+          "text": "mov eax, dword ptr [r15 + 0x80]"
+        }
+      ]
+    },
+    {
+      "name": "first_preset_copy",
+      "module": "old_game",
+      "rva": "0x12868e2",
+      "length": 8,
+      "hex": "0f1084c890992f03",
+      "instructions": [
+        {
+          "rva": "0x12868e2",
+          "text": "movups xmm0, xmmword ptr [rax + rcx*8 + 0x32f9990]"
+        }
+      ]
+    },
+    {
+      "name": "native_quaternion_solver_call",
+      "module": "old_game",
+      "rva": "0x1286a21",
+      "length": 5,
+      "hex": "e82a08ffff",
+      "instructions": [
+        {
+          "rva": "0x1286a21",
+          "text": "call 0x1277250"
+        }
+      ]
+    },
+    {
+      "name": "post00_call",
+      "module": "old_game",
+      "rva": "0x1287a41",
+      "length": 3,
+      "hex": "41ffd0",
+      "instructions": [
+        {
+          "rva": "0x1287a41",
+          "text": "call r8"
+        }
+      ]
+    },
+    {
+      "name": "post00_return",
+      "module": "old_game",
+      "rva": "0x1287a44",
+      "length": 8,
+      "hex": "4180bf8d00000000",
+      "instructions": [
+        {
+          "rva": "0x1287a44",
+          "text": "cmp byte ptr [r15 + 0x8d], 0"
+        }
+      ]
+    },
+    {
+      "name": "constructor_native_preset_read",
+      "module": "old_game",
+      "rva": "0x127e0cb",
+      "length": 8,
+      "hex": "428b8c30f0d85300",
+      "instructions": [
+        {
+          "rva": "0x127e0cb",
+          "text": "mov ecx, dword ptr [rax + r14 + 0x53d8f0]"
+        }
+      ]
+    },
+    {
+      "name": "constructor_temporary_preset_store",
+      "module": "old_game",
+      "rva": "0x127e0d3",
+      "length": 3,
+      "hex": "894de0",
+      "instructions": [
+        {
+          "rva": "0x127e0d3",
+          "text": "mov dword ptr [rbp - 0x20], ecx"
+        }
+      ]
+    },
+    {
+      "name": "exit_normal4_native_preset_read",
+      "module": "old_game",
+      "rva": "0x127ebcc",
+      "length": 7,
+      "hex": "8b8433f0d85300",
+      "instructions": [
+        {
+          "rva": "0x127ebcc",
+          "text": "mov eax, dword ptr [rbx + rsi + 0x53d8f0]"
+        }
+      ]
+    },
+    {
+      "name": "exit_normal4_default_preset_store",
+      "module": "old_game",
+      "rva": "0x127ebd3",
+      "length": 8,
+      "hex": "418984240c1f0000",
+      "instructions": [
+        {
+          "rva": "0x127ebd3",
+          "text": "mov dword ptr [r12 + 0x1f0c], eax"
+        }
+      ]
+    },
+    {
+      "name": "retire_kind_zero",
+      "module": "old_game",
+      "rva": "0x12771e8",
+      "length": 3,
+      "hex": "668902",
+      "instructions": [
+        {
+          "rva": "0x12771e8",
+          "text": "mov word ptr [rdx], ax"
+        }
+      ]
+    },
+    {
+      "name": "outer_kind6_index_read",
+      "module": "old_game",
+      "rva": "0x12799c6",
+      "length": 7,
+      "hex": "8b8c0b80020000",
+      "instructions": [
+        {
+          "rva": "0x12799c6",
+          "text": "mov ecx, dword ptr [rbx + rcx + 0x280]"
+        }
+      ]
+    },
+    {
+      "name": "outer_kind6_skip",
+      "module": "old_game",
+      "rva": "0x12799f6",
+      "length": 6,
+      "hex": "6683f8067421",
+      "instructions": [
+        {
+          "rva": "0x12799f6",
+          "text": "cmp ax, 6"
+        },
+        {
+          "rva": "0x12799fa",
+          "text": "je 0x1279a1d"
+        }
+      ]
+    },
+    {
+      "name": "outer_final_field_read",
+      "module": "old_game",
+      "rva": "0x1279eeb",
+      "length": 9,
+      "hex": "f30f108cc81c9a2f03",
+      "instructions": [
+        {
+          "rva": "0x1279eeb",
+          "text": "movss xmm1, dword ptr [rax + rcx*8 + 0x32f9a1c]"
+        }
+      ]
+    },
+    {
+      "name": "steering_producer_row_stride",
+      "module": "old_game",
+      "rva": "0x82a0af",
+      "length": 7,
+      "hex": "4c69e338120000",
+      "instructions": [
+        {
+          "rva": "0x82a0af",
+          "text": "imul r12, rbx, 0x1238"
+        }
+      ]
+    },
+    {
+      "name": "steering_producer_row_base",
+      "module": "old_game",
+      "rva": "0x82a0c5",
+      "length": 7,
+      "hex": "4981c4b0d85300",
+      "instructions": [
+        {
+          "rva": "0x82a0c5",
+          "text": "add r12, 0x53d8b0"
+        }
+      ]
+    },
+    {
+      "name": "steering_producer_owner_add",
+      "module": "old_game",
+      "rva": "0x82a0d4",
+      "length": 3,
+      "hex": "4d03e5",
+      "instructions": [
+        {
+          "rva": "0x82a0d4",
+          "text": "add r12, r13"
+        }
+      ]
+    },
+    {
+      "name": "steering_target_read",
+      "module": "old_game",
+      "rva": "0x82a5b3",
+      "length": 8,
+      "hex": "418b8c2404110000",
+      "instructions": [
+        {
+          "rva": "0x82a5b3",
+          "text": "mov ecx, dword ptr [r12 + 0x1104]"
+        }
+      ]
+    },
+    {
+      "name": "steering_projection_sdk_load",
+      "module": "old_game",
+      "rva": "0x82a609",
+      "length": 7,
+      "hex": "488b81f8000000",
+      "instructions": [
+        {
+          "rva": "0x82a609",
+          "text": "mov rax, qword ptr [rcx + 0xf8]"
+        }
+      ]
+    },
+    {
+      "name": "steering_projection_call",
+      "module": "old_game",
+      "rva": "0x82a617",
+      "length": 2,
+      "hex": "ffd0",
+      "instructions": [
+        {
+          "rva": "0x82a617",
+          "text": "call rax"
+        }
+      ]
+    },
+    {
+      "name": "steering_smoothing_call",
+      "module": "old_game",
+      "rva": "0x82a7c1",
+      "length": 5,
+      "hex": "e84a25f100",
+      "instructions": [
+        {
+          "rva": "0x82a7c1",
+          "text": "call 0x173cd10"
+        }
+      ]
+    },
+    {
+      "name": "steering_xy_publish",
+      "module": "old_game",
+      "rva": "0x82a7d4",
+      "length": 10,
+      "hex": "f2410f118424f4100000",
+      "instructions": [
+        {
+          "rva": "0x82a7d4",
+          "text": "movsd qword ptr [r12 + 0x10f4], xmm0"
+        }
+      ]
+    },
+    {
+      "name": "steering_z_publish",
+      "module": "old_game",
+      "rva": "0x82a7de",
+      "length": 8,
+      "hex": "41898c24fc100000",
+      "instructions": [
+        {
+          "rva": "0x82a7de",
+          "text": "mov dword ptr [r12 + 0x10fc], ecx"
+        }
+      ]
+    },
+    {
+      "name": "native_sdk90_world_matrix_getter",
+      "module": "old_exe",
+      "rva": "0x1fd220",
+      "length": 47,
+      "hex": "40534883ec204863dae89206eaff488bc84c8b0041ff90e8000000488bcb48c1e10648034828488bc14883c4205bc3",
+      "instructions": [
+        {
+          "rva": "0x1fd220",
+          "text": "push rbx"
+        },
+        {
+          "rva": "0x1fd222",
+          "text": "sub rsp, 0x20"
+        },
+        {
+          "rva": "0x1fd226",
+          "text": "movsxd rbx, edx"
+        },
+        {
+          "rva": "0x1fd229",
+          "text": "call 0x9d8c0"
+        },
+        {
+          "rva": "0x1fd22e",
+          "text": "mov rcx, rax"
+        },
+        {
+          "rva": "0x1fd231",
+          "text": "mov r8, qword ptr [rax]"
+        },
+        {
+          "rva": "0x1fd234",
+          "text": "call qword ptr [r8 + 0xe8]"
+        },
+        {
+          "rva": "0x1fd23b",
+          "text": "mov rcx, rbx"
+        },
+        {
+          "rva": "0x1fd23e",
+          "text": "shl rcx, 6"
+        },
+        {
+          "rva": "0x1fd242",
+          "text": "add rcx, qword ptr [rax + 0x28]"
+        },
+        {
+          "rva": "0x1fd246",
+          "text": "mov rax, rcx"
+        },
+        {
+          "rva": "0x1fd249",
+          "text": "add rsp, 0x20"
+        },
+        {
+          "rva": "0x1fd24d",
+          "text": "pop rbx"
+        },
+        {
+          "rva": "0x1fd24e",
+          "text": "ret "
+        }
+      ]
+    },
+    {
+      "name": "native_evaluator_frame_prologue",
+      "module": "old_game",
+      "rva": "0x1286335",
+      "length": 26,
+      "hex": "5556574154415541564157488dac24f0fcffff4881ec10040000",
+      "instructions": [
+        {
+          "rva": "0x1286335",
+          "text": "push rbp"
+        },
+        {
+          "rva": "0x1286336",
+          "text": "push rsi"
+        },
+        {
+          "rva": "0x1286337",
+          "text": "push rdi"
+        },
+        {
+          "rva": "0x1286338",
+          "text": "push r12"
+        },
+        {
+          "rva": "0x128633a",
+          "text": "push r13"
+        },
+        {
+          "rva": "0x128633c",
+          "text": "push r14"
+        },
+        {
+          "rva": "0x128633e",
+          "text": "push r15"
+        },
+        {
+          "rva": "0x1286340",
+          "text": "lea rbp, [rsp - 0x310]"
+        },
+        {
+          "rva": "0x1286348",
+          "text": "sub rsp, 0x410"
+        }
+      ]
+    },
+    {
+      "name": "context_spill_and_R15_request",
+      "module": "old_game",
+      "rva": "0x1286370",
+      "length": 7,
+      "hex": "48894d804c8bfa",
+      "instructions": [
+        {
+          "rva": "0x1286370",
+          "text": "mov qword ptr [rbp - 0x80], rcx"
+        },
+        {
+          "rva": "0x1286374",
+          "text": "mov r15, rdx"
+        }
+      ]
+    },
+    {
+      "name": "evaluator_dt_spill",
+      "module": "old_game",
+      "rva": "0x128637d",
+      "length": 6,
+      "hex": "f3440f115da0",
+      "instructions": [
+        {
+          "rva": "0x128637d",
+          "text": "movss dword ptr [rbp - 0x60], xmm11"
+        }
+      ]
+    },
+    {
+      "name": "avatar_index_spill",
+      "module": "old_game",
+      "rva": "0x1286430",
+      "length": 5,
+      "hex": "4889442448",
+      "instructions": [
+        {
+          "rva": "0x1286430",
+          "text": "mov qword ptr [rsp + 0x48], rax"
+        }
+      ]
+    }
+  ],
+  "additional_evaluator_fields": [
+    {
+      "rva": "0x1286756",
+      "text": "cmp byte ptr [rax + 0x1a9], r12b",
+      "hex": "4438a0a9010000"
+    },
+    {
+      "rva": "0x12869b5",
+      "text": "movzx r8d, byte ptr [r15 + 0x8c]",
+      "hex": "450fb6878c000000"
+    }
+  ],
+  "callgraph": [
+    {
+      "from": "native6 evaluator game+0x1286330",
+      "callsite": "0x12865FC",
+      "target": "UnitAPI+0x90 -> exe+0x1FD220",
+      "role": "last native SDK getter before input filter; returns world matrix pointer unchanged"
+    },
+    {
+      "from": "native6 evaluator",
+      "callsite": "0x128662A",
+      "target": "game+0x21087D0",
+      "role": "exp(dt_eval * -75), native smoothing coefficient"
+    },
+    {
+      "from": "native6 evaluator",
+      "callsite": "0x12868C4",
+      "target": "game+0x128D820",
+      "role": "add native target-steering vector after player zoom/device scaling"
+    },
+    {
+      "from": "native6 evaluator",
+      "callsite": "0x1286A21",
+      "target": "game+0x1277250",
+      "role": "native input quaternion solver after context/preset contributions"
+    },
+    {
+      "from": "native6 evaluator",
+      "callsite": "0x1287A41",
+      "target": "UnitAPI+0 (existing getter observation)",
+      "role": "later completion boundary after input and FOV; native arguments/return remain unchanged"
+    },
+    {
+      "from": "avatar update",
+      "callsite": "0x82A617",
+      "target": "CameraAPI+0xF8",
+      "role": "project target world point to screen for native steering"
+    },
+    {
+      "from": "avatar update",
+      "callsite": "0x82A7C1",
+      "target": "game+0x173CD10",
+      "role": "smooth steering vector before publish at 0x82A7D4/DE"
+    }
+  ],
+  "pipeline": [
+    "U = alpha*raw + (1-alpha)*previous_history, alpha = float(1-exp(float(dt_eval*-75))) for positive dt_eval; preserve native zero/inhibit branches.",
+    "Apply native inversion signs to U.",
+    "R = request_lens_radians * native_rad_to_deg / settings_tpv_degrees.",
+    "Scale player input by R and the native device scope sensitivity D.",
+    "Add the native target-steering vector S after zoom/device scaling.",
+    "For positive dt_eval, add C/(dt_eval*g) from context+0x15C/+0x160.",
+    "Apply native pitch gate, then native preset gains g and global frame delta; preserve native yaw sign/half-angle, pitch limits and quaternion solve.",
+    "Native recoil/animation/lens processing remains in the game. This audit does not equate S with recoil or establish all later recoil producers."
+  ],
+  "math_result": {
+    "naive_gain_division": "g/R changes S as well as player input and is not generally sensitivity-only.",
+    "qualified_candidate": "When S=0, g_prime=g/R is input-independent. For nonzero S, experimental candidate solves g_prime=g*(D*U+S)/(R*D*U+S) per axis with numerical/gate bounds and native context contribution tests.",
+    "context_cancellation": "Only under the reviewed positive-dt branch and native gate/order; the mod must not simplify away branches.",
+    "experimental_limit": "For S!=0 the inverse depends on sampled U/S. A double sample cannot prove those values remain unchanged before the game consumes them; post-history mismatch can detect after evaluation but cannot undo a rendered orientation."
+  },
+  "lifetime_result": {
+    "supported_pointer_route": "Owned UnitAPI+0x90 data-slot lease plus existing post00 getter completion; not a function-body detour.",
+    "temporary_write": "Only request+0x80 is temporarily changed by exact expected-value CAS; full 144-byte clone retains all nongain bytes.",
+    "native_readers": "Nine 16-byte loads for native input and another complete preset copy for FOV; outer dispatcher reads final +0x8C. SDK callback return does not drain these later readers.",
+    "retirement": "Original old retire routine clears kind at0x12771E8 but leaves +0x80. Exit restores normal4 native preset into context+0x1F0C from avatar at0x127EBCC/D3. In-flight readers remain a separate proof.",
+    "storage": "Clones require bounded immutable nongain templates, pinned/quarantined backing and compare-owned restoration; no free on hook drain alone.",
+    "ABI_issue_for_all_C": "Steam prototype uses nonvolatile R15 and caller RSP capture thunks. A plain C callback does not automatically expose native R15. An all-C implementation needs a separately verified intrinsic/unwind/argument proof; this audit does not qualify one."
+  },
+  "remaining_requirements": [
+    "Confirm original-build dispatch slot/current target/writable image identity and all source data live read-only.",
+    "Qualify actual R15/S capture from a C callback in Windows ABI fixtures. Original evaluator spills S+0x80/context,+0x48/index,+0xA0/dt are statically mapped; live call correspondence and C prologue/unwind recovery still need testing.",
+    "Review whole original evaluator, constructor, retirement and outer-consumer fingerprints; exit block diverges substantially from Steam.",
+    "Port arithmetic/ownership/lifetime into C with native old-build exp behavior and float32 environment tests.",
+    "Demonstrate input/steering producer serialization or retain explicit experimental bypasses; no all-frame sensitivity success claim.",
+    "Run private C native fixtures for adversarial End/reentry/foreign index/failed CAS/row reuse and immutable clone lifetime.",
+    "Only then perform a coordinated opt-in live normalization trial with native camera and saved sensitivity settings untouched."
+  ],
+  "static_caller_frame": {
+    "S_definition": "Native evaluator RSP at the SDK call; equals the SDK callee entry RSP+8.",
+    "RBP": "S+0x100, derived from seven pushes, LEA RBP,[RSP-0x310], SUB RSP,0x410.",
+    "context": "S+0x80 from [RBP-0x80], store at0x1286370",
+    "avatar_index": "S+0x48, store at0x1286430",
+    "dt_eval": "S+0xA0 from [RBP-0x60], store at0x128637D",
+    "request": "R15=original RDX, assignment at0x1286374",
+    "confidence": "Statically verified in the original evaluator; actual new C callback capture/lifetime is not qualified."
+  }
+}

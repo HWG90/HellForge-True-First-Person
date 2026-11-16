@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "id": "goose.true-first-person",
+  "name": "True First Person",
+  "version": "0.5.34-hellforge.dev.5",
+  "description": "C True First Person for build25480438. Native weapon visibility recovery after switching, native camera and FPS animations, F11 toggle and F8 placement. Development candidate; gameplay acceptance pending.",
+  "gameplay": false,
+  "code": {
+    "dll": "goose_true_first_person.dll",
+    "sdk": 16,
+    "prebuilt": true,
+    "game": "25480438"
+  }
+}

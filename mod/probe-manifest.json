@@ -1,0 +1,9 @@
+{
+  "format": 1,
+  "id": "goose.true-first-person-probe",
+  "name": "True First Person — read-only target check",
+  "version": "0.1.0-dev.1",
+  "description": "Read-only native C census for the True First Person backport. Observes camera ownership and rig layout on build25480438. No view changes, hooks or memory writes. Optional UI needs Goose Overlay Host. This is a diagnostic, not the completed mod.",
+  "gameplay": false,
+  "code": {"dll": "goose_true_first_person_probe.dll", "sdk": 16, "prebuilt": true, "game": "25480438"}
+}
