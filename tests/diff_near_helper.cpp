@@ -357,9 +357,11 @@ struct Run {
     ++call_index; call_text = text;
     for (int w = 0; w < 2; ++w) { events[w].clear(); reads_in_call[w] = cas_in_call[w] = writes_in_call[w] = 0; }
     inject.active = probe_here && inject.mode != INJECT_NONE;
+    const bool readonly_before = fixture_slot_readonly;
     const uint32_t a = retail(); finish(0);
-    if (readonly_after_cas || readonly_after_policy_lock) fixture_slot_readonly = false; // the translation starts where the original did
+    const bool readonly_after = fixture_slot_readonly; fixture_slot_readonly = readonly_before; // the translation starts where the original did
     const uint32_t b = translation(); finish(1);
+    if (fixture_slot_readonly != readonly_after) fail("a seam of the test fired for one helper only (slot read-only: retail %d, translation %d)", readonly_after, fixture_slot_readonly);
     inject.active = false; after_cas.clear(); generation_locks_after_write = false; readonly_after_cas = false; readonly_after_policy_lock = false;
     if (probe_here) { if (discovering) shared->probe_reads = static_cast<uint64_t>(reads_in_call[0]); inject.mode = INJECT_NONE; }
     if (a != b) fail("return value: retail %u, translation %u", a, b);
