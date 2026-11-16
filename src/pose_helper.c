@@ -211,6 +211,14 @@
 #define L_PLAYER_COUNT      0x88   /* layout; snapshot.c */
 #define L_PLAYER_ENTITY     0x3a8  /* layout; snapshot.c */
 /* ====================================================================== */
+/* TEST ONLY, never defined in a shipped build. tests/run-diff-pose.sh builds a
+ * second object with -DTFP_POSE_TEST_OPEN_CONSTANTS='"diff_pose_helper_open.h"':
+ * that header redefines the OPEN names above (and B_INPUT_ESTABLISHED) with
+ * places in the test's fake game image, so the look-gain normalisation, which
+ * refuses on this build, can still be compared with retail's call by call. */
+#ifdef TFP_POSE_TEST_OPEN_CONSTANTS
+#include TFP_POSE_TEST_OPEN_CONSTANTS
+#endif
 
 #define HIGH UINT64_C(0x800000000000)
 #define SLOT_COUNT 4u
