@@ -1,4 +1,4 @@
-# The read-only probe (0.6.0-probe.1)
+# The read-only probe (0.6.0-probe.2)
 
 A small separate mod, `goose.true-first-person-probe`, that checks on the real game what the offline tests cannot: that the player, weapon and camera-request data are where the build profile says they are on build 25480438.
 
@@ -32,3 +32,7 @@ Any ordinary play will do, a few minutes: load a mission, draw a weapon, aim, sw
 Anything else (a `Snapshot: error=…` that stays during play, a mismatched pin, a `weapon=-` while a gun is in hand) points at a wrong offset, and its text says which read failed.
 
 The log is `mod-goose.true-first-person-probe.log` in the session folder under the install's `logs/sessions/`.
+
+## First session, 2026-11-16 (probe.1)
+
+The whole session logged one line: `Snapshot: error=Native ADS fingerprint mismatch: controller_exit`. The First Person Controller was loaded and its aim-keeper hook sits on that pinned function (`hooks.tsv`: `game.dll+0x12b2ae0 … goose.first-person-controller`), so the code in memory differed from the pin and every snapshot refused, as retail's would. probe.2 compares pins with the code as it was before HellForge's hooks (`read_code`) and marks such a pin as hooked. For the mod itself the rule stays retail's: the First Person Controller must be switched off when True First Person is installed, because a changed pin is a refusal.

@@ -25,8 +25,28 @@ static FpcRequestLog request_log;
 static bool pins_reported;
 static uint32_t keyed_unit;
 
+static uintptr_t game_base, exe_base;
+/* A code pin is compared with the code as it was before any hook HellForge placed: another mod's
+ * hook on a pinned function (the First Person Controller hooks the aim controller's exit) must not
+ * make this diagnostic refuse every snapshot, as it did in the first probe session (2026-11-16).
+ * Everything else is read as it is now. */
+static bool pinned_code(uintptr_t at, size_t size) {
+  for (size_t i = 0; i < FP_WITNESS_COUNT; i++) {
+    uintptr_t pin = game_base + fp_witnesses[i].rva;
+    if (at >= pin && at + size <= pin + strlen(fp_witnesses[i].hex) / 2) return true;
+  }
+  for (size_t i = 0; i < FP_NATIVE_SITE_COUNT; i++) {
+    uintptr_t pin = (fp_native_sites[i].exe ? exe_base : game_base) + fp_native_sites[i].rva;
+    if (at >= pin && at + size <= pin + strlen(fp_native_sites[i].hex) / 2) return true;
+  }
+  return false;
+}
+static bool can_read_code(void) {
+  return hf->size >= offsetof(HfApi, read_code) + sizeof hf->read_code && hf->read_code;
+}
 static bool sdk_read(void *unused, uintptr_t at, void *out, size_t size) {
   (void)unused;
+  if (can_read_code() && pinned_code(at, size)) return hf->read_code(at, out, size) == 0;
   return hf->read(at, out, size) == 0;
 }
 
@@ -40,7 +60,12 @@ static void report_pins(const FpMemory *m) {
     uint8_t first;
     bool readable = fp_read(m, m->game + w->rva, &first, 1);
     bool match = readable && fp_bytes(m, m->game + w->rva, w->hex);
-    hf->log(owner, "Pin: %s %s game+%#x", match ? "ok" : readable ? "MISMATCH" : "unreadable", w->name, (unsigned)w->rva);
+    uint8_t live[64], original[64];
+    size_t n = strlen(w->hex) / 2;
+    bool hooked = match && n <= sizeof live && can_read_code() && hf->read(m->game + w->rva, live, n) == 0 &&
+                  hf->read_code(m->game + w->rva, original, n) == 0 && memcmp(live, original, n);
+    hf->log(owner, "Pin: %s %s game+%#x%s", match ? "ok" : readable ? "MISMATCH" : "unreadable", w->name, (unsigned)w->rva,
+            hooked ? " (hooked by another mod; its original code matches)" : "");
     if (match) ok++; else if (readable) bad++; else unread++;
   }
   for (size_t i = 0; i < FP_NATIVE_SITE_COUNT; i++) {
@@ -86,6 +111,8 @@ static void tick(HfMod *mod, float dt, void *unused) {
   size_t size = 0;
   FpMemory memory = {sdk_read, NULL, hf->module_base("game.dll", &size), hf->module_base("helldivers2.exe", &size)};
   if (!memory.game || !memory.exe) return;
+  game_base = memory.game;
+  exe_base = memory.exe;
   uint64_t now = GetTickCount64();
   TfpSnapshot s;
   char error[160] = "", why[160] = "", text[640];
@@ -118,7 +145,7 @@ __declspec(dllexport) int hellforge_mod_init(const HfApi *api, HfMod *mod) {
       !api->on_game_thread || strcmp(api->build_id(), "25480438")) return 1;
   hf = api;
   owner = mod;
-  hf->log(mod, "True First Person probe 0.6.0-probe.1. READ ONLY: no game calls, no table swaps, no memory writes, no keys.");
+  hf->log(mod, "True First Person probe 0.6.0-probe.2. READ ONLY: no game calls, no table swaps, no memory writes, no keys.");
   if (!hf->on_game_thread(mod, tick, NULL)) {
     hf->log(mod, "Probe could not register its game-thread tick");
     return 1;

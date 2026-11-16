@@ -2,7 +2,7 @@
   "format": 1,
   "id": "goose.true-first-person-probe",
   "name": "True First Person: read-only probe",
-  "version": "0.6.0-probe.1",
+  "version": "0.6.0-probe.2",
   "description": "Reads the player, weapon and camera request state on build 25480438 and writes them to its log, for the True First Person rewrite. It changes nothing in the game: no view changes, no game calls, no memory writes, no keys. A diagnostic, not the mod.",
   "gameplay": false,
   "code": {"dll": "goose_true_first_person_probe.dll", "sdk": 16, "prebuilt": true, "game": "25480438"}
