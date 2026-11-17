@@ -564,7 +564,7 @@ static bool CallV(lua_State* L, const char* what, const char* sig, int prepushed
     return ok;
 }
 
-bool eng_call(const char* path, const char* sig, ...)
+bool eng_callv(const char* path, const char* sig, va_list args)
 {
     lua_State* L = g_state;
     if (L == NULL) { Fail("no Lua state"); return false; }
@@ -579,9 +579,14 @@ bool eng_call(const char* path, const char* sig, ...)
         Fail("stingray.%s is not a function", path);
         return false;
     }
+    return CallV(L, path, sig, 0, args);
+}
+
+bool eng_call(const char* path, const char* sig, ...)
+{
     va_list args;
     va_start(args, sig);
-    bool ok = CallV(L, path, sig, 0, args);
+    bool ok = eng_callv(path, sig, args);
     va_end(args);
     return ok;
 }
@@ -806,6 +811,27 @@ bool eng_index(EngRef table, int i, EngRef* out)
     if (L_.type(L, -1) != LUA_TNIL) *out = MakeRef(L, L_.ref(L, LUA_REGISTRYINDEX)); else L_.settop(L, L_.gettop(L) - 1);
     L_.settop(L, L_.gettop(L) - 1);
     return true;
+}
+
+int eng_userdata_array(EngRef table, uintptr_t* out, int max)
+{
+    lua_State* L = g_state;
+    if (L == NULL || table == 0 || max < 0) return -1;
+    int index = RefIndex(table, "eng_userdata_array");
+    if (index <= 0) return -1;
+    if (!L_.checkstack(L, 4)) return -1;
+    L_.rawgeti(L, LUA_REGISTRYINDEX, index);
+    if (L_.type(L, -1) != LUA_TTABLE) { L_.settop(L, L_.gettop(L) - 1); return -1; }
+    int n = (int)L_.objlen(L, -1);
+    for (int i = 0; i < n && i < max; i++)
+    {
+        L_.rawgeti(L, -1, i + 1);
+        int type = L_.type(L, -1);
+        out[i] = type == LUA_TLIGHTUSERDATA || type == LUA_TUSERDATA ? (uintptr_t)L_.touserdata(L, -1) : 0;
+        L_.settop(L, L_.gettop(L) - 1);
+    }
+    L_.settop(L, L_.gettop(L) - 1);
+    return n;
 }
 
 bool eng_pairs_count(EngRef table, int* count)

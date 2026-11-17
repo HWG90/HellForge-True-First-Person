@@ -8,6 +8,7 @@
 #ifndef PHOTO_ENGINE_H
 #define PHOTO_ENGINE_H
 
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -37,6 +38,7 @@ uint64_t eng_stale_uses(void);               /* how many uses of a dead EngRef w
  * may be nil.
  * References created before a later result fails are released. Returns true, or false with eng_error() set. */
 bool eng_call(const char* path, const char* sig, ...);
+bool eng_callv(const char* path, const char* sig, va_list args); /* eng_call with the arguments as a va_list */
 /* A method of a userdata (a Matrix4x4Box's unbox): object:method(...) with the same signatures. */
 bool eng_method(EngRef object, const char* method, const char* sig, ...);
 bool eng_has(const char* path); /* stingray.<path> is a function (or a table) */
@@ -67,6 +69,9 @@ uintptr_t eng_pointer(EngRef ref);     /* userdata address; World.units Unit han
 int eng_len(EngRef table);             /* #table (0 for anything else) */
 bool eng_index(EngRef table, int i, EngRef* out); /* table[i] as a new reference (0 for nil) */
 bool eng_pairs_count(EngRef table, int* count);   /* how many keys a table has (next-based) */
+/* The userdata addresses (eng_pointer's number; 0 for anything that is not a userdata) of table[1..#table], with no
+ * reference made: at most `max` are written. Returns #table, or -1 when it is not a table. For World.units' list. */
+int eng_userdata_array(EngRef table, uintptr_t* out, int max);
 /* A table's entries in next() order (holes and all, as a native inventory may have them): at most `max` keys (NAN for
  * a key that is not a number) and values (new references, 0 for nil). Returns how many it read, `max` + 1 when the
  * table has more than `max` (the extra one is not kept), or -1 when it is not a table. */
