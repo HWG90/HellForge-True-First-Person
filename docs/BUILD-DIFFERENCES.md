@@ -4,7 +4,7 @@ Two kinds of entry: behaviour that has to differ from retail on this build (none
 
 ## Behaviour
 
-None yet.
+None yet in the translated units. The view build (0.6.0-view.1) differs from retail in its plumbing only, each listed with its reason in `docs/WIRING-VIEW.md` section 6: the frame clock is the performance counter, the mouse buttons come from Windows, a raised frame is logged instead of switching the mode off, code pins are read as they were before any HellForge hook, and the pose helper is a stand-in.
 
 ## Build data established by hand
 
