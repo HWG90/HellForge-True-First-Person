@@ -185,8 +185,9 @@ static TfpOpsResult hook_camera_before_entry(void *u, TfpOpsText *why) {
   value_text(r[1], why);
   return r[0].kind == TFP_RT_TRUE ? TFP_OPS_TRUE : r[0].kind == TFP_RT_NIL ? TFP_OPS_NIL : TFP_OPS_FALSE;
 }
-static bool placement_of(V value, TfpOpsPlacement *out) {
-  if (value.kind != TFP_RT_REF || value.ref != tfp_rt_default_placement) return false;
+bool tfp_wire_placement_of(TfpWire *w, V value, TfpOpsPlacement *out) {
+  if (value.kind != TFP_RT_REF) return false;
+  if (value.ref != tfp_rt_default_placement) return w->placement_decode && w->placement_decode(w, value, out);
   memset(out, 0, sizeof *out);
   out->x = tfp_rt_default_placement[0], out->y = tfp_rt_default_placement[1], out->z = tfp_rt_default_placement[2];
   out->present = TFP_OPS_X | TFP_OPS_Y | TFP_OPS_Z;
@@ -200,7 +201,7 @@ static TfpOpsResult hook_placement_resolver(void *u, const char *key, TfpOpsPlac
   args.v[0] = tfp_wire_text(key);
   TfpRtStatus s = tfp_rt_call(&w->rt, TFP_RT_E_action_placement, &args, r);
   if (s == TFP_RT_RAISED) { raised_text(w, raised); return TFP_OPS_RAISED; }
-  return s == TFP_RT_OK && placement_of(r[0], out) ? TFP_OPS_TRUE : TFP_OPS_NIL;
+  return s == TFP_RT_OK && tfp_wire_placement_of(w, r[0], out) ? TFP_OPS_TRUE : TFP_OPS_NIL;
 }
 static bool current_packet(TfpWire *w, bool *raised) { /* backend.presentation_transition() */
   V r[2] = {nil(), nil()};
@@ -474,7 +475,7 @@ static bool near_clock(void *u, double *seconds, const char **error) {
 /* ---- backend: the runtime host's pointers --------------------------------------------------- */
 static bool rt_backend_new(TfpRtHost *h) {
   TfpWire *w = W(h);
-  tfp_ops_init(&w->ops, &w->ops_host, NULL, &w->null_pose);
+  tfp_ops_init(&w->ops, &w->ops_host, NULL, w->pose_helper ? w->pose_helper : &w->null_pose);
   return true;
 }
 static bool rt_backend_begin_frame(TfpRtHost *h) { tfp_ops_begin_frame(&W(h)->ops); return true; }
@@ -558,6 +559,7 @@ static void lease_out(TfpRtHost *h, const TfpWireLease *l, TfpRtTable *out) {
   static char spill[48];
   if (!texts) texts = spill;
   tfp_wire_lease_table(l, out, texts, texts + 24);
+  if (l && W(h)->lease_extra) W(h)->lease_extra(W(h), l, out);
 }
 static void rt_controller_lease(TfpRtHost *h, TfpRtTable *out) { lease_out(h, held(W(h)), out); }
 static const TfpWireLease *ops_lease(const TfpOpsLease *l) { return l ? LEASE_OF(ops, l) : NULL; }
@@ -587,7 +589,8 @@ void tfp_wire_controller_state(TfpWire *w, TfpRtTable *out) { /* controller:resu
   }
   out->f[TFP_RT_STATE_CLEANUP_PENDING] = boolean(c->lease && c->phase == TFP_PHASE_CLEANUP_PENDING);
   out->f[TFP_RT_STATE_WAIT_REASON] = c->wait_reason[0] ? kept_text(w, c->wait_reason) : nil();
-  /* blend: the pose helper's hip blend; there is no pose helper, so nil. */
+  /* blend: the pose helper's hip blend; nil without a pose helper. */
+  if (w->controller_extra) w->controller_extra(w, out);
 }
 static bool rt_controller_new(TfpRtHost *h) { tfp_controller_init(&W(h)->controller, &W(h)->api); return true; }
 static bool rt_controller_is_enabled(TfpRtHost *h, V *o1) { *o1 = boolean(W(h)->controller.enabled); return true; }
@@ -657,7 +660,7 @@ static bool rt_controller_set_placement(TfpRtHost *h, V value, V extra, V *o1, V
   (void)extra;
   *o1 = boolean(false), *o2 = nil();
   /* The only placement table this build ever hands over is the shipped default (wire_off.c, Actions.resolve). */
-  if (!placement_of(value, &p)) { *o2 = tfp_wire_text("Placement requires XYZ"); return true; }
+  if (!tfp_wire_placement_of(w, value, &p)) { *o2 = tfp_wire_text("Placement requires XYZ"); return true; }
   const double xyz[3] = {p.x, p.y, p.z}, angles[3] = {0, 0, 0};
   const char *problem = tfp_wire_placement_check(xyz, angles);
   if (problem) { *o2 = tfp_wire_text(problem); return true; }
@@ -971,6 +974,19 @@ static bool rt_menu_update(TfpRtHost *h) {
   return true;
 }
 
+/* ---- for the other binder files (wire.h) ------------------------------------------------------- */
+const char *tfp_wire_keep(TfpWire *w, const char *t) { return keep(w, t); }
+bool tfp_wire_raise(TfpRtHost *h, const char *t) { return raise(h, t); }
+TfpWireSnap *tfp_wire_snap_of(TfpWire *w, const TfpRtTable *table) { return snap_of(w, table); }
+TfpWireLease *tfp_wire_held(TfpWire *w) { return held(w); }
+const TfpWireLease *tfp_wire_lease_of_ops(const TfpOpsLease *lease) { return ops_lease(lease); }
+const TfpWireLease *tfp_wire_lease_of_table(const TfpRtTable *table) { return table && table->present ? table->ref : NULL; }
+double tfp_wire_clock(TfpWire *w) { return runtime_clock(w); }
+void tfp_wire_say(TfpWire *w, const char *t) { io_log(w, t); }
+bool tfp_wire_pose_offset(const TfpWire *w) { return pose_offset(w); }
+const char *tfp_wire_phase_text(TfpPhase phase) { return phase_text(phase); }
+bool tfp_wire_address_of(double value, uint64_t *out) { return address_of(value, out); }
+
 /* ---- joining --------------------------------------------------------------------------------- */
 /* TfpOpsHost has one `user` for memory and for runtime.lua's hooks: the backend gets this binder, and
  * these forward the memory half to the caller's host. */
@@ -1091,6 +1107,7 @@ void tfp_wire_frame(TfpWire *w, const char *extra) {
     }
   } else w->entry_fault[0] = 0;
 
+  if (w->frame_extra) w->frame_extra(w);
   TfpViewSample s;
   TfpFovResult fov;
   TfpBlurResult blur;

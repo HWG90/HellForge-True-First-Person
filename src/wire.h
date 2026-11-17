@@ -55,6 +55,9 @@ typedef struct TfpWireSnap {
 } TfpWireSnap;
 
 enum { TFP_WIRE_SNAPS = 48, TFP_WIRE_VIEWS = 8, TFP_WIRE_ARENA = 16384 };
+/* Whose state sits in TfpWire.ext[]. */
+enum { TFP_WIRE_EXT_SETTINGS, TFP_WIRE_EXT_POSE, TFP_WIRE_EXT_MOTION, TFP_WIRE_EXT_ENGINE, TFP_WIRE_EXT_EFFECTS, TFP_WIRE_EXT_LOG,
+       TFP_WIRE_EXT_SPARE, TFP_WIRE_EXT_N };
 typedef struct TfpWire {
   TfpRt rt;
   TfpRtHost host;
@@ -102,6 +105,20 @@ typedef struct TfpWire {
   double row_eye[3], row_fov_native, row_fov_applied;
   TfpViewLog log;
   char entry_fault[256];
+  /* ---- the feel build (docs/WIRING-FEEL.md): each module's binder hangs its state and hooks here.
+   * All NULL in the view build, which then behaves exactly as before. ---- */
+  void *ext[TFP_WIRE_EXT_N];
+  /* The pose (editor) helper behind the backend; NULL: the stand-in above. Set before on_enable. */
+  const TfpOpsPoseHelper *pose_helper;
+  /* A placement value the runtime hands back (a ref made by Actions.resolve and friends) decoded;
+   * the shipped default table is decoded by the binder itself. */
+  bool (*placement_decode)(struct TfpWire *w, TfpRtValue value, TfpOpsPlacement *out);
+  /* More fields for the LEASE table (the helper's depth_stats / input_stats functions) and for
+   * controller:result() (blend). */
+  void (*lease_extra)(struct TfpWire *w, const TfpWireLease *lease, TfpRtTable *out);
+  void (*controller_extra)(struct TfpWire *w, TfpRtTable *out);
+  /* After on_update, before the session-log sample: modules add their per-frame numbers. */
+  void (*frame_extra)(struct TfpWire *w);
 } TfpWire;
 
 /* Builds the host (off answers first, then the wired view) and the runtime's start state. The
@@ -121,4 +138,31 @@ void tfp_wire_view(const TfpOpsSnapshot *s, const char *reason_storage, TfpView 
 /* controller.lua:112-135 (set_placement): 0 accepted, else the refusal text. */
 const char *tfp_wire_placement_check(const double xyz[3], const double angles[3]);
 void tfp_wire_identity_text(char out[24], char level, uint64_t key);
+
+/* ---- for the other binder files (wire_*.c of the feel build) ---------------------------------
+ * A module binder is `tfp_wire_<module>_bind(TfpWire *, …)`, called after tfp_wire_init and before
+ * the runtime's on_enable: it keeps its state in w->ext[], overrides the pointers of w->host that
+ * wire_off.c answered, and may set the hooks above and the members of w->ops_host. */
+/* A text that stays valid until the outermost runtime call returns. */
+const char *tfp_wire_keep(TfpWire *w, const char *text);
+/* A Lua error from a host pointer: `return tfp_wire_raise(h, "…")`. */
+bool tfp_wire_raise(TfpRtHost *h, const char *text);
+/* The snapshot behind a SNAP table's ref (NULL: not one of this binder's). */
+TfpWireSnap *tfp_wire_snap_of(TfpWire *w, const TfpRtTable *table);
+/* The controller's lease (NULL: none), and the binder's lease behind the backend's. */
+TfpWireLease *tfp_wire_held(TfpWire *w);
+const TfpWireLease *tfp_wire_lease_of_ops(const TfpOpsLease *lease);
+/* The lease behind a LEASE table's ref. */
+const TfpWireLease *tfp_wire_lease_of_table(const TfpRtTable *table);
+/* The runtime's monotonic clock (its entry `clock`); NAN: none. */
+double tfp_wire_clock(TfpWire *w);
+/* The mod's log (one line). */
+void tfp_wire_say(TfpWire *w, const char *text);
+/* controller:result().mode == 'pose_offset'. */
+bool tfp_wire_pose_offset(const TfpWire *w);
+const char *tfp_wire_phase_text(TfpPhase phase);
+/* A placement value: the shipped default table, or whatever placement_decode knows. */
+bool tfp_wire_placement_of(TfpWire *w, TfpRtValue value, TfpOpsPlacement *out);
+/* A number that is an address (a Lua number holding an integer below 2^53). */
+bool tfp_wire_address_of(double value, uint64_t *out);
 #endif
