@@ -1,0 +1,558 @@
+/* The settings store and its binder (src/tfp_settings.c, src/wire_settings.c).
+ *
+ *   wire_settings_test                  the tests: the JSON reader's refusals, the store, and retail's own answers
+ *                                       (tests/vectors/settings_vectors.h, from the unmodified retail Lua) replayed
+ *                                       through the runtime host's pointers on the converted settings
+ *   wire_settings_test --dump <file>    the store loaded from that settings.json, one `path=value` line per leaf
+ *   wire_settings_test --write <file>   the store loaded from it and written back as JSON
+ *
+ * No Windows, no game: every memory read fails. */
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "wire.h"
+#include "wire_off.h"
+#include "wire_settings.h"
+#include "vectors/settings_vectors.h"
+
+static unsigned checks;
+#define CHECK(condition) do { checks++; if (!(condition)) { printf("wire settings: FAILED %s (line %d)\n", #condition, __LINE__); return 1; } } while (0)
+#define COUNT(a) (sizeof(a) / sizeof *(a))
+typedef TfpRtValue V;
+
+static char lines[64][700];
+static int line_count;
+static void capture(void *user, const char *text) {
+  (void)user;
+  if (line_count < 64) snprintf(lines[line_count++], sizeof lines[0], "%s", text);
+}
+static const char *logged(const char *part) {
+  for (int i = 0; i < line_count; i++) if (strstr(lines[i], part)) return lines[i];
+  return NULL;
+}
+
+/* ---- a host with no game behind it (as tests/wire_glue_test.c) ---- */
+static double now_seconds = 100;
+static uint64_t no_module(void *u, TfpOpsModule which) { (void)u; (void)which; return 0; }
+static bool no_read(void *u, uint64_t at, void *out, size_t size) { (void)u; (void)at; (void)out; (void)size; return false; }
+static bool no_write(void *u, uint64_t at, const void *bytes, size_t size) { (void)u; (void)at; (void)bytes; (void)size; return false; }
+static void no_query(void *u, uint64_t at, TfpOpsRegion *out) { (void)u; (void)at; memset(out, 0, sizeof *out); }
+static bool no_call(void *u, TfpOpsNative which, uint64_t address, const uint64_t args[4], uint64_t *result, TfpOpsText *raised) {
+  (void)u; (void)which; (void)address; (void)args; (void)result;
+  raised->present = true;
+  snprintf(raised->text, sizeof raised->text, "no game");
+  return false;
+}
+static double test_clock(void *u) { (void)u; return now_seconds; }
+static int test_mouse(void *u, int button) { (void)u; (void)button; return 0; }
+static uint32_t h_validate_c(const TfpCameraConfig *c) { (void)c; return 0; }
+static uint32_t h_begin_c(const TfpCameraConfig *c, uint64_t *g) { (void)c; (void)g; return 0; }
+static uint32_t h_end(uint64_t g) { (void)g; return 1; }
+static uint32_t h_stats_c(uint64_t g, TfpCameraStats *s) { (void)g; (void)s; return 0; }
+static uint32_t h_error(void) { return 0; }
+static uint32_t h_generation(uint64_t g) { (void)g; return 0; }
+static uint32_t h_handoff(uint64_t g, float a, float b) { (void)g; (void)a; (void)b; return 0; }
+static uint32_t h_u32(uint64_t g, uint32_t v) { (void)g; (void)v; return 0; }
+static uint32_t h_validate_f(const TfpFovConfig *c) { (void)c; return 0; }
+static uint32_t h_begin_f(const TfpFovConfig *c, uint64_t *g) { (void)c; (void)g; return 0; }
+static uint32_t h_bind_f(uint64_t g, uint64_t r, uint32_t w) { (void)g; (void)r; (void)w; return 0; }
+static uint32_t h_transition_f(uint64_t g, uint64_t e, float p, uint32_t a) { (void)g; (void)e; (void)p; (void)a; return 0; }
+static uint32_t h_stats_f(uint64_t g, TfpFovStats *s) { (void)g; (void)s; return 0; }
+static uint32_t h_begin_n(const TfpNearConfig *c, uint64_t *g) { (void)c; (void)g; return 0; }
+static uint32_t h_set_n(uint64_t g, float a, float b) { (void)g; (void)a; (void)b; return 0; }
+static uint32_t h_stats_n(uint64_t g, TfpNearStats *s) { (void)g; (void)s; return 0; }
+static uint32_t h_validate_b(const TfpBlurConfig *c) { (void)c; return 0; }
+static uint32_t h_begin_b(const TfpBlurConfig *c, uint64_t *g) { (void)c; (void)g; return 0; }
+static uint32_t h_stats_b(uint64_t g, TfpBlurStats *s) { (void)g; (void)s; return 0; }
+static TfpWire wire;
+static void new_wire(void) {
+  static const TfpCameraHelperApi camera = {h_validate_c, h_begin_c, h_end, h_stats_c, h_error, h_generation, h_handoff, h_u32, h_u32};
+  static const TfpFovHelperApi fov = {h_validate_f, h_begin_f, h_bind_f, h_transition_f, h_end, h_stats_f, h_error};
+  static const TfpNearHelperApi near_clip = {h_begin_n, h_set_n, h_end, h_stats_n, h_error};
+  static const TfpBlurHelperApi blur = {h_validate_b, h_begin_b, h_end, h_stats_b, h_error};
+  TfpOpsHost memory;
+  memset(&memory, 0, sizeof memory);
+  memory.module = no_module, memory.read = no_read, memory.write = no_write, memory.query = no_query, memory.call = no_call;
+  TfpWirePlatform platform = {NULL, test_clock, test_mouse, capture};
+  TfpWireHelpers helpers = {&camera, &fov, &near_clip, &blur};
+  line_count = 0;
+  tfp_wire_init(&wire, &memory, &platform, &helpers);
+}
+
+static V text(const char *t) { return tfp_wire_text(t); }
+static bool text_is(V v, const char *t) { return v.kind == TFP_RT_TEXT && t && v.length == strlen(t) && !memcmp(v.text, t, v.length); }
+static bool same_placement(const TfpActionPlacement *p, unsigned mask, const double v[6]) {
+  const double got[6] = {p->x, p->y, p->z, p->yaw, p->pitch, p->roll};
+  if (p->present != mask) return false;
+  for (int i = 0; i < 6; i++) if ((mask >> i & 1) && got[i] != v[i]) return false; /* an absent field's storage is not part of the answer */
+  return true;
+}
+
+/* ---- the store as flat lines (the Python side compares them with the import, key by key) ---- */
+static void dump_placement(const char *path, const TfpActionPlacement *p) {
+  static const char *const names[6] = {"x", "y", "z", "yaw", "pitch", "roll"};
+  const double v[6] = {p->x, p->y, p->z, p->yaw, p->pitch, p->roll};
+  if (!p->present) printf("%s={}\n", path);
+  for (int i = 0; i < 6; i++) if (p->present >> i & 1) printf("%s.%s=%.17g\n", path, names[i], v[i]);
+}
+static void dump(const TfpSettings *s) {
+  char path[200];
+  for (int f = 0; f < TFP_SET_COUNT; f++) {
+    const TfpSettingsValue *v = s->field[f];
+    const char *name = tfp_settings_field_name((TfpSettingsField)f);
+    if (!v) continue;
+    snprintf(path, sizeof path, "first_person.%s", name);
+    if (v->kind == TFP_SETTINGS_BOOL) printf("%s=%s\n", path, v->boolean ? "true" : "false");
+    else if (v->kind == TFP_SETTINGS_NUMBER) printf("%s=%.17g\n", path, v->number);
+    else if (v->kind == TFP_SETTINGS_PLACEMENT) dump_placement(path, &v->placement);
+    else if (!v->count) printf("%s={}\n", path);
+    for (size_t i = 0; i < v->count; i++) {
+      if (v->kind == TFP_SETTINGS_MAPPING) { printf("%s.%s.%s=%s\n", path, v->rows[i].resource, v->rows[i].states, v->rows[i].action); continue; }
+      snprintf(path, sizeof path, "first_person.%s.%s", name, v->ids[i]);
+      if (v->kind == TFP_SETTINGS_MARKERS) printf("%s=true\n", path);
+      else if (v->kind == TFP_SETTINGS_PLACEMENTS) dump_placement(path, &v->placements[i].placement);
+      else if (v->kind == TFP_SETTINGS_NEAR) {
+        if (!v->near_clip[i].has_hip && !v->near_clip[i].has_aim) printf("%s={}\n", path);
+        if (v->near_clip[i].has_hip) printf("%s.hip_cm=%.17g\n", path, v->near_clip[i].hip_cm);
+        if (v->near_clip[i].has_aim) printf("%s.aim_cm=%.17g\n", path, v->near_clip[i].aim_cm);
+      } else {
+        if (!v->profiles[i].has) printf("%s={}\n", path);
+        for (int action = 0; action < TFP_ACT_COUNT; action++) {
+          if (!(v->profiles[i].has >> action & 1)) continue;
+          snprintf(path, sizeof path, "first_person.%s.%s.%s", name, v->ids[i], tfp_action_name((TfpAct)action));
+          dump_placement(path, &v->profiles[i].action[action]);
+        }
+      }
+    }
+  }
+  for (int id = 0; id < TFP_MENU_COUNT; id++) {
+    if (s->menu[id].is_bool) printf("menu.%s=%s\n", tfp_settings_menu_name((TfpSettingsMenuId)id), s->menu[id].boolean ? "true" : "false");
+    else printf("menu.%s=%.17g\n", tfp_settings_menu_name((TfpSettingsMenuId)id), s->menu[id].number);
+  }
+}
+static int file_mode(const char *mode, const char *path) {
+  static char bytes[TFP_SETTINGS_MAX + 1], out[TFP_SETTINGS_MAX];
+  static TfpSettings s;
+  char why[200];
+  FILE *file = fopen(path, "rb");
+  if (!file) { fprintf(stderr, "cannot open %s\n", path); return 2; }
+  size_t n = fread(bytes, 1, sizeof bytes, file);
+  fclose(file);
+  if (!tfp_settings_load(&s, bytes, n, why, sizeof why)) { fprintf(stderr, "refused: %s\n", why); return 1; }
+  if (!strcmp(mode, "--dump")) dump(&s);
+  else { tfp_settings_write(&s, out, sizeof out); fputs(out, stdout); }
+  tfp_settings_free(&s);
+  return 0;
+}
+
+/* ---- retail's answers replayed through the host pointers ---- */
+static int replay(const char *label, const SettingsOp *ops, size_t count) {
+  TfpRtHost *h = &wire.host;
+  TfpSettings *store = tfp_wire_settings(&wire);
+  for (size_t i = 0; i < count; i++) {
+    const SettingsOp *op = &ops[i];
+    V key = text(op->key), name = text(op->name), o1 = tfp_wire_nil(), o2 = tfp_wire_nil();
+    TfpActionPlacement p, given = {op->in[0], op->in[1], op->in[2], op->in[3], op->in[4], op->in[5], op->in_mask};
+    TfpRtTable table;
+    bool ok = false, returned;
+    switch (op->op) {
+      case 'R': case 'D':
+        returned = op->op == 'R' ? h->actions_resolve(h, key, name, &o1, &o2) : h->actions_default_placement(h, key, name, &o1, &o2);
+        if (op->answer == 'E') ok = !returned && h->raised && !strcmp(h->raised, op->text);
+        else ok = returned && tfp_wire_settings_placement_of(&wire, o1, &p) && same_placement(&p, op->mask, op->v) &&
+                  (op->op == 'D' ? o2.kind == TFP_RT_NIL : o2.kind == (op->extra ? TFP_RT_TRUE : TFP_RT_FALSE));
+        if (ok && op->op == 'R' && op->answer == 'P' && (!op->name || tfp_action_from_name(op->name) != TFP_ACT_NONE)) {
+          /* the log's wording agrees with retail's `explicit` */
+          char source[48];
+          tfp_wire_settings_source(&wire, op->key && strlen(op->key) < 64 ? op->key : NULL, op->name ? tfp_action_from_name(op->name) : TFP_ACT_IDLE,
+                                   source, sizeof source);
+          bool named = !strncmp(source, "imported(own)", 13) || !strncmp(source, "imported(__all)", 15);
+          ok = named == (op->extra == 1);
+        }
+        break;
+      case 'I':
+        ok = h->actions_weapon_info(h, key, &table) && table.present == (op->text != NULL) &&
+             (!op->text || (text_is(table.f[TFP_RT_WINFO_NAME], op->text) && text_is(table.f[TFP_RT_WINFO_FAMILY], op->text2)));
+        break;
+      case 'N': {
+        double hip, aim;
+        bool profile;
+        tfp_settings_near_options(store, op->key, &hip, &aim, &profile);
+        ok = hip == op->v[0] && aim == op->v[1] && profile == (op->extra == 1);
+        break;
+      }
+      case 'O': { /* runtime.lua:816-821: the defaults the runtime hands the menu */
+        V defaults[TFP_RT_DEFAULTS_N], scale = h->config_field(h, "motion_scale");
+        TfpMotionOptions options;
+        defaults[TFP_RT_DEFAULTS_ENABLED] = tfp_wire_bool(h->config_field(h, "motion_enabled").kind != TFP_RT_FALSE);
+        defaults[TFP_RT_DEFAULTS_SCALE] = scale.kind == TFP_RT_NUMBER ? scale : tfp_wire_number(1);
+        defaults[TFP_RT_DEFAULTS_CAMERA_BOB_STRENGTH] = defaults[TFP_RT_DEFAULTS_CAMERA_SWAY_STRENGTH] = tfp_wire_number(0);
+        ok = h->menu_motion_options(h, defaults, &o1) && tfp_wire_settings_options_of(&wire, o1, &options) &&
+             options.enabled == (op->extra ? TFP_MOTION_TRUE : TFP_MOTION_FALSE) && options.scale.kind == TFP_MOTION_NUMBER &&
+             options.scale.value == op->v[0] && options.editor_frozen == TFP_MOTION_ABSENT && options.shoulder_aim_enabled == TFP_MOTION_ABSENT &&
+             options.setting[TFP_MOTION_CAMERA_BOB_SPEED].kind == TFP_MOTION_NIL && options.setting[TFP_MOTION_CAMERA_SWAY_SPEED].kind == TFP_MOTION_NIL;
+        static const int order[7] = {TFP_MOTION_BOB_STRENGTH, TFP_MOTION_BOB_SPEED, TFP_MOTION_SWAY_STRENGTH, TFP_MOTION_SWAY_SPEED,
+                                     TFP_MOTION_SPRINT_STRENGTH, TFP_MOTION_CAMERA_BOB_STRENGTH, TFP_MOTION_CAMERA_SWAY_STRENGTH};
+        for (int k = 0; ok && k < 7; k++) ok = options.setting[order[k]].kind == TFP_MOTION_NUMBER && options.setting[order[k]].value == op->v[1 + k];
+        break;
+      }
+      case 'F': {
+        V arms, torso, native, mode;
+        ok = h->menu_fird_person_arms(h, &arms) && h->menu_show_torso(h, &torso) && h->menu_native_ads(h, &native) && h->menu_ads_mode(h, &mode) &&
+             (arms.kind == TFP_RT_TRUE) == (op->extra & 1) && (torso.kind == TFP_RT_TRUE) == (op->extra >> 1 & 1) &&
+             (native.kind == TFP_RT_TRUE) == (op->extra >> 2 & 1) && text_is(mode, op->text);
+        break;
+      }
+      case 'V': {
+        V value = h->config_field(h, op->name);
+        const TfpSettingsValue *saved = tfp_wire_settings_value_of(&wire, value);
+        if (op->answer == '0') ok = value.kind == TFP_RT_NIL;
+        else if (op->answer == 'b') ok = value.kind == (op->extra ? TFP_RT_TRUE : TFP_RT_FALSE);
+        else if (op->answer == 'n') ok = value.kind == TFP_RT_NUMBER && value.number == op->v[0];
+        else if (op->answer == 't') ok = saved && saved->kind != TFP_SETTINGS_PLACEMENT && saved->count == (size_t)op->extra;
+        else ok = saved && saved->kind == TFP_SETTINGS_PLACEMENT && same_placement(&saved->placement, op->mask, op->v) &&
+                  tfp_wire_settings_placement_of(&wire, value, &p) && same_placement(&p, op->mask, op->v);
+        break;
+      }
+      case 'M':
+        ok = h->config_action_mapped(h, name).kind == (op->extra ? TFP_RT_TRUE : TFP_RT_FALSE);
+        break;
+      case 'S': { /* runtime.lua:782-783 */
+        V profiles = tfp_wire_nil();
+        returned = h->actions_saved(h, key, name, tfp_wire_settings_placement(&wire, &given), tfp_wire_bool(op->flag), &profiles);
+        if (op->answer == 'E') ok = !returned && h->raised && !strcmp(h->raised, op->text);
+        else ok = returned && profiles.kind == TFP_RT_REF && h->mod_set(h, "action_placements", profiles, &o1, &o2) && o1.kind == TFP_RT_TRUE &&
+                  o2.kind == TFP_RT_NIL;
+        break;
+      }
+      case 'X': { /* runtime.lua:806-811, as tfp_runtime.c runs it */
+        static const char *const keys[3] = {"weapon_placements", "action_placements", "placement"};
+        V before[3], values[3] = {tfp_wire_ref(&tfp_rt_empty_table), tfp_wire_ref(&tfp_rt_empty_table), tfp_wire_ref(tfp_rt_default_placement)};
+        TfpActionPlacement old = {0, 0, 0, 0, 0, 0, 0}, kept = {0, 0, 0, 0, 0, 0, 0};
+        for (int k = 0; k < 3; k++) before[k] = h->config_field(h, keys[k]);
+        bool had = tfp_wire_settings_placement_of(&wire, before[2], &old);
+        size_t rows = before[1].kind == TFP_RT_REF ? tfp_wire_settings_value_of(&wire, before[1])->count : 0;
+        ok = true;
+        for (int k = 0; ok && k < 3; k++) ok = h->mod_set(h, keys[k], values[k], &o1, &o2) && o1.kind == TFP_RT_TRUE;
+        /* the tables read before the writes still hold what they held (retail puts them back on a failure) */
+        if (ok && had) ok = tfp_wire_settings_placement_of(&wire, before[2], &kept) && !memcmp(&old, &kept, sizeof old);
+        if (ok && before[1].kind == TFP_RT_REF) ok = tfp_wire_settings_value_of(&wire, before[1])->count == rows;
+        break;
+      }
+      case 'W': {
+        V value = op->flag == 0 ? tfp_wire_nil() : op->flag == 1 ? tfp_wire_bool(false) : op->flag == 2 ? tfp_wire_bool(true)
+                  : op->flag == 3 ? tfp_wire_number(op->in[0]) : tfp_wire_settings_placement(&wire, &given);
+        ok = h->mod_set(h, op->name, value, &o1, &o2) && o1.kind == (op->extra ? TFP_RT_TRUE : TFP_RT_FALSE);
+        break;
+      }
+      case 'U': {
+        int id = tfp_settings_menu(op->name);
+        ok = id >= 0 && tfp_settings_set_menu(store, (TfpSettingsMenuId)id, op->flag != 3, op->flag == 2, op->in[0]);
+        break;
+      }
+      default: break;
+    }
+    checks++;
+    if (!ok) {
+      printf("wire settings: FAILED %s operation %zu ('%c' key %s name %s): retail answered '%c'\n", label, i, op->op, op->key ? op->key : "nil",
+             op->name ? op->name : "nil", op->answer);
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static bool foreign_decode(TfpWire *w, V value, TfpOpsPlacement *out) {
+  static const char marker = 0;
+  (void)w;
+  if (value.ref != &marker && value.ref != (const void *)foreign_decode) return false;
+  *out = (TfpOpsPlacement){.25, 0, 0, 0, 0, 0, TFP_OPS_X};
+  return true;
+}
+
+int main(int argc, char **argv) {
+  if (argc == 3 && (!strcmp(argv[1], "--dump") || !strcmp(argv[1], "--write"))) return file_mode(argv[1], argv[2]);
+  static TfpSettings s, defaults;
+  static char written[1 << 16], expected[1 << 16];
+  char why[200];
+
+  /* ---- the JSON reader and the loader: what is refused, and that a refusal leaves retail's defaults ---- */
+  CHECK(tfp_settings_defaults(&defaults));
+  size_t defaults_length = tfp_settings_write(&defaults, expected, sizeof expected);
+  CHECK(defaults_length > 400 && defaults_length < sizeof expected);
+  static const struct { const char *json, *why; } refused[] = {
+    {"", "no settings file"}, {"   ", "a value is missing"}, {"{", "a member needs a name"}, {"[1,]", "an unknown word"},
+    {"{\"a\":1,}", "a member needs a name"}, {"{\"a\":1 \"b\":2}", "a ',' or '}' is missing"}, {"{\"a\":1,\"a\":2}", "twice in one object"},
+    {"{\"a\" 1}", "a ':' is missing"}, {"{a:1}", "a member needs a name"}, {"[01]", "must not start with 0"}, {"[1.]", "digit after the point"},
+    {"[1e]", "digit in its exponent"}, {"[-]", "a number needs a digit"}, {"[.5]", "an unknown word"}, {"[+1]", "an unknown word"},
+    {"[tru]", "an unknown word"}, {"[True]", "an unknown word"}, {"[NaN]", "an unknown word"}, {"[1e999]", "out of range"},
+    {"[\"abc]", "a string is not closed"}, {"[\"a\\x\"]", "an unknown escape"}, {"[\"\\ud800\"]", "a lone high surrogate"},
+    {"[\"\\udc00\"]", "a lone low surrogate"}, {"[\"\\u12g4\"]", "four hex digits"}, {"[\"\\u0000\"]", "a NUL character"},
+    {"[\"a\tb\"]", "a control character"}, {"[\"\xC3\xA9\"]", "outside ASCII"}, {"{} x", "text after the end"}, {"[1] [2]", "text after the end"},
+    {"\xEF\xBB\xBF{}", "byte order mark"}, {"[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]", "nested deeper"}, {"[1", "a ',' or ']' is missing"},
+    {"'a'", "an unknown word"}, {"[1 // note\n]", "a ',' or ']' is missing"},
+    /* a JSON document of the wrong shape */
+    {"[]", "the document must be an object"}, {"{}", "format: expected 1"}, {"{\"format\":2,\"first_person\":{}}", "format: expected 1"},
+    {"{\"format\":\"1\",\"first_person\":{}}", "format: expected 1"}, {"{\"format\":1}", "first_person: expected an object"},
+    {"{\"format\":1,\"first_person\":[]}", "first_person: expected an object"}, {"{\"format\":1,\"first_person\":{},\"extra\":1}", "an unknown member"},
+    {"{\"format\":1,\"first_person\":{\"speed\":1}}", "an unknown setting"},
+    {"{\"format\":1,\"first_person\":{\"motion_enabled\":1}}", "expected true or false"},
+    {"{\"format\":1,\"first_person\":{\"motion_scale\":true}}", "expected a number"},
+    {"{\"format\":1,\"first_person\":{\"placement\":3}}", "expected an object"},
+    {"{\"format\":1,\"first_person\":{\"placement\":{\"x\":\"0.1\"}}}", "must be a number"},
+    {"{\"format\":1,\"first_person\":{\"placement\":{\"w\":1}}}", "x, y, z, yaw, pitch, roll only"},
+    {"{\"format\":1,\"first_person\":{\"weapon_placements\":{\"k\":{\"x\":null}}}}", "must be a number"},
+    {"{\"format\":1,\"first_person\":{\"weapon_placements\":{\"0123456789abcdef0123456789abcdef\":{}}}}", "1 to 31 bytes"},
+    {"{\"format\":1,\"first_person\":{\"weapon_placements\":{\"\":{}}}}", "1 to 31 bytes"},
+    {"{\"format\":1,\"first_person\":{\"action_placements\":{\"k\":{\"fly\":{}}}}}", "an action retail does not know"},
+    {"{\"format\":1,\"first_person\":{\"action_placements\":{\"k\":7}}}", "expected an object of actions"},
+    {"{\"format\":1,\"first_person\":{\"action_state_mapping\":{\"r\":{\"1:2\":5}}}}", "expected an action name"},
+    {"{\"format\":1,\"first_person\":{\"action_state_mapping\":{\"r\":3}}}", "expected an object of states"},
+    {"{\"format\":1,\"first_person\":{\"aim_markers\":{\"k\":false}}}", "expected true"},
+    {"{\"format\":1,\"first_person\":{\"near_clip_profiles\":{\"k\":{\"hip\":10}}}}", "hip_cm and aim_cm only"},
+    {"{\"format\":1,\"first_person\":{\"near_clip_profiles\":{\"k\":{\"hip_cm\":\"10\"}}}}", "must be a number"},
+    {"{\"format\":1,\"first_person\":{},\"menu\":{\"volume\":1}}", "an unknown control"},
+    {"{\"format\":1,\"first_person\":{},\"menu\":{\"show_torso\":1}}", "expected true or false"},
+    {"{\"format\":1,\"first_person\":{},\"menu\":{\"near_clip_cm\":true}}", "expected a number"},
+    {"{\"format\":1,\"first_person\":{},\"menu\":[]}", "menu: expected an object"},
+  };
+  for (size_t i = 0; i < COUNT(refused); i++) {
+    bool loaded = tfp_settings_load(&s, refused[i].json, strlen(refused[i].json), why, sizeof why);
+    size_t n = tfp_settings_write(&s, written, sizeof written);
+    checks++;
+    if (loaded || !strstr(why, refused[i].why) || s.from_file || n != defaults_length || strcmp(written, expected)) {
+      printf("wire settings: FAILED refusal %zu: %s -> %s \"%s\" (expected \"%s\")\n", i, refused[i].json, loaded ? "loaded" : "refused", why, refused[i].why);
+      return 1;
+    }
+    tfp_settings_free(&s);
+  }
+  CHECK(!tfp_settings_load(&s, NULL, 0, why, sizeof why) && !strcmp(why, "no settings file") && s.field[TFP_SET_placement]->placement.x == .15);
+  tfp_settings_free(&s);
+  /* what is accepted: every escape, both surrogates, the number forms, white space, an empty first_person (every field nil) */
+  static const char accepted[] =
+      " {\r\n\t\"format\" : 1 , \"source\" : {\"a\\\"b\\\\c\\/d\\b\\f\\n\\r\\t\\u0041\\u00e9\\u20ac\\ud83d\\ude00\": [1, -0, 0.5, -1.25e-3, 2E+2, 1e0, null, true, false, {}, []]},"
+      " \"first_person\": {\"motion_scale\": 1.5e0, \"placement\": {\"x\": -0.0, \"roll\": 9e1}}, \"unread\": {\"anything\": [{\"deep\": [[[[[[[1]]]]]]]}]} } \n";
+  CHECK(tfp_settings_load(&s, accepted, sizeof accepted - 1, why, sizeof why) && !*why && s.from_file);
+  CHECK(s.field[TFP_SET_motion_scale]->number == 1.5 && s.field[TFP_SET_placement]->placement.present == (TFP_PLACE_X | TFP_PLACE_ROLL));
+  CHECK(s.field[TFP_SET_placement]->placement.roll == 90 && !s.field[TFP_SET_action_placements] && !s.field[TFP_SET_aim_markers] &&
+        tfp_settings_menu_number(&s, TFP_MENU_near_clip_cm) == 15 && tfp_settings_menu_flag(&s, TFP_MENU_fird_person_arms));
+  tfp_settings_free(&s);
+  CHECK(!tfp_settings_load(&s, accepted, sizeof accepted - 4, why, sizeof why)); /* cut short: text is never read past n */
+  tfp_settings_free(&s);
+
+  /* ---- the store ---- */
+  CHECK(tfp_settings_field("placement") == TFP_SET_placement && tfp_settings_field("grab_offsets") == TFP_SET_grab_offsets && tfp_settings_field("x") < 0);
+  CHECK(tfp_settings_menu("toggle_key") == TFP_MENU_toggle_key && tfp_settings_menu("first_person_toggle_key") < 0);
+  CHECK(defaults.field[TFP_SET_placement]->placement.x == .15 && defaults.field[TFP_SET_placement]->placement.z == -.12 &&
+        defaults.field[TFP_SET_placement]->placement.present == TFP_PLACE_XYZ && defaults.field[TFP_SET_fird_head_camera]->placement.z == .04);
+  CHECK(tfp_settings_flag(&defaults, TFP_SET_motion_enabled) == 1 && defaults.field[TFP_SET_motion_scale]->number == 1 &&
+        tfp_settings_flag(&defaults, TFP_SET_camera_kick_enabled) == 1 && tfp_settings_flag(&defaults, TFP_SET_show_aim_markers) == -1 &&
+        tfp_settings_flag(&defaults, TFP_SET_family_placement_defaults) == -1 && !defaults.field[TFP_SET_near_clip_profiles]);
+  CHECK(defaults.field[TFP_SET_weapon_placements]->count == 0 && defaults.field[TFP_SET_action_placements]->count == 0 &&
+        defaults.field[TFP_SET_action_state_mapping]->count == 0 && defaults.field[TFP_SET_aim_markers]->count == 0 && !defaults.from_file);
+  const char *problem = NULL;
+  const TfpSettingsValue *old_placement = defaults.field[TFP_SET_placement];
+  TfpActionPlacement moved = {.1, .2, .3, 4, 5, 6, TFP_PLACE_ALL};
+  const TfpSettingsValue *made = tfp_settings_new_placement(&defaults, &moved), *flag = tfp_settings_new_bool(&defaults, true);
+  CHECK(made && flag && tfp_settings_owned(&defaults, made) == made && !tfp_settings_owned(&defaults, &moved));
+  CHECK(!tfp_settings_set(&defaults, TFP_SET_placement, flag, &problem) && problem && strstr(problem, "cannot store"));
+  CHECK(!tfp_settings_set(&defaults, TFP_SET_motion_enabled, made, &problem) && defaults.writes == 0);
+  TfpSettingsValue stranger = *made;
+  CHECK(!tfp_settings_set(&defaults, TFP_SET_placement, &stranger, &problem) && strstr(problem, "not made by"));
+  CHECK(tfp_settings_set(&defaults, TFP_SET_placement, made, &problem) && !problem && defaults.writes == 1);
+  CHECK(defaults.field[TFP_SET_placement]->placement.yaw == 4 && old_placement->placement.x == .15); /* the old table is unchanged */
+  CHECK(tfp_settings_set(&defaults, TFP_SET_placement, made, &problem) && defaults.writes == 1);   /* the same value: no write */
+  CHECK(tfp_settings_set(&defaults, TFP_SET_placement, NULL, &problem) && !defaults.field[TFP_SET_placement] && defaults.writes == 2);
+  const char *unsorted[3] = {"ffff000000000000", "0000000000000001", "8000000000000000"}, *twice[2] = {"a", "a"};
+  const TfpSettingsValue *markers = tfp_settings_new_markers(&defaults, unsorted, 3);
+  CHECK(markers && markers->count == 3 && !strcmp(markers->ids[0], "0000000000000001") && !strcmp(markers->ids[2], "ffff000000000000"));
+  CHECK(tfp_settings_row(markers, "8000000000000000") == 1 && tfp_settings_row(markers, "8") < 0 && tfp_settings_row(NULL, "a") < 0);
+  CHECK(!tfp_settings_new_markers(&defaults, twice, 2));
+  const char *long_key[1] = {"0123456789abcdef0123456789abcdef"};
+  CHECK(!tfp_settings_new_markers(&defaults, long_key, 1) && !tfp_settings_new_empty(&defaults, TFP_SETTINGS_BOOL));
+  CHECK(!tfp_settings_set_menu(&defaults, TFP_MENU_show_torso, false, false, 1) && tfp_settings_set_menu(&defaults, TFP_MENU_show_torso, true, true, 0));
+  tfp_settings_free(&defaults);
+
+  /* ---- written and read back: the same store ---- */
+  CHECK(tfp_settings_load(&s, settings_user_json, sizeof settings_user_json - 1, why, sizeof why) && s.from_file);
+  size_t user_length = tfp_settings_write(&s, expected, sizeof expected);
+  CHECK(user_length < sizeof expected && tfp_settings_write(&s, NULL, 0) == user_length);
+  char small[32];
+  CHECK(tfp_settings_write(&s, small, sizeof small) == user_length && strlen(small) == sizeof small - 1 && !strncmp(small, expected, 31));
+  tfp_settings_free(&s);
+  CHECK(tfp_settings_load(&s, expected, user_length, why, sizeof why));
+  CHECK(tfp_settings_write(&s, written, sizeof written) == user_length && !strcmp(written, expected));
+  CHECK(s.field[TFP_SET_action_placements]->count == 19 && s.field[TFP_SET_near_clip_profiles]->count == 1 && s.field[TFP_SET_grab_offsets]->count == 2);
+  tfp_settings_free(&s);
+
+  /* ---- retail's answers, through the binder ---- */
+  new_wire();
+  CHECK(!tfp_wire_settings(&wire) && !wire.host.mod_set && !wire.host.menu_near_options);
+  wire.placement_decode = foreign_decode; /* a decoder that was there first stays in the chain */
+  CHECK(tfp_wire_settings_bind(&wire, settings_defaults_json, sizeof settings_defaults_json - 1, "settings.json"));
+  CHECK(logged("Ready: settings imported from settings.json: 0 weapon placement profiles") && !logged("Refused"));
+  CHECK(tfp_wire_settings(&wire) && tfp_wire_settings(&wire)->from_file && tfp_wire_settings_catalogue(&wire)->count == 105);
+  CHECK(wire.host.mod_set && wire.host.menu_near_options && wire.host.menu_motion_options && wire.host.menu_show_torso && wire.host.menu_fird_person_arms);
+  if (replay("defaults", settings_defaults_ops, COUNT(settings_defaults_ops))) return 1;
+  tfp_wire_settings_free(&wire);
+  CHECK(!tfp_wire_settings(&wire) && wire.placement_decode == foreign_decode);
+
+  /* no file at all, and a broken one: retail's defaults, and the log says why */
+  new_wire();
+  CHECK(tfp_wire_settings_bind(&wire, NULL, 0, "settings.json"));
+  CHECK(logged("Refused: settings: settings.json: no settings file; retail's defaults are used") && logged("Ready: settings are retail's defaults: 0 weapon"));
+  CHECK(!tfp_wire_settings(&wire)->from_file);
+  if (replay("no file", settings_defaults_ops, COUNT(settings_defaults_ops))) return 1;
+  tfp_wire_settings_free(&wire);
+  new_wire();
+  CHECK(tfp_wire_settings_bind(&wire, "{\"format\":1,", 12, NULL) && logged("Refused: settings: not JSON: line 1:") && logged("Ready: settings are retail's defaults"));
+  if (replay("broken file", settings_defaults_ops, COUNT(settings_defaults_ops))) return 1;
+  tfp_wire_settings_free(&wire);
+
+  /* the user's file */
+  new_wire();
+  wire.placement_decode = foreign_decode;
+  CHECK(tfp_wire_settings_bind(&wire, settings_user_json, sizeof settings_user_json - 1, "settings.json"));
+  CHECK(logged("Ready: settings imported from settings.json: 18 weapon placement profiles (") && logged("family defaults on") &&
+        logged("1 weapon clipping profiles") && logged("near clip hip 0.00 m aim 0.00 m") && logged("sprint 1.00") && !logged("Refused"));
+  {
+    TfpRtHost *h = &wire.host;
+    TfpSettings *store = tfp_wire_settings(&wire);
+    TfpActionPlacement p, q;
+    V a, b, none = tfp_wire_nil();
+    /* placement refs: each of the last 64 reads back; older ones are overwritten; foreign refs go down the chain */
+    V refs[70];
+    for (int i = 0; i < 70; i++) {
+      TfpActionPlacement value = {i * .001, -i * .002, i * .003, i, -i, i * .5, i % 2 ? TFP_PLACE_ALL : TFP_PLACE_XYZ};
+      refs[i] = tfp_wire_settings_placement(&wire, &value);
+      CHECK(refs[i].kind == TFP_RT_REF);
+    }
+    for (int i = 6; i < 70; i++) {
+      TfpOpsPlacement ops;
+      CHECK(tfp_wire_placement_of(&wire, refs[i], &ops) && ops.x == i * .001 && ops.y == -i * .002 && ops.z == i * .003 && ops.yaw == i &&
+            ops.pitch == -i && ops.roll == i * .5 && ops.present == (i % 2 ? 63u : 7u));
+    }
+    CHECK(refs[0].ref == refs[64].ref && tfp_wire_settings_placement_of(&wire, refs[0], &p) && p.yaw == 64);
+    V shipped = tfp_wire_ref(tfp_rt_default_placement), baseline = tfp_wire_ref(tfp_rt_camera_baseline), empty = tfp_wire_ref(&tfp_rt_empty_table);
+    V chained = tfp_wire_ref((const void *)foreign_decode), unknown = tfp_wire_ref(&checks), inside = tfp_wire_ref((const char *)refs[10].ref + 1);
+    CHECK(tfp_wire_settings_placement_of(&wire, shipped, &p) && p.x == .15 && p.z == -.12 && p.present == TFP_PLACE_XYZ);
+    CHECK(tfp_wire_settings_placement_of(&wire, baseline, &p) && p.x == 0 && p.z == .04 && p.present == TFP_PLACE_XYZ);
+    CHECK(tfp_wire_settings_placement_of(&wire, chained, &p) && p.x == .25 && p.present == TFP_PLACE_X);
+    CHECK(!tfp_wire_settings_placement_of(&wire, unknown, &p) && !tfp_wire_settings_placement_of(&wire, empty, &p) &&
+          !tfp_wire_settings_placement_of(&wire, inside, &p) && !tfp_wire_settings_placement_of(&wire, none, &p) &&
+          !tfp_wire_settings_placement_of(&wire, tfp_wire_number(1), &p));
+    CHECK(tfp_wire_settings_placement(&wire, NULL).kind == TFP_RT_NIL);
+    /* a saved placement table is a placement too, and stays what it was after the field is written */
+    V saved = h->config_field(h, "placement");
+    CHECK(tfp_wire_settings_placement_of(&wire, saved, &p) && p.x == .15 && p.present == TFP_PLACE_XYZ);
+    CHECK(h->mod_set(h, "placement", refs[69], &a, &b) && a.kind == TFP_RT_TRUE && b.kind == TFP_RT_NIL);
+    CHECK(tfp_wire_settings_placement_of(&wire, saved, &q) && !memcmp(&p, &q, sizeof p));
+    CHECK(tfp_wire_settings_placement_of(&wire, h->config_field(h, "placement"), &q) && q.x == .069 && q.roll == 34.5);
+    CHECK(h->mod_set(h, "placement", saved, &a, &b) && a.kind == TFP_RT_TRUE && h->config_field(h, "placement").ref == saved.ref);
+    /* mod.set: what this store cannot hold is refused with a text, and nothing changes */
+    uint64_t writes = store->writes;
+    CHECK(h->mod_set(h, "speed", tfp_wire_number(1), &a, &b) && a.kind == TFP_RT_FALSE && text_is(b, "Unknown first-person setting"));
+    CHECK(h->mod_set(h, "placement", tfp_wire_bool(true), &a, &b) && a.kind == TFP_RT_FALSE && b.kind == TFP_RT_TEXT);
+    CHECK(h->mod_set(h, "motion_enabled", tfp_wire_number(1), &a, &b) && a.kind == TFP_RT_FALSE);
+    CHECK(h->mod_set(h, "motion_scale", empty, &a, &b) && a.kind == TFP_RT_FALSE);
+    CHECK(h->mod_set(h, "action_placements", unknown, &a, &b) && a.kind == TFP_RT_FALSE);
+    CHECK(h->mod_set(h, "action_placements", h->config_field(h, "weapon_placements"), &a, &b) && a.kind == TFP_RT_FALSE);
+    CHECK(h->mod_set(h, "aim_markers", text("x"), &a, &b) && a.kind == TFP_RT_FALSE && store->writes == writes);
+    CHECK(h->mod_set(h, "fird_head_camera", baseline, &a, &b) && a.kind == TFP_RT_TRUE &&
+          tfp_wire_settings_placement_of(&wire, h->config_field(h, "fird_head_camera"), &p) && p.z == .04);
+    CHECK(h->mod_set(h, "near_clip_profiles", none, &a, &b) && a.kind == TFP_RT_TRUE && h->config_field(h, "near_clip_profiles").kind == TFP_RT_NIL);
+    /* the aim-marker binder's table */
+    const char *weapons[2] = {"5663fbf6d81eee27", "12a8953da33a06ce"};
+    V table = tfp_wire_settings_markers(&wire, weapons, 2);
+    CHECK(table.kind == TFP_RT_REF && h->mod_set(h, "aim_markers", table, &a, &b) && a.kind == TFP_RT_TRUE);
+    const TfpSettingsValue *now = tfp_wire_settings_value_of(&wire, h->config_field(h, "aim_markers"));
+    CHECK(now && now->kind == TFP_SETTINGS_MARKERS && now->count == 2 && !strcmp(now->ids[0], "12a8953da33a06ce"));
+    CHECK(h->mod_set(h, "show_aim_markers", tfp_wire_bool(false), &a, &b) && h->config_field(h, "show_aim_markers").kind == TFP_RT_FALSE);
+    /* fields and tables retail hands on by identity */
+    CHECK(h->config_table(h).kind == TFP_RT_REF && h->config_field(h, "nothing").kind == TFP_RT_NIL && h->config_field(h, "camera_kick_enabled").kind == TFP_RT_TRUE);
+    CHECK(h->actions_actions(h).ref == tfp_wire_settings_actions && !strcmp(tfp_wire_settings_actions[8][0], "dive") &&
+          !strcmp(tfp_wire_settings_actions[1][1], "Normal aim"));
+    for (int action = 0; action < TFP_ACT_COUNT; action++)
+      CHECK(!strcmp(tfp_wire_settings_actions[action][0], tfp_action_name((TfpAct)action)) &&
+            !strcmp(tfp_wire_settings_actions[action][1], tfp_action_label((TfpAct)action)));
+    CHECK(h->actions_observed(h, text("crouch")).kind == TFP_RT_TRUE && h->actions_observed(h, text("idle")).kind == TFP_RT_NIL &&
+          h->actions_observed(h, none).kind == TFP_RT_NIL && h->actions_observed(h, tfp_wire_number(3)).kind == TFP_RT_NIL);
+    CHECK(tfp_wire_settings_mapping_of(&wire, h->config_field(h, "action_state_mapping")) && !tfp_wire_settings_mapping_of(&wire, saved));
+    /* a key that is not text is no key (retail: a table lookup that finds nothing) */
+    CHECK(h->actions_resolve(h, tfp_wire_number(5), none, &a, &b) && tfp_wire_settings_placement_of(&wire, a, &p) && b.kind == TFP_RT_FALSE);
+    CHECK(!h->actions_resolve(h, none, tfp_wire_number(5), &a, &b) && !strcmp(h->raised, "Unknown placement action"));
+    CHECK(!h->actions_saved(h, tfp_wire_number(5), text("idle"), shipped, none, &a) && !strcmp(h->raised, "Invalid weapon identity"));
+    CHECK(!h->actions_saved(h, text("5663fbf6d81eee27"), text("idle"), unknown, none, &a) && !strcmp(h->raised, "Invalid action placement"));
+  }
+  tfp_wire_settings_free(&wire);
+  new_wire();
+  CHECK(tfp_wire_settings_bind(&wire, settings_user_json, sizeof settings_user_json - 1, "settings.json"));
+  if (replay("user", settings_user_ops, COUNT(settings_user_ops))) return 1;
+  tfp_wire_settings_free(&wire);
+  /* a made-up file: older placements, a mapping, markers, clipping profiles retail ignores, placements out of bounds */
+  new_wire();
+  CHECK(tfp_wire_settings_bind(&wire, settings_synthetic_json, sizeof settings_synthetic_json - 1, "settings.json") && !logged("Refused"));
+  CHECK(tfp_wire_settings(&wire)->field[TFP_SET_action_state_mapping]->count == 3 && tfp_wire_settings(&wire)->field[TFP_SET_weapon_placements]->count == 4);
+  if (replay("synthetic", settings_synthetic_ops, COUNT(settings_synthetic_ops))) return 1;
+  tfp_wire_settings_free(&wire);
+
+  /* ---- inside the runtime: enable, the entry placement, the near-clip reader, the weapon line ---- */
+  new_wire();
+  CHECK(tfp_wire_settings_bind(&wire, settings_user_json, sizeof settings_user_json - 1, "settings.json"));
+  {
+    V r[30];
+    TfpNearOptions options;
+    CHECK(tfp_wire_call(&wire, TFP_RT_E_on_enable, NULL, r) == TFP_RT_OK && logged("Idle. F11 toggles True First Person"));
+    /* rt:742 assert(controller:set_placement(saved_placement())): no weapon yet, so the global placement */
+    CHECK(wire.ops.has_pose_placement && wire.ops.pose_placement.x == .15 && wire.ops.pose_placement.y == 0 && wire.ops.pose_placement.z == -.12);
+    for (int i = 0; i < 3; i++) { now_seconds += 1 / 60.0; tfp_wire_frame(&wire, NULL); tfp_wire_settings_frame(&wire); }
+    CHECK(!logged("Refused") && !logged("Weapon:"));
+    wire.near_io.options(wire.near_io.user, &options); /* no weapon: the user's global 5 cm is the game's own distance */
+    CHECK(options.is_table && options.hip_is_number && options.aim_is_number && options.hip == 0 && options.aim == 0);
+    /* a running lease on the weapon that has a saved clipping profile (hip 10 cm, aim 5 cm) */
+    TfpWireLease *lease = calloc(1, sizeof *lease);
+    CHECK(lease != NULL);
+    lease->ops.origin.full = true, lease->ops.origin.weapon_unit = 78, lease->ops.origin.body = 11;
+    wire.controller.lease = &lease->view, wire.controller.phase = TFP_PHASE_RUNNING;
+    wire.ops.has_placement_weapon_key = true;
+    snprintf(wire.ops.placement_weapon_key, sizeof wire.ops.placement_weapon_key, "%s", "5663fbf6d81eee27");
+    CHECK(tfp_wire_call(&wire, TFP_RT_E_current_weapon, NULL, r) == TFP_RT_OK && r[0].kind == TFP_RT_TRUE && text_is(r[1], "5663fbf6d81eee27"));
+    wire.near_io.options(wire.near_io.user, &options);
+    CHECK(options.is_table && options.hip == .1 && options.aim == 0);
+    CHECK(tfp_settings_set_menu(tfp_wire_settings(&wire), TFP_MENU_near_clip_cm, false, false, 20));
+    snprintf(wire.ops.placement_weapon_key, sizeof wire.ops.placement_weapon_key, "%s", "12a8953da33a06ce");
+    wire.near_io.options(wire.near_io.user, &options); /* a weapon without a profile: the global distance */
+    CHECK(options.is_table && options.hip == .2 && options.aim == 0);
+    /* the placement the backend asks for on entry (backend.placement_resolver, rt:739) is the weapon's saved idle one */
+    TfpOpsPlacement resolved;
+    TfpOpsText raised;
+    CHECK(wire.ops_host.placement_resolver(wire.ops_host.user, "12a8953da33a06ce", &resolved, &raised) == TFP_OPS_TRUE);
+    CHECK(resolved.x == 0.080729166666667 && resolved.y == .15 && resolved.z == -0.00027777777777775 && resolved.present == 63);
+    tfp_wire_settings_frame(&wire);
+    const char *line = logged("Weapon: key=12a8953da33a06ce");
+    CHECK(line && strstr(line, "placement=imported(own) x=0.0807 y=0.1500 z=-0.0003 yaw=0.00 pitch=0.00 roll=0.00") && strstr(line, "near=global hip=0.20m"));
+    int before = line_count;
+    tfp_wire_settings_frame(&wire);
+    CHECK(line_count == before); /* the same weapon: no second line */
+    snprintf(wire.ops.placement_weapon_key, sizeof wire.ops.placement_weapon_key, "%s", "5663fbf6d81eee27");
+    tfp_wire_settings_frame(&wire);
+    line = logged("Weapon: key=5663fbf6d81eee27");
+    CHECK(line && strstr(line, "placement=imported(") && strstr(line, "near=imported(own) hip=0.10m aim=0.00m"));
+    snprintf(wire.ops.placement_weapon_key, sizeof wire.ops.placement_weapon_key, "%s", "b2b69248b51ea9a8"); /* AR-11: in the catalogue, nothing saved */
+    tfp_wire_settings_frame(&wire);
+    line = logged("Weapon: key=b2b69248b51ea9a8");
+    CHECK(line && strstr(line, "name=\"AR-11 Arbitrator\" family=rifle"));
+    char source[48];
+    CHECK(!strcmp(tfp_wire_settings_source(&wire, "0123456789abcdef", TFP_ACT_ADS, source, sizeof source), "ads default") ||
+          !strncmp(source, "imported(__all)", 15));
+    wire.controller.lease = NULL, wire.controller.phase = TFP_PHASE_IDLE, wire.ops.has_placement_weapon_key = false;
+    free(lease);
+    CHECK(tfp_wire_call(&wire, TFP_RT_E_on_disable, NULL, r) == TFP_RT_OK && r[0].kind == TFP_RT_TRUE);
+  }
+  tfp_wire_settings_free(&wire);
+  printf("wire settings: %u checks passed (%zu refusals of the reader and loader; retail's answers on %zu + %zu + %zu operations, the defaults "
+         "also with no file and with a broken one; placement refs; mod.set; the runtime's entry placement, near clip and weapon line)\n",
+         checks, COUNT(refused), COUNT(settings_defaults_ops), COUNT(settings_user_ops), COUNT(settings_synthetic_ops));
+  return 0;
+}
