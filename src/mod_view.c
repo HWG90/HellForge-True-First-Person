@@ -22,7 +22,7 @@
 #include "wire_win_engine.h"
 #include "wire_win_effects.h"
 #include "engine.h"
-#define TFP_VIEW_VERSION "0.6.0-feel.2"
+#define TFP_VIEW_VERSION "0.6.0-feel.3"
 #else
 #include "wire_win.h"
 #define TFP_VIEW_VERSION "0.6.0-view.1"

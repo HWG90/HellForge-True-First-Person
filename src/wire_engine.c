@@ -123,6 +123,7 @@ typedef struct TfpWireEngine {
   /* the snapshots head visibility was handed, to find the backend's own again */
   struct { TfpOpsSnapshot ops; TfpVisSnapshot vis; } recent[RECENT];
   unsigned recent_next;
+  uint64_t pack_seen; unsigned pack_said; /* the backpack answer last logged, and how many were */
   TfpOpsAction actions[4];
   unsigned action_next;
   /* checks */
@@ -1119,16 +1120,35 @@ static bool io_snapshot(St *st, Snapshot take, TfpVisSnapshot *out, TfpVisText *
 static bool io_player_snapshot(void *user, TfpVisSnapshot *out, TfpVisText *why) { return io_snapshot(user, tfp_ops_player_snapshot, out, why); }
 static bool io_pin_player_snapshot(void *user, TfpVisSnapshot *out, TfpVisText *why) { return io_snapshot(user, tfp_ops_pin_player_snapshot, out, why); }
 static bool io_full_snapshot(void *user, TfpVisSnapshot *out, TfpVisText *why) { return io_snapshot(user, tfp_ops_snapshot, out, why); }
+/* Says each change of the backpack answer (at most 24 a session): which of head_visibility.lua:728's
+ * three conditions failed is not in its error text. */
+static void pack_note(St *st, const TfpOpsSnapshot *ops, int rc, const TfpOpsBackpack *pack, const char *text) {
+  uint64_t seen = UINT64_C(0xcbf29ce484222325);
+  const uint32_t parts[] = {(uint32_t)(rc + 2), ops ? ops->full : 2u, rc == 1 ? pack->ref : 0, rc == 1 ? pack->entity : 0};
+  for (size_t i = 0; i < sizeof parts; i++) seen = (seen ^ ((const uint8_t *)parts)[i]) * UINT64_C(0x100000001b3);
+  for (size_t i = 0; rc == 1 && i < 20; i++) seen = (seen ^ pack->descriptor[i]) * UINT64_C(0x100000001b3);
+  for (const char *c = text; rc < 0 && c && *c; c++) seen = (seen ^ (uint8_t)*c) * UINT64_C(0x100000001b3);
+  if (seen == st->pack_seen || st->pack_said >= 24) return;
+  st->pack_seen = seen, st->pack_said++;
+  if (rc == 1) {
+    char hex[41];
+    for (int i = 0; i < 20; i++) snprintf(hex + 2 * i, 3, "%02x", pack->descriptor[i]);
+    sayf(st, "Check: backpack: found entity=%u renderer=%u descriptor=%s (snapshot %s; body=%u viewmodel=%u weapon unit=%u)", pack->entity, pack->ref, hex,
+         ops->full ? "full" : "player", ops->body, ops->viewmodel, ops->full ? ops->weapon_unit : 0);
+  } else if (rc == 0) sayf(st, "Check: backpack: none (snapshot %s)", ops->full ? "full" : "player");
+  else sayf(st, "Check: backpack: refused: %s (snapshot %s)", text && *text ? text : "no reason given", ops ? (ops->full ? "full" : "player") : "not recalled");
+}
 static int io_backpack(void *user, const TfpVisSnapshot *s, TfpHeadBackpack *out, TfpVisText *why) {
   St *st = user;
   const TfpOpsSnapshot *ops = recalled(st, s);
   TfpOpsBackpack pack;
   TfpOpsText text;
   text.present = false, text.text[0] = 0;
-  if (!ops) { vis_text(why, "Backpack snapshot is not one of this frame's"); return -1; }
+  if (!ops) { vis_text(why, "Backpack snapshot is not one of this frame's"); pack_note(st, NULL, -1, NULL, "Backpack snapshot is not one of this frame's"); return -1; }
   TfpOpsResult r = tfp_ops_backpack(&st->w->ops, ops, &pack, &text);
-  if (r == TFP_OPS_RAISED) { vis_text(why, text.text); return -1; }
-  if (r != TFP_OPS_TRUE) return 0;
+  if (r == TFP_OPS_RAISED) { vis_text(why, text.text); pack_note(st, ops, -1, NULL, text.text); return -1; }
+  if (r != TFP_OPS_TRUE) { pack_note(st, ops, 0, NULL, NULL); return 0; }
+  pack_note(st, ops, 1, &pack, NULL);
   /* backend.lua:314: identity = tostring(entity)..':'..descriptor */
   out->ref = pack.ref;
   out->identity.present = true;
