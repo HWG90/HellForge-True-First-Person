@@ -28,6 +28,28 @@ if [ "${1:-}" = --view ]; then
  echo "Built the True First Person view build"
  exit 0
 fi
+if [ "${1:-}" = --feel ]; then
+ # The feel build (0.6.0-feel.1): the view build plus the pose helper, motion, the engine modules, the
+ # effects and the settings store (src/wire_feel.h). Same flags as --view. docs/WIRING-FEEL.md.
+ TFP_OUT="$TFP_ROOT/dist/true-first-person-feel"
+ mkdir -p "$TFP_OUT"
+ TFP_FEEL=(mod_view wire_win wire_rt wire_off wire_recovery wire_log tfp_runtime backend_ops controller recovery transition
+  camera_adapter fov_adapter near_adapter blur_adapter camera_helper fov_helper near_helper blur_helper slot_atomic
+  wire_feel wire_settings tfp_settings action_select
+  pose_helper pose_adapter wire_pose wire_win_pose
+  wire_motion motion_runtime motion_math action_state locomotion backend snapshot
+  engine wire_engine wire_win_engine head_visibility model_shadow_source arm_pieces grip_hand
+  wire_effects wire_win_effects dof vignette aim_markers first_person_movement native_ads_option)
+ TFP_FEEL_SOURCES=();for tfp_module in "${TFP_FEEL[@]}";do TFP_FEEL_SOURCES+=("$TFP_ROOT/src/$tfp_module.c");done
+ "$TFP_ZIG" cc -std=c11 -fms-extensions -target x86_64-windows-gnu -shared -O2 -ffp-contract=off -Wall -Wextra -Werror -DTFP_FEEL=1 \
+  -I "$TFP_HF/app/sdk" -I "$TFP_ROOT/src" "${TFP_FEEL_SOURCES[@]}" "$TFP_ROOT/src/pose_input_thunks.S" -luser32 \
+  -o "$TFP_OUT/goose_true_first_person.dll"
+ cp "$TFP_ROOT/mod-feel/hellforge-mod.json" "$TFP_OUT/hellforge-mod.json"
+ # The user's own retail settings, converted for the C settings store and shipped beside the DLL.
+ python3 "$TFP_ROOT/tools/convert_settings.py" --config "$TFP_ROOT/import/retail-config-2026-11-16.cfg" --out "$TFP_OUT/settings.json"
+ echo "Built the True First Person feel build"
+ exit 0
+fi
 TFP_DEFINES=();if [ "${TFP_RESEARCH:-0}" = 1 ];then TFP_DEFINES+=(-DTFP_READONLY_SDK_CENSUS=1);fi
 TFP_MODULES=(backend scene presentation correction lens depth motion placement dispatch_lease slot_platform slot_atomic lifecycle native_call camera_policy pose_policy fov_policy near_policy blur_policy visibility_policy action preferences private_byte markers markers_native engine sdk_inventory native_observer effects models settings runtime ui mod)
 TFP_SOURCES=();for tfp_module in "${TFP_MODULES[@]}";do TFP_SOURCES+=("$TFP_ROOT/src/$tfp_module.c");done

@@ -119,6 +119,9 @@ typedef struct TfpWire {
   void (*controller_extra)(struct TfpWire *w, TfpRtTable *out);
   /* After on_update, before the session-log sample: modules add their per-frame numbers. */
   void (*frame_extra)(struct TfpWire *w);
+  /* The pose helper's running counts at the last status poll (controller.lua's weapon_updates /
+   * zero_restores, which the backend's statistics do not carry). false: none. */
+  bool (*pose_counts)(const struct TfpWire *w, double *weapon_updates, double *zero_restores);
 } TfpWire;
 
 /* Builds the host (off answers first, then the wired view) and the runtime's start state. The

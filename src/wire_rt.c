@@ -321,6 +321,7 @@ static bool api_pose_status(void *u, TfpLease *lease, TfpPoseStats *out, char *w
   if (r != TFP_OPS_TRUE) return false;
   out->armed = stats.armed == 1, out->expired = stats.expired == 1;
   out->target_weight = stats.target_weight, out->blend = stats.blend, out->error = (int)stats.error;
+  if (w->pose_counts && w->pose_counts(w, &out->weapon_updates, &out->zero_restores)) out->has_weapon_updates = out->has_zero_restores = true;
   return true;
 }
 static bool api_release(void *u, TfpLease *lease, char *why, size_t size) {

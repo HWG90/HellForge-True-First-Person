@@ -15,9 +15,18 @@
 #include "hellforge_mod.h"
 #include "profile.h"
 #include "native_contract.h"
+#ifdef TFP_FEEL
+/* The feel build: the same entry with the module binders joined on (src/wire_feel.h, docs/WIRING-FEEL.md). */
+#include "wire_win_pose.h" /* first: it settles the two TfpPoseStats names */
+#include "wire_feel.h"
+#include "wire_win_engine.h"
+#include "wire_win_effects.h"
+#include "engine.h"
+#define TFP_VIEW_VERSION "0.6.0-feel.1"
+#else
 #include "wire_win.h"
-
 #define TFP_VIEW_VERSION "0.6.0-view.1"
+#endif
 #define TFP_CONFLICT_ID "goose.first-person-controller"
 
 static const HfApi *hf;
@@ -26,6 +35,32 @@ static TfpWire wire;
 static enum { WAIT_MODULES, WAIT_PINS, RUNNING, REFUSED } stage;
 static bool key_held, told_waiting, told_tick_thread, hook_told[TFP_WIN_HOOKS];
 static uint64_t next_pin_check;
+#ifdef TFP_FEEL
+static TfpWireFeel feel;
+static TfpFxPlatform fx_platform;
+static bool engine_hooked, pose_hook_told[TFP_WIN_POSE_HOOKS];
+static char settings_text[TFP_SETTINGS_MAX];
+/* settings.json beside this DLL (made at build time by tools/convert_settings.py). 0: no file. */
+static size_t read_settings(char *where, size_t where_size) {
+  HMODULE self = NULL;
+  char path[MAX_PATH + 16];
+  where[0] = 0;
+  if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)(void *)read_settings, &self))
+    return 0;
+  DWORD n = GetModuleFileNameA(self, path, MAX_PATH);
+  if (!n || n >= MAX_PATH) return 0;
+  char *slash = strrchr(path, '\\');
+  if (!slash) return 0;
+  strcpy(slash + 1, "settings.json");
+  snprintf(where, where_size, "%s", path);
+  HANDLE file = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (file == INVALID_HANDLE_VALUE) return 0;
+  DWORD got = 0, total = 0;
+  while (total < sizeof settings_text && ReadFile(file, settings_text + total, (DWORD)(sizeof settings_text - total), &got, NULL) && got) total += got;
+  CloseHandle(file);
+  return total;
+}
+#endif
 
 static void say(const char *format, ...) {
   char line[700];
@@ -123,8 +158,29 @@ static void start(void) {
   TfpWireHelpers helpers;
   TfpRtValue r[2];
   tfp_win_hosts(&memory, &platform, &helpers);
+#ifdef TFP_FEEL
+  tfp_win_pose_hosts();
+#endif
   tfp_wire_init(&wire, &memory, &platform, &helpers);
   measure_reads();
+#ifdef TFP_FEEL
+  {
+    char where[MAX_PATH + 16], text[360];
+    TfpWireFeelParts parts;
+    memset(&parts, 0, sizeof parts);
+    parts.settings_length = read_settings(where, sizeof where);
+    parts.settings_json = parts.settings_length ? settings_text : NULL;
+    parts.settings_origin = where[0] ? where : "settings.json";
+    parts.pose = tfp_wire_pose_linked(), parts.pose_io = tfp_win_pose_io();
+    parts.engine = engine_hooked ? tfp_win_engine_api() : NULL;
+    if (!engine_hooked) say("Refused: engine bridge: %s", eng_status());
+    tfp_win_effects_platform(&fx_platform, tfp_win_exe());
+    parts.effects = &fx_platform;
+    tfp_wire_feel_bind(&wire, &feel, &parts);
+    int slots = tfp_win_pose_check(text, sizeof text);
+    say(slots == 1 ? "Ready: pose slots: %s" : slots == 0 ? "Refused: pose: %s" : "Waiting: pose slots are not readable yet: %s", text);
+  }
+#endif
   memset(r, 0, sizeof r);
   TfpRtStatus status = tfp_wire_call(&wire, TFP_RT_E_on_enable, NULL, r);
   if (status != TFP_RT_OK) {
@@ -136,8 +192,14 @@ static void start(void) {
     return;
   }
   stage = RUNNING;
+#ifdef TFP_FEEL
+  say("Ready. F11 toggles True First Person (view, weapon and arm placement, motion; head hiding, sleeves, hand grips and the effects once "
+      "their checks pass: see the Ready / Check / Refused lines). Not in this build: the F8 editor, the menu, look-gain normalisation, "
+      "Photo Mode camera sharing.");
+#else
   say("Ready. F11 toggles the view. Not in this build: arms and weapon placement, sleeves, hand grips, motion, head and body hiding, "
       "depth of field, vignette, aiming markers, movement policy, the F8 editor, the menu, Photo Mode camera sharing.");
+#endif
 }
 
 static void tick(HfMod *mod, float dt, void *unused) {
@@ -183,7 +245,27 @@ static void tick(HfMod *mod, float dt, void *unused) {
   char extra[160];
   snprintf(extra, sizeof extra, "calls=cam:%u,fov:%u,near:%u,blur:%u", tfp_win_hook(0)->calls, tfp_win_hook(1)->calls, tfp_win_hook(2)->calls,
            tfp_win_hook(3)->calls);
+#ifdef TFP_FEEL
+  /* Engine values made in the tick live in the engine's per-frame buffer (src/engine.h). */
+  eng_temp_begin();
+  tfp_wire_feel_begin(&wire);
   tfp_wire_frame(&wire, extra);
+  eng_temp_end();
+  for (int i = 0; i < TFP_WIN_POSE_HOOKS; i++) {
+    const TfpWinHook *hook = tfp_win_pose_hook(i);
+    if (hook->refused) {
+      say("Refused: the pose %s slot was not swapped: the function it points at is not the pinned one (read with read_code)", tfp_win_pose_hook_name(i));
+      tfp_win_pose_hook_refusal_seen(i);
+    }
+    if (hook->first_thread && !pose_hook_told[i]) {
+      pose_hook_told[i] = true;
+      say("Hook: pose %s first fired on thread %lu, called from game+%#llx (the tick is thread %lu)", tfp_win_pose_hook_name(i),
+          (unsigned long)hook->first_thread, (unsigned long long)(hook->first_return - tfp_win_game()), (unsigned long)GetCurrentThreadId());
+    }
+  }
+#else
+  tfp_wire_frame(&wire, extra);
+#endif
 
   for (int i = 0; i < TFP_WIN_HOOKS; i++) {
     const TfpWinHook *hook = tfp_win_hook(i);
@@ -205,6 +287,9 @@ static void tick(HfMod *mod, float dt, void *unused) {
 static void session_end(HfMod *mod, HfEvent event, void *unused) {
   (void)event; (void)unused;
   unsigned restored = tfp_win_restore_slots();
+#ifdef TFP_FEEL
+  restored += tfp_win_pose_restore_slots();
+#endif
   hf->log(mod, "Session end: %u dispatch slot(s) put back", restored);
 }
 
@@ -217,7 +302,12 @@ __declspec(dllexport) int hellforge_mod_init(const HfApi *api, HfMod *mod) {
     api->log(mod, "Refused: this build of True First Person is for game build 25480438, not %s", api->build_id());
     return 1;
   }
+#ifdef TFP_FEEL
+  say("True First Person " TFP_VIEW_VERSION " (feel build): retail 0.5.41-smooth.66 in C for build 25480438.");
+  engine_hooked = tfp_win_engine_init(api, mod); /* hooks lua51.dll's lua_pcall / lua_close, from the loader's thread as the donor did */
+#else
   say("True First Person " TFP_VIEW_VERSION " (view only): retail 0.5.41-smooth.66 in C for build 25480438.");
+#endif
   api->on(mod, HF_EVENT_SESSION_END, session_end, NULL);
   if (!api->on_game_thread(mod, tick, NULL)) {
     say("Refused: the game-thread callback could not be registered");
