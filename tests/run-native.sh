@@ -74,6 +74,9 @@ else
   echo "Camera helper: differential test skipped (retail source, g++ or Linux not found)"
 fi
 
+# The view build's binder (src/wire_*.c): value adapters, session log, the binder without a game.
+bash "$TFP_ROOT/tests/run-wire-glue.sh"
+
 # Helper translations against the retail C++ (tests/run-diff-*.sh) and the modules that drive them against
 # the retail Lua (tests/run-vectors-*.sh). Each prints its own summary and skips itself when the retail
 # tree, g++ or luajit-made vectors are not available.
