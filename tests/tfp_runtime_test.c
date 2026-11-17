@@ -11,7 +11,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include "tfp_runtime.h"
-#include "vectors/runtime_vectors.h"
+/* TFP_RT_VECTORS: another cut of vectors over the same spec (tests/wire_off_test.c). */
+#ifndef TFP_RT_VECTORS
+#define TFP_RT_VECTORS "vectors/runtime_vectors.h"
+#endif
+#include TFP_RT_VECTORS
 
 static TfpRtValue K[RT_KNOBS];
 static TfpRt rt;
@@ -375,6 +379,9 @@ int main(int argc, char **argv) {
     }
     for (unsigned i = 0; i < op->sets; i++) K[rt_sets[op->set0 + i].knob] = value_of(&rt_sets[op->set0 + i].value);
     fk_bind(&host);
+#ifdef TFP_RT_AFTER_BIND
+    TFP_RT_AFTER_BIND(&host);
+#endif
     op_now = op;
     calls = 0;
     memset(seen, 0, sizeof seen);
@@ -385,6 +392,9 @@ int main(int argc, char **argv) {
     run_entry(&actual, op->entry, rt_values + op->arg0, op->args);
     if (actual.at[0] == '!') raised++;
     put(&actual, "|");
+#ifdef TFP_RT_AFTER_OP
+    TFP_RT_AFTER_OP(trace.at);
+#endif
     put(&actual, trace.at);
     put(&actual, "|");
     now.used = 0;
@@ -415,6 +425,9 @@ int main(int argc, char **argv) {
   printf("Runtime: %ld of %d operations in %ld sessions equal to retail runtime.lua at %s (%ld calls into the fakes, %ld raised, "
          "%" PRIu64 " non-whole doubles by their bits)\n", (long)RT_OPS - failed, RT_OPS, sessions, RT_VECTOR_COMMIT, traced, raised,
          numbers_compared);
+#ifdef TFP_RT_AT_END
+  failed += TFP_RT_AT_END();
+#endif
   free(actual.at);
   free(now.at);
   free(before.at);
