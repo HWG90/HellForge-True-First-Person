@@ -3,6 +3,7 @@
 #ifndef TFP_WIRE_ENGINE_HOST_WINDOWS_H
 #define TFP_WIRE_ENGINE_HOST_WINDOWS_H
 #include <stdint.h>
+#define __declspec(x)
 typedef void *HMODULE;
 typedef void (*FARPROC)(void);
 typedef int32_t LONG;
