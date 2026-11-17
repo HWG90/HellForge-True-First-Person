@@ -32,4 +32,13 @@ unsigned tfp_win_restore_slots(void);
 /* F11 and focus. */
 bool tfp_win_focused(void);
 bool tfp_win_key_down(int virtual_key);
+/* For src/wire_win_pose.c: the page and write rules the four helper hosts use (native_memory.h,
+ * native_ads_camera.cpp:228-232, :432-445, native_ads_fov.cpp:355-361), and a code pin compared
+ * through hf->read_code (false too when read_code is not there). */
+bool tfp_win_code_is(uint64_t at, const char *hex);
+bool tfp_win_writable_slot(uint64_t at, uint64_t exe);
+bool tfp_win_writable32(uint64_t at);
+bool tfp_win_executable(uint64_t at);
+bool tfp_win_write(void *out, const void *data, size_t length);
+bool tfp_win_pin(uint64_t address);
 #endif

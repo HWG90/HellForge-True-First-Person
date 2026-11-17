@@ -376,3 +376,21 @@ void tfp_win_hosts(TfpOpsHost *memory, TfpWirePlatform *platform, TfpWireHelpers
   platform->user = NULL, platform->clock = platform_clock, platform->mouse = platform_mouse, platform->log = ops_log;
   helpers->camera = &camera_api, helpers->fov = &fov_api, helpers->near_clip = &near_api, helpers->blur = &blur_api;
 }
+
+/* ---- for src/wire_win_pose.c (the feel build's pose helper host): the same rules, shared ---------- */
+bool tfp_win_code_is(uint64_t at, const char *hex) { /* the bytes at `at` as they were before any HellForge hook */
+  uint8_t now[128], want[128];
+  size_t n = strlen(hex) / 2;
+  if (!n || n > sizeof now || !has_read_code) return false;
+  for (size_t i = 0; i < n; i++) {
+    unsigned byte = 0;
+    sscanf(hex + i * 2, "%2x", &byte);
+    want[i] = (uint8_t)byte;
+  }
+  return hf->read_code((uintptr_t)at, now, n) == 0 && !memcmp(now, want, n);
+}
+bool tfp_win_writable_slot(uint64_t at, uint64_t exe) { return host_writable_slot(NULL, at, exe); }
+bool tfp_win_writable32(uint64_t at) { return host_writable_request_field(NULL, at); }
+bool tfp_win_executable(uint64_t at) { return host_executable(NULL, at); }
+bool tfp_win_write(void *out, const void *data, size_t length) { return host_write(NULL, out, data, length); }
+bool tfp_win_pin(uint64_t address) { return host_pin(NULL, address); }
