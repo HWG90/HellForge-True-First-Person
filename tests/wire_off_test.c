@@ -14,16 +14,31 @@ struct TfpRtHost;
 static void off_wrap(struct TfpRtHost *h);
 static void off_after_op(const char *trace_text);
 static long off_at_end(void);
+/* -DTFP_OFF_FEEL: the feel build's session (tests/vectors/feel_off_vectors.h): the modules the feel
+ * build binds (tests/feel_bound.h) answer as in ordinary play and are not compared; every module it
+ * still stubs is compared as before. */
+#ifdef TFP_OFF_FEEL
+#define TFP_RT_VECTORS "vectors/feel_off_vectors.h"
+#define OFF_NAME "Feel off"
+#else
 #define TFP_RT_VECTORS "vectors/view_off_vectors.h"
+#define OFF_NAME "View off"
+#endif
 #define TFP_RT_AFTER_BIND off_wrap
 #define TFP_RT_AFTER_OP off_after_op
 #define TFP_RT_AT_END off_at_end
 #include "tfp_runtime_test.c"
 #include "wire_off.h"
+#include "feel_bound.h"
 
 static TfpRtHost off_host;
 static bool off_bound;
-static long off_differences, off_compared, off_unchecked;
+static long off_differences, off_compared, off_unchecked, off_bound_calls;
+#ifdef TFP_OFF_FEEL
+static bool now_bound(const char *name) { return feel_bound(name); }
+#else
+static bool now_bound(const char *name) { (void)name; return false; }
+#endif
 static const char *off_checked[400];
 static int off_checked_count;
 
@@ -39,9 +54,10 @@ static bool same_table(const TfpRtTable *a, const TfpRtTable *b) {
   return true;
 }
 static void compared(const char *name, bool same) {
+  if (now_bound(name)) { off_bound_calls++; return; } /* bound to real code in the feel build: no off answer to hold */
   off_compared++;
   if (same) return;
-  if (off_differences++ < 10) printf("View off: %s answers differently from the scripted retail collaborator (operation %ld)\n", name,
+  if (off_differences++ < 10) printf(OFF_NAME ": %s answers differently from the scripted retail collaborator (operation %ld)\n", name,
                                      (long)(op_now - rt_ops));
 }
 #define W0(name) static bool wr_##name(TfpRtHost *h) { bool f = fk_##name(h), m = off_host.name(&off_host); compared(#name, f == m); return f; }
@@ -139,7 +155,12 @@ static void off_wrap(TfpRtHost *h) {
                            (const void *)off_host.menu_near_options, (const void *)off_host.menu_motion_options,
                            (const void *)off_host.arm_pieces_new, (const void *)off_host.grip_hand_new, (const void *)off_host.head_sdk_handles,
                            (const void *)off_host.camera_is_pinned, (const void *)off_host.camera_look_stats, (const void *)off_host.mod_set};
-  for (size_t i = 0; i < sizeof absent / sizeof *absent; i++) compared("an optional pointer", !absent[i] && !stubbed[i]);
+  static const char *const optional[] = {"menu_fird_person_arms", "menu_show_torso", "menu_near_options", "menu_motion_options", "arm_pieces_new",
+                                         "grip_hand_new", "head_sdk_handles", "camera_is_pinned", "camera_look_stats", "mod_set"};
+  for (size_t i = 0; i < sizeof absent / sizeof *absent; i++) {
+    if (now_bound(optional[i])) compared(optional[i], absent[i] != NULL); /* counted as bound; the session has the method */
+    else compared("an optional pointer", !absent[i] && !stubbed[i]);
+  }
 }
 /* Every collaborator named in the trace is either part of the wired view or was compared above. */
 static void off_after_op(const char *text) {
@@ -152,10 +173,13 @@ static void off_after_op(const char *text) {
     if (end > at && *end == '(' && (at == text || at[-1] == ' ')) {
       bool known = false;
       for (size_t i = 0; i < sizeof wired / sizeof *wired && !known; i++) known = !strncmp(at, wired[i], strlen(wired[i]));
+      char called[64];
+      snprintf(called, sizeof called, "%.*s", (int)(end - at), at);
+      if (now_bound(called)) known = true;
       /* Stubbed although their names start like a wired group: listed in off_checked. */
       for (int i = 0; i < off_checked_count; i++)
         if (strlen(off_checked[i]) == (size_t)(end - at) && !strncmp(off_checked[i], at, (size_t)(end - at))) known = true;
-      if (!known && off_unchecked++ < 10) printf("View off: %.*s was called and is neither wired nor compared\n", (int)(end - at), at);
+      if (!known && off_unchecked++ < 10) printf(OFF_NAME ": %.*s was called and is neither wired nor compared\n", (int)(end - at), at);
     }
     /* next token: skip to the end of this call's argument list or callback text */
     at = end;
@@ -163,7 +187,11 @@ static void off_after_op(const char *text) {
   }
 }
 static long off_at_end(void) {
-  printf("View off: %ld answers of src/wire_off.c equal to what the scripted collaborators answered retail; %ld differ; %ld calls unchecked\n",
+  printf(OFF_NAME ": %ld answers of src/wire_off.c equal to what the scripted collaborators answered retail; %ld differ; %ld calls unchecked",
          off_compared - off_differences, off_differences, off_unchecked);
+#ifdef TFP_OFF_FEEL
+  printf("; %ld calls went to modules the feel build binds", off_bound_calls);
+#endif
+  printf("\n");
   return off_differences + off_unchecked;
 }

@@ -14,3 +14,8 @@ TFP_FLAGS=(-std=c11 -Wall -Wextra -Werror -I "$TFP_ROOT/src")
 "$TFP_CC" -fsanitize=address,undefined "$TFP_WORK/wire_off_test.o" "$TFP_WORK/wire_off_runtime.o" "$TFP_WORK/wire_off_stubs.o" -lm \
   -o "$TFP_WORK/wire_off_test"
 ASAN_OPTIONS=detect_leaks=0 "$TFP_WORK/wire_off_test" "$@"
+# The feel build: the same proof over its own session, for the modules it still stubs (tests/feel_bound.h).
+"$TFP_CC" "${TFP_FLAGS[@]}" -Wno-unused-function -O0 -DTFP_OFF_FEEL=1 -I "$TFP_ROOT/tests" -c "$TFP_ROOT/tests/wire_off_test.c" -o "$TFP_WORK/wire_off_feel_test.o"
+"$TFP_CC" -fsanitize=address,undefined "$TFP_WORK/wire_off_feel_test.o" "$TFP_WORK/wire_off_runtime.o" "$TFP_WORK/wire_off_stubs.o" -lm \
+  -o "$TFP_WORK/wire_off_feel_test"
+ASAN_OPTIONS=detect_leaks=0 "$TFP_WORK/wire_off_feel_test" "$@"

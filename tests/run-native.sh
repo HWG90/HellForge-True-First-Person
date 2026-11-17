@@ -76,6 +76,11 @@ fi
 
 # The view build's binder (src/wire_*.c): value adapters, session log, the binder without a game.
 bash "$TFP_ROOT/tests/run-wire-glue.sh"
+# The feel build's binders: the settings store and its conversion, the pose helper behind the backend,
+# the engine modules over a stand-in Lua state, the effect modules, and all of them joined with no game.
+for tfp_wire in settings pose engine effects feel; do
+  bash "$TFP_ROOT/tests/run-wire-$tfp_wire.sh"
+done
 
 # Helper translations against the retail C++ (tests/run-diff-*.sh) and the modules that drive them against
 # the retail Lua (tests/run-vectors-*.sh). Each prints its own summary and skips itself when the retail

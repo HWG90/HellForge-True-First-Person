@@ -7,6 +7,7 @@
  * It does not prove anything about the game: that is docs/WIRING-FEEL.md, "unproven". */
 #include "wire_feel.h"
 #include "wire_off.h"
+#include "feel_bound.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -172,6 +173,21 @@ int main(void) {
   /* what stays the view build's off answer */
   CHECK(h->editor_request_open == off.editor_request_open && h->compat_update == off.compat_update && h->fird_start == off.fird_start);
   CHECK(h->head_positioner_start == off.head_positioner_start && h->camera_free_aim == off.camera_free_aim && h->menu_update == off.menu_update);
+
+  /* tests/feel_bound.h is exactly what the binders replaced: every pointer of wire_off.h's lists is
+   * either still wire_off.c's own function or named there (an optional pointer: NULL before, set now). */
+#define SAME(name, ...) \
+  if (((const void *)h->name != (const void *)off.name) != feel_bound(#name)) { printf("wire feel: %s is %s but feel_bound says otherwise\n", #name, (const void *)h->name != (const void *)off.name ? "bound" : "still off"); mismatches++; }
+  int mismatches = 0;
+  TFP_OFF_S0(SAME) TFP_OFF_S1(SAME) TFP_OFF_S2(SAME) TFP_OFF_ST(SAME) TFP_OFF_G0(SAME)
+  SAME(menu_fird_person_arms) SAME(menu_show_torso) SAME(menu_near_options) SAME(menu_motion_options) SAME(arm_pieces_new) SAME(grip_hand_new)
+  SAME(head_sdk_handles) SAME(camera_is_pinned) SAME(camera_look_stats) SAME(mod_set) SAME(actions_resolve) SAME(actions_saved)
+  SAME(actions_default_placement) SAME(actions_weapon_info) SAME(actions_observed) SAME(config_field) SAME(config_action_mapped)
+  SAME(helper_depth_stats) SAME(helper_input_stats) SAME(backend_prepare_pose) SAME(backend_alignment_context) SAME(backend_pose_status)
+  SAME(arm_pieces_update) SAME(grip_hand_update) SAME(aim_markers_toggle) SAME(aim_markers_set_setting) SAME(motion_capture_neutral)
+  SAME(editor_cancel) SAME(camera_free_aim) SAME(head_positioner_save) SAME(fird_start) SAME(ref_field)
+#undef SAME
+  CHECK(mismatches == 0);
 
   tfp_wire_feel_begin(&wire);
   CHECK(tfp_wire_call(&wire, TFP_RT_E_on_update, NULL, r) == TFP_RT_OK);
