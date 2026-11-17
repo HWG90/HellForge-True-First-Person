@@ -71,7 +71,8 @@ static Unit units[UNITS] = {{BODY, 0x20000000, 90, 3, true}, {RIG, 0x20010000, 6
                             {STRANGER, 0x20040000, 5, 0, true}};
 static uint64_t world_block[2];
 #define NATIVE_WORLD UINT64_C(0x30000000)
-static Unit *unit_by_value(uintptr_t value) { for (int i = 0; i < UNITS; i++) if (((uintptr_t)units[i].ref << 2 | 1) == value) return &units[i]; return NULL; }
+static unsigned handle_skew; /* a test: the handles stop being the unit references */
+static Unit *unit_by_value(uintptr_t value) { for (int i = 0; i < UNITS; i++) if (((uintptr_t)(units[i].ref + handle_skew) << 2 | 1) == value) return &units[i]; return NULL; }
 static bool mem_object(void *user, uint32_t unit, bool has_owner, uint64_t owner, bool has_index, uint32_t index, uint64_t *object, char *why, size_t size) {
   (void)user; (void)has_owner; (void)owner; (void)has_index; (void)index;
   for (int i = 0; i < UNITS; i++) if (units[i].ref == unit) { *object = units[i].object; return true; }
@@ -87,7 +88,7 @@ static void build_memory(void) {
   for (int i = 0; i < UNITS; i++) {
     const Unit *u = &units[i];
     mem_map(u->object, 0x5000);
-    put32(u->object + 8, u->ref), put32(u->object + 0x70, u->nodes), put64(u->object + 0x98, links_at(u)), put64(u->object + 0xA0, names_at(u));
+    put32(u->object + 8, u->ref), put64(u->object + 0x18, NATIVE_WORLD), put32(u->object + 0x70, u->nodes), put64(u->object + 0x98, links_at(u)), put64(u->object + 0xA0, names_at(u));
     put32(u->object + 0xC8, u->meshes), put64(u->object + 0xD0, meshes_at(u));
     for (uint32_t m = 1; m <= u->meshes; m++) put64(meshes_at(u) + (m - 1) * 16, mesh_object(u, m));
     for (uint32_t n = 0; n < u->nodes; n++) put32(names_at(u) + n * 4, 0xA0000000u + u->ref * 256 + n), put32(links_at(u) + n * 4, n ? 1u | ((n - 1) << 16) : 0);
@@ -263,7 +264,7 @@ static int f_units(lua_State *L) {
   (void)L; ENTER("World.units");
   if (kat(1)->t != K_USER || kat(1)->p != world_block) return oops("not a World");
   KTab *t = calloc(1, sizeof *t);
-  for (int i = 0; i < listed; i++) t->arr[t->n++] = klight((uintptr_t)units[i % UNITS].ref << 2 | 1);
+  for (int i = 0; i < listed; i++) t->arr[t->n++] = klight((uintptr_t)(units[i % UNITS].ref + handle_skew) << 2 | 1);
   note("units();");
   kpush(ktable(t));
   return 1;
@@ -456,7 +457,7 @@ static double test_clock(void *u) { (void)u; return 100; }
 static int test_mouse(void *u, int button) { (void)u; (void)button; return 0; }
 static TfpWire wire;
 static bool text_is(TfpRtValue v, const char *text) { return v.kind == TFP_RT_TEXT && v.length == strlen(text) && !memcmp(v.text, text, v.length); }
-static const TfpWireEngineBody body = {BODY, RIG, 2, NATIVE_WORLD, 0x6000, true};
+static const TfpWireEngineBody body = {BODY, RIG, 2, 0x6000, true};
 static void fresh(void) { calls[0] = 0; line_count = 0; }
 static TfpOpsSnapshot sample(void) {
   TfpOpsSnapshot s;
@@ -637,11 +638,14 @@ int main(void) {
   CHECK(REFUSES("Refused: head visibility: default pass id observed=unreadable at exe+0x27ce5b0 expected=f2760503"));
   unreadable = 0;
   put64((uint64_t)(uintptr_t)world_block, 0x31000000);
-  CHECK(REFUSES("Refused: head visibility: world handle observed=0x31000000 behind the userdata") && logged("expected=0x30000000 (the snapshot's world)"));
+  CHECK(REFUSES("Refused: head visibility: world handle observed=0x31000000 behind the userdata") && logged("expected=0x30000000 (the body unit's world, object +0x18)"));
+  unreadable = units[0].object + 0x18;
+  CHECK(REFUSES("Refused: head visibility: body unit object observed=unreadable"));
+  unreadable = 0;
   put64((uint64_t)(uintptr_t)world_block, NATIVE_WORLD);
-  units[0].ref = 12; /* the handles are not the references: nothing in the inventory is the body */
-  CHECK(REFUSES("Refused: head visibility: unit handle observed=none of 5 units (the first is 0x31) expected=one handle whose address / 4 is the body's reference 0xb"));
-  units[0].ref = BODY;
+  handle_skew = 0x40; /* the handles are not the references: nothing in the inventory is the body */
+  CHECK(REFUSES("Refused: head visibility: unit handle observed=none of 5 units (the first is 0x12d) expected=one handle whose address / 4 is the body's reference 0xb"));
+  handle_skew = 0;
   put32(units[0].object + 0x70, 91);
   CHECK(REFUSES("Refused: head visibility: unit object observed=object 0x20000000: reference 0xb, 91 nodes, 3 meshes; engine: 90 nodes, 3 meshes"));
   put32(units[0].object + 0x70, 90);

@@ -709,17 +709,21 @@ bool tfp_wire_engine_check_head(TfpWire *w, const TfpWireEngineBody *s) {
     snprintf(expected, sizeof expected, "%08x", value);
     if (!verdict(st, M, read && id == value, i ? "shadow pass id" : "default pass id", observed, expected)) return false;
   }
-  /* (d) the World handle: its userdata holds the native world (hv:51) */
+  /* (d) the World handle: its userdata holds the native world (hv:51), the one the body's unit object names at +0x18 (hv:390-391) */
   const void *world = NULL;
-  uint64_t native = 0;
+  uint64_t native = 0, object = 0, body_world = 0;
   text[0] = 0;
   if (!main_world(st, &world, text, sizeof text) || !world) return verdict(st, M, false, "world handle", text[0] ? text : "nil", "a World userdata");
+  if (!mobject(st, s, s->body, &object) || !mread(st, object + 0x18, &body_world, 8)) {
+    snprintf(observed, sizeof observed, "unreadable (%.160s)", st->why);
+    return verdict(st, M, false, "body unit object", observed, "the unit object of the snapshot's body");
+  }
   uint64_t world_at = (uint64_t)slot_of(st, world)->pointer;
   read = mread(st, world_at, &native, 8);
   snprintf(observed, sizeof observed, read ? "%#llx behind the userdata at %#llx" : "unreadable (%llx) at %#llx", (unsigned long long)native,
            (unsigned long long)world_at);
-  snprintf(expected, sizeof expected, "%#llx (the snapshot's world)", (unsigned long long)s->world);
-  if (!verdict(st, M, read && native == s->world, "world handle", observed, expected)) return false;
+  snprintf(expected, sizeof expected, "%#llx (the body unit's world, object +0x18)", (unsigned long long)body_world);
+  if (!verdict(st, M, read && native == body_world, "world handle", observed, expected)) return false;
   /* (d) a Unit handle: its address is the unit reference times 4 plus tag bits (hv:49) */
   const TfpEngineUnit *units = NULL;
   size_t count = 0, matches = 0;
@@ -738,10 +742,10 @@ bool tfp_wire_engine_check_head(TfpWire *w, const TfpWireEngineBody *s) {
   snprintf(expected, sizeof expected, "one handle whose address / 4 is the body's reference %#x", s->body);
   if (!verdict(st, M, matches == 1, "unit handle", observed, expected)) return false;
   /* The unit object the backend reaches natively must be the unit the handle names. */
-  uint64_t object = 0, meshes_at = 0, first_mesh = 0;
+  uint64_t meshes_at = 0, first_mesh = 0;
   uint32_t self = 0, nodes = 0, meshes = 0;
   double engine_nodes = -1, engine_meshes = -1;
-  bool have = mobject(st, s, s->body, &object) && mread(st, object + 8, &self, 4) && mread(st, object + 0x70, &nodes, 4) &&
+  bool have = mread(st, object + 8, &self, 4) && mread(st, object + 0x70, &nodes, 4) &&
               mread(st, object + 0xC8, &meshes, 4);
   bool asked = unit_number(st, "Unit.num_scene_graph_items", body, &engine_nodes, text, sizeof text) &&
                unit_number(st, "Unit.num_meshes", body, &engine_meshes, text, sizeof text);
@@ -1262,7 +1266,7 @@ static bool ab_clock(void *user, double *now, TfpArmError *error) { (void)error;
 #define SH(h) ST(W(h))
 static void body_of(const TfpOpsSnapshot *s, TfpWireEngineBody *out) {
   out->body = s->body, out->viewmodel = s->viewmodel, out->avatar_index = s->avatar_index;
-  out->world = s->world, out->avatar_owner = s->avatar_owner, out->has_owner = true;
+  out->avatar_owner = s->avatar_owner, out->has_owner = true;
 }
 static void refuse_arms_without_head(St *st) {
   if (st->told_head_off) return;

@@ -101,7 +101,8 @@ const TfpArmEngine *tfp_wire_engine_arm_iface(const TfpWire *w, TfpWireEngineMod
 /* userdata_address of a handle: the number the retail host gives for the engine value. */
 double tfp_wire_engine_address(const TfpWire *w, const void *handle);
 /* The in-game checks, each logging its Check / Refused line through tfp_wire_say. */
-typedef struct TfpWireEngineBody { uint32_t body, viewmodel, avatar_index; uint64_t world, avatar_owner; bool has_owner; } TfpWireEngineBody;
+/* Whose units: the fields of a snapshot the checks ask the backend with. */
+typedef struct TfpWireEngineBody { uint32_t body, viewmodel, avatar_index; uint64_t avatar_owner; bool has_owner; } TfpWireEngineBody;
 bool tfp_wire_engine_check_head(TfpWire *w, const TfpWireEngineBody *s);
 /* 1 passed, 0 refused, -1 cannot be judged yet (nothing hangs on the rig). `sleeves` / `grip`: each module's verdict. */
 int tfp_wire_engine_check_arms(TfpWire *w, const TfpWireEngineBody *s, const TfpArmHandles *handles, bool *sleeves, bool *grip);
