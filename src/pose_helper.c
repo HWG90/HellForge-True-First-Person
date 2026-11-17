@@ -106,7 +106,7 @@
 #define B_STACK_ROOT        0x240  /* retail the same; image: B_CARRIER_HEX_2 lea r8,[rbp+0x140] with rbp = S+0x100 (B_CARRIER_HEX_1) */
 #define B_STACK_ROOT_SOURCE 0x10   /* retail the same; image: B_CARRIER_HEX_3 lea r8,[rbp+0x130], the quaternion 16 bytes below the root position */
 /* -- look-gain normalisation. Refused on this build: see B_INPUT_ESTABLISHED -- */
-#define B_INPUT_ESTABLISHED 0                    /* 1 only when no B_INPUT_* value below is OPEN */
+#define B_INPUT_ESTABLISHED 0                    /* stays 0: B_PIN_EXIT_FNV is OPEN and none of the values below has run in the game. Evidence for each: docs/LOOK-GAIN-CONSTANTS-25480438.md, tools/find_look_gain.py */
 #define B_EXE_WORLD_MATRIX  UINT32_C(0x1fd220)   /* retail 0x1f30e0; build_map; native_contract.h unit_world_matrix; input-json */
 #define B_HEX_WORLD_MATRIX  "40534883ec204863dae89206eaff488bc84c8b0041ff90e8000000488bcb48c1e10648034828488bc14883c4205bc3"
                                                  /* 47 bytes as retail; retail call displacement e2d5eaff, here 9206eaff; image at exe+0x1fd220 */
@@ -116,56 +116,56 @@
 #define B_GAME_INPUT_OWNER  UINT32_C(0x347cf18)  /* retail 0x2e38250; input-json input_owner_cell */
 #define B_GAME_CLOCK        UINT32_C(0x3326348)  /* retail 0x2ce14f8; input-json clock_cell; image: native_contract.h look_clock */
 #define B_GAME_PLAYER       UINT32_C(0x3326468)  /* retail 0x2ce1618; build_map; profile.h FP_PLAYER */
-#define B_GAME_NO_AVATAR    UINT32_C(0)          /* retail 0x2e3fcb8 (the "no avatar" id steering compares with): OPEN */
-#define B_GAME_HOST_AVATAR  UINT32_C(0)          /* retail 0x2e3fa9c (avatar id when the local entity is 0x7fff): OPEN */
-#define B_GAME_IDLE_AVATAR  UINT32_C(0)          /* retail 0x2e3f0e4 (avatar id when the player count is 0): OPEN */
+#define B_GAME_NO_AVATAR    UINT32_C(0x3484788)  /* retail 0x2e3fcb8 (the "no avatar" id steering compares with); image: cmp eax,[rip] at game+0x128d860 in B_PIN_STEERING */
+#define B_GAME_HOST_AVATAR  UINT32_C(0x348456c)  /* retail 0x2e3fa9c (avatar id when the local entity is 0x7fff); image: mov eax,[rip] at game+0xfd9bb9 in B_PIN_9 */
+#define B_GAME_IDLE_AVATAR  UINT32_C(0x3483c34)  /* retail 0x2e3f0e4 (avatar id when the player count is 0); image: mov eax,[rip] at game+0x128d84f in B_PIN_STEERING */
 #define B_WORLD_ENTITY_MAP  UINT32_C(0xf22ec8)   /* retail 0xf24990; build_map; profile.h FP_LIGHT_MAP */
 #define B_WORLD_ENTITY_AVATAR UINT32_C(0xf32f20) /* retail 0xf349e8 = rows 0xf349e0 + 8; build_map 0xf349e0 -> 0xf32f18 (profile.h FP_ENTITY_ROWS); snapshot.c takes word 2 of the 24-byte row */
 #define B_AVATAR_STEERING   UINT32_C(0x53e9a4)   /* retail 0x53e9ac; input-json steering_components */
 #define B_INPUT_RAW         UINT32_C(0xa7c24)    /* retail the same; input-json raw_offset; native_contract.h look_field */
 #define B_INPUT_RAW_STRIDE  UINT32_C(0xa7aec)    /* retail the same; input-json raw_stride; native_contract.h look_stride */
 #define B_INPUT_FLAGS       UINT32_C(0xa7af8)    /* retail the same; input-json: scope gains at owner+0xa7b50 (= +0x58) and +0xa7b44 (= +0x4c) */
-#define B_INPUT_DEVICE      UINT32_C(0)          /* retail input owner+0x324 (device kind): OPEN, no reader found on this build */
+#define B_INPUT_DEVICE      UINT32_C(0x324)      /* retail the same (device kind); image: mov eax,[rdi+0x324] at game+0x128678b and game+0x128686a, rdi = [B_GAME_INPUT_OWNER] loaded at game+0x12865fe */
 #define B_CONTEXT_INHIBIT   0x1a9                /* retail the same; input-json additional_evaluator_fields (game+0x1286756) */
 #define B_CONTEXT_LOOK      0x15c                /* retail the same; NATIVE-INPUT-DEEP-DIVE.md "context+0x15C/+0x160" */
-/* The 16 code pins (FNV-1a 64 over the range). 7 established, 9 OPEN. */
+/* The 16 code pins (FNV-1a 64 over the range). 15 established from the images, 1 OPEN (B_PIN_EXIT_FNV). */
 #define B_PIN_EVALUATOR     UINT32_C(0x1286330)  /* retail 0x1118370; build_map; input-json native6_evaluator */
 #define B_PIN_EVALUATOR_LEN 9688                 /* retail the same; input-json (2051 instructions both builds) */
 #define B_PIN_EVALUATOR_FNV UINT64_C(0x925c6f76c4b866ed) /* retail 0xac98356760db02c9; computed from the image */
-#define B_PIN_2             UINT32_C(0)          /* retail game+0x111a948, 24 bytes, 0xded70c3fd0eba95c: OPEN */
-#define B_PIN_2_FNV         UINT64_C(0)
-#define B_PIN_3             UINT32_C(0)          /* retail game+0x1114950, 1724 bytes, 0x3690803fb2e8bced: OPEN */
-#define B_PIN_3_FNV         UINT64_C(0)
-#define B_PIN_EXP_FNV       UINT64_C(0)          /* retail game+0x1f8ff70, 1013 bytes, 0xe4a380a8807b6ec2: address B_GAME_EXP known, extent not established: OPEN */
+#define B_PIN_2             UINT32_C(0x1288908)  /* retail game+0x111a948, 24 bytes, 0xded70c3fd0eba95c; image: the evaluator's jump table, named by its table load at game+0x1286680; six entries, each retail's + 0x16dfc0 */
+#define B_PIN_2_FNV         UINT64_C(0x6f23c15a305e84dc)/* computed from the image */
+#define B_PIN_3             UINT32_C(0x1282a40)  /* retail game+0x1114950, 1724 bytes, 0x3690803fb2e8bced; image: the only place where the 1724 bytes equal retail's outside relocated targets */
+#define B_PIN_3_FNV         UINT64_C(0x6d6b65a1d985444d)/* computed from the image */
+#define B_PIN_EXP_FNV       UINT64_C(0xfa3d329f82edb886)/* retail game+0x1f8ff70, 1013 bytes, 0xe4a380a8807b6ec2; image at B_GAME_EXP: 1013 bytes equal retail's outside relocated targets, and this build's function table ends the function at +1013 */
 #define B_PIN_SOLVER        UINT32_C(0x1277250)  /* retail 0x1109110; input-json native_orientation_solver (equal after masking, 1328 bytes) */
 #define B_PIN_SOLVER_FNV    UINT64_C(0xef9a68f3f959a945) /* retail 0xabb508e82158f3f1; computed from the image */
-#define B_PIN_6             UINT32_C(0)          /* retail game+0x1109640, 0x1a0 bytes, 0xf17ad9ae58e57ab0: OPEN */
-#define B_PIN_6_FNV         UINT64_C(0)
-#define B_PIN_7             UINT32_C(0)          /* retail game+0x110b830, 0x5b0 bytes, 0xd77b549041450f76: OPEN */
-#define B_PIN_7_FNV         UINT64_C(0)
+#define B_PIN_6             UINT32_C(0x1277780)  /* retail game+0x1109640, 0x1a0 bytes, 0xf17ad9ae58e57ab0; image: only match; differs in B_SETTINGS_DEGREES and the padding byte after the 0x19f-byte function */
+#define B_PIN_6_FNV         UINT64_C(0x36566b360cb60898)/* computed from the image */
+#define B_PIN_7             UINT32_C(0x1279970)  /* retail game+0x110b830, 0x5b0 bytes, 0xd77b549041450f76; image: only match; like retail's it starts 2 bytes before an instruction boundary; differs in B_GAME_PRESETS+0x8c and its own jump table */
+#define B_PIN_7_FNV         UINT64_C(0xcb8c325895c1bf1d)/* computed from the image */
 #define B_PIN_STEERING      UINT32_C(0x128d820)  /* retail 0x111f860; input-json steering_addition (292 bytes, 68 instructions both builds) */
 #define B_PIN_STEERING_FNV  UINT64_C(0xba858f4fe27538d8) /* retail 0x23ae2b71a5e0f871; computed from the image */
-#define B_PIN_9             UINT32_C(0)          /* retail game+0xe69ca0, 0xdc bytes, 0x91b780e54d5bb826: OPEN */
-#define B_PIN_9_FNV         UINT64_C(0)
+#define B_PIN_9             UINT32_C(0xfd9ba0)   /* retail game+0xe69ca0, 0xdc bytes, 0x91b780e54d5bb826; image: only match, and the callee of B_PIN_STEERING at game+0x128d848; differs in B_WORLD_ENTITY_MAP and B_WORLD_ENTITY_AVATAR */
+#define B_PIN_9_FNV         UINT64_C(0x29608cd098aef135)/* computed from the image */
 #define B_PIN_ENTER         UINT32_C(0x127de20)  /* retail 0x110fcf0; build_map; input-json constructor (2992 bytes, 665 instructions both builds) */
 #define B_PIN_ENTER_FNV     UINT64_C(0x4bed0e223589e85e) /* retail 0x32dc74e3dc6a26e9; computed from the image */
 #define B_PIN_EXIT          UINT32_C(0x127e9d0)  /* retail 0x11108a0; build_map; profile.h FP_EXIT */
-#define B_PIN_EXIT_FNV      UINT64_C(0)          /* retail 0x1dd0 bytes, 0x1a26ca7b7bbba077: this build's exit block differs (1730 against 1711 instructions), its extent is not established: OPEN */
-#define B_PIN_12            UINT32_C(0)          /* retail exe+0x1f3050, 51 bytes, 0xdafbc85ae8dffa23: OPEN */
-#define B_PIN_12_FNV        UINT64_C(0)
-#define B_PIN_13            UINT32_C(0)          /* retail exe+0x1f3090, 76 bytes, 0x9f25c14a58784f1f: OPEN */
-#define B_PIN_13_FNV        UINT64_C(0)
+#define B_PIN_EXIT_FNV      UINT64_C(0)          /* retail 0x1dd0 bytes, 0x1a26ca7b7bbba077: OPEN. This build's exit function is a different body (0x1d58 bytes against 0x1d9d). The 0x1dd0 bytes from B_PIN_EXIT hash to 0xab98f35fc8fb95d5; not entered, see docs/LOOK-GAIN-CONSTANTS-25480438.md */
+#define B_PIN_12            UINT32_C(0x1fd190)   /* retail exe+0x1f3050, 51 bytes, 0xdafbc85ae8dffa23; image: only match, 0x90 below B_EXE_WORLD_MATRIX as in retail */
+#define B_PIN_12_FNV        UINT64_C(0x2d9df1a66a439fb6)/* computed from the image */
+#define B_PIN_13            UINT32_C(0x1fd1d0)   /* retail exe+0x1f3090, 76 bytes, 0x9f25c14a58784f1f; image: only match, 0x50 below B_EXE_WORLD_MATRIX as in retail */
+#define B_PIN_13_FNV        UINT64_C(0xe99ec6ca69868d09)/* computed from the image */
 #define B_PIN_WORLD_MATRIX_FNV   UINT64_C(0xcca0a362b082795b) /* retail 0xd34dcd5634fed114 over exe+0x1f30e0, 47 bytes; computed from the image at B_EXE_WORLD_MATRIX */
 #define B_PIN_LOCAL_POSITION_FNV UINT64_C(0xb51d92e7e9e2090d) /* retail 0x542e94a63b7ebae6 over exe+0x1f2310, 51 bytes; computed from the image at B_EXE_LOCAL_POSITION */
 #define B_PIN_GRAPH_GETTER_FNV   UINT64_C(0x86a7f411c046a30c) /* retail the same over exe+0x28d3c0, 5 bytes; computed from the image at B_EXE_GRAPH_GETTER */
-/* The seven numeric constants the evaluator loads (six floats, one double): addresses OPEN. */
-#define B_CONST_ONE         UINT32_C(0)          /* retail game+0x22465c4 = 1.0f: OPEN */
-#define B_CONST_MINUS_ONE   UINT32_C(0)          /* retail game+0x2247894 = -1.0f: OPEN */
-#define B_CONST_RAD_TO_DEG  UINT32_C(0)          /* retail game+0x2246fb0 = 0x42652ee0: OPEN */
-#define B_CONST_MINUS_HALF_PI UINT32_C(0)        /* retail game+0x22478c8 = 0xbfc90fdb: OPEN */
-#define B_CONST_HALF_PI     UINT32_C(0)          /* retail game+0x2246774 = 0x3fc90fdb: OPEN */
-#define B_CONST_MINUS_75    UINT32_C(0)          /* retail game+0x2247ab0 = -75.0f: OPEN */
-#define B_CONST_DOUBLE_ONE  UINT32_C(0)          /* retail game+0x2246900 = 1.0: OPEN */
+/* The seven numeric constants the evaluator and the solver load (six floats, one double): each is the address the matched instruction names. */
+#define B_CONST_ONE         UINT32_C(0x23c6d70)  /* retail game+0x22465c4 = 1.0f; image: the load at game+0x12866cf (evaluator) and four more matched loads */
+#define B_CONST_MINUS_ONE   UINT32_C(0x23c800c)  /* retail game+0x2247894 = -1.0f; image: the load at game+0x1286791 (evaluator) and two more */
+#define B_CONST_RAD_TO_DEG  UINT32_C(0x23c7730)  /* retail game+0x2246fb0 = 0x42652ee0; image: the load at game+0x128685a (evaluator) and two more */
+#define B_CONST_MINUS_HALF_PI UINT32_C(0x23c8040)/* retail game+0x22478c8 = 0xbfc90fdb; image: the load at game+0x12774d8 (B_PIN_SOLVER) */
+#define B_CONST_HALF_PI     UINT32_C(0x23c6f1c)  /* retail game+0x2246774 = 0x3fc90fdb; image: the load at game+0x1277503 (B_PIN_SOLVER) */
+#define B_CONST_MINUS_75    UINT32_C(0x23c8228)  /* retail game+0x2247ab0 = -75.0f; image: the load at game+0x128661e (evaluator) */
+#define B_CONST_DOUBLE_ONE  UINT32_C(0x23c7098)  /* retail game+0x2246900 = 1.0; image: the loads at game+0x128662f and game+0x12866be (evaluator) */
 /* -- structure layout shared by both builds -- */
 #define L_API_UNIT          0x18   /* UnitAPI table at root+0x18: image, mov r9,[rcx+0x18] at game+0x1288414; NATIVE-INPUT-DEEP-DIVE.md */
 #define L_API_POSITION      0x38   /* image: "41ff5138" call [r9+0x38] */
