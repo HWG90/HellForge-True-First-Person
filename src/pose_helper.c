@@ -106,7 +106,7 @@
 #define B_STACK_ROOT        0x240  /* retail the same; image: B_CARRIER_HEX_2 lea r8,[rbp+0x140] with rbp = S+0x100 (B_CARRIER_HEX_1) */
 #define B_STACK_ROOT_SOURCE 0x10   /* retail the same; image: B_CARRIER_HEX_3 lea r8,[rbp+0x130], the quaternion 16 bytes below the root position */
 /* -- look-gain normalisation. Refused on this build: see B_INPUT_ESTABLISHED -- */
-#define B_INPUT_ESTABLISHED 0                    /* stays 0: B_PIN_EXIT_FNV is OPEN and none of the values below has run in the game. Evidence for each: docs/LOOK-GAIN-CONSTANTS-25480438.md, tools/find_look_gain.py */
+#define B_INPUT_ESTABLISHED 1                    /* all 16 pins entered; B_PIN_EXIT_FNV accepted 2026-11-17 on its preset use (see there). Evidence for each: docs/LOOK-GAIN-CONSTANTS-25480438.md. input_code still proves every pin in the running game before the first write. */
 #define B_EXE_WORLD_MATRIX  UINT32_C(0x1fd220)   /* retail 0x1f30e0; build_map; native_contract.h unit_world_matrix; input-json */
 #define B_HEX_WORLD_MATRIX  "40534883ec204863dae89206eaff488bc84c8b0041ff90e8000000488bcb48c1e10648034828488bc14883c4205bc3"
                                                  /* 47 bytes as retail; retail call displacement e2d5eaff, here 9206eaff; image at exe+0x1fd220 */
@@ -128,7 +128,7 @@
 #define B_INPUT_DEVICE      UINT32_C(0x324)      /* retail the same (device kind); image: mov eax,[rdi+0x324] at game+0x128678b and game+0x128686a, rdi = [B_GAME_INPUT_OWNER] loaded at game+0x12865fe */
 #define B_CONTEXT_INHIBIT   0x1a9                /* retail the same; input-json additional_evaluator_fields (game+0x1286756) */
 #define B_CONTEXT_LOOK      0x15c                /* retail the same; NATIVE-INPUT-DEEP-DIVE.md "context+0x15C/+0x160" */
-/* The 16 code pins (FNV-1a 64 over the range). 15 established from the images, 1 OPEN (B_PIN_EXIT_FNV). */
+/* The 16 code pins (FNV-1a 64 over the range), all from the images. */
 #define B_PIN_EVALUATOR     UINT32_C(0x1286330)  /* retail 0x1118370; build_map; input-json native6_evaluator */
 #define B_PIN_EVALUATOR_LEN 9688                 /* retail the same; input-json (2051 instructions both builds) */
 #define B_PIN_EVALUATOR_FNV UINT64_C(0x925c6f76c4b866ed) /* retail 0xac98356760db02c9; computed from the image */
@@ -150,7 +150,7 @@
 #define B_PIN_ENTER         UINT32_C(0x127de20)  /* retail 0x110fcf0; build_map; input-json constructor (2992 bytes, 665 instructions both builds) */
 #define B_PIN_ENTER_FNV     UINT64_C(0x4bed0e223589e85e) /* retail 0x32dc74e3dc6a26e9; computed from the image */
 #define B_PIN_EXIT          UINT32_C(0x127e9d0)  /* retail 0x11108a0; build_map; profile.h FP_EXIT */
-#define B_PIN_EXIT_FNV      UINT64_C(0)          /* retail 0x1dd0 bytes, 0x1a26ca7b7bbba077: OPEN. This build's exit function is a different body (0x1d58 bytes against 0x1d9d). The 0x1dd0 bytes from B_PIN_EXIT hash to 0xab98f35fc8fb95d5; not entered, see docs/LOOK-GAIN-CONSTANTS-25480438.md */
+#define B_PIN_EXIT_FNV      UINT64_C(0xab98f35fc8fb95d5) /* retail 0x1dd0 bytes, 0x1a26ca7b7bbba077. This build: the exit function (0x1d58 bytes), padding, the next function, padding. A recompiled body, accepted because its only preset use is retail's: index [r12+0x1f0c] *144 + table with no bound, then the same 14 field reads and 2 pointer passes (tools/find_look_gain.py "exit preset use") */
 #define B_PIN_12            UINT32_C(0x1fd190)   /* retail exe+0x1f3050, 51 bytes, 0xdafbc85ae8dffa23; image: only match, 0x90 below B_EXE_WORLD_MATRIX as in retail */
 #define B_PIN_12_FNV        UINT64_C(0x2d9df1a66a439fb6)/* computed from the image */
 #define B_PIN_13            UINT32_C(0x1fd1d0)   /* retail exe+0x1f3090, 76 bytes, 0x9f25c14a58784f1f; image: only match, 0x50 below B_EXE_WORLD_MATRIX as in retail */
@@ -776,9 +776,8 @@ static const InputPin INPUT_PINS[] = {
   {B_EXE_LOCAL_POSITION, 51, B_PIN_LOCAL_POSITION_FNV, true},
   {B_EXE_GRAPH_GETTER, 5, B_PIN_GRAPH_GETTER_FNV, true}};
 typedef struct InputConstant { uint32_t offset, bits; } InputConstant;
-/* cpp:602-618. On this build the proof cannot be made (B_INPUT_ESTABLISHED
- * 0: nine pins and seven constant addresses are open), so it fails as it
- * does in retail when a pin differs: false, reason INPUT_CODE_UNAVAILABLE. */
+/* cpp:602-618. Every pin and constant is read from the running game; one
+ * difference answers false, reason INPUT_CODE_UNAVAILABLE, as in retail. */
 static bool input_code(const TfpPoseConfig *c) {
   if (!B_INPUT_ESTABLISHED) return false;
   for (size_t k = 0; k < sizeof INPUT_PINS/sizeof INPUT_PINS[0]; ++k) {

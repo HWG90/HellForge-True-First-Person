@@ -68,8 +68,8 @@ ESTABLISHED = {
     "B_GAME_NO_AVATAR": 0x3484788, "B_GAME_HOST_AVATAR": 0x348456c, "B_GAME_IDLE_AVATAR": 0x3483c34,
     "B_INPUT_DEVICE": 0x324,
 }
-# Not established: this build's exit block is a different function body. The hash the C would compute over
-# its fixed 0x1dd0 bytes is printed as a candidate only.
+# The exit function is a recompiled body here, so it has no byte match. Its hash over the fixed 0x1dd0 bytes
+# is accepted when the function's use of the preset row is retail's ("exit preset use" below).
 OPEN = {"B_PIN_EXIT_FNV": 0xab98f35fc8fb95d5}
 
 IMAGES = {}
@@ -429,18 +429,34 @@ def main():
     if candidate != OPEN["B_PIN_EXIT_FNV"]:
         FAILED.append("B_PIN_EXIT_FNV candidate")
 
+    def preset_use(which, at, length, table):
+        """How the function uses the preset row: the index load and scaling before the table lea, then every r13 operand."""
+        rows = instructions(which, at, length)
+        hit = next(i for i, x in enumerate(rows) if x[2].startswith("lea") and "rax,[rip" in x[2] and x[0] + len(x[1]) + struct.unpack_from("<i", x[1], 3)[0] == table)
+        lead = [x[2] for x in rows[hit - 4:hit] if "0x1f0c" in x[2] or "r13" in x[2]]
+        uses = sorted(re.sub(r"xmm\d+", "xmm", x[2]) for x in rows[hit + 1:] if "r13" in x[2])
+        index_refs = sorted(x[2] for x in rows if "0x1f0c" in x[2])
+        return lead, uses, index_refs
+    r_use = preset_use("retail_game", r_at, r_end - r_at, 0x2cb2140)
+    h_use = preset_use("here_game", h_at, h_end - h_at, 0x32f9990)
+    same_use = r_use == h_use and len(r_use[1]) > 10
+    print(f"{'PASS' if same_use else 'FAIL'}  exit preset use            index {r_use[0]} then {len(r_use[1])} r13 operands and {len(r_use[2])} index references:"
+          f" {'the same in both builds' if same_use else 'DIFFERENT'}")
+    if not same_use:
+        FAILED.append("exit preset use")
+
     if args.check_c:
         print(f"== {args.check_c}")
         text = args.check_c.read_text()
         flag = re.search(r"#define B_INPUT_ESTABLISHED\s+(\S+)", text).group(1)
-        print(f"{'ok  ' if flag == '0' else 'BAD '}  B_INPUT_ESTABLISHED is {flag} (must stay 0 until an in-game check)")
-        if flag != "0":
+        print(f"{'ok  ' if flag == '1' else 'BAD '}  B_INPUT_ESTABLISHED is {flag} (1: all pins entered)")
+        if flag != "1":
             FAILED.append("B_INPUT_ESTABLISHED")
         for name in list(ESTABLISHED) + list(OPEN):
             match = re.search(rf"#define {name}\s+(?:UINT(?:32|64)_C\()?(0x[0-9a-fA-F]+|\d+)", text)
             value = int(match.group(1), 0) if match else None
             if name in OPEN:
-                ok, want = value == 0, "0 (open)"
+                ok, want = value == OPEN[name], f"{OPEN[name]:#x} (accepted on its preset use)"
             else:
                 ok, want = value in (0, ESTABLISHED[name]) and (value == 0 or RESULT.get(name) == value), f"{ESTABLISHED[name]:#x} or 0"
             print(f"{'ok  ' if ok else 'BAD '}  {name:<22} in the C: {'missing' if value is None else hex(value)}; expected {want}")

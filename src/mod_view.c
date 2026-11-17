@@ -22,7 +22,7 @@
 #include "wire_win_engine.h"
 #include "wire_win_effects.h"
 #include "engine.h"
-#define TFP_VIEW_VERSION "0.6.0-feel.1"
+#define TFP_VIEW_VERSION "0.6.0-feel.2"
 #else
 #include "wire_win.h"
 #define TFP_VIEW_VERSION "0.6.0-view.1"
@@ -194,7 +194,7 @@ static void start(void) {
   stage = RUNNING;
 #ifdef TFP_FEEL
   say("Ready. F11 toggles True First Person (view, weapon and arm placement, motion; head hiding, sleeves, hand grips and the effects once "
-      "their checks pass: see the Ready / Check / Refused lines). Not in this build: the F8 editor, the menu, look-gain normalisation, "
+      "their checks pass: see the Ready / Check / Refused lines). Not in this build: the F8 editor, the menu, "
       "Photo Mode camera sharing.");
 #else
   say("Ready. F11 toggles the view. Not in this build: arms and weapon placement, sleeves, hand grips, motion, head and body hiding, "

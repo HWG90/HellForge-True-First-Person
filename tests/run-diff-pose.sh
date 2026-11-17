@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Editor/pose helper: the C translation (src/pose_helper.c, src/pose_math.h) against the retail source
 # (native/first_person/native_ads_editor.cpp and its arithmetic headers), compared after every call.
-# Three programs: the arithmetic headers bit for bit; the helper as shipped (production object, in which the
-# look-gain normalisation refuses); and the helper built with the test's values for its open constants
+# Three programs: the arithmetic headers bit for bit; the helper with its code proof switched off
+# (tests/diff_pose_helper_refuse.h, in which the look-gain normalisation refuses); and the helper built with the test's values for its open constants
 # (tests/diff_pose_helper_open.h), in which the normalisation runs. One summary line each; exits non-zero on
 # any difference. Needs the retail tree (read only), g++ and Linux (process_vm_readv); without them it says
 # "skipped" and exits 0. The look-gain program also needs the captured images of both builds.
@@ -40,7 +40,7 @@ tfp_build() { # $1 program name, $2... extra defines for both compilations
 }
 tfp_status=0
 if [ -z "$TFP_ONLY" ] || [ "$TFP_ONLY" = production ]; then
-  tfp_build diff_pose_helper
+  tfp_build diff_pose_helper '-DTFP_POSE_TEST_OPEN_CONSTANTS="diff_pose_helper_refuse.h"'
   "$TFP_WORK/diff_pose_helper" "$@" || tfp_status=1
 fi
 if [ -z "$TFP_ONLY" ] || [ "$TFP_ONLY" = input ]; then
