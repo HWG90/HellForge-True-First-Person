@@ -17,11 +17,13 @@
 /* The chunk name LuaJIT prints before an assertion's message ("<chunk>:<line>: "). */
 #define TFP_DOF_LUA_CHUNK "src/first_person/dof.lua"
 #define TFP_DOF_INTERVAL .5
-/* check(): the two SDK thunks of the retail build, as dof.lua:62-63 has them. */
-#define TFP_DOF_GET_THUNK 0x3d43d0
-#define TFP_DOF_SET_THUNK 0x3d3ff0
-#define TFP_DOF_GET_BYTES "\x48\x8b\xd1\xe9\x08\xfd\xff\xff"
-#define TFP_DOF_SET_BYTES "\x48\x8b\xd1\xe9\x88\xfa\xff\xff"
+/* check(): the two SDK thunks (Application.render_setting, .set_render_setting) with their first 8
+ * bytes, relative to the executable; dof.lua:62-63. The only build data of this file. */
+typedef struct TfpDofBuild { uint32_t get_thunk, set_thunk; uint8_t get_bytes[8], set_bytes[8]; } TfpDofBuild;
+/* Retail 26568081: the numbers of the retail file; the vectors are replayed with these. */
+extern const TfpDofBuild tfp_dof_build_retail;
+/* HellForge's build 25480438: tools/verify_effects_constants.py shows where each number comes from. */
+extern const TfpDofBuild tfp_dof_build_25480438;
 
 /* retail's context(): stingray.Application, its render_setting and its set_render_setting, each
  * an opaque identity. Two bindings are the same when all three are equal. */
@@ -87,6 +89,8 @@ typedef struct TfpDofHost {
   bool (*vignette_is_clean)(void *user);
   void (*vignette_result)(void *user, TfpDofVignetteResult *out);
   const char *(*vignette_status)(void *user);
+  /* The build whose thunks check() expects. NULL: retail's. */
+  const TfpDofBuild *build;
 } TfpDofHost;
 
 typedef enum TfpDofPhase {

@@ -53,12 +53,27 @@ static void make_key(TfpNativeAimRecord *r, const char *kind, uint32_t id) {
   r->key_len = r->owner_len + (size_t)n;
 }
 
+const TfpNativeAimBuild tfp_native_aim_build_retail = {0x2ce1618, 0x2ce1ea0, {
+  {0xa5cff5, 10, {0x8b,0xc8,0x49,0x8b,0x42,0x50,0x0f,0xb6,0x04,0x48}},
+  {0xa5cf03, 21, {0x48,0x8b,0x05,0xd6,0x4f,0x28,0x02,0x48,0x8b,0x48,0x40,0xf7,0x81,0xf0,0x00,0x00,0x00,0xfd,0xff,0xff,0xff}},
+  {0xa5d0b3, 13, {0x48,0x6b,0xc1,0x38,0x42,0x0f,0xb6,0x84,0x08,0xec,0x02,0x00,0x00}},
+}};
+/* The first and third witnesses are retail's bytes at this build's addresses; the second is the same
+ * `mov rax,[rip+d]` / `mov rcx,[rax+0x40]` / `test dword [rcx+0xf0],0xfffffffd` with this build's
+ * displacement (it resolves to the avatar pool global, game+0x3326d20). */
+const TfpNativeAimBuild tfp_native_aim_build_25480438 = {0x3326468, 0x3326ce0, {
+  {0xa427b5, 10, {0x8b,0xc8,0x49,0x8b,0x42,0x50,0x0f,0xb6,0x04,0x48}},
+  {0xa426c3, 21, {0x48,0x8b,0x05,0x56,0x46,0x8e,0x02,0x48,0x8b,0x48,0x40,0xf7,0x81,0xf0,0x00,0x00,0x00,0xfd,0xff,0xff,0xff}},
+  {0xa42873, 13, {0x48,0x6b,0xc1,0x38,0x42,0x0f,0xb6,0x84,0x08,0xec,0x02,0x00,0x00}},
+}};
+static const TfpNativeAimBuild *build_of(const TfpNativeAimHost *h) { return h->build ? h->build : &tfp_native_aim_build_retail; }
+
 /* retail context(s,weapon,read_mode), lines 8-26. */
 static bool context(const TfpNativeAimHost *h, const TfpNativeAimSnapshot *s, uint32_t weapon, bool has_mode, uint32_t read_mode,
                     TfpNativeAimRecord *r, Raised *e) {
   uint64_t player, settings, pool, table, descriptor, values, selected;
   uint32_t mode, index, word, entity;
-  if (!mem_ptr(h, s->base + 0x2ce1618, &player, e)) return false;
+  if (!mem_ptr(h, s->base + build_of(h)->player, &player, e)) return false;
   if (!mem_ptr(h, s->avatar_owner + 0x40, &settings, e)) return false;
   if (has_mode) mode = read_mode;
   else if (!mem_u32(h, settings + 0xf0, &mode, e)) return false;
@@ -68,7 +83,7 @@ static bool context(const TfpNativeAimHost *h, const TfpNativeAimSnapshot *s, ui
   r->owner_len = s->player_identity_len < sizeof r->owner ? s->player_identity_len : sizeof r->owner;
   memcpy(r->owner, s->player_identity, r->owner_len);
   if (mode == 1 || mode == 3) {
-    if (!mem_ptr(h, s->base + 0x2ce1ea0, &pool, e)) return false;
+    if (!mem_ptr(h, s->base + build_of(h)->weapons, &pool, e)) return false;
     if (!mem_map(h, pool + 0x30, weapon, false, 0, &index, e)) return false;
     if (!mem_ptr(h, pool + 0x48, &table, e)) return false;
     if (!mem_ptr(h, table + (uint64_t)index * 8, &descriptor, e)) return false;
@@ -93,23 +108,17 @@ static bool context(const TfpNativeAimHost *h, const TfpNativeAimSnapshot *s, ui
   return true;
 }
 
-/* The three code witnesses of probe(), in the order LuaJIT's pairs() visits retail's table. */
-static const struct { uint32_t at, size; const char *bytes; } witnesses[] = {
-  {0xa5cff5, 10, "\x8b\xc8\x49\x8b\x42\x50\x0f\xb6\x04\x48"},
-  {0xa5cf03, 21, "\x48\x8b\x05\xd6\x4f\x28\x02\x48\x8b\x48\x40\xf7\x81\xf0\x00\x00\x00\xfd\xff\xff\xff"},
-  {0xa5d0b3, 13, "\x48\x6b\xc1\x38\x42\x0f\xb6\x84\x08\xec\x02\x00\x00"},
-};
-
 static bool probe(const TfpNativeAimHost *h, TfpNativeAimRecord *out, Raised *e) {
+  const TfpNativeAimBuild *build = build_of(h);
   TfpNativeAimSnapshot s, after;
   TfpNativeAimRecord r, again;
   const char *why = NULL;
   uint8_t bytes[32];
   if (!h->backend_snapshot(h->user, &s, &why)) return fail(e, 28, why);
   if (!(s.safe && (s.camera_kind == 6 || s.camera_kind == 4))) return fail(e, 28, "Native aim owner unavailable");
-  for (size_t i = 0; i < sizeof witnesses / sizeof witnesses[0]; i++) {
-    if (!mem_read(h, s.base + witnesses[i].at, witnesses[i].size, bytes, e)) return false;
-    if (memcmp(bytes, witnesses[i].bytes, witnesses[i].size) != 0) return fail(e, 31, "Native aim selection contract changed");
+  for (size_t i = 0; i < sizeof build->witnesses / sizeof build->witnesses[0]; i++) {
+    if (!mem_read(h, s.base + build->witnesses[i].at, build->witnesses[i].size, bytes, e)) return false;
+    if (memcmp(bytes, build->witnesses[i].bytes, build->witnesses[i].size) != 0) return fail(e, 31, "Native aim selection contract changed");
   }
   if (!context(h, &s, s.weapon, false, 0, &r, e)) return false;
   why = NULL;

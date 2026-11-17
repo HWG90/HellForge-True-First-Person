@@ -43,21 +43,33 @@ static bool mem_read(const TfpAimMarkersHost *h, uint64_t at, uint32_t size, uin
 /* ---- the adapter (retail lines 6-63) ---- */
 
 /* retail's `checks`: code that must be in place before the HUD is trusted. */
-static const struct { uint32_t at, size; uint8_t bytes[32]; } checks[] = {
-  {TFP_AIM_MARKERS_SET_SHOWN_RVA, 32, {0x48, 0x83, 0xec, 0x28, 0x44, 0x8b, 0x01, 0x4c, 0x8b, 0xd1, 0x41, 0x8b, 0xc0, 0x45, 0x8b, 0xc8,
-                                      0x83, 0xe0, 0xef, 0x41, 0x83, 0xc9, 0x10, 0x84, 0xd2, 0x44, 0x0f, 0x44, 0xc8, 0x44, 0x89, 0x09}},
+#define SET_SHOWN_BYTES {0x48, 0x83, 0xec, 0x28, 0x44, 0x8b, 0x01, 0x4c, 0x8b, 0xd1, 0x41, 0x8b, 0xc0, 0x45, 0x8b, 0xc8, \
+                         0x83, 0xe0, 0xef, 0x41, 0x83, 0xc9, 0x10, 0x84, 0xd2, 0x44, 0x0f, 0x44, 0xc8, 0x44, 0x89, 0x09}
+const TfpAimMarkersBuild tfp_aim_markers_build_retail = {0x12e4e20, {
+  {0x12e4e20, 32, SET_SHOWN_BYTES},
   {0x1635ccf, 7, {0x4d, 0x8d, 0xa5, 0x10, 0x01, 0x00, 0x00}},                      /* fixed crosshair group */
   {0x1635d61, 7, {0x49, 0x8d, 0xb5, 0x20, 0x02, 0x00, 0x00}},                      /* moving aiming-circle group */
   {0x117c88d, 19, {0x49, 0x8d, 0x8f, 0x78, 0xa6, 0x19, 0x00, 0xe8, 0x87, 0x93, 0x4b, 0x00, 0x49, 0x8d, 0x97, 0x78, 0xa6, 0x19, 0x00}},
-};
+}, 0x2ce1508, 0xac29c, 0x2e28788, 0x19a678};
+/* The function and the two group fingerprints are retail's bytes at this build's addresses. The
+ * fourth is the same `lea rcx,[r15+d]` / `call` / `lea rdx,[r15+d]` with this build's crosshair
+ * offset and call displacement (the call resolves to the function the two group fingerprints sit in). */
+const TfpAimMarkersBuild tfp_aim_markers_build_25480438 = {0x144cfb0, {
+  {0x144cfb0, 32, SET_SHOWN_BYTES},
+  {0x17b48df, 7, {0x4d, 0x8d, 0xa5, 0x10, 0x01, 0x00, 0x00}},
+  {0x17b4971, 7, {0x49, 0x8d, 0xb5, 0x20, 0x02, 0x00, 0x00}},
+  {0x12e98ed, 19, {0x49, 0x8d, 0x8f, 0xf8, 0xaa, 0x19, 0x00, 0xe8, 0x37, 0xaf, 0x4c, 0x00, 0x49, 0x8d, 0x97, 0xf8, 0xaa, 0x19, 0x00}},
+}, 0x3326340, 0xac21c, 0x346d538, 0x19aaf8};
+static const TfpAimMarkersBuild *build_of(const TfpAimMarkersHost *h) { return h->build ? h->build : &tfp_aim_markers_build_retail; }
 
 static bool validate(const TfpAimMarkersHost *h, uint64_t *game, Raised *e) {
+  const TfpAimMarkersBuild *build = build_of(h);
   const char *why = NULL;
   uint8_t bytes[32];
   if (!h->backend_module_identity(h->user, game, &why)) return raised(e, why);
-  for (size_t i = 0; i < sizeof checks / sizeof checks[0]; i++) {
-    if (!mem_read(h, *game + checks[i].at, checks[i].size, bytes, e)) return false;
-    if (memcmp(bytes, checks[i].bytes, checks[i].size) != 0) return fail(e, 24, "Aiming HUD fingerprint differs");
+  for (size_t i = 0; i < sizeof build->checks / sizeof build->checks[0]; i++) {
+    if (!mem_read(h, *game + build->checks[i].at, build->checks[i].size, bytes, e)) return false;
+    if (memcmp(bytes, build->checks[i].bytes, build->checks[i].size) != 0) return fail(e, 24, "Aiming HUD fingerprint differs");
   }
   return true;
 }
@@ -66,16 +78,17 @@ static TfpAimMarkersProbe probe(const TfpAimMarkersHost *h, bool mission_only, T
   uint64_t game, state, root, crosshair, parent, context, world, owner;
   uint32_t word;
   uint8_t byte;
+  const TfpAimMarkersBuild *build = build_of(h);
   if (!validate(h, &game, e)) return TFP_AIM_MARKERS_PROBE_RAISED;
-  if (!mem_ptr(h, game + 0x2ce1508, &state, e)) return TFP_AIM_MARKERS_PROBE_RAISED;
+  if (!mem_ptr(h, game + build->state, &state, e)) return TFP_AIM_MARKERS_PROBE_RAISED;
   if (mission_only) {
-    if (!mem_u32(h, state + 0xac29c, &word, e)) return TFP_AIM_MARKERS_PROBE_RAISED;
+    if (!mem_u32(h, state + build->scene, &word, e)) return TFP_AIM_MARKERS_PROBE_RAISED;
     if (word != 4) return TFP_AIM_MARKERS_PROBE_NONE;
   }
-  if (!mem_ptr(h, game + 0x2e28788, &root, e)) return TFP_AIM_MARKERS_PROBE_RAISED;
+  if (!mem_ptr(h, game + build->root, &root, e)) return TFP_AIM_MARKERS_PROBE_RAISED;
   if (!mem_u8(h, root + 0x24e334, &byte, e)) return TFP_AIM_MARKERS_PROBE_RAISED;
   if (byte != 1) return TFP_AIM_MARKERS_PROBE_NONE;
-  crosshair = root + 0x24e340 + 0x19a678;
+  crosshair = root + 0x24e340 + build->crosshair;
   if (!mem_ptr(h, crosshair + 0xf0, &parent, e)) return TFP_AIM_MARKERS_PROBE_RAISED;
   if (parent != root + 0x820) { fail(e, 36, "Aiming HUD parent differs"); return TFP_AIM_MARKERS_PROBE_RAISED; }
   if (!mem_ptr(h, crosshair + 0xf8, &context, e)) return TFP_AIM_MARKERS_PROBE_RAISED;
@@ -129,7 +142,7 @@ static bool show(const TfpAimMarkersHost *h, const TfpAimMarkersHud *hud, uint64
     bool wine = false;
     uint64_t address;
     if (!h->backend_windows(h->user, &wine, &why)) return raised(e, why);
-    address = hud->game + TFP_AIM_MARKERS_SET_SHOWN_RVA;
+    address = hud->game + build_of(h)->set_shown;
     memset(&r, 0, sizeof r);
     if (!(h->windows_virtual_query(h->user, address, &r, sizeof r) == sizeof r && r.state == 0x1000 &&
           (r.kind == 0x1000000 || (r.kind == 0x40000 && wine && r.allocation == hud->game)) &&

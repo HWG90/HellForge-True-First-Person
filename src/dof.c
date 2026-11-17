@@ -92,6 +92,12 @@ static bool foreign(TfpDofSetting *s, char *why) {
   return held;
 }
 
+const TfpDofBuild tfp_dof_build_retail = {
+  0x3d43d0, 0x3d3ff0, {0x48, 0x8b, 0xd1, 0xe9, 0x08, 0xfd, 0xff, 0xff}, {0x48, 0x8b, 0xd1, 0xe9, 0x88, 0xfa, 0xff, 0xff}};
+/* mov rdx,rcx / jmp exe+0x3fa210 and jmp exe+0x3f9cc0: the same two instructions as retail's. */
+const TfpDofBuild tfp_dof_build_25480438 = {
+  0x3fa3d0, 0x3fa120, {0x48, 0x8b, 0xd1, 0xe9, 0x38, 0xfe, 0xff, 0xff}, {0x48, 0x8b, 0xd1, 0xe9, 0x98, 0xfb, 0xff, 0xff}};
+
 /* retail check(c), lines 50-66. */
 static bool check(TfpDofSetting *s, const TfpDofBinding *c, Raised *e) {
   const TfpDofHost *h = s->host;
@@ -102,14 +108,15 @@ static bool check(TfpDofSetting *s, const TfpDofBinding *c, Raised *e) {
     if (!h->verify(h->user, c->app, &is_true, &error)) return raised(e, error);
     if (!is_true) return fail(e, 52, "Renderer DoF binding contract changed");
   } else {
+    const TfpDofBuild *build = h->build ? h->build : &tfp_dof_build_retail;
     uint64_t exe = 0;
     uint8_t bytes[8];
     if (!h->backend_profile_pose) return fail(e, 60, "Renderer executable profile unavailable");
     if (!h->backend_alignment_executable(h->user, &exe, &error)) return raised(e, error);
-    if (!h->backend_read(h->user, exe + TFP_DOF_GET_THUNK, 8, bytes, &error)) return raised(e, error);
-    if (memcmp(bytes, TFP_DOF_GET_BYTES, 8) != 0) return fail(e, 62, "Renderer DoF SDK contract changed");
-    if (!h->backend_read(h->user, exe + TFP_DOF_SET_THUNK, 8, bytes, &error)) return raised(e, error);
-    if (memcmp(bytes, TFP_DOF_SET_BYTES, 8) != 0) return fail(e, 62, "Renderer DoF SDK contract changed");
+    if (!h->backend_read(h->user, exe + build->get_thunk, 8, bytes, &error)) return raised(e, error);
+    if (memcmp(bytes, build->get_bytes, 8) != 0) return fail(e, 62, "Renderer DoF SDK contract changed");
+    if (!h->backend_read(h->user, exe + build->set_thunk, 8, bytes, &error)) return raised(e, error);
+    if (memcmp(bytes, build->set_bytes, 8) != 0) return fail(e, 62, "Renderer DoF SDK contract changed");
   }
   s->verified = *c; s->has_verified = true;
   return true;

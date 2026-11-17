@@ -14,6 +14,19 @@
 /* The chunk name LuaJIT prints before an assertion's message ("<chunk>:<line>: "). */
 #define TFP_MOVEMENT_LUA_CHUNK "src/first_person/first_person_movement.lua"
 
+/* The build data of this file: the six code fingerprints (retail `anchors`, lines 8-15) and the
+ * global that holds the locomotion pool (line 45), all relative to the game module. The row layout
+ * (pool +0xC, +0x20, +0x38, +0x50; row 0xA0 bytes, the focused byte at +0x94) is the same in both
+ * builds: it is what anchors 1 to 3 spell out. */
+typedef struct TfpMovementBuild {
+  struct { uint32_t at, size; uint8_t bytes[52]; } anchors[6];
+  uint32_t pool;
+} TfpMovementBuild;
+/* Retail 26568081: the numbers of the retail file; the vectors are replayed with these. */
+extern const TfpMovementBuild tfp_movement_build_retail;
+/* HellForge's build 25480438: tools/verify_effects_constants.py shows where each number comes from. */
+extern const TfpMovementBuild tfp_movement_build_25480438;
+
 /* What this module reads of a backend player snapshot. `handle` is the host's own: the module
  * hands the snapshot back (controller_focus_owned, deps_fallback_ready, backend_action_state,
  * backend_on_foot) and those read fields this module does not know. Only the snapshot taken last
@@ -86,6 +99,8 @@ typedef struct TfpMovementHost {
   bool (*deps_write)(void *user, uint64_t address, uint8_t value, bool *answer, const char **error);
   /* log(text). NULL: none. */
   void (*log)(void *user, const char *text);
+  /* The build whose anchors and pool global are used. NULL: retail's. */
+  const TfpMovementBuild *build;
 } TfpMovementHost;
 
 /* The leased byte and who it belongs to (retail's `location` table plus `before`). */

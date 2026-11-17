@@ -16,6 +16,20 @@
 /* The chunk name LuaJIT prints before an assertion's message ("<chunk>:<line>: "). */
 #define TFP_NATIVE_AIM_LUA_CHUNK "src/first_person/native_ads_option.lua"
 
+/* The build data of this file, relative to the game module: the globals that hold the local player
+ * and the weapon pool (lines 9, 13) and the three code witnesses of probe() (lines 29-31), in the
+ * order LuaJIT's pairs() visits retail's table. The field offsets (owner +0x40, settings +0xf0, pool
+ * +0x30 / +0x48 / +0x50, player +0x88 / +0xd0 / +0xe8 / +0x2ec, row 0x38) are the same in both
+ * builds: the witnesses spell out +0x40, +0xf0, +0x50, 0x38 and +0x2ec. */
+typedef struct TfpNativeAimBuild {
+  uint32_t player, weapons;
+  struct { uint32_t at, size; uint8_t bytes[24]; } witnesses[3];
+} TfpNativeAimBuild;
+/* Retail 26568081: the numbers of the retail file; the vectors are replayed with these. */
+extern const TfpNativeAimBuild tfp_native_aim_build_retail;
+/* HellForge's build 25480438: tools/verify_effects_constants.py shows where each number comes from. */
+extern const TfpNativeAimBuild tfp_native_aim_build_25480438;
+
 /* What this module reads of a backend snapshot. The host fills the texts (bytes, not
  * NUL-terminated) and refuses a snapshot whose identity does not fit. */
 typedef struct TfpNativeAimSnapshot {
@@ -59,6 +73,8 @@ typedef struct TfpNativeAimHost {
   bool (*foreign)(void *user);
   bool (*controller_is_enabled)(void *user);
   void (*controller_result)(void *user, TfpNativeAimControllerState *out);
+  /* The build whose globals and witnesses are used. NULL: retail's. */
+  const TfpNativeAimBuild *build;
 } TfpNativeAimHost;
 
 /* Where the preference byte of one owner lives (retail's record `r`). */

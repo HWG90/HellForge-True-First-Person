@@ -20,8 +20,20 @@
 #define TFP_AIM_MARKERS_SAVED_KEY 24          /* a saved entry's key text with its NUL (longer ones: cut, then invalid) */
 /* The chunk name LuaJIT prints before an assertion's message ("<chunk>:<line>: "). */
 #define TFP_AIM_MARKERS_LUA_CHUNK "src/first_person/aim_markers.lua"
-/* The game's own "set widget shown" function, relative to the game module (retail build 26568081). */
-#define TFP_AIM_MARKERS_SET_SHOWN_RVA 0x12e4e20u
+/* The build data of this file, relative to the game module: the game's own "set widget shown"
+ * function, the four code fingerprints (retail's `checks`; the first is the function itself), the
+ * globals that hold the game state and the HUD, the scene field of the state and the crosshair's
+ * place in the mission HUD. The other offsets (HUD +0x24e334 built, +0x24e340 mission HUD, +0x820
+ * parent; widget +0xf0 parent, +0xf8 context, groups +0x110 and +0x220) are the same in both builds. */
+typedef struct TfpAimMarkersBuild {
+  uint32_t set_shown;
+  struct { uint32_t at, size; uint8_t bytes[32]; } checks[4];
+  uint32_t state, scene, root, crosshair;
+} TfpAimMarkersBuild;
+/* Retail 26568081: the numbers of the retail file; the vectors are replayed with these. */
+extern const TfpAimMarkersBuild tfp_aim_markers_build_retail;
+/* HellForge's build 25480438: tools/verify_effects_constants.py shows where each number comes from. */
+extern const TfpAimMarkersBuild tfp_aim_markers_build_25480438;
 
 /* The HUD the adapter found (retail's identity table). All fields are addresses. */
 typedef struct TfpAimMarkersHud { uint64_t game, root, state, parent, context, world, widgets[2]; } TfpAimMarkersHud;
@@ -67,7 +79,7 @@ typedef struct TfpAimMarkersHost {
   bool (*backend_windows)(void *user, bool *wine, const char **error);
   /* kernel32 VirtualQuery(address, region, size): the number of bytes it filled. */
   size_t (*windows_virtual_query)(void *user, uint64_t address, TfpAimMarkersRegion *region, size_t size);
-  /* The call of the game's function at `function` (= game + TFP_AIM_MARKERS_SET_SHOWN_RVA) with
+  /* The call of the game's function at `function` (= game + the build's set_shown) with
    * (widget, shown 0|1). Retail calls it through FFI, where only a fault can stop it; the error
    * channel is for a host that guards the call. It may have written before it fails. */
   bool (*game_set_widget_shown)(void *user, uint64_t function, uint64_t widget, uint8_t shown, const char **error);
@@ -95,6 +107,8 @@ typedef struct TfpAimMarkersHost {
    * RAISED: it raised *why. NULL: not a function. */
   TfpAimMarkersSave (*save_global)(void *user, bool value, const char **why);
   void (*log)(void *user, const char *text);           /* may be NULL */
+  /* The build whose addresses and fingerprints are used. NULL: retail's. */
+  const TfpAimMarkersBuild *build;
 } TfpAimMarkersHost;
 
 /* ---- the adapter ---- */
