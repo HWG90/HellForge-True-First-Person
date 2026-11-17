@@ -22,7 +22,20 @@ REASONS = ["Memory unavailable", "Camera is not owned by local player",
            "Waiting for owned native request to retire: Entity absent", "Already clean", "Native camera exited",
            "Waiting for native ADS camera initialization (evaluator)", "Field of view policy unavailable"]
 PHASES = ["idle", "waiting", "running", "cleanup_pending", "disabled"]
-CALLS = ["start", "stop", "shutdown", "suspend", "update", "retry_cleanup"]
+CALLS = ["start", "stop", "shutdown", "suspend", "update", "retry_cleanup", "set_placement", "get_placement", "placement_target"]
+STATUS = dict(ok=True, armed=True, expired=False, tw=1, blend=1, error=0, why=0, retire=False, has_wu=False, wu=0, has_zr=False, zr=0)
+NIL, NUM, OTHER, FALSE = 0, 1, 2, 3  # a placement field: nil, a number, a text, false
+
+
+def place(x=0.15, y=0, z=-0.12, yaw=None, pitch=None, roll=None, ok=True):
+    """A placement table. A field is a number, None (nil), a str (not a number) or False."""
+    kinds, values = [], []
+    for value in (x, y, z, yaw, pitch, roll):
+        if value is None: kinds.append(NIL); values.append(0.0)
+        elif value is False: kinds.append(FALSE); values.append(0.0)
+        elif isinstance(value, str): kinds.append(OTHER); values.append(0.0)
+        else: kinds.append(NUM); values.append(float(value))
+    return dict(ok=ok, kind=kinds, v=values)
 
 
 def snap(ok=True, err=0, identity=1, player=1, aiming=False, active=False, kind=4, safe=True, record=0, reason=0, guard=0):
@@ -34,8 +47,10 @@ def world(now, call="update", arg=0, **kw):
     w = dict(call=call, arg=arg, now=now, follow=False, snap=snap(), snap2=None, psnap=snap(), hammer=False, prepare=0, enter=0,
              lease_request=7, lease_cleanup_only=False,
              status=dict(ok=True, armed=True, expired=False, tw=1, blend=1, error=0, why=0, retire=False),
-             release=0, release_note=0, set_transition=0, packet=dict(ok=False, identity=1, player=1, epoch=1, progress=0.5))
+             release=0, release_note=0, set_transition=0, packet=dict(ok=False, identity=1, player=1, epoch=1, progress=0.5),
+             final=dict(ok=False, wu=0, blend=1, tw=1), value=place(), bpose=place(ok=False), key=0, set=0)
     w.update(kw)
+    w["status"] = dict(STATUS, **w["status"])
     if w["snap2"] is None:
         w["snap2"] = copy.deepcopy(w["snap"])
     return w
@@ -191,6 +206,92 @@ def edges():
     return ops
 
 
+def placement():
+    """get_placement, placement_target and set_placement in every state, and the counts behind status()."""
+    nan, inf = float("nan"), float("inf")
+    ops = []
+    t = [700.0]
+
+    def step(dt=0.01, **kw):
+        t[0] += dt
+        ops.append(world(t[0], **kw))
+
+    def refusals():
+        step(call="set_placement", value=place(ok=False))                       # not a table
+        for bad in (place(x=None), place(y=None), place(z=None), place(x="a"), place(y=False), place(x=nan), place(z=nan),
+                    place(x=0.5000001), place(x=-0.5000001), place(y=inf), place(z=-inf), place(x=7), place(None, None, None)):
+            step(call="set_placement", value=bad)
+        for bad in (place(yaw=90.0001), place(pitch=-90.0001), place(roll=nan), place(yaw="a"), place(pitch=inf),
+                    place(roll=-inf), place(yaw=1, pitch=2, roll=91), place(x=nan, yaw=nan)):
+            step(call="set_placement", value=bad)
+
+    def accepted():
+        for good in (place(), place(0.5, -0.5, 0.5), place(-0.5, 0.5, -0.5, 90, -90, 90), place(0.1, 0.2, 0.3, False, None, 12.5),
+                     place(0, 0, 0, -0.0, 45, -89.999), place(0.01, -0.02, 0.03, 1, 2, 3)):
+            step(call="set_placement", value=good)
+            step(call="get_placement")
+            step(call="get_placement", bpose=place(0.2, 0.1, -0.1))             # the backend's placement wins; no angles: 0
+            step(call="get_placement", bpose=place(0.2, 0.1, -0.1, 3, False, -4))
+        for answer in (8, -1, -2, -3):                                          # a text, none, raised, nil
+            step(call="set_placement", value=place(0.3, 0.3, 0.3, 9, 9, 9), set=answer)
+            step(call="get_placement")
+
+    rig = snap(kind=6, record=7)
+    # Never started: the shipped placement, no target, the defaults call.
+    step(call="get_placement"); step(call="placement_target"); step(call="placement_target", key=1)
+    refusals(); accepted()
+    # Running with a lease: the lease call, and a target when the backend names a weapon.
+    step(call="start", snap2=rig); step(snap=rig)
+    step(call="placement_target"); step(call="placement_target", key=2); step(call="get_placement")
+    refusals(); accepted()
+    # The helper's counts: they only add what is new since the last look; a lower count is ignored.
+    for wu, zr in ((3, 1), (5, 1), (5, 2), (2, 0), (9, 4)):
+        step(snap=rig, status=dict(has_wu=True, wu=wu, has_zr=True, zr=zr, blend=0.25))
+    for wu in (nan, inf, -1, 1e17):
+        step(snap=rig, status=dict(has_wu=True, wu=wu, blend=1 / 3))
+    step(snap=rig, status=dict(blend=nan)); step(snap=rig, status=dict(blend=inf)); step(snap=rig, status=dict(blend=-inf))
+    step(snap=rig, status=dict(blend=1e15)); step(snap=rig, status=dict(blend=0.1 + 0.2))
+    # Waiting after a swap: no lease, the defaults call; the final statistics of the released lease count.
+    step(snap=snap(ok=False, err=2), psnap=snap(safe=False), final=dict(ok=True, wu=1e17 + 64, blend=0.75, tw=1))
+    step(call="placement_target", key=2); step(call="set_placement", value=place(0.05, 0.05, 0.05)); step(call="get_placement")
+    # A new lease starts counting from zero again.
+    step(dt=0.4, snap=snap(identity=2)); step(snap=snap(identity=2, kind=6, record=7), status=dict(has_wu=True, wu=4))
+    # Cleanup pending: a lease is held, the phase is not running: the defaults call, no target.
+    step(call="stop", release=8, final=dict(ok=True, wu=6, blend=0.5, tw=0))
+    step(call="placement_target", key=2); step(call="set_placement", value=place(0.06, 0.06, 0.06, 6)); step(call="get_placement")
+    step(final=dict(ok=True, wu=7, blend=0.5, tw=0))
+    step(call="set_placement", value=place(0.07, 0.07, 0.07)); step(call="placement_target", key=2)
+    # A second session zeroes the counts; waiting without a firearm.
+    step(call="start", snap=snap(safe=False, reason=5)); step(call="set_placement", value=place(0.08, 0, 0))
+    step(call="placement_target", key=2); step(call="shutdown"); step(call="set_placement", value=place(0.09, 0, 0))
+    step(call="get_placement"); step(call="placement_target", key=1)
+    return ops
+
+
+PLACES = [place(), place(0.5, -0.5, 0.5), place(0.1, 0.2, 0.3, 10, -20, 30), place(0.2, 0, -0.1, 90, None, False),
+          place(0.6), place(z=float("nan")), place(yaw=91), place(pitch="a"), place(x=None), place(ok=False),
+          place(-0.3, 0.3, 0.05, -45, 0, 5.5)]
+
+
+def add_placement(ops, seed):
+    """Placement calls, helper counts and final statistics laid over a walk, from a generator of their own."""
+    rng = random.Random(seed)
+    count = 0.0
+    for op in ops:
+        if rng.random() < 0.05: count = 0.0                                     # the helper was armed again
+        count += rng.choice((0, 0, 1, 1, 2, 7))
+        op["status"].update(has_wu=rng.random() < 0.9, wu=count if rng.random() < 0.97 else rng.choice((-1.0, float("nan"), float("inf"))),
+                            has_zr=rng.random() < 0.5, zr=float(rng.randint(0, 3)))
+        op["final"] = dict(ok=rng.random() < 0.6, wu=count + rng.choice((0, 0, 1, 3)), blend=rng.choice((0, 0.5, 1)), tw=rng.choice((0, 1)))
+        op["bpose"] = rng.choice((place(ok=False), place(ok=False), place(0.2, 0.1, -0.1), place(0.1, 0.1, 0.1, 5, None, False)))
+        op["key"] = rng.choice((0, 1, 1, 2))
+        op["set"] = rng.choice((0, 0, 0, 0, 8, -1, -2, -3))
+        op["value"] = copy.deepcopy(rng.choice(PLACES))
+        if rng.random() < 0.06:
+            op["call"] = rng.choice(CALLS[6:])
+    return ops
+
+
 def idle_shutdown():
     ops = [world(50.0, call="update"), world(50.1, call="retry_cleanup"), world(50.2, call="suspend"),
            world(50.3, call="stop", arg=13), world(50.4, call="shutdown"), world(50.5, call="start"), world(50.6)]
@@ -219,7 +320,7 @@ def walk(seed, count):
         pview = snap(ok=rng.random() > 0.03, err=rng.randint(0, 4), player=rng.choice((player, player, player, 3 - player)),
                      aiming=full["aiming"], active=active, kind=rng.choice((kind, kind, 4, 6)),
                      safe=rng.random() > 0.2, reason=rng.choice((0, 5, 6)), guard=full["guard"])
-        call = rng.choices(CALLS, weights=(8, 0.4, 0, 1.5, 88, 2))[0]
+        call = rng.choices(CALLS[:6], weights=(8, 0.4, 0, 1.5, 88, 2))[0]
         ops.append(world(t, call=call, arg=rng.choice((0, 13)), snap=full, snap2=second, psnap=pview,
                          hammer=rng.random() < 0.04, prepare=rng.choice((0, 0, 0, 0, 12, -1)),
                          enter=rng.choice((0, 0, 0, 0, 0, 12, -1)), lease_request=rng.choice((7, 7, 7, 0)),
@@ -266,7 +367,7 @@ def calm(seed, count):
         pview = snap(player=player, aiming=aiming, active=aiming, safe=not disturbed and not guard,
                      reason=5 if disturbed else 0, guard=guard)
         tw = 0 if aiming else 1
-        call = rng.choices(CALLS, weights=(3, 0.15, 0, 0.3, 96, 0.55))[0]
+        call = rng.choices(CALLS[:6], weights=(3, 0.15, 0, 0.3, 96, 0.55))[0]
         ops.append(world(t, call=call, arg=rng.choice((0, 13)), follow=rng.random() > 0.01, snap=full, psnap=pview,
                          hammer=identity == 4 and rng.random() < 0.9, prepare=0 if rng.random() > 0.05 else 12,
                          enter=0 if rng.random() > 0.03 else 12, lease_request=rng.choice((7, 7, 7, 0)),
@@ -299,6 +400,11 @@ def lua(value):
     raise TypeError(value)
 
 
+def c_place(p):
+    kinds = [OTHER if k == OTHER else NUM if k == NUM else NIL for k in p["kind"]]   # false reads as nil (controller.h)
+    return "{%d,{%s},{%s}}" % (p["ok"], ",".join(str(k) for k in kinds), ",".join(cnum(v) for v in p["v"]))
+
+
 def c_view(v):
     return "{%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d}" % (v["ok"], v["err"], v["identity"], v["player"], v["aiming"],
         v["active"], v["kind"], v["safe"], v["record"], v["reason"], v["guard"])
@@ -318,24 +424,28 @@ def main():
         sys.exit(f"Retail is at {commit}; this project is frozen at {FROZEN}.")
     source = args.retail / "src/first_person/controller.lua"
     digest = hashlib.sha256(source.read_bytes()).hexdigest()
-    runs = ([("scripted", scripted()), ("edges", edges()), ("idle_shutdown", idle_shutdown())]
-            + [(f"walk{seed}", walk(seed, 3000)) for seed in (1, 2)]
-            + [(f"calm{seed}", calm(seed, 4000)) for seed in (1, 2, 3)])
+    runs = ([("scripted", scripted()), ("edges", edges()), ("idle_shutdown", idle_shutdown()), ("placement", placement())]
+            + [(f"walk{seed}", add_placement(walk(seed, 3000), 100 + seed)) for seed in (1, 2)]
+            + [(f"calm{seed}", add_placement(calm(seed, 4000), 200 + seed)) for seed in (1, 2, 3)])
     out = [f"/* Generated by tools/retail_ref/gen_controller.py. Do not edit.\n * Retail file: src/first_person/controller.lua at commit "
            f"{commit}, sha256 {digest}.\n * Each run starts a fresh controller; every operation carries what the scripted backend answers\n"
            f" * during it and what the retail controller did. */",
            f'#define CONTROLLER_VECTOR_COMMIT "{commit}"', f'#define CONTROLLER_VECTOR_SHA256 "{digest}"',
            "static const char *const controller_reasons[] = {\"\", " + ", ".join(c_string(r) for r in REASONS) + "};",
            "typedef struct ControllerView { int ok, err, identity, player, aiming, active, kind, safe, record, reason, guard; } ControllerView;",
+           "/* A placement table: ok 0 is no table; kind per field (x y z yaw pitch roll): 0 nil or false, 1 a number, 2 something else. */",
+           "typedef struct ControllerPlace { int ok, kind[6]; double v[6]; } ControllerPlace;",
            "typedef struct ControllerVector {", "  int run, call, arg, follow; double now; ControllerView snap, snap2, psnap;",
            "  int hammer, prepare, enter, lease_request, lease_cleanup_only;",
            "  int status_ok, armed, expired; double tw, blend; int error, status_why, retire;",
            "  int release, release_note, set_transition, packet_ok, packet_identity, packet_player, packet_epoch; double packet_progress;",
+           "  int has_wu; double wu; int has_zr; double zr; int final_ok; double final_wu, final_blend, final_tw;",
+           "  ControllerPlace value, bpose; int key, set;",
            "  int result, phase, enabled, lease, runs, enter_attempts, release_attempts, samples, native_without_aim, reacquisitions, aim_transitions;",
-           "  const char *trace, *label;", "} ControllerVector;",
-           "enum { CV_START, CV_STOP, CV_SHUTDOWN, CV_SUSPEND, CV_UPDATE, CV_RETRY_CLEANUP };",
+           "  const char *trace, *label, *status, *text;", "} ControllerVector;",
+           "enum { CV_START, CV_STOP, CV_SHUTDOWN, CV_SUSPEND, CV_UPDATE, CV_RETRY_CLEANUP, CV_SET_PLACEMENT, CV_GET_PLACEMENT, CV_PLACEMENT_TARGET };",
            "static const ControllerVector controller_vectors[] = {"]
-    total = 0
+    total, counts = 0, {}
     for index, (name, ops) in enumerate(runs):
         with tempfile.NamedTemporaryFile("w", suffix=".lua", delete=False) as script:
             script.write("return {reasons=" + lua(REASONS) + ",ops={\n" + ",\n".join(lua(op) for op in ops) + "\n}}\n")
@@ -347,21 +457,27 @@ def main():
         if len(lines) != len(ops):
             sys.exit(f"{name}: {len(lines)} results for {len(ops)} operations")
         for op, line in zip(ops, lines):
-            parts = line.split("|", 12)
-            s, p = op["status"], op["packet"]
+            parts = line.split("|")
+            if len(parts) != 15:
+                sys.exit(f"{name}: unexpected answer line: {line}")
+            s, p, f = op["status"], op["packet"], op["final"]
+            counts[op["call"]] = counts.get(op["call"], 0) + 1
             fields = [index, CALLS.index(op["call"]), op["arg"], int(op["follow"]), cnum(op["now"]), c_view(op["snap"]), c_view(op["snap2"]),
                       c_view(op["psnap"]), int(op["hammer"]), op["prepare"], op["enter"], op["lease_request"],
-                      int(op["lease_cleanup_only"]), int(s["ok"]), int(s["armed"]), int(s["expired"]), repr(float(s["tw"])),
-                      repr(float(s["blend"])), s["error"], s["why"], int(s["retire"]), op["release"], op["release_note"],
+                      int(op["lease_cleanup_only"]), int(s["ok"]), int(s["armed"]), int(s["expired"]), cnum(s["tw"]),
+                      cnum(s["blend"]), s["error"], s["why"], int(s["retire"]), op["release"], op["release_note"],
                       op["set_transition"], int(p["ok"]), p["identity"], p["player"], p["epoch"], repr(float(p["progress"])),
+                      int(s["has_wu"]), cnum(s["wu"]), int(s["has_zr"]), cnum(s["zr"]), int(f["ok"]), cnum(f["wu"]), cnum(f["blend"]),
+                      cnum(f["tw"]), c_place(op["value"]), c_place(op["bpose"]), op["key"], op["set"],
                       parts[0], PHASES.index(parts[1]), parts[2], parts[3], parts[4], parts[5], parts[6], parts[7], parts[8],
-                      parts[9], parts[10], c_string(parts[11]), c_string(parts[12])]
+                      parts[9], parts[10], c_string(parts[11]), c_string(parts[12]), c_string(parts[13]),
+                      c_string(parts[14])]
             out.append("  {" + ",".join(str(f) for f in fields) + "},")
         total += len(ops)
         print(f"{name}: {len(ops)} operations")
     out.append("};")
     (args.out / "controller_vectors.h").write_text("\n".join(out) + "\n")
-    print(f"controller: {total} operations in {len(runs)} runs")
+    print(f"controller: {total} operations in {len(runs)} runs (" + ", ".join(f"{counts.get(c, 0)} {c}" for c in CALLS) + ")")
     return 0
 
 

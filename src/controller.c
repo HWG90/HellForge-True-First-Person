@@ -21,8 +21,31 @@ static bool now(TfpController *c, double *out) { /* :45 */
   *out = value;
   return true;
 }
-static bool pose_stats(TfpController *c, TfpPoseStats *out, char *why, size_t size) { /* :92 */
-  return c->backend->pose_status(c->backend->user, c->lease, out, why, size);
+/* Lua's tostring of a number (LuaJIT: "%.14g"; nan and inf without C's variants). */
+static void number_text(char out[32], double value) {
+  if (value != value) snprintf(out, 32, "nan");
+  else if (value == HUGE_VAL || value == -HUGE_VAL) snprintf(out, 32, value > 0 ? "inf" : "-inf");
+  else snprintf(out, 32, "%.14g", value);
+}
+static void accumulate_count(bool has, double value, double *seen, double *sum) { /* :84-92 */
+  if (!has || value != value || !(value >= 0) || !(value < HUGE_VAL)) return;
+  if (value > *seen) {
+    *sum = *sum + value - *seen;
+    *seen = value;
+  }
+}
+static void accumulate_pose_stats(TfpController *c, const TfpPoseStats *stats) { /* :81 */
+  accumulate_count(stats->has_weapon_updates, stats->weapon_updates, &c->seen_weapon_updates, &c->weapon_updates);
+  accumulate_count(stats->has_zero_restores, stats->zero_restores, &c->seen_zero_restores, &c->zero_restores);
+  c->blend = stats->blend, c->target_weight = stats->target_weight;
+  c->has_blend = true;
+}
+static void forget_pose_seen(TfpController *c) { c->seen_weapon_updates = c->seen_zero_restores = 0; } /* pose_seen = nil */
+static bool pose_stats(TfpController *c, TfpPoseStats *out, char *why, size_t size) { /* :96 */
+  memset(out, 0, sizeof *out);
+  if (!c->backend->pose_status(c->backend->user, c->lease, out, why, size)) return false;
+  accumulate_pose_stats(c, out);
+  return true;
 }
 static void observe(TfpController *c, const TfpView *s) { /* :66 */
   c->samples++;
@@ -36,6 +59,60 @@ void tfp_controller_init(TfpController *c, const TfpBackendApi *backend) {
   memset(c, 0, sizeof *c);
   c->backend = backend;
   report(c, "Idle; manual start required"); /* :11 */
+  c->placement.kind[TFP_AXIS_X] = c->placement.kind[TFP_AXIS_Y] = c->placement.kind[TFP_AXIS_Z] = TFP_AXIS_NUMBER; /* :23 */
+  c->placement.v[TFP_AXIS_X] = 0.15, c->placement.v[TFP_AXIS_Y] = 0, c->placement.v[TFP_AXIS_Z] = -0.12;
+}
+
+void tfp_controller_get_placement(const TfpController *c, const TfpPlacementApi *api, TfpPlacementValue *out) { /* :102 */
+  TfpPlacementValue backend;
+  const TfpPlacementValue *value = api->pose_placement(api->user, &backend) ? &backend : &c->placement;
+  *out = *value;
+  for (int axis = TFP_AXIS_YAW; axis < TFP_AXIS_N; axis++)
+    if (value->kind[axis] == TFP_AXIS_NIL) out->kind[axis] = TFP_AXIS_NUMBER, out->v[axis] = 0; /* `or 0` */
+}
+bool tfp_controller_placement_target(const TfpController *c, const TfpPlacementApi *api, const char **key, TfpLease **lease) { /* :106 */
+  const char *weapon = c->phase == TFP_PHASE_RUNNING && c->lease ? api->placement_weapon_key(api->user) : NULL;
+  if (!weapon) return false;
+  *key = weapon, *lease = c->lease;
+  return true;
+}
+bool tfp_controller_set_placement(TfpController *c, const TfpPlacementApi *api, const TfpPlacementValue *value, char *why, size_t size) { /* :110 */
+  TfpPlacementValue next;
+  char problem[160] = "";
+  bool accepted;
+  if (!value) { snprintf(why, size, "Placement requires XYZ"); return false; }
+  for (int axis = TFP_AXIS_X; axis <= TFP_AXIS_Z; axis++) {
+    double number = value->v[axis];
+    if (value->kind[axis] != TFP_AXIS_NUMBER || number != number || number < -TFP_PLACEMENT_REACH || number > TFP_PLACEMENT_REACH) {
+      snprintf(why, size, "Placement must be finite XYZ within 0.5 metres");
+      return false;
+    }
+    next.kind[axis] = TFP_AXIS_NUMBER, next.v[axis] = number;
+  }
+  for (int axis = TFP_AXIS_YAW; axis < TFP_AXIS_N; axis++) {
+    double number = value->kind[axis] == TFP_AXIS_NIL ? 0 : value->v[axis]; /* value[axis] or 0 */
+    if (value->kind[axis] == TFP_AXIS_OTHER || number != number || fabs(number) > TFP_PLACEMENT_ANGLE) {
+      snprintf(why, size, "Angles must be within90degrees"); /* retail's text, as written */
+      return false;
+    }
+    next.kind[axis] = TFP_AXIS_NUMBER, next.v[axis] = number;
+  }
+  /* :127 refuses a running lease of another test mode with 'Placement requires the arms/weapon
+   * test'; this controller starts in the arms / weapon mode only, so that line cannot be reached. */
+  if (c->phase == TFP_PHASE_RUNNING && c->lease) accepted = api->set_pose_placement(api->user, c->lease, next.v, problem, sizeof problem);
+  else accepted = api->set_placement_defaults(api->user, next.v, problem, sizeof problem);
+  if (!accepted) { snprintf(why, size, "%s", first(problem, "Placement was not accepted")); return false; }
+  c->placement = next;
+  return true;
+}
+int tfp_controller_status(const TfpController *c, char *out, size_t size) { /* :138 */
+  char updates[32], blend[32];
+  /* summary.mode is nil until the first session begins and 'pose_offset' from then on. */
+  if (!c->runs) return snprintf(out, size, "%s; camera6/aimfalse observations=%u", c->label, c->observed_native_without_aim);
+  number_text(updates, c->weapon_updates);
+  number_text(blend, c->has_blend ? c->blend : 0);
+  return snprintf(out, size, "%s; camera6/aimfalse observations=%u; arms/weapon offset updates=%s; hip blend=%s; aim transitions=%u",
+                  c->label, c->observed_native_without_aim, updates, blend, c->aim_transitions);
 }
 
 bool tfp_controller_retry_cleanup(TfpController *c) { /* :156 */
@@ -47,6 +124,8 @@ bool tfp_controller_retry_cleanup(TfpController *c) { /* :156 */
     reportf(c, "Cleanup pending: ", first(why, "Native exit has not acknowledged restoration"));
     return false;
   }
+  if (c->lease->has_pose_stats) accumulate_pose_stats(c, &c->lease->pose_stats); /* :165 */
+  forget_pose_seen(c);
   if (c->manual && c->enabled) {
     c->lease = NULL;
     c->phase = TFP_PHASE_WAITING;
@@ -71,6 +150,7 @@ bool tfp_controller_stop(TfpController *c, const char *reason) { /* :182 */
   snprintf(c->stop_reason, sizeof c->stop_reason, "%s", first(reason, "manual stop"));
   c->has_stop_reason = true;
   if (!c->lease) {
+    forget_pose_seen(c);
     c->phase = c->closing ? TFP_PHASE_DISABLED : TFP_PHASE_IDLE;
     reportf(c, "Stopped: ", c->stop_reason);
     return true;
@@ -96,6 +176,9 @@ static void begin_session(TfpController *c, const TfpView *current, double times
   c->started = timestamp;
   c->runs++;
   c->aim_transitions = c->reacquisitions = 0;
+  c->weapon_updates = c->zero_restores = 0;
+  c->has_blend = false;
+  forget_pose_seen(c);
   c->pose_aiming = current->aiming || current->controller_active;
   c->observed_native_without_aim = c->samples = 0;
   c->has_stop_reason = false;
@@ -222,6 +305,7 @@ static bool manual_update(TfpController *c, double timestamp) { /* :364 */
   }
   c->lease = lease;
   c->phase = TFP_PHASE_RUNNING;
+  forget_pose_seen(c);
   c->has_ads_return = false;
   c->has_pose = true;
   /* Rebase only after the former lease acknowledged retirement and a later,

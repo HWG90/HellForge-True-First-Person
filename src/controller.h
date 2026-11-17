@@ -2,7 +2,9 @@
  * first-person view is entered, held, let go and re-entered. Translation of
  * the manual ("pose_offset", persistent) branch of retail
  * src/first_person/controller.lua at 0.5.41-smooth.66, including its status
- * texts. tests/vectors/controller_vectors.h holds that file's own answers.
+ * texts, the arms / weapon placement it keeps (get_placement, placement_target,
+ * set_placement, :102-135) and its status line (:138-147).
+ * tests/vectors/controller_vectors.h holds that file's own answers.
  * The timed test modes of the retail file are not translated. The backend
  * owns game calls and lease validity; this unit owns timing and decisions. */
 #ifndef TFP_CONTROLLER_H
@@ -24,7 +26,13 @@ typedef struct TfpView {
   const char *reason;             /* why safe is false, when the backend knows; may be NULL */
   char error[128];
 } TfpView;
-typedef struct TfpPoseStats { bool armed, expired; double target_weight, blend; int error; } TfpPoseStats;
+/* weapon_updates / zero_restores: the helper's running counts (stats.weapon_updates, .zero_restores);
+ * has_* false: the backend does not report one (nil in retail). The controller clears a TfpPoseStats
+ * before it asks, so a backend that knows nothing of them leaves them absent. */
+typedef struct TfpPoseStats {
+  bool armed, expired; double target_weight, blend; int error;
+  bool has_weapon_updates, has_zero_restores; double weapon_updates, zero_restores;
+} TfpPoseStats;
 /* A lease on the native view. Owned and filled by the backend. */
 typedef struct TfpLease {
   uint64_t request;               /* the camera request it entered with; 0: unknown */
@@ -33,6 +41,10 @@ typedef struct TfpLease {
    * its final statistics when the backend disarmed it. Retail reads lease.pose_error and falls
    * back to lease.pose_stats.error; the backend folds both into this pair. */
   bool has_pose_error; int pose_error;
+  /* lease.pose_stats or lease.alignment_stats: the statistics the backend last recorded on the lease
+   * (a status poll, or the final ones when it disarmed the helper). Read once the release is
+   * acknowledged (:165). has_pose_stats false: neither is there. */
+  bool has_pose_stats; TfpPoseStats pose_stats;
 } TfpLease;
 typedef struct TfpPhasePacket { bool available; uint64_t identity, player_identity, epoch; double progress; } TfpPhasePacket;
 
@@ -51,6 +63,23 @@ typedef struct TfpBackendApi {
   double (*clock)(void *user);    /* monotonic seconds */
 } TfpBackendApi;
 
+/* ---- arms / weapon placement (:23, :102-135) ----
+ * A placement table as Lua sees it, field by field: x, y, z in metres, yaw, pitch, roll in degrees. */
+typedef enum TfpAxisKind { TFP_AXIS_NIL, TFP_AXIS_NUMBER, TFP_AXIS_OTHER } TfpAxisKind; /* nil or false; a number; anything else */
+enum { TFP_AXIS_X, TFP_AXIS_Y, TFP_AXIS_Z, TFP_AXIS_YAW, TFP_AXIS_PITCH, TFP_AXIS_ROLL, TFP_AXIS_N };
+typedef struct TfpPlacementValue { TfpAxisKind kind[TFP_AXIS_N]; double v[TFP_AXIS_N]; } TfpPlacementValue;
+/* The backend's side of placement. A set_* answers retail's `accepted == true`; why takes its second
+ * result, or the text it raised (the controller calls it under pcall), empty when there is none. */
+typedef struct TfpPlacementApi {
+  void *user;
+  bool (*pose_placement)(void *user, TfpPlacementValue *out);     /* backend.pose_placement; false: nil */
+  const char *(*placement_weapon_key)(void *user);                /* backend.placement_weapon_key; NULL: nil */
+  bool (*set_pose_placement)(void *user, TfpLease *lease, const double value[TFP_AXIS_N], char *why, size_t size);
+  bool (*set_placement_defaults)(void *user, const double value[TFP_AXIS_N], char *why, size_t size);
+} TfpPlacementApi;
+#define TFP_PLACEMENT_REACH 0.5      /* controller.lua:116, metres */
+#define TFP_PLACEMENT_ANGLE 90.0     /* controller.lua:123, degrees */
+
 typedef enum TfpPhase { TFP_PHASE_IDLE, TFP_PHASE_WAITING, TFP_PHASE_RUNNING, TFP_PHASE_CLEANUP_PENDING,
                         TFP_PHASE_DISABLED } TfpPhase;
 typedef struct TfpController {
@@ -65,6 +94,10 @@ typedef struct TfpController {
   bool has_ads_return, has_pose, pose_aiming;
   struct { uint64_t identity, player_identity; } ads_return;
   unsigned runs, enter_attempts, release_attempts, samples, observed_native_without_aim, reacquisitions, aim_transitions;
+  TfpPlacementValue placement;       /* :23 {x=.15,y=0,z=-.12} until a set_placement is accepted */
+  /* summary.weapon_updates, .zero_restores, .blend, .target_weight and pose_seen (:81-95) */
+  double weapon_updates, zero_restores, seen_weapon_updates, seen_zero_restores, blend, target_weight;
+  bool has_blend;                    /* false: summary.blend is nil (no statistics since the session began) */
 } TfpController;
 
 #define TFP_GUARD_HOLD 0.75          /* controller.lua:19 */
@@ -78,5 +111,15 @@ bool tfp_controller_shutdown(TfpController *c);
 bool tfp_controller_suspend(TfpController *c, const char *reason);
 bool tfp_controller_update(TfpController *c);
 bool tfp_controller_retry_cleanup(TfpController *c);
+/* self:get_placement(): backend.pose_placement, else the controller's own; angles that are not there are 0. */
+void tfp_controller_get_placement(const TfpController *c, const TfpPlacementApi *api, TfpPlacementValue *out);
+/* self:placement_target(): false is nil. true: the backend's weapon key and the lease whose
+ * origin.identity is retail's second result (the binder renders it; a TfpLease has no origin). */
+bool tfp_controller_placement_target(const TfpController *c, const TfpPlacementApi *api, const char **key, TfpLease **lease);
+/* self:set_placement(value). value NULL: not a table. false: why holds retail's refusal text. With a
+ * running lease the backend's set_pose_placement is asked, otherwise set_placement_defaults. */
+bool tfp_controller_set_placement(TfpController *c, const TfpPlacementApi *api, const TfpPlacementValue *value, char *why, size_t size);
+/* self:status(): the status line, cut to size. Answers the length it wanted (as snprintf). */
+int tfp_controller_status(const TfpController *c, char *out, size_t size);
 static inline bool tfp_controller_is_clean(const TfpController *c) { return !c->lease && !c->enabled; }
 #endif

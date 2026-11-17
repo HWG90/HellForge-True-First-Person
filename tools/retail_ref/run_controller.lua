@@ -40,12 +40,16 @@ function backend:pose_status(lease)
     if s.retire then lease.pose_owner_retired = true end
     return nil, reason(s.why)
   end
-  local stats = {armed = s.armed, expired = s.expired, target_weight = s.tw, blend = s.blend, error = s.error}
+  local stats = {armed = s.armed, expired = s.expired, target_weight = s.tw, blend = s.blend, error = s.error,
+                 weapon_updates = s.has_wu and s.wu or nil, zero_restores = s.has_zr and s.zr or nil}
   lease.pose_stats, lease.pose_error = stats, stats.error
   return stats
 end
-function backend:release()
+function backend:release(lease)
   trace[#trace + 1] = 'release'
+  -- The backend records the helper's final statistics on the lease when it disarms it.
+  local f = world.final
+  if f.ok then lease.pose_stats = {weapon_updates = f.wu, target_weight = f.tw, blend = f.blend} end
   if world.release == 0 then return true, reason(world.release_note) end
   return false, reason(world.release)
 end
@@ -60,7 +64,37 @@ backend.presentation_transition = function()
   if not p.ok then return nil end
   return {identity = 'i' .. p.identity, player_identity = 'p' .. p.player, epoch = p.epoch, progress = p.progress}
 end
-local c = M.new(backend, nil, function() return world.now end)
+-- Placement: backend.pose_placement and backend.placement_weapon_key are fields; the two setters answer the script.
+local AXES = {'x', 'y', 'z', 'yaw', 'pitch', 'roll'}
+local function placement_table(spec)
+  local t = {}
+  for i, axis in ipairs(AXES) do
+    local kind = spec.kind[i]
+    if kind == 1 then t[axis] = spec.v[i] elseif kind == 2 then t[axis] = 'text' elseif kind == 3 then t[axis] = false end
+  end
+  return t
+end
+local function six(t)
+  local parts = {}
+  for i, axis in ipairs(AXES) do
+    local value = t[axis]
+    parts[i] = type(value) == 'number' and string.format('%.17g', value) or tostring(value)
+  end
+  return table.concat(parts, ',')
+end
+local c
+local function set_answer(name, value)
+  trace[#trace + 1] = name .. '(' .. six(value) .. ')'
+  local answer = world.set
+  if answer == 0 then return true end
+  if answer == -1 then return false end
+  if answer == -2 then error(reason(7), 0) end
+  if answer == -3 then return nil end
+  return false, reason(answer)
+end
+function backend:set_pose_placement(lease, value) assert(lease == c.lease); return set_answer('set_pose_placement', value) end
+function backend:set_placement_defaults(value) return set_answer('set_placement_defaults', value) end
+c = M.new(backend, nil, function() return world.now end)
 for _, op in ipairs(script.ops) do
   world, trace, snapshots = op, {}, 0
   if op.follow then
@@ -70,15 +104,29 @@ for _, op in ipairs(script.ops) do
     for _, v in ipairs({op.snap, op.snap2}) do v.kind, v.record = kind, record end
     op.psnap.kind = kind
   end
-  local result
+  backend.pose_placement = op.bpose.ok and placement_table(op.bpose) or nil
+  backend.placement_weapon_key = op.key > 0 and ('weapon' .. op.key) or nil
+  local result, text = nil, ''
   if op.call == 'start' then result = c:start(0, 'pose_offset')
   elseif op.call == 'stop' then result = c:stop(reason(op.arg))
   elseif op.call == 'shutdown' then result = c:shutdown()
   elseif op.call == 'suspend' then result = c:suspend(reason(op.arg))
   elseif op.call == 'update' then result = c:update()
-  elseif op.call == 'retry_cleanup' then result = c:retry_cleanup() end
+  elseif op.call == 'retry_cleanup' then result = c:retry_cleanup()
+  elseif op.call == 'set_placement' then
+    local value = 5
+    if op.value.ok then value = placement_table(op.value) end
+    result, text = c:set_placement(value)
+    text = text or ''
+  elseif op.call == 'get_placement' then
+    text = six(c:get_placement())
+    result = true
+  elseif op.call == 'placement_target' then
+    local key = c:placement_target()
+    result, text = key ~= nil, key or ''
+  end
   local r = c:result()
   print(table.concat({result == true and 1 or 0, c.phase, c:is_enabled() and 1 or 0, c.lease and 1 or 0,
     r.runs, r.enter_attempts, r.release_attempts, r.samples, r.observed_native_without_aim,
-    r.reacquisitions or 0, r.aim_transitions or 0, table.concat(trace, ','), c:display_status()}, '|'))
+    r.reacquisitions or 0, r.aim_transitions or 0, table.concat(trace, ','), c:display_status(), c:status(), text}, '|'))
 end
