@@ -622,61 +622,119 @@ static bool rt_controller_start(TfpRtHost *h, V seconds, V mode, V *o1, V *o2) {
   }
   return controller_answer(h, tfp_controller_start(&W(h)->controller), o1, o2);
 }
+/* Placement and the status line are the controller's (controller.c, controller.lua:102-147); what
+ * follows only carries values between the runtime, the controller and the backend. */
+static const unsigned place_bits[TFP_AXIS_N] = {TFP_OPS_X, TFP_OPS_Y, TFP_OPS_Z, TFP_OPS_YAW, TFP_OPS_PITCH, TFP_OPS_ROLL};
+static void place_from_ops(const TfpOpsPlacement *p, TfpPlacementValue *out) {
+  const double values[TFP_AXIS_N] = {p->x, p->y, p->z, p->yaw, p->pitch, p->roll};
+  for (int i = 0; i < TFP_AXIS_N; i++)
+    out->kind[i] = p->present & place_bits[i] ? TFP_AXIS_NUMBER : TFP_AXIS_NIL, out->v[i] = values[i];
+}
+static TfpOpsPlacement place_to_ops(const double value[TFP_AXIS_N]) { /* the controller's next_value: six numbers */
+  return (TfpOpsPlacement){value[TFP_AXIS_X], value[TFP_AXIS_Y], value[TFP_AXIS_Z], value[TFP_AXIS_YAW], value[TFP_AXIS_PITCH],
+                           value[TFP_AXIS_ROLL], TFP_OPS_X | TFP_OPS_Y | TFP_OPS_Z | TFP_OPS_YAW | TFP_OPS_PITCH | TFP_OPS_ROLL};
+}
+static bool place_pose_placement(void *u, TfpPlacementValue *out) { /* backend.pose_placement */
+  TfpWire *w = u;
+  if (!w->ops.has_pose_placement) return false;
+  place_from_ops(&w->ops.pose_placement, out);
+  return true;
+}
+static const char *place_weapon_key(void *u) { /* backend.placement_weapon_key */
+  TfpWire *w = u;
+  return w->ops.has_placement_weapon_key ? w->ops.placement_weapon_key : NULL;
+}
+static bool place_answer(TfpOpsResult accepted, const TfpOpsText *text, char *why, size_t size) {
+  why_out(text, why, size);
+  return accepted == TFP_OPS_TRUE;
+}
+static bool place_set_pose(void *u, TfpLease *lease, const double value[TFP_AXIS_N], char *why, size_t size) {
+  TfpWire *w = u;
+  TfpOpsText text = {false, ""};
+  TfpOpsPlacement p = place_to_ops(value);
+  return place_answer(tfp_ops_set_pose_placement(&w->ops, &((TfpWireLease *)lease)->ops, &p, &text), &text, why, size);
+}
+static bool place_set_defaults(void *u, const double value[TFP_AXIS_N], char *why, size_t size) {
+  TfpWire *w = u;
+  TfpOpsText text = {false, ""};
+  TfpOpsPlacement p = place_to_ops(value);
+  return place_answer(tfp_ops_set_placement_defaults(&w->ops, &p, &text), &text, why, size);
+}
+static TfpPlacementApi place_api(TfpWire *w) {
+  return (TfpPlacementApi){w, place_pose_placement, place_weapon_key, place_set_pose, place_set_defaults};
+}
 static bool rt_controller_get_placement(TfpRtHost *h, TfpRtTable *o1) { /* ctl:102-105 */
   TfpWire *w = W(h);
-  TfpOpsPlacement p = {tfp_rt_default_placement[0], tfp_rt_default_placement[1], tfp_rt_default_placement[2], 0, 0, 0, 7};
-  if (w->ops.has_pose_placement) p = w->ops.pose_placement;
+  TfpPlacementApi api = place_api(w);
+  TfpPlacementValue value;
+  tfp_controller_get_placement(&w->controller, &api, &value);
   memset(o1, 0, sizeof *o1);
   o1->present = true;
   o1->ref = &w->ops.pose_placement;
-  const double values[6] = {p.x, p.y, p.z, p.present & TFP_OPS_YAW ? p.yaw : 0, p.present & TFP_OPS_PITCH ? p.pitch : 0,
-                            p.present & TFP_OPS_ROLL ? p.roll : 0};
-  for (int i = 0; i < 6; i++) o1->f[TFP_RT_PLACE_X + i] = num(values[i]);
+  for (int i = 0; i < TFP_AXIS_N; i++) o1->f[TFP_RT_PLACE_X + i] = value.kind[i] == TFP_AXIS_NUMBER ? num(value.v[i]) : nil();
   return true;
 }
 static bool rt_controller_placement_target(TfpRtHost *h, V *o1, V *o2) { /* ctl:106-109 */
   TfpWire *w = W(h);
+  TfpPlacementApi api = place_api(w);
+  const char *key = NULL;
+  TfpLease *lease = NULL;
   *o1 = *o2 = nil();
-  if (w->controller.phase != TFP_PHASE_RUNNING || !w->controller.lease || !w->ops.has_placement_weapon_key) return true;
+  if (!tfp_controller_placement_target(&w->controller, &api, &key, &lease)) return true;
+  *o1 = tfp_wire_text(key);
+  /* lease.origin and lease.origin.identity: a lease of this binder always has its origin. */
   char *identity = arena(w, 24);
-  *o1 = tfp_wire_text(w->ops.placement_weapon_key);
   if (identity) {
-    tfp_wire_identity_text(identity, 'W', tfp_ops_identity_key(&held(w)->ops.origin));
+    tfp_wire_identity_text(identity, 'W', tfp_ops_identity_key(&((TfpWireLease *)lease)->ops.origin));
     *o2 = tfp_wire_text(identity);
   }
   return true;
 }
-const char *tfp_wire_placement_check(const double xyz[3], const double angles[3]) { /* ctl:112-124 */
-  for (int i = 0; i < 3; i++)
-    if (xyz[i] != xyz[i] || xyz[i] < -.5 || xyz[i] > .5) return "Placement must be finite XYZ within 0.5 metres";
-  for (int i = 0; i < 3; i++)
-    if (angles[i] != angles[i] || fabs(angles[i]) > 90) return "Angles must be within90degrees";
-  return NULL;
+/* The bounds rule alone (ctl:112-124), asked of the controller with a backend that accepts. */
+static bool place_accept_lease(void *u, TfpLease *lease, const double value[TFP_AXIS_N], char *why, size_t size) {
+  (void)u; (void)lease; (void)value; (void)why; (void)size;
+  return true;
+}
+static bool place_accept(void *u, const double value[TFP_AXIS_N], char *why, size_t size) {
+  (void)u; (void)value; (void)why; (void)size;
+  return true;
+}
+const char *tfp_wire_placement_check(const double xyz[3], const double angles[3]) {
+  static const char *const refusals[] = {"Placement must be finite XYZ within 0.5 metres", "Angles must be within90degrees"};
+  static const TfpPlacementApi accepting = {NULL, NULL, NULL, place_accept_lease, place_accept};
+  TfpController scratch;
+  TfpPlacementValue value;
+  char why[160] = "";
+  memset(&scratch, 0, sizeof scratch);
+  for (int i = 0; i < 3; i++) {
+    value.kind[i] = value.kind[3 + i] = TFP_AXIS_NUMBER;
+    value.v[i] = xyz[i], value.v[3 + i] = angles[i];
+  }
+  if (tfp_controller_set_placement(&scratch, &accepting, &value, why, sizeof why)) return NULL;
+  return strcmp(why, refusals[0]) ? refusals[1] : refusals[0];
 }
 static bool rt_controller_set_placement(TfpRtHost *h, V value, V extra, V *o1, V *o2) { /* ctl:110-135 */
   TfpWire *w = W(h);
+  TfpPlacementApi api = place_api(w);
   TfpOpsPlacement p;
-  TfpOpsText why = {false, ""};
-  (void)extra;
+  TfpPlacementValue table, *given = NULL;
+  char why[320] = "";
+  (void)extra; /* self:set_placement(value) takes one argument */
   *o1 = boolean(false), *o2 = nil();
-  /* The only placement table this build ever hands over is the shipped default (wire_off.c, Actions.resolve). */
-  if (!tfp_wire_placement_of(w, value, &p)) { *o2 = tfp_wire_text("Placement requires XYZ"); return true; }
-  const double xyz[3] = {p.x, p.y, p.z}, angles[3] = {0, 0, 0};
-  const char *problem = tfp_wire_placement_check(xyz, angles);
-  if (problem) { *o2 = tfp_wire_text(problem); return true; }
-  p.present = TFP_OPS_X | TFP_OPS_Y | TFP_OPS_Z | TFP_OPS_YAW | TFP_OPS_PITCH | TFP_OPS_ROLL;
-  TfpOpsResult accepted = w->controller.phase == TFP_PHASE_RUNNING && w->controller.lease
-                              ? tfp_ops_set_pose_placement(&w->ops, &held(w)->ops, &p, &why)
-                              : tfp_ops_set_placement_defaults(&w->ops, &p, &why);
-  if (accepted != TFP_OPS_TRUE) { *o2 = why.present ? kept_text(w, why.text) : tfp_wire_text("Placement was not accepted"); return true; }
-  *o1 = boolean(true);
+  if (value.kind == TFP_RT_REF) { /* a table: the shipped default, one placement_decode reads, or {} */
+    if (tfp_wire_placement_of(w, value, &p)) place_from_ops(&p, &table);
+    else if (value.ref == &tfp_rt_empty_table) memset(&table, 0, sizeof table); /* every field nil */
+    else { *o2 = tfp_wire_text("Placement table is not one the binder can read"); return true; } /* the binder's own refusal */
+    given = &table;
+  }
+  if (tfp_controller_set_placement(&w->controller, &api, given, why, sizeof why)) *o1 = boolean(true);
+  else *o2 = kept_text(w, why);
   return true;
 }
-static bool rt_controller_status(TfpRtHost *h, V *o1) { /* ctl:138-147, mode pose_offset */
+static bool rt_controller_status(TfpRtHost *h, V *o1) { /* ctl:138-147 */
   TfpWire *w = W(h);
-  char line[400];
-  snprintf(line, sizeof line, "%s; camera6/aimfalse observations=%u; arms/weapon offset updates=0; hip blend=0; aim transitions=%u",
-           w->controller.label, w->controller.observed_native_without_aim, w->controller.aim_transitions);
+  char line[512];
+  tfp_controller_status(&w->controller, line, sizeof line);
   *o1 = kept_text(w, line);
   return true;
 }

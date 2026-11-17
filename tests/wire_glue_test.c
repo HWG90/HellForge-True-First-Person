@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "wire.h"
 #include "wire_off.h"
@@ -61,6 +62,16 @@ static uint32_t h_begin_b(const TfpBlurConfig *c, uint64_t *g) { (void)c; (void)
 static uint32_t h_stats_b(uint64_t g, TfpBlurStats *s) { (void)g; (void)s; helper_calls++; return 0; }
 
 static TfpWire wire;
+/* A saved per-weapon placement as another binder would decode it: the ref points at six numbers. */
+static bool saved_decode(TfpWire *w, TfpRtValue value, TfpOpsPlacement *out) {
+  const double *v = value.ref;
+  (void)w;
+  *out = (TfpOpsPlacement){v[0], v[1], v[2], v[3], v[4], v[5], TFP_OPS_X | TFP_OPS_Y | TFP_OPS_Z | TFP_OPS_YAW | TFP_OPS_PITCH | TFP_OPS_ROLL};
+  return true;
+}
+static bool text_is(TfpRtValue v, const char *text) {
+  return v.kind == TFP_RT_TEXT && v.length == strlen(text) && !memcmp(v.text, text, v.length);
+}
 static TfpOpsSnapshot sample(bool full) {
   TfpOpsSnapshot s;
   memset(&s, 0, sizeof s);
@@ -252,6 +263,66 @@ int main(void) {
   CHECK(r[1].kind == TFP_RT_TEXT && !strncmp(r[1].text, "Fird Person render placement is unavailable", r[1].length));
   CHECK(tfp_wire_call(&wire, TFP_RT_E_status, NULL, r) == TFP_RT_OK && r[0].kind == TFP_RT_TEXT);
   CHECK(tfp_wire_call(&wire, TFP_RT_E_placement, NULL, r) == TFP_RT_OK);
+
+  /* ---- the controller's placement and status through the host pointers (controller.lua:102-147) ---- */
+  {
+    TfpRtHost *h = &wire.host;
+    TfpRtTable t;
+    TfpRtValue a, b, none = {.kind = TFP_RT_NIL}, number = {.kind = TFP_RT_NUMBER, .number = 5};
+    TfpRtValue shipped_ref = {.kind = TFP_RT_REF, .ref = tfp_rt_default_placement}, empty = {.kind = TFP_RT_REF, .ref = &tfp_rt_empty_table};
+    static const double saved_ok[6] = {.2, -.1, .05, 12, -90, 3.5}, saved_tilted[6] = {.2, -.1, .05, 12, 91, 0}, saved_far[6] = {.2, .6, 0, 0, 0, 0};
+    static const char unknown = 0;
+    TfpRtValue unknown_ref = {.kind = TFP_RT_REF, .ref = &unknown};
+    /* on_enable's set_placement went through the controller: six numbers reached the backend's defaults */
+    CHECK(wire.ops.pose_placement.present == 63 && wire.ops.pose_placement.yaw == 0 && wire.controller.placement.kind[TFP_AXIS_ROLL] == TFP_AXIS_NUMBER);
+    CHECK(h->controller_get_placement(h, &t) && t.present && t.f[TFP_RT_PLACE_X].number == .15 && t.f[TFP_RT_PLACE_Z].number == -.12);
+    CHECK(t.f[TFP_RT_PLACE_YAW].kind == TFP_RT_NUMBER && t.f[TFP_RT_PLACE_YAW].number == 0 && t.f[TFP_RT_PLACE_ROLL].number == 0);
+    CHECK(h->controller_set_placement(h, number, none, &a, &b) && a.kind == TFP_RT_FALSE && text_is(b, "Placement requires XYZ"));
+    CHECK(h->controller_set_placement(h, none, none, &a, &b) && a.kind == TFP_RT_FALSE && text_is(b, "Placement requires XYZ"));
+    CHECK(h->controller_set_placement(h, empty, none, &a, &b) && a.kind == TFP_RT_FALSE &&
+          text_is(b, "Placement must be finite XYZ within 0.5 metres"));
+    CHECK(h->controller_set_placement(h, unknown_ref, none, &a, &b) && a.kind == TFP_RT_FALSE &&
+          text_is(b, "Placement table is not one the binder can read")); /* no decoder: the binder's own refusal */
+    CHECK(h->controller_set_placement(h, shipped_ref, none, &a, &b) && a.kind == TFP_RT_TRUE && b.kind == TFP_RT_NIL);
+    wire.placement_decode = saved_decode;
+    TfpRtValue saved = {.kind = TFP_RT_REF, .ref = saved_tilted};
+    CHECK(h->controller_set_placement(h, saved, none, &a, &b) && a.kind == TFP_RT_FALSE && text_is(b, "Angles must be within90degrees"));
+    saved.ref = saved_far;
+    CHECK(h->controller_set_placement(h, saved, none, &a, &b) && a.kind == TFP_RT_FALSE &&
+          text_is(b, "Placement must be finite XYZ within 0.5 metres"));
+    CHECK(wire.ops.pose_placement.x == .15 && wire.controller.placement.v[TFP_AXIS_X] == .15); /* a refusal changes nothing */
+    saved.ref = saved_ok;
+    CHECK(h->controller_set_placement(h, saved, none, &a, &b) && a.kind == TFP_RT_TRUE && b.kind == TFP_RT_NIL);
+    CHECK(wire.ops.pose_placement.x == .2 && wire.ops.pose_placement.yaw == 12 && wire.ops.pose_placement.pitch == -90 &&
+          wire.ops.pose_placement.roll == 3.5 && wire.controller.placement.v[TFP_AXIS_PITCH] == -90);
+    CHECK(h->controller_get_placement(h, &t) && t.f[TFP_RT_PLACE_Y].number == -.1 && t.f[TFP_RT_PLACE_YAW].number == 12 &&
+          t.f[TFP_RT_PLACE_ROLL].number == 3.5);
+    CHECK(h->controller_placement_target(h, &a, &b) && a.kind == TFP_RT_NIL && b.kind == TFP_RT_NIL); /* no lease */
+    /* a session that never began: the label and the observation count, no arms / weapon counts */
+    CHECK(h->controller_status(h, &a) && text_is(a, "Start refused: game.dll unavailable; camera6/aimfalse observations=0"));
+    /* With a running lease the lease call is the one asked, and the target names the weapon and the lease's origin.
+     * No game stands behind this lease, so the backend refuses it in its own words. */
+    TfpWireLease *lease = calloc(1, sizeof *lease);
+    CHECK(lease != NULL);
+    lease->ops.origin = sample(true);
+    wire.controller.lease = &lease->view, wire.controller.phase = TFP_PHASE_RUNNING;
+    CHECK(h->controller_set_placement(h, shipped_ref, none, &a, &b) && a.kind == TFP_RT_FALSE &&
+          text_is(b, "Pose placement lease is not active or owned"));
+    CHECK(wire.ops.pose_placement.x == .2 && wire.controller.placement.v[TFP_AXIS_X] == .2);
+    CHECK(h->controller_placement_target(h, &a, &b) && a.kind == TFP_RT_NIL); /* the backend names no weapon yet */
+    wire.ops.has_placement_weapon_key = true;
+    snprintf(wire.ops.placement_weapon_key, sizeof wire.ops.placement_weapon_key, "%s", "00000000000003a0");
+    char expected[24];
+    tfp_wire_identity_text(expected, 'W', tfp_ops_identity_key(&lease->ops.origin));
+    CHECK(h->controller_placement_target(h, &a, &b) && text_is(a, "00000000000003a0") && text_is(b, expected));
+    wire.controller.phase = TFP_PHASE_CLEANUP_PENDING; /* held but not running: no target, the defaults call */
+    CHECK(h->controller_placement_target(h, &a, &b) && a.kind == TFP_RT_NIL && b.kind == TFP_RT_NIL);
+    CHECK(h->controller_set_placement(h, shipped_ref, none, &a, &b) && a.kind == TFP_RT_TRUE && wire.ops.pose_placement.x == .15);
+    wire.controller.lease = NULL, wire.controller.phase = TFP_PHASE_IDLE;
+    wire.ops.has_placement_weapon_key = false;
+    wire.placement_decode = NULL;
+    free(lease);
+  }
   CHECK(tfp_wire_call(&wire, TFP_RT_E_on_disable, NULL, r) == TFP_RT_OK && r[0].kind == TFP_RT_TRUE);
   CHECK(!wire.rt.has[TFP_RT_O_CONTROLLER]);
   CHECK(helper_calls == 0); /* no helper was reached: nothing was armed, nothing to disarm */
