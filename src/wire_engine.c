@@ -1,6 +1,7 @@
 /* See wire_engine.h. Line references: "rt:N" retail runtime.lua, "hv:N" head_visibility.lua,
  * "ap:N" arm_pieces.lua, "gh:N" grip_hand.lua, "census N" a line of
  * docs/research-0.5.34/live-sdk-census-g1-9472b065.tsv. No Windows. */
+#include "wire_recent.h"
 #include "wire_engine.h"
 #include "wire_off.h"
 #include "head_visibility.h"
@@ -80,7 +81,6 @@ const char *tfp_wire_engine_module_name(TfpWireEngineModule module) { return mod
 typedef struct Slot { uintptr_t pointer; TfpEngRef ref; uint32_t list_index; uint8_t state; } Slot;
 enum { SLOT_FREE, SLOT_TRANSIENT, SLOT_KEPT };
 enum { KEPT_MAX = 65536, UNITS_MAX = 131072 /* hv:374 */, SLOTS = KEPT_MAX + UNITS_MAX, INDEX_BITS = 19, INDEX = 1 << INDEX_BITS };
-enum { RECENT = 8 };
 
 struct TfpWireEngine;
 typedef struct ArmUser { struct TfpWireEngine *st; TfpWireEngineModule module; } ArmUser;
@@ -121,8 +121,7 @@ typedef struct TfpWireEngine {
   TfpArmHandle *arm_rows;
   size_t arm_room;
   /* the snapshots head visibility was handed, to find the backend's own again */
-  struct { TfpOpsSnapshot ops; TfpVisSnapshot vis; } recent[RECENT];
-  unsigned recent_next;
+  TfpWireRecent recent;
   uint64_t pack_seen; unsigned pack_said; /* the backpack answer last logged, and how many were */
   TfpOpsAction actions[4];
   unsigned action_next;
@@ -1045,22 +1044,9 @@ static void vis_snapshot(const TfpOpsSnapshot *s, TfpVisSnapshot *t) {
     identity_of(&t->identity, 'W', tfp_ops_identity_key(s));
   } else t->identity = t->player_identity;
 }
-static void remember(St *st, const TfpOpsSnapshot *s, const TfpVisSnapshot *t) {
-  st->recent[st->recent_next % RECENT].ops = *s;
-  st->recent[st->recent_next++ % RECENT].vis = *t;
-}
-/* The backend's snapshot behind one head visibility hands back (the newest that reads the same). */
-static const TfpOpsSnapshot *recalled(St *st, const TfpVisSnapshot *t) {
-  for (unsigned i = 0; i < RECENT; i++) {
-    const TfpVisSnapshot *v = &st->recent[(st->recent_next + RECENT - 1 - i) % RECENT].vis;
-    if (v->player_identity.present && v->base == t->base && v->record == t->record && v->head == t->head && v->tail == t->tail &&
-        v->camera_kind == t->camera_kind && v->body == t->body && v->world == t->world && v->avatar_owner == t->avatar_owner &&
-        v->avatar_index == t->avatar_index && v->safe == t->safe && tfp_vis_identity_equal(&v->player_identity, &t->player_identity) &&
-        tfp_vis_identity_equal(&v->identity, &t->identity) && !memcmp(v->flags, t->flags, 24))
-      return &st->recent[(st->recent_next + RECENT - 1 - i) % RECENT].ops;
-  }
-  return NULL;
-}
+static void remember(St *st, const TfpOpsSnapshot *s, const TfpVisSnapshot *t) { tfp_recent_remember(&st->recent, s, t); }
+/* The backend's snapshot behind one the visibility modules hand back (src/wire_recent.h). */
+static const TfpOpsSnapshot *recalled(St *st, const TfpVisSnapshot *t) { return tfp_recent_recall(&st->recent, t); }
 static void vis_text(TfpVisText *why, const char *text) { if (why) { why->present = true; cut(why->text, sizeof why->text, text); } }
 static bool vis_address(double at, uint64_t *out, TfpVisText *why) {
   if (tfp_wire_address_of(at, out)) return true;
