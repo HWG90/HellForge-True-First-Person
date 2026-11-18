@@ -3,7 +3,7 @@
  * F11 toggles the game's own first-person camera through the translated retail units: the runtime
  * order (tfp_runtime.c) with the controller, the backend, the camera / FOV / near / blur adapters
  * and helpers bound for real (wire_rt.c, wire_win.c), and every other module answering "off"
- * (wire_off.c). No arms, sleeves, motion or effects in this build. docs/WIRING-VIEW.md.
+ * (wire_off.c). No arms, sleeves, motion or effects in this build. docs/wiring/WIRING-VIEW.md.
  *
  * One tick on the game thread; four dispatch-slot hooks that the helpers install while the view is
  * on and take out again when it goes off; nothing else is hooked, no code byte is written. */
@@ -16,7 +16,7 @@
 #include "profile.h"
 #include "native_contract.h"
 #ifdef TFP_FEEL
-/* The feel build: the same entry with the module binders joined on (src/wire_feel.h, docs/WIRING-FEEL.md). */
+/* The feel build: the same entry with the module binders joined on (src/wire_feel.h, docs/wiring/WIRING-FEEL.md). */
 #include "wire_win_pose.h" /* first: it settles the two TfpPoseStats names */
 #include "wire_feel.h"
 #include "wire_win_engine.h"
@@ -35,7 +35,7 @@ static TfpWire wire;
 static enum { WAIT_MODULES, WAIT_PINS, RUNNING, REFUSED } stage;
 static bool key_held, told_waiting, told_tick_thread, hook_told[TFP_WIN_HOOKS];
 static uint64_t next_pin_check;
-/* Live replace (docs/LIVE-REPLACE.md). closing: hellforge_mod_unload has taken over, the tick does
+/* Live replace (docs/guides/LIVE-REPLACE.md). closing: hellforge_mod_unload has taken over, the tick does
  * nothing. in_tick: a tick is between its first and last line. Each side sets its own flag and then
  * reads the other's, both with interlocked operations, so one of the two always sees the other. */
 static volatile LONG closing, in_tick;
@@ -147,7 +147,7 @@ static int check_pins(bool report) {
   return 1;
 }
 
-static void measure_reads(void) { /* docs/WIRING-INVENTORY.md section 4: the helpers read many times per hook call */
+static void measure_reads(void) { /* docs/wiring/WIRING-INVENTORY.md section 4: the helpers read many times per hook call */
   LARGE_INTEGER f, a, b;
   uint64_t value = 0;
   if (!QueryPerformanceFrequency(&f) || !QueryPerformanceCounter(&a)) return;

@@ -5,7 +5,7 @@
  * src/first_person/motion_runtime.lua at 0.5.41-smooth.66 (commit 1d0d453);
  * tests/vectors/motion_runtime_vectors.h holds that file's own answers. Line
  * numbers in motion_runtime.c are the Lua file's.
- * docs/MOTION-RUNTIME-TRANSLATION.md lists what C cannot express and why.
+ * docs/translation/MOTION-RUNTIME-TRANSLATION.md lists what C cannot express and why.
  *
  * The three pure modules the Lua file loads are called directly: the motion
  * model (motion_math), the action selection (action_select) and locomotion's

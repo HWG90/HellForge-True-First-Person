@@ -1,7 +1,7 @@
 /* The retail camera helper (native/first_person/native_ads_camera.cpp with
  * native_ads_camera.h at 0.5.41-smooth.66) in C11 for build 25480438.
  * Behaviour is retail's; what differs is listed in
- * docs/CAMERA-HELPER-TRANSLATION.md. No Windows calls: everything the retail
+ * docs/translation/CAMERA-HELPER-TRANSLATION.md. No Windows calls: everything the retail
  * file took from Windows or from its NADSC_FIXTURE seams comes through
  * TfpCameraHost. */
 #ifndef TFP_CAMERA_HELPER_H

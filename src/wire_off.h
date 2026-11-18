@@ -5,7 +5,7 @@
  * recovery, transition, the clock and the mouse) to real code. Every other pointer gets one of the
  * fixed answers below: what the runtime sees from a module that exists, is idle, clean and never
  * refuses, so the per-update order runs exactly as it does in retail with those modules doing
- * nothing. docs/WIRING-VIEW.md says for each group whether retail has such an off path itself.
+ * nothing. docs/wiring/WIRING-VIEW.md says for each group whether retail has such an off path itself.
  *
  * The lists are X-macros so that tests/wire_off_test.c can wrap every one of them and compare its
  * answer, call by call, with what the scripted collaborator of the retail reference run answered

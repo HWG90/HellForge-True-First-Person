@@ -1,0 +1,1059 @@
+{
+  "generated_utc": "2026-11-10T03:06:54.366404+00:00",
+  "scope": "Bounded static original-build25480438 current-rig / outgoing request exit follow-up; no game attach, native calls, product changes or installation",
+  "original_images": {
+    "game": {
+      "path": "~/Documents/ChatGPT/Linux HD2/native-work/evidence/game-pre1020.dll",
+      "sha256": "642b0aac0b4f577054993a965054827455ef143ced9895b2dfd09d1ecd433a37"
+    },
+    "exe": {
+      "path": "~/Applications/HellForge/mods-retired/localappdata-1019/LocalAppData/LinksLinkToMemory/r6_reload_exe_20261017.bin",
+      "sha256": "2b2c496218a5ce7e4f3453951acb8bd756bc4c2f281ce95eadef17b894e39c16"
+    }
+  },
+  "source_snapshot": {
+    "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge-dev4/src/lifecycle.c",
+    "sha256": "39f543d78d2fd6fd195271b9f458121f168c4fa59849e77b0846967c7673eee8",
+    "remaining_old_new_rig_equality_line": 105
+  },
+  "native_exit_abi": "Context-only; current top kind6 selected internally; old weapon=request+8, avatar=request+4",
+  "current_rig_resolution": "826450 remaps request avatar to current descriptor/body and avatarMgr+index*0x1238+0x53e9b8 current FPS Unit; no old viewmodel parameter",
+  "current_rig_equality_is_native_precondition": false,
+  "confirmed_current_presentation_effects": [
+    "UnitAPI+658 on freshly resolved current FPS Unit with false/true presentation argument",
+    "Current presentation accessory World unlink and queued link commands selecting body vs current FPS Unit",
+    "Current equipment slot1/3/6 visibility routes, but skip currently selected slot",
+    "Outgoing request weapon lookup and resource-dependent presentation helper757480"
+  ],
+  "not_proved": [
+    "NativeExit unconditionally reselects outgoing weapon",
+    "NativeExit unconditionally hides newly selected current held gun",
+    "Queued attachment completion coincides with kind4 retirement acknowledgement",
+    "Retained source viewmodel guard caused the present Talon/Nova observation",
+    "Missing old descriptor safe under all flags",
+    "All transitive callees or all source register aliases inspected"
+  ],
+  "required_cleanup_qualification": [
+    "Exact leased top nonempty request/context/avatar/body and ring generation/header immediately before context-only Exit",
+    "Same current local player/body and safe action/real ADS refusal",
+    "Fresh independent outgoing descriptor bytes and Unit generation/object proof; retain missing-old refusal",
+    "Fresh current FPSrig Unit generation/graph metadata and unchanged current s.viewmodel across preparation; do not compare to lease.origin.viewmodel",
+    "Disarm outgoing pose callbacks before Exit native callback activity",
+    "Only reacquire new weapon after request retirement and separately observed current gun/camera attachment readiness"
+  ],
+  "witnesses": [
+    {
+      "name": "exit_current_avatar_helper",
+      "rva": "0x127eb1b",
+      "hex": "418b560441b1014889b424600200004533c0488b7424704c89ac2428020000488bce4d8bacc7100100000f29bc24000200004869d838120000440f298424f0010000440f29a424b0010000440f29ac24a0010000458b7d0c48895c24784c896c2440e8ce785aff",
+      "instructions": [
+        {
+          "rva": "0x127eb1b",
+          "hex": "418b5604",
+          "instruction": "mov edx, dword ptr [r14 + 4]"
+        },
+        {
+          "rva": "0x127eb1f",
+          "hex": "41b101",
+          "instruction": "mov r9b, 1"
+        },
+        {
+          "rva": "0x127eb22",
+          "hex": "4889b42460020000",
+          "instruction": "mov qword ptr [rsp + 0x260], rsi"
+        },
+        {
+          "rva": "0x127eb2a",
+          "hex": "4533c0",
+          "instruction": "xor r8d, r8d"
+        },
+        {
+          "rva": "0x127eb2d",
+          "hex": "488b742470",
+          "instruction": "mov rsi, qword ptr [rsp + 0x70]"
+        },
+        {
+          "rva": "0x127eb32",
+          "hex": "4c89ac2428020000",
+          "instruction": "mov qword ptr [rsp + 0x228], r13"
+        },
+        {
+          "rva": "0x127eb3a",
+          "hex": "488bce",
+          "instruction": "mov rcx, rsi"
+        },
+        {
+          "rva": "0x127eb3d",
+          "hex": "4d8bacc710010000",
+          "instruction": "mov r13, qword ptr [r15 + rax*8 + 0x110]"
+        },
+        {
+          "rva": "0x127eb45",
+          "hex": "0f29bc2400020000",
+          "instruction": "movaps xmmword ptr [rsp + 0x200], xmm7"
+        },
+        {
+          "rva": "0x127eb4d",
+          "hex": "4869d838120000",
+          "instruction": "imul rbx, rax, 0x1238"
+        },
+        {
+          "rva": "0x127eb54",
+          "hex": "440f298424f0010000",
+          "instruction": "movaps xmmword ptr [rsp + 0x1f0], xmm8"
+        },
+        {
+          "rva": "0x127eb5d",
+          "hex": "440f29a424b0010000",
+          "instruction": "movaps xmmword ptr [rsp + 0x1b0], xmm12"
+        },
+        {
+          "rva": "0x127eb66",
+          "hex": "440f29ac24a0010000",
+          "instruction": "movaps xmmword ptr [rsp + 0x1a0], xmm13"
+        },
+        {
+          "rva": "0x127eb6f",
+          "hex": "458b7d0c",
+          "instruction": "mov r15d, dword ptr [r13 + 0xc]"
+        },
+        {
+          "rva": "0x127eb73",
+          "hex": "48895c2478",
+          "instruction": "mov qword ptr [rsp + 0x78], rbx"
+        },
+        {
+          "rva": "0x127eb78",
+          "hex": "4c896c2440",
+          "instruction": "mov qword ptr [rsp + 0x40], r13"
+        },
+        {
+          "rva": "0x127eb7d",
+          "hex": "e8ce785aff",
+          "instruction": "call 0x826450"
+        }
+      ]
+    },
+    {
+      "name": "entry_current_avatar_helper",
+      "rva": "0x127e12e",
+      "hex": "488b0deb8b0a0241b101450fb6c18bd70f10000f1144247ce805835aff",
+      "instructions": [
+        {
+          "rva": "0x127e12e",
+          "hex": "488b0deb8b0a02",
+          "instruction": "mov rcx, qword ptr [rip + 0x20a8beb]"
+        },
+        {
+          "rva": "0x127e135",
+          "hex": "41b101",
+          "instruction": "mov r9b, 1"
+        },
+        {
+          "rva": "0x127e138",
+          "hex": "450fb6c1",
+          "instruction": "movzx r8d, r9b"
+        },
+        {
+          "rva": "0x127e13c",
+          "hex": "8bd7",
+          "instruction": "mov edx, edi"
+        },
+        {
+          "rva": "0x127e13e",
+          "hex": "0f1000",
+          "instruction": "movups xmm0, xmmword ptr [rax]"
+        },
+        {
+          "rva": "0x127e141",
+          "hex": "0f1144247c",
+          "instruction": "movups xmmword ptr [rsp + 0x7c], xmm0"
+        },
+        {
+          "rva": "0x127e146",
+          "hex": "e805835aff",
+          "instruction": "call 0x826450"
+        }
+      ]
+    },
+    {
+      "name": "fresh_rig_and_body",
+      "rva": "0x826519",
+      "hex": "8bc84c89a424800000004869d0381200004869c0b8010000498dba706a54004c896c24784903d24c897c247048895424584533c04803f84c8daab8e95300498b84ca10010000418bd68b480c488b059cfdaf0244887770894c2434418b4d004c8b481841ff9158060000",
+      "instructions": [
+        {
+          "rva": "0x826519",
+          "hex": "8bc8",
+          "instruction": "mov ecx, eax"
+        },
+        {
+          "rva": "0x82651b",
+          "hex": "4c89a42480000000",
+          "instruction": "mov qword ptr [rsp + 0x80], r12"
+        },
+        {
+          "rva": "0x826523",
+          "hex": "4869d038120000",
+          "instruction": "imul rdx, rax, 0x1238"
+        },
+        {
+          "rva": "0x82652a",
+          "hex": "4869c0b8010000",
+          "instruction": "imul rax, rax, 0x1b8"
+        },
+        {
+          "rva": "0x826531",
+          "hex": "498dba706a5400",
+          "instruction": "lea rdi, [r10 + 0x546a70]"
+        },
+        {
+          "rva": "0x826538",
+          "hex": "4c896c2478",
+          "instruction": "mov qword ptr [rsp + 0x78], r13"
+        },
+        {
+          "rva": "0x82653d",
+          "hex": "4903d2",
+          "instruction": "add rdx, r10"
+        },
+        {
+          "rva": "0x826540",
+          "hex": "4c897c2470",
+          "instruction": "mov qword ptr [rsp + 0x70], r15"
+        },
+        {
+          "rva": "0x826545",
+          "hex": "4889542458",
+          "instruction": "mov qword ptr [rsp + 0x58], rdx"
+        },
+        {
+          "rva": "0x82654a",
+          "hex": "4533c0",
+          "instruction": "xor r8d, r8d"
+        },
+        {
+          "rva": "0x82654d",
+          "hex": "4803f8",
+          "instruction": "add rdi, rax"
+        },
+        {
+          "rva": "0x826550",
+          "hex": "4c8daab8e95300",
+          "instruction": "lea r13, [rdx + 0x53e9b8]"
+        },
+        {
+          "rva": "0x826557",
+          "hex": "498b84ca10010000",
+          "instruction": "mov rax, qword ptr [r10 + rcx*8 + 0x110]"
+        },
+        {
+          "rva": "0x82655f",
+          "hex": "418bd6",
+          "instruction": "mov edx, r14d"
+        },
+        {
+          "rva": "0x826562",
+          "hex": "8b480c",
+          "instruction": "mov ecx, dword ptr [rax + 0xc]"
+        },
+        {
+          "rva": "0x826565",
+          "hex": "488b059cfdaf02",
+          "instruction": "mov rax, qword ptr [rip + 0x2affd9c]"
+        },
+        {
+          "rva": "0x82656c",
+          "hex": "44887770",
+          "instruction": "mov byte ptr [rdi + 0x70], r14b"
+        },
+        {
+          "rva": "0x826570",
+          "hex": "894c2434",
+          "instruction": "mov dword ptr [rsp + 0x34], ecx"
+        },
+        {
+          "rva": "0x826574",
+          "hex": "418b4d00",
+          "instruction": "mov ecx, dword ptr [r13]"
+        },
+        {
+          "rva": "0x826578",
+          "hex": "4c8b4818",
+          "instruction": "mov r9, qword ptr [rax + 0x18]"
+        },
+        {
+          "rva": "0x82657c",
+          "hex": "41ff9158060000",
+          "instruction": "call qword ptr [r9 + 0x658]"
+        }
+      ]
+    },
+    {
+      "name": "current_accessory_parent_selection",
+      "rva": "0x82677a",
+      "hex": "488b0587fbaf02488d4c24344084f68bd3490f45cd4533ff4c8b50084533c944897c2420448b01488b0df057c402488b0941ff92d0000000488b054ffbaf024c8d05e01af70233d28bcb4c8b481841ff5138",
+      "instructions": [
+        {
+          "rva": "0x82677a",
+          "hex": "488b0587fbaf02",
+          "instruction": "mov rax, qword ptr [rip + 0x2affb87]"
+        },
+        {
+          "rva": "0x826781",
+          "hex": "488d4c2434",
+          "instruction": "lea rcx, [rsp + 0x34]"
+        },
+        {
+          "rva": "0x826786",
+          "hex": "4084f6",
+          "instruction": "test sil, sil"
+        },
+        {
+          "rva": "0x826789",
+          "hex": "8bd3",
+          "instruction": "mov edx, ebx"
+        },
+        {
+          "rva": "0x82678b",
+          "hex": "490f45cd",
+          "instruction": "cmovne rcx, r13"
+        },
+        {
+          "rva": "0x82678f",
+          "hex": "4533ff",
+          "instruction": "xor r15d, r15d"
+        },
+        {
+          "rva": "0x826792",
+          "hex": "4c8b5008",
+          "instruction": "mov r10, qword ptr [rax + 8]"
+        },
+        {
+          "rva": "0x826796",
+          "hex": "4533c9",
+          "instruction": "xor r9d, r9d"
+        },
+        {
+          "rva": "0x826799",
+          "hex": "44897c2420",
+          "instruction": "mov dword ptr [rsp + 0x20], r15d"
+        },
+        {
+          "rva": "0x82679e",
+          "hex": "448b01",
+          "instruction": "mov r8d, dword ptr [rcx]"
+        },
+        {
+          "rva": "0x8267a1",
+          "hex": "488b0df057c402",
+          "instruction": "mov rcx, qword ptr [rip + 0x2c457f0]"
+        },
+        {
+          "rva": "0x8267a8",
+          "hex": "488b09",
+          "instruction": "mov rcx, qword ptr [rcx]"
+        },
+        {
+          "rva": "0x8267ab",
+          "hex": "41ff92d0000000",
+          "instruction": "call qword ptr [r10 + 0xd0]"
+        },
+        {
+          "rva": "0x8267b2",
+          "hex": "488b054ffbaf02",
+          "instruction": "mov rax, qword ptr [rip + 0x2affb4f]"
+        },
+        {
+          "rva": "0x8267b9",
+          "hex": "4c8d05e01af702",
+          "instruction": "lea r8, [rip + 0x2f71ae0]"
+        },
+        {
+          "rva": "0x8267c0",
+          "hex": "33d2",
+          "instruction": "xor edx, edx"
+        },
+        {
+          "rva": "0x8267c2",
+          "hex": "8bcb",
+          "instruction": "mov ecx, ebx"
+        },
+        {
+          "rva": "0x8267c4",
+          "hex": "4c8b4818",
+          "instruction": "mov r9, qword ptr [rax + 0x18]"
+        },
+        {
+          "rva": "0x8267c8",
+          "hex": "41ff5138",
+          "instruction": "call qword ptr [r9 + 0x38]"
+        }
+      ]
+    },
+    {
+      "name": "equipment_slot_selection",
+      "rva": "0x826a48",
+      "hex": "4c8b1de9fcaf02418bd7c744245801000000c744245c03000000c744246006000000458b4b30458b5338440fafd6",
+      "instructions": [
+        {
+          "rva": "0x826a48",
+          "hex": "4c8b1de9fcaf02",
+          "instruction": "mov r11, qword ptr [rip + 0x2affce9]"
+        },
+        {
+          "rva": "0x826a4f",
+          "hex": "418bd7",
+          "instruction": "mov edx, r15d"
+        },
+        {
+          "rva": "0x826a52",
+          "hex": "c744245801000000",
+          "instruction": "mov dword ptr [rsp + 0x58], 1"
+        },
+        {
+          "rva": "0x826a5a",
+          "hex": "c744245c03000000",
+          "instruction": "mov dword ptr [rsp + 0x5c], 3"
+        },
+        {
+          "rva": "0x826a62",
+          "hex": "c744246006000000",
+          "instruction": "mov dword ptr [rsp + 0x60], 6"
+        },
+        {
+          "rva": "0x826a6a",
+          "hex": "458b4b30",
+          "instruction": "mov r9d, dword ptr [r11 + 0x30]"
+        },
+        {
+          "rva": "0x826a6e",
+          "hex": "458b5338",
+          "instruction": "mov r10d, dword ptr [r11 + 0x38]"
+        },
+        {
+          "rva": "0x826a72",
+          "hex": "440fafd6",
+          "instruction": "imul r10d, esi"
+        }
+      ]
+    },
+    {
+      "name": "selected_slot_skip",
+      "rva": "0x826b3d",
+      "hex": "4d8b73508bc8488d04494803c045397cc61c0f848c0000004183ff06756e",
+      "instructions": [
+        {
+          "rva": "0x826b3d",
+          "hex": "4d8b7350",
+          "instruction": "mov r14, qword ptr [r11 + 0x50]"
+        },
+        {
+          "rva": "0x826b41",
+          "hex": "8bc8",
+          "instruction": "mov ecx, eax"
+        },
+        {
+          "rva": "0x826b43",
+          "hex": "488d0449",
+          "instruction": "lea rax, [rcx + rcx*2]"
+        },
+        {
+          "rva": "0x826b47",
+          "hex": "4803c0",
+          "instruction": "add rax, rax"
+        },
+        {
+          "rva": "0x826b4a",
+          "hex": "45397cc61c",
+          "instruction": "cmp dword ptr [r14 + rax*8 + 0x1c], r15d"
+        },
+        {
+          "rva": "0x826b4f",
+          "hex": "0f848c000000",
+          "instruction": "je 0x826be1"
+        },
+        {
+          "rva": "0x826b55",
+          "hex": "4183ff06",
+          "instruction": "cmp r15d, 6"
+        },
+        {
+          "rva": "0x826b59",
+          "hex": "756e",
+          "instruction": "jne 0x826bc9"
+        }
+      ]
+    },
+    {
+      "name": "slot_visibility_call",
+      "rva": "0x826bc9",
+      "hex": "450fb6cd458bc74180f1018bd6e8e5331800",
+      "instructions": [
+        {
+          "rva": "0x826bc9",
+          "hex": "450fb6cd",
+          "instruction": "movzx r9d, r13b"
+        },
+        {
+          "rva": "0x826bcd",
+          "hex": "458bc7",
+          "instruction": "mov r8d, r15d"
+        },
+        {
+          "rva": "0x826bd0",
+          "hex": "4180f101",
+          "instruction": "xor r9b, 1"
+        },
+        {
+          "rva": "0x826bd4",
+          "hex": "8bd6",
+          "instruction": "mov edx, esi"
+        },
+        {
+          "rva": "0x826bd6",
+          "hex": "e8e5331800",
+          "instruction": "call 0x9a9fc0"
+        }
+      ]
+    },
+    {
+      "name": "outgoing_weapon_lookup",
+      "rva": "0x127ebe9",
+      "hex": "418b5e088bcbe84cb1d5ff4889442448488bf04885c00f849d030000488bc8e833ae28ff80b88101000000741c488b0deb760a024533c04c8b4918418d50018b4e0c41ff9158060000",
+      "instructions": [
+        {
+          "rva": "0x127ebe9",
+          "hex": "418b5e08",
+          "instruction": "mov ebx, dword ptr [r14 + 8]"
+        },
+        {
+          "rva": "0x127ebed",
+          "hex": "8bcb",
+          "instruction": "mov ecx, ebx"
+        },
+        {
+          "rva": "0x127ebef",
+          "hex": "e84cb1d5ff",
+          "instruction": "call 0xfd9d40"
+        },
+        {
+          "rva": "0x127ebf4",
+          "hex": "4889442448",
+          "instruction": "mov qword ptr [rsp + 0x48], rax"
+        },
+        {
+          "rva": "0x127ebf9",
+          "hex": "488bf0",
+          "instruction": "mov rsi, rax"
+        },
+        {
+          "rva": "0x127ebfc",
+          "hex": "4885c0",
+          "instruction": "test rax, rax"
+        },
+        {
+          "rva": "0x127ebff",
+          "hex": "0f849d030000",
+          "instruction": "je 0x127efa2"
+        },
+        {
+          "rva": "0x127ec05",
+          "hex": "488bc8",
+          "instruction": "mov rcx, rax"
+        },
+        {
+          "rva": "0x127ec08",
+          "hex": "e833ae28ff",
+          "instruction": "call 0x509a40"
+        },
+        {
+          "rva": "0x127ec0d",
+          "hex": "80b88101000000",
+          "instruction": "cmp byte ptr [rax + 0x181], 0"
+        },
+        {
+          "rva": "0x127ec14",
+          "hex": "741c",
+          "instruction": "je 0x127ec32"
+        },
+        {
+          "rva": "0x127ec16",
+          "hex": "488b0deb760a02",
+          "instruction": "mov rcx, qword ptr [rip + 0x20a76eb]"
+        },
+        {
+          "rva": "0x127ec1d",
+          "hex": "4533c0",
+          "instruction": "xor r8d, r8d"
+        },
+        {
+          "rva": "0x127ec20",
+          "hex": "4c8b4918",
+          "instruction": "mov r9, qword ptr [rcx + 0x18]"
+        },
+        {
+          "rva": "0x127ec24",
+          "hex": "418d5001",
+          "instruction": "lea edx, [r8 + 1]"
+        },
+        {
+          "rva": "0x127ec28",
+          "hex": "8b4e0c",
+          "instruction": "mov ecx, dword ptr [rsi + 0xc]"
+        },
+        {
+          "rva": "0x127ec2b",
+          "hex": "41ff9158060000",
+          "instruction": "call qword ptr [r9 + 0x658]"
+        }
+      ]
+    },
+    {
+      "name": "outgoing_resource_presentation_retire",
+      "rva": "0x127ee56",
+      "hex": "8bc78bc8488b4650807c4801007415488b0d747e0a028bd3e80d864dff4c8b0dbe7b0a02488b742448",
+      "instructions": [
+        {
+          "rva": "0x127ee56",
+          "hex": "8bc7",
+          "instruction": "mov eax, edi"
+        },
+        {
+          "rva": "0x127ee58",
+          "hex": "8bc8",
+          "instruction": "mov ecx, eax"
+        },
+        {
+          "rva": "0x127ee5a",
+          "hex": "488b4650",
+          "instruction": "mov rax, qword ptr [rsi + 0x50]"
+        },
+        {
+          "rva": "0x127ee5e",
+          "hex": "807c480100",
+          "instruction": "cmp byte ptr [rax + rcx*2 + 1], 0"
+        },
+        {
+          "rva": "0x127ee63",
+          "hex": "7415",
+          "instruction": "je 0x127ee7a"
+        },
+        {
+          "rva": "0x127ee65",
+          "hex": "488b0d747e0a02",
+          "instruction": "mov rcx, qword ptr [rip + 0x20a7e74]"
+        },
+        {
+          "rva": "0x127ee6c",
+          "hex": "8bd3",
+          "instruction": "mov edx, ebx"
+        },
+        {
+          "rva": "0x127ee6e",
+          "hex": "e80d864dff",
+          "instruction": "call 0x757480"
+        },
+        {
+          "rva": "0x127ee73",
+          "hex": "4c8b0dbe7b0a02",
+          "instruction": "mov r9, qword ptr [rip + 0x20a7bbe]"
+        },
+        {
+          "rva": "0x127ee7a",
+          "hex": "488b742448",
+          "instruction": "mov rsi, qword ptr [rsp + 0x48]"
+        }
+      ]
+    },
+    {
+      "name": "current_rig_weapon_link",
+      "rva": "0x127e75b",
+      "hex": "488b0da67b0a028b500c4c8b4108488b8e8001000041ff90f8000000488b0d8a7b0a02488b5118418b8c3fb8e953004c8b82d0060000ba9d39944141ffd084c07425488b05647b0a02ba9d399441488b4818488b81d8060000418b8c3fb8e95300ffd08bc8eb0233c9488b053d7b0a024533c0458b8c3fb8e95300418b560c894c24204c8b5008488b8e8001000041ff92c8000000488b05117b0a024c8d056aee5402418b4e0c33d24c8b481841ff5138",
+      "instructions": [
+        {
+          "rva": "0x127e75b",
+          "hex": "488b0da67b0a02",
+          "instruction": "mov rcx, qword ptr [rip + 0x20a7ba6]"
+        },
+        {
+          "rva": "0x127e762",
+          "hex": "8b500c",
+          "instruction": "mov edx, dword ptr [rax + 0xc]"
+        },
+        {
+          "rva": "0x127e765",
+          "hex": "4c8b4108",
+          "instruction": "mov r8, qword ptr [rcx + 8]"
+        },
+        {
+          "rva": "0x127e769",
+          "hex": "488b8e80010000",
+          "instruction": "mov rcx, qword ptr [rsi + 0x180]"
+        },
+        {
+          "rva": "0x127e770",
+          "hex": "41ff90f8000000",
+          "instruction": "call qword ptr [r8 + 0xf8]"
+        },
+        {
+          "rva": "0x127e777",
+          "hex": "488b0d8a7b0a02",
+          "instruction": "mov rcx, qword ptr [rip + 0x20a7b8a]"
+        },
+        {
+          "rva": "0x127e77e",
+          "hex": "488b5118",
+          "instruction": "mov rdx, qword ptr [rcx + 0x18]"
+        },
+        {
+          "rva": "0x127e782",
+          "hex": "418b8c3fb8e95300",
+          "instruction": "mov ecx, dword ptr [r15 + rdi + 0x53e9b8]"
+        },
+        {
+          "rva": "0x127e78a",
+          "hex": "4c8b82d0060000",
+          "instruction": "mov r8, qword ptr [rdx + 0x6d0]"
+        },
+        {
+          "rva": "0x127e791",
+          "hex": "ba9d399441",
+          "instruction": "mov edx, 0x4194399d"
+        },
+        {
+          "rva": "0x127e796",
+          "hex": "41ffd0",
+          "instruction": "call r8"
+        },
+        {
+          "rva": "0x127e799",
+          "hex": "84c0",
+          "instruction": "test al, al"
+        },
+        {
+          "rva": "0x127e79b",
+          "hex": "7425",
+          "instruction": "je 0x127e7c2"
+        },
+        {
+          "rva": "0x127e79d",
+          "hex": "488b05647b0a02",
+          "instruction": "mov rax, qword ptr [rip + 0x20a7b64]"
+        },
+        {
+          "rva": "0x127e7a4",
+          "hex": "ba9d399441",
+          "instruction": "mov edx, 0x4194399d"
+        },
+        {
+          "rva": "0x127e7a9",
+          "hex": "488b4818",
+          "instruction": "mov rcx, qword ptr [rax + 0x18]"
+        },
+        {
+          "rva": "0x127e7ad",
+          "hex": "488b81d8060000",
+          "instruction": "mov rax, qword ptr [rcx + 0x6d8]"
+        },
+        {
+          "rva": "0x127e7b4",
+          "hex": "418b8c3fb8e95300",
+          "instruction": "mov ecx, dword ptr [r15 + rdi + 0x53e9b8]"
+        },
+        {
+          "rva": "0x127e7bc",
+          "hex": "ffd0",
+          "instruction": "call rax"
+        },
+        {
+          "rva": "0x127e7be",
+          "hex": "8bc8",
+          "instruction": "mov ecx, eax"
+        },
+        {
+          "rva": "0x127e7c0",
+          "hex": "eb02",
+          "instruction": "jmp 0x127e7c4"
+        },
+        {
+          "rva": "0x127e7c2",
+          "hex": "33c9",
+          "instruction": "xor ecx, ecx"
+        },
+        {
+          "rva": "0x127e7c4",
+          "hex": "488b053d7b0a02",
+          "instruction": "mov rax, qword ptr [rip + 0x20a7b3d]"
+        },
+        {
+          "rva": "0x127e7cb",
+          "hex": "4533c0",
+          "instruction": "xor r8d, r8d"
+        },
+        {
+          "rva": "0x127e7ce",
+          "hex": "458b8c3fb8e95300",
+          "instruction": "mov r9d, dword ptr [r15 + rdi + 0x53e9b8]"
+        },
+        {
+          "rva": "0x127e7d6",
+          "hex": "418b560c",
+          "instruction": "mov edx, dword ptr [r14 + 0xc]"
+        },
+        {
+          "rva": "0x127e7da",
+          "hex": "894c2420",
+          "instruction": "mov dword ptr [rsp + 0x20], ecx"
+        },
+        {
+          "rva": "0x127e7de",
+          "hex": "4c8b5008",
+          "instruction": "mov r10, qword ptr [rax + 8]"
+        },
+        {
+          "rva": "0x127e7e2",
+          "hex": "488b8e80010000",
+          "instruction": "mov rcx, qword ptr [rsi + 0x180]"
+        },
+        {
+          "rva": "0x127e7e9",
+          "hex": "41ff92c8000000",
+          "instruction": "call qword ptr [r10 + 0xc8]"
+        },
+        {
+          "rva": "0x127e7f0",
+          "hex": "488b05117b0a02",
+          "instruction": "mov rax, qword ptr [rip + 0x20a7b11]"
+        },
+        {
+          "rva": "0x127e7f7",
+          "hex": "4c8d056aee5402",
+          "instruction": "lea r8, [rip + 0x254ee6a]"
+        },
+        {
+          "rva": "0x127e7fe",
+          "hex": "418b4e0c",
+          "instruction": "mov ecx, dword ptr [r14 + 0xc]"
+        },
+        {
+          "rva": "0x127e802",
+          "hex": "33d2",
+          "instruction": "xor edx, edx"
+        },
+        {
+          "rva": "0x127e804",
+          "hex": "4c8b4818",
+          "instruction": "mov r9, qword ptr [rax + 0x18]"
+        },
+        {
+          "rva": "0x127e808",
+          "hex": "41ff5138",
+          "instruction": "call qword ptr [r9 + 0x38]"
+        }
+      ]
+    },
+    {
+      "name": "presentation_flag_clear",
+      "rva": "0x757a4d",
+      "hex": "498b45504c8b7c24604c8b74246842c644600100",
+      "instructions": [
+        {
+          "rva": "0x757a4d",
+          "hex": "498b4550",
+          "instruction": "mov rax, qword ptr [r13 + 0x50]"
+        },
+        {
+          "rva": "0x757a51",
+          "hex": "4c8b7c2460",
+          "instruction": "mov r15, qword ptr [rsp + 0x60]"
+        },
+        {
+          "rva": "0x757a56",
+          "hex": "4c8b742468",
+          "instruction": "mov r14, qword ptr [rsp + 0x68]"
+        },
+        {
+          "rva": "0x757a5b",
+          "hex": "42c644600100",
+          "instruction": "mov byte ptr [rax + r12*2 + 1], 0"
+        }
+      ]
+    }
+  ],
+  "original_api_tables": [
+    {
+      "api": "Unit",
+      "table_rva": "0x27c8f10",
+      "slot": "0x658",
+      "target_exe_rva": "0x205680",
+      "prefix_hex": "48895c24084889742410574883ec20410fb6f08bfa8bd9e82482e9ff4c8b5018b801000000f0410fc182380017008bc04c6bc85843c784118800010015000000"
+    },
+    {
+      "api": "Unit",
+      "table_rva": "0x27c8f10",
+      "slot": "0x668",
+      "target_exe_rva": "0x205700",
+      "prefix_hex": "40534883ec208bd9e8b381e9ff4c8b4018b801000000f0410fc180380017008bc0486bd05842c78402880001001700000042899c023800010042c684023c0001"
+    },
+    {
+      "api": "World",
+      "table_rva": "0x27cab40",
+      "slot": "0xc8",
+      "target_exe_rva": "0x3362c0",
+      "prefix_hex": "b801000000f00fc181380017008bc04c6bd0588b44242841c7840a88000100000000004189940a380001004589840a4000010045898c0a3c0001004189840a44"
+    },
+    {
+      "api": "World",
+      "table_rva": "0x27cab40",
+      "slot": "0xd0",
+      "target_exe_rva": "0x336310",
+      "prefix_hex": "48895c2408574883ec20b801000000f00fc181380017008bc0bb04000000486bf8584803f9395c24500f425c2450c7878800010001000000488d8f4400010044"
+    },
+    {
+      "api": "World",
+      "table_rva": "0x27cab40",
+      "slot": "0xf8",
+      "target_exe_rva": "0x336500",
+      "prefix_hex": "b801000000f00fc181380017008bc04c6bc05841c7840888000100020000004189940838000100c3cccccccccccccccc40534883ec20488bd98bcae88073d6ff"
+    }
+  ],
+  "helper_jump_table": {
+    "rva": "0x8274e8",
+    "entries": [
+      {
+        "equipment_slot": 1,
+        "target": "0x826cd3",
+        "instructions": [
+          {
+            "rva": "0x826cd3",
+            "hex": "8b1a",
+            "instruction": "mov ebx, dword ptr [rdx]"
+          },
+          {
+            "rva": "0x826cd5",
+            "hex": "eb16",
+            "instruction": "jmp 0x826ced"
+          }
+        ]
+      },
+      {
+        "equipment_slot": 2,
+        "target": "0x826cd7",
+        "instructions": [
+          {
+            "rva": "0x826cd7",
+            "hex": "8b5a04",
+            "instruction": "mov ebx, dword ptr [rdx + 4]"
+          },
+          {
+            "rva": "0x826cda",
+            "hex": "eb11",
+            "instruction": "jmp 0x826ced"
+          }
+        ]
+      },
+      {
+        "equipment_slot": 3,
+        "target": "0x826cdc",
+        "instructions": [
+          {
+            "rva": "0x826cdc",
+            "hex": "8b5a08",
+            "instruction": "mov ebx, dword ptr [rdx + 8]"
+          },
+          {
+            "rva": "0x826cdf",
+            "hex": "eb0c",
+            "instruction": "jmp 0x826ced"
+          }
+        ]
+      },
+      {
+        "equipment_slot": 4,
+        "target": "0x826ce6",
+        "instructions": [
+          {
+            "rva": "0x826ce6",
+            "hex": "8b5a10",
+            "instruction": "mov ebx, dword ptr [rdx + 0x10]"
+          },
+          {
+            "rva": "0x826ce9",
+            "hex": "eb02",
+            "instruction": "jmp 0x826ced"
+          }
+        ]
+      },
+      {
+        "equipment_slot": 5,
+        "target": "0x826ce6",
+        "instructions": [
+          {
+            "rva": "0x826ce6",
+            "hex": "8b5a10",
+            "instruction": "mov ebx, dword ptr [rdx + 0x10]"
+          },
+          {
+            "rva": "0x826ce9",
+            "hex": "eb02",
+            "instruction": "jmp 0x826ced"
+          }
+        ]
+      },
+      {
+        "equipment_slot": 6,
+        "target": "0x826ce1",
+        "instructions": [
+          {
+            "rva": "0x826ce1",
+            "hex": "8b5a0c",
+            "instruction": "mov ebx, dword ptr [rdx + 0xc]"
+          },
+          {
+            "rva": "0x826ce4",
+            "hex": "eb07",
+            "instruction": "jmp 0x826ced"
+          }
+        ]
+      }
+    ]
+  },
+  "bounded_cfg_artifacts": [
+    {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge-dev4/work/native-swap-followup/game-127de20.json",
+      "sha256": "6ce18233e55f6919a8e02bb504f92cf4fcf82fa0d0a5fdb4322a4434ff256bb6"
+    },
+    {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge-dev4/work/native-swap-followup/game-127e9d0.json",
+      "sha256": "f754724b78224653ccf676e1b2edc4ef8c3e707828c48c7684134c356c2da95a"
+    },
+    {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge-dev4/work/native-swap-followup/game-1280730.json",
+      "sha256": "f49904d4e45b51cf460a74eabf0bc321b273811ceb38e3e9961616863b536035"
+    },
+    {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge-dev4/work/native-swap-followup/game-756d50.json",
+      "sha256": "dee8cd00368ec52e3ca149bc8f11fa5203d83e81ee14aa380e29b953d4c20714"
+    },
+    {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge-dev4/work/native-swap-followup/game-757480.json",
+      "sha256": "b5fbd004a145b9128495df33490b2db4790007af261e726751e4b5a045668d10"
+    },
+    {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge-dev4/work/native-swap-followup/game-813250.json",
+      "sha256": "e06c863328d04732f511123edc858af073a26225433a005e07405d1019da8dbd"
+    },
+    {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge-dev4/work/native-swap-followup/game-826450.json",
+      "sha256": "bd9805c8443d61e74f27516317824489ba8f22ba5baf4da9eb193657208dd5cf"
+    },
+    {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge-dev4/work/native-swap-followup/game-836060.json",
+      "sha256": "5f0b67142fcd134835622fbcaaf76bf4836e54ffa158fdc8c30d221ab910cfcc"
+    },
+    {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge-dev4/work/native-swap-followup/game-9a9fc0.json",
+      "sha256": "0e47c94a92501e347cd30c6a0191ca9fcf9bd5d2f9a6c17f58a73bf26c0c67ca"
+    }
+  ]
+}

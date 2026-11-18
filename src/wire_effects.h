@@ -27,7 +27,7 @@ typedef enum TfpFxModule { TFP_FX_DOF, TFP_FX_VIGNETTE, TFP_FX_MARKERS, TFP_FX_M
 typedef enum TfpFxState { TFP_FX_WAITING, TFP_FX_READY, TFP_FX_REFUSED } TfpFxState;
 
 /* The engine script functions the modules call, each with the address the census of build 25480438
- * has for it (docs/research-0.5.34/live-sdk-census-g1-9472b065.tsv), relative to the executable. A
+ * has for it (docs/history/research-0.5.34/live-sdk-census-g1-9472b065.tsv), relative to the executable. A
  * module is allowed on only when every function it uses is registered at that address. */
 typedef enum TfpFxFunction {
   TFP_FX_FN_RENDER_SETTING, TFP_FX_FN_SET_RENDER_SETTING,

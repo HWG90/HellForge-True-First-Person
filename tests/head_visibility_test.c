@@ -107,7 +107,7 @@ static void head_state(VfBuf *out) {
 }
 
 /* What the two game builds hold, written down a second time: the scripted world must not take its numbers from the
- * table under test. Retail: head_visibility.lua:113-142, 393. 25480438: docs/VISIBILITY-TRANSLATION.md "Build data". */
+ * table under test. Retail: head_visibility.lua:113-142, 393. 25480438: docs/translation/VISIBILITY-TRANSLATION.md "Build data". */
 static const TfpHeadBuild world_retail = {
   0x3f4ca0, {0x48, 0x8b, 0xd1, 0xe9, 0xa8, 0xf8, 0xff, 0xff},
   0x51fe80, {0x40, 0x57, 0x48, 0x83, 0xec, 0x30, 0x44, 0x0f, 0xb6, 0x89, 0xdc, 0x00, 0x00, 0x00},

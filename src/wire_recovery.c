@@ -1,6 +1,6 @@
 /* The recovery ledger behind the runtime host: retail recovery.lua's methods as runtime.lua calls
  * them (policy names and phases as texts), on src/recovery.c. A file of its own because recovery.h
- * and controller.h both define TFP_PHASE_WAITING (docs/RUNTIME-TRANSLATION.md). No Windows. */
+ * and controller.h both define TFP_PHASE_WAITING (docs/translation/RUNTIME-TRANSLATION.md). No Windows. */
 #include "wire_recovery.h"
 #include "recovery.h"
 #include "wire_off.h"

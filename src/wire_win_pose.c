@@ -15,7 +15,7 @@
 
 /* The function each pose slot must hold before one of the helper's values goes in: exe RVA and the
  * bytes there. The same numbers as src/pose_helper.c B_EXE_POSITION / _ROTATION / _BRANCH_ROTATION /
- * _LOCAL_POSITION / _WORLD_MATRIX and their B_HEX_* (docs/POSE-HELPER-TRANSLATION.md section 2:
+ * _LOCAL_POSITION / _WORLD_MATRIX and their B_HEX_* (docs/translation/POSE-HELPER-TRANSLATION.md section 2:
  * build map and the exe image of build 25480438). The helper checks them too, through its host's
  * read; this second check is the binder's own rule and names the slot in the log. */
 enum { SLOTS = 5 };

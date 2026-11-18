@@ -14,7 +14,7 @@
  * never look inside one: they are made, combined and taken apart only by the
  * functions below, in the order the Lua calls them. Scene-graph node and mesh
  * indices count from 1 and are Lua numbers (double), as are all scalars.
- * docs/ARMS-TRANSLATION.md lists every function with its Lua signature. */
+ * docs/translation/ARMS-TRANSLATION.md lists every function with its Lua signature. */
 #ifndef TFP_ARM_ENGINE_IFACE_H
 #define TFP_ARM_ENGINE_IFACE_H
 #include <stdbool.h>

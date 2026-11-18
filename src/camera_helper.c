@@ -4,7 +4,7 @@
  *
  * A translation, not a rewrite: every check, its order, every reset, counter
  * and expression is retail's. "cpp:a-b" above a function is its line range in
- * the retail file. What differs is in docs/CAMERA-HELPER-TRANSLATION.md. */
+ * the retail file. What differs is in docs/translation/CAMERA-HELPER-TRANSLATION.md. */
 #include "camera_helper.h"
 #include "camera_math.h"
 #include <stdatomic.h>

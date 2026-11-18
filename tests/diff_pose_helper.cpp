@@ -11,7 +11,7 @@
 // from their start-up state. The retail tree is read, never written.
 // Built twice by tests/run-diff-pose.sh: against the production object of the translation, and (with
 // DIFF_POSE_INPUT) against an object built with tests/diff_pose_helper_open.h, in which the look-gain
-// normalisation is not refused. See docs/POSE-HELPER-TRANSLATION.md, "Differential test".
+// normalisation is not refused. See docs/translation/POSE-HELPER-TRANSLATION.md, "Differential test".
 #include <algorithm>
 #include <atomic>
 #include <cmath>

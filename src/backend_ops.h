@@ -3,7 +3,7 @@
  * shipped path (`Backend.new(log)`, no fixture `io`), for build 25480438, and
  * the animation-state sampler of src/first_person/action_state.lua that
  * `Backend:action_state` runs. tests/vectors/backend_ops_vectors.h holds the
- * retail files' own answers; docs/BACKEND-OPS-TRANSLATION.md has the notes.
+ * retail files' own answers; docs/translation/BACKEND-OPS-TRANSLATION.md has the notes.
  *
  * Nothing here touches the process directly: memory, module bases, page
  * queries, engine calls and the log go through TfpOpsHost, so the same object

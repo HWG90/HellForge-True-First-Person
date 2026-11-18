@@ -4,7 +4,7 @@
  * Begin, the placement / motion / zoom / transition setters, statistics and
  * End. Every text is retail's. pose.lua writes no log line.
  * tests/vectors/pose_adapter_vectors.h holds the retail file's own answers;
- * docs/POSE-ADAPTER-TRANSLATION.md lists what was dropped and why. */
+ * docs/translation/POSE-ADAPTER-TRANSLATION.md lists what was dropped and why. */
 #ifndef TFP_POSE_ADAPTER_H
 #define TFP_POSE_ADAPTER_H
 #include "pose_helper.h"

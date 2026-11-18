@@ -15,7 +15,7 @@
  *
  * A translation, not a rewrite: every check, its order, every reset, counter
  * and expression is retail's. "cpp:a-b" above a function is its line range in
- * the retail file. What differs is in docs/NEAR-HELPER-TRANSLATION.md. */
+ * the retail file. What differs is in docs/translation/NEAR-HELPER-TRANSLATION.md. */
 #include "near_helper.h"
 #include <math.h>
 #include <stdatomic.h>

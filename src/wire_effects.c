@@ -15,7 +15,7 @@ typedef TfpRtValue V;
 
 static const char *const module_name[TFP_FX_MODULES] = {"dof", "vignette", "markers", "movement", "aimopt"};
 
-/* Census of build 25480438 (docs/research-0.5.34/live-sdk-census-g1-9472b065.tsv; rows 238, 267,
+/* Census of build 25480438 (docs/history/research-0.5.34/live-sdk-census-g1-9472b065.tsv; rows 238, 267,
  * 282, 91, 599, 600, 1154, 1152, 1156, 1324, 1323, 1332, 493, 489). tests/wire_effects_test.c
  * compares this table with the file. */
 const TfpFxFunctionRow tfp_fx_functions[TFP_FX_FUNCTIONS] = {

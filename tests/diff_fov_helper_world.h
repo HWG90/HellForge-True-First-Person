@@ -1,6 +1,6 @@
 // Fake game memory for tests/diff_fov_helper.cpp: the same logical state in real pages twice, once with the
 // retail build's addresses and offsets (26568081, from native_ads_fov.cpp) and once with this build's
-// (25480438, from the table in docs/FOV-HELPER-TRANSLATION.md, not from the #define block of the C file).
+// (25480438, from the table in docs/translation/FOV-HELPER-TRANSLATION.md, not from the #define block of the C file).
 // The structure layout numbers both builds share are written here once, as the retail source has them.
 #pragma once
 #include <algorithm>
@@ -31,7 +31,7 @@ static const Layout RETAIL = {
     {"e8e0fc0000", "f3450f119c24c4000000f3450f115c243c", "f3410f1044243c",
      "448bc14969c0e8000000664283bc300002000004740bffc183e11f3bca75e1eb11", "4969c0e8000000f3420f1084303c020000",
      "f30f590506b51201488d55a0488b05535abc01f30f5e8088c40a00f30f59d8f30f59d0f30f59c8"}};
-// docs/FOV-HELPER-TRANSLATION.md section 2, column "here".
+// docs/translation/FOV-HELPER-TRANSLATION.md section 2, column "here".
 static const Layout HERE = {
     0x6ab3b43f, 0x4744000, 0x6ab382e4, 0x39e8000,
     0x30d990, 0x30d980, 0x127a11a,

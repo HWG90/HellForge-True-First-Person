@@ -8,7 +8,7 @@
  *
  * tfp_wire_settings_bind is called after tfp_wire_init and before the runtime's on_enable; its state
  * is w->ext[TFP_WIRE_EXT_SETTINGS]. No Windows: the caller reads the file and hands its bytes over.
- * docs/WIRING-FEEL.md lists every binding. */
+ * docs/wiring/WIRING-FEEL.md lists every binding. */
 #ifndef TFP_WIRE_SETTINGS_H
 #define TFP_WIRE_SETTINGS_H
 #include "wire.h"

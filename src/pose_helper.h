@@ -1,7 +1,7 @@
 /* The retail editor/pose helper (native/first_person/native_ads_editor.cpp
  * with native_ads_editor.h at 0.5.41-smooth.66) in C11 for build 25480438.
  * Behaviour is retail's; what differs is listed in
- * docs/POSE-HELPER-TRANSLATION.md. No Windows calls: everything the retail
+ * docs/translation/POSE-HELPER-TRANSLATION.md. No Windows calls: everything the retail
  * file took from Windows, from its assembly thunks or from its NADSE_FIXTURE
  * seams comes through TfpPoseHost. */
 #ifndef TFP_POSE_HELPER_H
@@ -176,7 +176,7 @@ uint32_t tfp_pose_end(uint64_t generation);
 uint32_t tfp_pose_read_stats(uint64_t generation, TfpPoseStats *stats);
 uint32_t tfp_pose_read_depth_stats(uint64_t generation, TfpPoseDepthStats *stats);
 uint32_t tfp_pose_error(void);
-/* Not in retail's helper; read-only, for a live replace of the mod (docs/LIVE-REPLACE.md): 1 while a
+/* Not in retail's helper; read-only, for a live replace of the mod (docs/guides/LIVE-REPLACE.md): 1 while a
  * private preset index is published or waiting, or a private row is in use; 0 when the look-gain
  * normalisation holds nothing in the game. */
 uint32_t tfp_pose_input_held(void);

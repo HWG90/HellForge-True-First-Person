@@ -18,7 +18,7 @@
  * B_ = build data of 25480438, L_ = structure layout (the same number as retail).
  * Evidence: "map" = tools/build_map.py; "profile.h"; "image" = bytes read from
  * game-pre1020.dll / exe-25480438.bin on 2026-11-16; a file name = that file of this
- * repository reads the same field on this build. docs/BACKEND-OPS-TRANSLATION.md has the table. */
+ * repository reads the same field on this build. docs/translation/BACKEND-OPS-TRANSLATION.md has the table. */
 #define B_GAME_INVENTORY      FP_INVENTORY     /* retail 0x2ce18e8; BUILD-DIFFERENCES (by hand) */
 #define B_GAME_STATE          FP_STATE         /* retail 0x2ce1508; map; action.c */
 #define B_STATE_SCENE         FP_STATE_SCENE   /* retail 0xac29c; map; action.c */

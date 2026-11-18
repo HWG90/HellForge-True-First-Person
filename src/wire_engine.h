@@ -70,7 +70,7 @@ const char *tfp_wire_engine_module_name(TfpWireEngineModule module);
 
 /* One engine function a module needs: its path under `stingray`, where this build's C body is
  * (exe + rva; 0: a constructor table, only its presence is asked) and the line of
- * docs/research-0.5.34/live-sdk-census-g1-9472b065.tsv that says so. */
+ * docs/history/research-0.5.34/live-sdk-census-g1-9472b065.tsv that says so. */
 typedef struct TfpWireEngineFunction { const char *path; uint32_t rva; uint16_t census; uint8_t modules; /* bit per module */ } TfpWireEngineFunction;
 const TfpWireEngineFunction *tfp_wire_engine_functions(size_t *count);
 

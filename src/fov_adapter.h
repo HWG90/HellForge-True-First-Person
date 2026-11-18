@@ -4,7 +4,7 @@
  * lease (retail's Fov.new object) decides per update when to begin, bind,
  * publish the presentation phase, read health and end. Every text is retail's.
  * tests/vectors/fov_adapter_vectors.h holds the retail file's own answers;
- * docs/LENS-ADAPTERS-TRANSLATION.md lists what was dropped and why. */
+ * docs/translation/LENS-ADAPTERS-TRANSLATION.md lists what was dropped and why. */
 #ifndef TFP_FOV_ADAPTER_H
 #define TFP_FOV_ADAPTER_H
 #include "fov_helper.h"

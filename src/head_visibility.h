@@ -4,7 +4,7 @@
  * changed. Translation of retail src/first_person/head_visibility.lua at
  * 0.5.41-smooth.66 (commit 1d0d453), `Head.new` and everything inside it.
  * tests/vectors/head_visibility_vectors.h holds the retail file's own answers.
- * What differs from the Lua and why: docs/VISIBILITY-TRANSLATION.md.
+ * What differs from the Lua and why: docs/translation/VISIBILITY-TRANSLATION.md.
  *
  * Engine calls go through engine_iface.h; memory, snapshots, the options and
  * the clock through TfpHeadIo. Addresses and unit references are `double`, as
@@ -78,7 +78,7 @@ typedef struct TfpHeadBuild {
 } TfpHeadBuild;
 /* Retail 26568081: the numbers of the retail file; the vectors are replayed with these. */
 extern const TfpHeadBuild tfp_head_build_retail;
-/* HellForge's build 25480438: see docs/VISIBILITY-TRANSLATION.md for where each number comes from. */
+/* HellForge's build 25480438: see docs/translation/VISIBILITY-TRANSLATION.md for where each number comes from. */
 extern const TfpHeadBuild tfp_head_build_25480438;
 
 typedef enum TfpHeadPhase { TFP_HEAD_IDLE, TFP_HEAD_ACTIVE, TFP_HEAD_UNAVAILABLE, TFP_HEAD_CLEANUP_PENDING } TfpHeadPhase;

@@ -10,7 +10,7 @@
  * Look gain ("input mode"): the profile asks for it as retail does (normalize_zoom_input = true), the
  * helper installs retail's two extra hooks and its code proof refuses on build 25480438, exactly as
  * retail's helper behaves when one of its pins differs: no gain is ever changed. See
- * docs/BUILD-DIFFERENCES.md, "Look gain". */
+ * docs/build-25480438/BUILD-DIFFERENCES.md, "Look gain". */
 #ifndef TFP_WIRE_POSE_H
 #define TFP_WIRE_POSE_H
 #include "wire.h"

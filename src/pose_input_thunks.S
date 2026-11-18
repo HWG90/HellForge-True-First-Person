@@ -11,7 +11,7 @@
        NADSE_Input90Call(unit, node, request, native_stack, caller)
        NADSE_Input00Call(unit, node, request, native_stack, caller)
    with R8 = R15, R9 = RSP+64 and the thunk's own return address at [RSP+32]. The C entries take the
-   return address first (docs/POSE-HELPER-TRANSLATION.md section 1), so the arguments move:
+   return address first (docs/translation/POSE-HELPER-TRANSLATION.md section 1), so the arguments move:
        tfp_pose_input90_from(caller, unit, node, request, native_stack)
        tfp_pose_position_getter_from(caller, unit, node, native_stack, native_request)
    The frame is retail's: 56 bytes (32 home + the fifth argument + alignment), so [RSP+56] is the

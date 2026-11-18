@@ -168,7 +168,7 @@ def run(interpreter, retail, sessions, coverage=None):
     command = interpreter + [str(HERE / "run_runtime.lua"), str(retail), handle.name] + ([str(coverage)] if coverage else [])
     with tempfile.TemporaryDirectory() as folder:
         # x^2 (:997, :999) as the exact square in the interpreter too, as LuaJIT's compiled traces
-        # compute it: see SQUARE_SHIM in gen_motion_runtime.py and docs/MOTION-RUNTIME-TRANSLATION.md.
+        # compute it: see SQUARE_SHIM in gen_motion_runtime.py and docs/translation/MOTION-RUNTIME-TRANSLATION.md.
         environment = dict(os.environ, LD_PRELOAD=str(square_shim(folder)))
         done = subprocess.run(command, capture_output=True, text=True, env=environment)
     if done.returncode:

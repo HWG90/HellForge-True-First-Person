@@ -4,7 +4,7 @@
  * `Adapter` (the FFI wrapper, lines 12-256) and `Camera.new` (the lease
  * manager, lines 260-462) as they run on the shipped path, in one unit.
  * tests/vectors/camera_adapter_vectors.h holds the retail file's own answers.
- * What is not translated and why: docs/CAMERA-ADAPTER-TRANSLATION.md. */
+ * What is not translated and why: docs/translation/CAMERA-ADAPTER-TRANSLATION.md. */
 #ifndef TFP_CAMERA_ADAPTER_H
 #define TFP_CAMERA_ADAPTER_H
 #include "camera_helper.h"

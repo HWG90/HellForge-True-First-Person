@@ -7,7 +7,7 @@
  *   wire_effects.c   depth of field, vignette, aim markers, movement, the native aim option
  *
  * No Windows here: src/mod_view.c (compiled with TFP_FEEL) supplies the platform halves.
- * docs/WIRING-FEEL.md lists every binding. */
+ * docs/wiring/WIRING-FEEL.md lists every binding. */
 #ifndef TFP_WIRE_FEEL_H
 #define TFP_WIRE_FEEL_H
 #include "wire_pose.h"
@@ -41,7 +41,7 @@ void tfp_wire_feel_begin(TfpWire *w);
 /* The aim_markers table of the settings store as the keys that are true (TfpFxOptions.markers_decode). */
 bool tfp_wire_feel_markers(TfpWire *w, TfpRtValue value, TfpAimMarkersSaved *out);
 
-/* ---- live replace (docs/LIVE-REPLACE.md) ---------------------------------------------------------
+/* ---- live replace (docs/guides/LIVE-REPLACE.md) ---------------------------------------------------------
  * What the mod still holds in the game. Gathered by reading the modules' own state: no game call, no
  * engine call, no write, so it may run on the loader's change thread once no tick is in flight. */
 typedef struct TfpWireFeelFacts {

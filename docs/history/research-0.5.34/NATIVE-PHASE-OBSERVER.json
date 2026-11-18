@@ -1,0 +1,538 @@
+{
+  "schema": 1,
+  "generated_utc": "2026-11-09T21:36:07.834530+00:00",
+  "scope": "Offline reusable read-only C11/Win64 caller capture and separate FpMemory phase binder; no live game qualification",
+  "product_source_modified": false,
+  "runtime_or_installed_file_modified": false,
+  "game_attached_or_called": false,
+  "prototype_in_current_build": false,
+  "report": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/docs/research/NATIVE-PHASE-OBSERVER.md",
+  "report_sha256": "43fda199d1602093a4e1a32fb4c5b1baae8ce668a52d8e5960c14c0c39e257fb",
+  "fixture_receipt": {
+    "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/fixture-evidence.json",
+    "sha256": "c7c39beeece7f0e1b3716342eeb7421db5e973198a7af917e32c0fb3fca3dd91",
+    "totals": {
+      "capture_checks": 421101,
+      "capture_calls": 36111,
+      "binding_checks": 74,
+      "failures": 0
+    },
+    "all_return_codes_zero": true,
+    "variants": [
+      {
+        "name": "O2",
+        "test_hook_enabled": true,
+        "results": {
+          "checks": 105300,
+          "failed": 0,
+          "calls": 9030,
+          "callback_rbx_repurposed": 9009,
+          "callback_r15_repurposed": 6006,
+          "reentry_refusals": 3,
+          "sites": [
+            "PRE analogue12865fe",
+            "LATE analogue1287a44",
+            "composed FOV analogue127a120"
+          ],
+          "sample": {
+            "oracle_pc": "0x140002a73",
+            "recovered_pc": "0x140002a73",
+            "oracle_rsp": "0x101e9b0",
+            "recovered_rsp": "0x101e9b0",
+            "oracle_rbx": "0xe61de543e7bbd17c",
+            "recovered_rbx": "0xe61de543e7bbd17c",
+            "oracle_r15": "0x19e21abc18442e83",
+            "recovered_r15": "0x19e21abc18442e83",
+            "callback_rbx": "0x18",
+            "callback_r15": "0x15"
+          },
+          "live_game_qualified": false
+        },
+        "binary": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/phase-fixture-O2.exe",
+        "binary_sha256": "fb1c250b8f77c894b5e2bbd04ae167f327f71d14e4655d3b1867ac1be0680b86"
+      },
+      {
+        "name": "O3",
+        "test_hook_enabled": true,
+        "results": {
+          "checks": 105300,
+          "failed": 0,
+          "calls": 9030,
+          "callback_rbx_repurposed": 9009,
+          "callback_r15_repurposed": 6006,
+          "reentry_refusals": 3,
+          "sites": [
+            "PRE analogue12865fe",
+            "LATE analogue1287a44",
+            "composed FOV analogue127a120"
+          ],
+          "sample": {
+            "oracle_pc": "0x140002a73",
+            "recovered_pc": "0x140002a73",
+            "oracle_rsp": "0x101e9b0",
+            "recovered_rsp": "0x101e9b0",
+            "oracle_rbx": "0xe61de543e7bbd17c",
+            "recovered_rbx": "0xe61de543e7bbd17c",
+            "oracle_r15": "0x19e21abc18442e83",
+            "recovered_r15": "0x19e21abc18442e83",
+            "callback_rbx": "0x18",
+            "callback_r15": "0x15"
+          },
+          "live_game_qualified": false
+        },
+        "binary": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/phase-fixture-O3.exe",
+        "binary_sha256": "568ba4a18bca575f891f588a05d8db4a4d255793e993c02c8d0454673fba8ae9"
+      },
+      {
+        "name": "O2-frame-pointer",
+        "test_hook_enabled": true,
+        "results": {
+          "checks": 105300,
+          "failed": 0,
+          "calls": 9030,
+          "callback_rbx_repurposed": 9009,
+          "callback_r15_repurposed": 6006,
+          "reentry_refusals": 3,
+          "sites": [
+            "PRE analogue12865fe",
+            "LATE analogue1287a44",
+            "composed FOV analogue127a120"
+          ],
+          "sample": {
+            "oracle_pc": "0x140002a77",
+            "recovered_pc": "0x140002a77",
+            "oracle_rsp": "0x101e9b0",
+            "recovered_rsp": "0x101e9b0",
+            "oracle_rbx": "0xe61de543e7bbd17c",
+            "recovered_rbx": "0xe61de543e7bbd17c",
+            "oracle_r15": "0x19e21abc18442e83",
+            "recovered_r15": "0x19e21abc18442e83",
+            "callback_rbx": "0x15",
+            "callback_r15": "0x31"
+          },
+          "live_game_qualified": false
+        },
+        "binary": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/phase-fixture-O2-frame-pointer.exe",
+        "binary_sha256": "c0ac15c454ec5086fb3b0737f2ba23cdf22cef560d80dd4d8c31c797ade0f21c"
+      },
+      {
+        "name": "production-O2",
+        "test_hook_enabled": false,
+        "results": {
+          "checks": 105201,
+          "failed": 0,
+          "calls": 9021,
+          "callback_rbx_repurposed": 9003,
+          "callback_r15_repurposed": 6002,
+          "reentry_refusals": 0,
+          "sites": [
+            "PRE analogue12865fe",
+            "LATE analogue1287a44",
+            "composed FOV analogue127a120"
+          ],
+          "sample": {
+            "oracle_pc": "0x140002a23",
+            "recovered_pc": "0x140002a23",
+            "oracle_rsp": "0x101e9b0",
+            "recovered_rsp": "0x101e9b0",
+            "oracle_rbx": "0xe61de543e7bbd17c",
+            "recovered_rbx": "0xe61de543e7bbd17c",
+            "oracle_r15": "0x19e21abc18442e83",
+            "recovered_r15": "0x19e21abc18442e83",
+            "callback_rbx": "0x18",
+            "callback_r15": "0x15"
+          },
+          "live_game_qualified": false
+        },
+        "binary": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/phase-fixture-production-O2.exe",
+        "binary_sha256": "2fc625978933cf8de8cc5721cc654fbd3bbf5ecdd19fc1a547dd1a42eb82fd8e"
+      }
+    ],
+    "binding_variants": [
+      {
+        "name": "binding-O2",
+        "command": [
+          "~/.local/share/hellforge-prefix/pfx/drive_c/users/steamuser/Documents/HellForge/tools/zig-linux/zig",
+          "cc",
+          "-std=c11",
+          "-fms-extensions",
+          "-target",
+          "x86_64-windows-gnu",
+          "-g",
+          "-UNDEBUG",
+          "-Wall",
+          "-Wextra",
+          "-Werror",
+          "-fno-lto",
+          "-O2",
+          "-Wno-unused-function",
+          "-I",
+          "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/src",
+          "-I",
+          "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/tests",
+          "phase_bind.c",
+          "binding_test.c",
+          "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/src/backend.c",
+          "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/src/scene.c",
+          "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/src/presentation.c",
+          "-o",
+          "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/binding-O2.exe"
+        ],
+        "binary_sha256": "12b08b79e419bc0c2d5d6e2d67733a22b84c051a21950ce4c7403052ea92fe37",
+        "results": {
+          "checks": 37,
+          "failed": 0,
+          "scope": "separate fake protected-memory ring/spill proof",
+          "actual_non_top_request_distinguished": true,
+          "composed_fov_has_no_actual_request": true,
+          "live_game_qualified": false
+        },
+        "exit_code": 0
+      },
+      {
+        "name": "binding-O3",
+        "command": [
+          "~/.local/share/hellforge-prefix/pfx/drive_c/users/steamuser/Documents/HellForge/tools/zig-linux/zig",
+          "cc",
+          "-std=c11",
+          "-fms-extensions",
+          "-target",
+          "x86_64-windows-gnu",
+          "-g",
+          "-UNDEBUG",
+          "-Wall",
+          "-Wextra",
+          "-Werror",
+          "-fno-lto",
+          "-O3",
+          "-Wno-unused-function",
+          "-I",
+          "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/src",
+          "-I",
+          "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/tests",
+          "phase_bind.c",
+          "binding_test.c",
+          "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/src/backend.c",
+          "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/src/scene.c",
+          "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/src/presentation.c",
+          "-o",
+          "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/binding-O3.exe"
+        ],
+        "binary_sha256": "6c1f084a490fdb9e860779ff0d9015b6dc2ecb0ba73b6715f05edf87e3d99d08",
+        "results": {
+          "checks": 37,
+          "failed": 0,
+          "scope": "separate fake protected-memory ring/spill proof",
+          "actual_non_top_request_distinguished": true,
+          "composed_fov_has_no_actual_request": true,
+          "live_game_qualified": false
+        },
+        "exit_code": 0
+      }
+    ]
+  },
+  "prototype_sources": {
+    "phase_capture.c": {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/phase_capture.c",
+      "sha256": "5e5f7ea65242ae25f072ee76b16d9bbe2631e9c2152d03e3b0d8f1742f6b031c",
+      "matches_fixture_receipt": true
+    },
+    "phase_capture.h": {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/phase_capture.h",
+      "sha256": "2d3448b1ec375206bdc4d0e4cc6e08db44b33b4428f897c2e8e8870e62454bd0",
+      "matches_fixture_receipt": true
+    },
+    "phase_bind.c": {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/phase_bind.c",
+      "sha256": "e3b2fad831ce4677306e1d2a00297c13369eab3590c087fff95a703361d2392e",
+      "matches_fixture_receipt": true
+    },
+    "phase_bind.h": {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/phase_bind.h",
+      "sha256": "fd98aaaee1bbd02f947779a3ff2980dbaaf7e2f3ac54cf603afbd397ddeb1f37",
+      "matches_fixture_receipt": true
+    },
+    "callbacks.c": {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/callbacks.c",
+      "sha256": "163f8ab5daa4975c19d1007d07933324f1966d0ebad44be2a0616a73fdd2d0dd",
+      "matches_fixture_receipt": true
+    },
+    "fixture.h": {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/fixture.h",
+      "sha256": "19a56679836dd3bb31e825694980e72e24976d1a1fadd4f8f43b0e89757c1a15",
+      "matches_fixture_receipt": true
+    },
+    "oracle.S": {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/oracle.S",
+      "sha256": "01a9a960acbf5436f9c2c0032c63922632ba4d1d14115849aa9795591b261639",
+      "matches_fixture_receipt": true
+    },
+    "main.c": {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/main.c",
+      "sha256": "757fff5c34e5347cfa87baa13a248a8d2682fd2e0d0a84b04f7a38751304b38c",
+      "matches_fixture_receipt": true
+    },
+    "binding_test.c": {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/binding_test.c",
+      "sha256": "0072b8c96291ff44d6e660127c4a6228d1e1fc1b2fcd23d8732dfe7dacf762dd",
+      "matches_fixture_receipt": true
+    },
+    "run_fixture.py": {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/run_fixture.py",
+      "sha256": "1d36dee1a3a0ae05dc5b6f8addaa82a408e15c2dd38fcb9263c622cbfea5857d",
+      "matches_fixture_receipt": true
+    }
+  },
+  "prior_proof": {
+    "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/caller-context-proof/fixture-evidence.json",
+    "sha256": "c46d9e0e4d979ae71c32c29edba737813d81506dd9a9e3e512e37ed86733a92b",
+    "recorded_checks": 432207,
+    "rerun": false,
+    "source_hashes": {
+      "capture.c": "270b166843afc4ee7c683f03dbff52c6b2f1a7d44feead92ed4e91cfdf05dc46",
+      "capture.h": "65908d5625cffbfd31ec363d17bfe1e2f50099d7ce6b7364b9c4ed293bc1e8b9",
+      "callbacks.c": "2cdee80c188c38b5aa370887696ddeb69ef41abc886be4c068087b67a9508099",
+      "fixture.h": "d81c60be2403cb87947ce54afa1ad940434da8c7d919f716e0bd387d7c20d115",
+      "main.c": "af0dcb0ed49d92ab42e2dc1bf6d251e79be1e5537ee20765c771cfd3432af9d4",
+      "oracle.S": "a6b4599b72bcabc79e88c81410a6e4f07b2a8a3ab69306af9aafca649714e733",
+      "run_fixture.py": "db694c0f32e2ab0a796c0a99ab258df63cb1bc125e50574f5adfe10e03ef7daf"
+    },
+    "all_source_hashes_still_match": true,
+    "included_in_new_test_total": false
+  },
+  "shared_fake_binder_dependencies_at_report_time": {
+    "src/backend.c": {
+      "sha256": "0a7ca54457df744cb97670192cbd7fe4d1ec9e1a3f8955cbd310d6d6b20b89e6",
+      "mtime_utc": "2026-11-09T04:58:29.039562+00:00",
+      "mtime_precedes_fixture_run_start": true
+    },
+    "src/backend.h": {
+      "sha256": "a57a0d469f34296e8d8c772067f6cd34cb912d6b34ab22ea1ed3153196a239f2",
+      "mtime_utc": "2026-11-09T04:57:40.720044+00:00",
+      "mtime_precedes_fixture_run_start": true
+    },
+    "src/scene.c": {
+      "sha256": "e1049569475006b8a6718bbc6d30f4f0f451426c24f2ed972f3e21998ad4cc62",
+      "mtime_utc": "2026-11-09T19:43:42.671510+00:00",
+      "mtime_precedes_fixture_run_start": true
+    },
+    "src/scene.h": {
+      "sha256": "f4f57c6572dd3411a441b93043a13058ad7095acce9e2a4c3b37112ac2ca9f87",
+      "mtime_utc": "2026-11-09T19:43:42.672239+00:00",
+      "mtime_precedes_fixture_run_start": true
+    },
+    "src/presentation.c": {
+      "sha256": "3b876703f71862b37c59f00c23da6f21b58f83cbbb28dde4ea7a8b3ebf1da1dd",
+      "mtime_utc": "2026-11-09T20:22:26.262881+00:00",
+      "mtime_precedes_fixture_run_start": true
+    },
+    "src/presentation.h": {
+      "sha256": "e8f28bb77f181ea5c6cf24cbe96066c899d2f697bdd7951569910ada6fb25dac",
+      "mtime_utc": "2026-11-09T20:22:26.263399+00:00",
+      "mtime_precedes_fixture_run_start": true
+    },
+    "src/profile.h": {
+      "sha256": "b63d2610685d602b86b683c143a483b6a118e1ea5c7f4da2a34504ffdf371f38",
+      "mtime_utc": "2026-11-08T20:29:25.480984+00:00",
+      "mtime_precedes_fixture_run_start": true
+    },
+    "src/dispatch_lease.h": {
+      "sha256": "bdfdb63e658ede753fa7f962c664e1bd8b932e9a6012644651a8f6dd1a013a08",
+      "mtime_utc": "2026-11-08T20:47:58.010880+00:00",
+      "mtime_precedes_fixture_run_start": true
+    },
+    "tests/fake_native.h": {
+      "sha256": "698755a19913413b294133aafea343eea0b6432258875ce434dfc87037e0e6f7",
+      "mtime_utc": "2026-11-09T05:30:42.745478+00:00",
+      "mtime_precedes_fixture_run_start": true
+    },
+    "src/native_contract.h": {
+      "sha256": "086c2a4fbadebc51ae3c824564b7d634ebc8c6bb0cf862ac1ca8dce1edebf529",
+      "mtime_utc": "2026-11-09T05:46:33.945752+00:00",
+      "mtime_precedes_fixture_run_start": true
+    }
+  },
+  "original_capture_identities": {
+    "game": {
+      "path": "~/Documents/ChatGPT/Linux HD2/native-work/evidence/game-pre1020.dll",
+      "sha256": "642b0aac0b4f577054993a965054827455ef143ced9895b2dfd09d1ecd433a37",
+      "stamp": "0x6ab3b43f",
+      "image_size": "0x4744000"
+    },
+    "exe": {
+      "path": "~/Applications/HellForge/mods-retired/localappdata-1019/LocalAppData/LinksLinkToMemory/r6_reload_exe_20261017.bin",
+      "sha256": "2b2c496218a5ce7e4f3453951acb8bd756bc4c2f281ce95eadef17b894e39c16",
+      "stamp": "0x6ab382e4",
+      "image_size": "0x39e8000"
+    },
+    "build": "25480438",
+    "address_semantics": "RVA in mapped original-build captures"
+  },
+  "exact_site_profiles": [
+    {
+      "phase": "native6_pre",
+      "abi_family": "UnitAPI world-matrix getter",
+      "game_call_rva": "0x12865fc",
+      "game_return_rva": "0x12865fe",
+      "sdk_slot_offset": "0x90",
+      "original_exe_implementation_rva": "0x1fd220",
+      "call_hex": "ffd0",
+      "implementation_prefix_hex": "40534883ec204863dae89206eaff488bc84c8b0041ff90e8000000488bcb48c1e10648034828488bc14883c4205b",
+      "verified_in_original_capture": true,
+      "actual_evaluator_identity_claim": true
+    },
+    {
+      "phase": "native6_late",
+      "abi_family": "UnitAPI local-position getter",
+      "game_call_rva": "0x1287a41",
+      "game_return_rva": "0x1287a44",
+      "sdk_slot_offset": "0x0",
+      "original_exe_implementation_rva": "0x1fc450",
+      "call_hex": "41ffd0",
+      "implementation_prefix_hex": "40534883ec204863dae86214eaff488bc84c8b0041ff90e8000000488bcb48c1e1064883c124488b40204803c14883c4",
+      "verified_in_original_capture": true,
+      "actual_evaluator_identity_claim": true
+    },
+    {
+      "phase": "composed_camera_fov",
+      "abi_family": "CameraAPI FOV setter",
+      "game_call_rva": "0x127a11a",
+      "game_return_rva": "0x127a120",
+      "sdk_slot_offset": "0x80",
+      "original_exe_implementation_rva": "0x30d990",
+      "call_hex": "ff9280000000",
+      "implementation_prefix_hex": "f30f114934c7415000000000e90f211c00cccccccccccccc",
+      "verified_in_original_capture": true,
+      "actual_evaluator_identity_claim": false
+    }
+  ],
+  "additional_code_witnesses": [
+    {
+      "game_rva": "0x1286330",
+      "hex": "48895c24205556574154415541564157488dac24f0fcffff4881ec10040000440f299c24b0030000",
+      "purpose": "native6 parent prologue/frame",
+      "verified_in_original_capture": true
+    },
+    {
+      "game_rva": "0x1286370",
+      "hex": "48894d804c8bfa",
+      "purpose": "context nativeS+0x80 and R15 assignment",
+      "verified_in_original_capture": true
+    },
+    {
+      "game_rva": "0x128637d",
+      "hex": "f3440f115da0",
+      "purpose": "float dt nativeS+0xa0",
+      "verified_in_original_capture": true
+    },
+    {
+      "game_rva": "0x1286430",
+      "hex": "4889442448",
+      "purpose": "8-byte index nativeS+0x48",
+      "verified_in_original_capture": true
+    },
+    {
+      "game_rva": "0x1279190",
+      "hex": "4055534155488dac2400ffffff4881ec00020000440f29942490010000488b055c2e3c014833c448894530",
+      "purpose": "composed camera parent prologue/frame",
+      "verified_in_original_capture": true
+    }
+  ],
+  "source_locations": {
+    "capture_prepare": {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/phase_capture.c",
+      "line": 72
+    },
+    "capture_walk": {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/phase_capture.c",
+      "line": 89
+    },
+    "capture_entry": {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/phase_capture.c",
+      "line": 144
+    },
+    "phase_bind": {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/phase_bind.c",
+      "line": 44
+    },
+    "integration_contract": {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/phase_bind.h",
+      "line": 31
+    },
+    "private_worker_join": {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/main.c",
+      "line": 153
+    },
+    "private_exception_test": {
+      "path": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/main.c",
+      "line": 54
+    }
+  },
+  "capture_contract": {
+    "own_unwind_frames": 2,
+    "unwinds_native_frame": false,
+    "required_metadata": "Same loaded immutable PE, version1 non-chained image-backed RUNTIME_FUNCTION and bounded unwind bytes",
+    "max_own_frame_bytes": 65536,
+    "max_tib_stack_range_bytes": 134217728,
+    "final_native_rsp_alignment": 16,
+    "published_registers": [
+      "PC",
+      "RSP",
+      "RBX",
+      "R15"
+    ],
+    "failure_published_caller": "all zero",
+    "exception_scope": "SEH protects context capture and virtual walk; initial trusted argument/output accesses precede SEH",
+    "same_thread_reentry": "refused via TLS; deliberate private exception followed by successful capture verifies reset"
+  },
+  "binding_contract": {
+    "memory_interface": "FpMemory protected reads only",
+    "tuple_trust": "Trusted unchanged successful result, immediate use on same thread; not a capability or generation token",
+    "buffers": "Valid caller-owned disjoint input/output/policy storage",
+    "lifetime": "Pin own module; immutable policy/code/unwind metadata during callback; separate SDK-slot ownership/drain lease required before any future integration",
+    "native_stack_base": "Recovered native caller RSP before SDK call; callback entry RSP+8",
+    "native6_spills": {
+      "context_offset": "0x80",
+      "avatar_index_offset": "0x48",
+      "avatar_index_width": 8,
+      "dt_offset": "0xa0",
+      "dt_width": 4
+    },
+    "actual_request": "R15 aligned queued 0xe8 record in 32-slot ring, kind6/current avatar/weapon/body; may be non-top",
+    "fov_identity": "Composed context/camera only; actual_request=0 and actual_index=UINT32_MAX",
+    "closing_reads": "SDK root/table/slot, player/request/controller/flags, descriptor, Unit objects, rig, copied request bytes and spills",
+    "same_evaluation_claim": false
+  },
+  "live_prerequisites": [
+    "Full native caller register liveness/alias and exact current module/build validation",
+    "Own noinline callback/helper metadata plus current SDK slot/original-target lease and callback-drain lifecycle",
+    "Same-thread PRE/LATE/FOV copied observation paired to actual evaluator generation; current top is not an evaluator identity",
+    "Root0/branch5/camera50 and actual world camera end-to-end observation; pointer passthrough alone is boundary evidence",
+    "Native6 post-rig and action/vehicle/native queue evaluation ordering",
+    "Foreign writer and ABA lifetime boundaries",
+    "Bounded read-only capture cadence and measured latency/FPS budget"
+  ],
+  "not_established": [
+    "Real-game successful capture or phase binding",
+    "Single-evaluation or render-thread coherence",
+    "Native6 post-rig phase identity",
+    "Safe blend/input/request/animation writes",
+    "New interception-point or native invocation authorization",
+    "Native handoff visual acceptance"
+  ],
+  "test_only_assembly": "~/Documents/Codex/2026-11-07/tr/work/true-first-person-hellforge/work/native-phase-observer/oracle.S",
+  "candidate_logic_entirely_c": true,
+  "windows_extensions": "C11 with MS SEH, compiler intrinsics, Windows platform APIs; no handwritten product assembly",
+  "independent_review": {
+    "reviewer": "/root/hf_sdk_audit",
+    "scope": "Final capture/binder source, documentation limits and final receipt/source hashes",
+    "remaining_actionable_offline_findings": 0,
+    "fixture_counts_verified_from_receipt": true,
+    "fixtures_rerun_by_reviewer": false,
+    "game_qualified": false,
+    "previous_findings_resolved": [
+      "Private worker join failure must exit before reading worker-owned storage",
+      "Private exception with zero caller followed by successful capture on same thread"
+    ]
+  }
+}

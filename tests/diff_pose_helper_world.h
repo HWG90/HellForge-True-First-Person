@@ -1,6 +1,6 @@
 // Fake game memory for tests/diff_pose_helper.cpp: one logical scene, written into real pages twice, once
 // with the retail build's addresses and offsets (26568081, from native_ads_editor.cpp) and once with this
-// build's (25480438, from the tables of docs/POSE-HELPER-TRANSLATION.md section 2; the names that document
+// build's (25480438, from the tables of docs/translation/POSE-HELPER-TRANSLATION.md section 2; the names that document
 // lists as open take the test's own values from tests/diff_pose_helper_open.h). The structure layout
 // numbers both builds share are written here once, as the retail source has them.
 #pragma once
@@ -56,7 +56,7 @@ static const Layout RETAIL = {
      {0xe69ca0, 0xdc, false, true}, {0x110fcf0, 0xbb0, false, true}, {0x11108a0, 0x1dd0, false, true}, {0x1f3050, 51, true, true},
      {0x1f3090, 76, true, true}, {0x1f30e0, 47, true, true}, {0x1f2310, 51, true, true}, {0x28d3c0, 5, true, true}},
     {0x22465c4, 0x2247894, 0x2246fb0, 0x22478c8, 0x2246774, 0x2247ab0, 0x2246900}};
-// docs/POSE-HELPER-TRANSLATION.md section 2, column "here"; the open names from diff_pose_helper_open.h.
+// docs/translation/POSE-HELPER-TRANSLATION.md section 2, column "here"; the open names from diff_pose_helper_open.h.
 static const Layout HERE = {
     0x6ab3b43f, 0x4744000, 0x6ab382e4, 0x39e8000,
     {0x1fc720, 0x1fc880, 0x1fc7a0, 0x1fc450},

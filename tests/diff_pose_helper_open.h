@@ -1,4 +1,4 @@
-/* TEST ONLY. Values for the build constants that docs/POSE-HELPER-TRANSLATION.md lists as open on build
+/* TEST ONLY. Values for the build constants that docs/translation/POSE-HELPER-TRANSLATION.md lists as open on build
  * 25480438 (all of them in the look-gain normalisation), so that the normalisation's LOGIC can be compared
  * with the retail helper in tests/diff_pose_helper.cpp. They are NOT this build's values: they are places in
  * the test's fake game image, chosen at offsets unlike retail's, and the code-pin hashes are those of the

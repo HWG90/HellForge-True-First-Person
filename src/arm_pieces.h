@@ -2,7 +2,7 @@
  * src/first_person/arm_pieces.lua at 0.5.41-smooth.66 (commit 1d0d453), whole
  * file. tests/vectors/arm_pieces_vectors.h holds the retail file's own
  * answers and engine calls. What differs from the Lua and why:
- * docs/ARMS-TRANSLATION.md.
+ * docs/translation/ARMS-TRANSLATION.md.
  *
  * Every engine function goes through TfpArmEngine (arm_engine_iface.h), the
  * backend's readers and the clock through TfpArmBackend. Bone indices,

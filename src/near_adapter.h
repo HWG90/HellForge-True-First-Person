@@ -4,7 +4,7 @@
  * (retail's Near.new object) decides per update when to begin, send the
  * distances, poll health and end. Every text is retail's.
  * tests/vectors/near_adapter_vectors.h holds the retail file's own answers;
- * docs/LENS-ADAPTERS-TRANSLATION.md lists what was dropped and why. */
+ * docs/translation/LENS-ADAPTERS-TRANSLATION.md lists what was dropped and why. */
 #ifndef TFP_NEAR_ADAPTER_H
 #define TFP_NEAR_ADAPTER_H
 #include "near_helper.h"

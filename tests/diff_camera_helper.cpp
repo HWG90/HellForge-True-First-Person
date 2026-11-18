@@ -7,7 +7,7 @@
 // caller's argument buffer; what the dispatch slot holds; the error code; the stats, handoff stats, entry
 // trace and anchor stats structures. The first difference is printed and the test exits non-zero.
 // Every script runs in its own child process, so both helpers start from their start-up state.
-// The retail tree is read, never written. See docs/CAMERA-HELPER-TRANSLATION.md, "Differential test".
+// The retail tree is read, never written. See docs/translation/CAMERA-HELPER-TRANSLATION.md, "Differential test".
 #include <algorithm>
 #include <atomic>
 #include <cmath>

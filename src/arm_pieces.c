@@ -1,6 +1,6 @@
 /* Translation of retail src/first_person/arm_pieces.lua (0.5.41-smooth.66,
  * commit 1d0d453). Numbers in comments and in the engine calls are that
- * file's lines. See arm_pieces.h and docs/ARMS-TRANSLATION.md.
+ * file's lines. See arm_pieces.h and docs/translation/ARMS-TRANSLATION.md.
  *
  * A raised Lua error is a longjmp to the pcall the retail function wraps its
  * body in (arm_engine_calls.h). Where the Lua evaluates several engine calls

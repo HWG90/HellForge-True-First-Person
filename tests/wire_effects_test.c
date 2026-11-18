@@ -497,8 +497,12 @@ static void load_case(const TfpFxPlatform *platform, int frames) {
 int main(int argc, char **argv) {
   const char *game_image = getenv("TFP_GAME_IMAGE"), *exe_image = getenv("TFP_EXE_IMAGE"), *census = getenv("TFP_CENSUS");
   if (argc > 1 && !strcmp(argv[1], "--constants")) { dump_constants(); return 0; }
-  if (!game_image) game_image = "/home/goose/Documents/ChatGPT/Linux HD2/native-work/evidence/game-pre1020.dll";
-  if (!exe_image) exe_image = "/home/goose/Applications/HellForge/mods-retired/localappdata-1019/LocalAppData/LinksLinkToMemory/r6_reload_exe_20261017.bin";
+  static char game_default[512], exe_default[512];
+  const char *home = getenv("HOME");
+  snprintf(game_default, sizeof game_default, "%s/Documents/ChatGPT/Linux HD2/native-work/evidence/game-pre1020.dll", home ? home : "");
+  snprintf(exe_default, sizeof exe_default, "%s/Applications/HellForge/mods-retired/localappdata-1019/LocalAppData/LinksLinkToMemory/r6_reload_exe_20261017.bin", home ? home : "");
+  if (!game_image) game_image = game_default;
+  if (!exe_image) exe_image = exe_default;
 
   /* ---- 1. constants ---- */
   if (constants_against_images(game_image, exe_image)) return 1;

@@ -1,7 +1,7 @@
 /* The retail field-of-view helper (native/first_person/native_ads_fov.cpp with
  * native_ads_fov.h and native_memory.h at 0.5.41-smooth.66) in C11 for build
  * 25480438. Behaviour is retail's; what differs is listed in
- * docs/FOV-HELPER-TRANSLATION.md. No Windows calls: everything the retail
+ * docs/translation/FOV-HELPER-TRANSLATION.md. No Windows calls: everything the retail
  * file took from Windows or from its NADSF_FIXTURE seams comes through
  * TfpFovHost. */
 #ifndef TFP_FOV_HELPER_H

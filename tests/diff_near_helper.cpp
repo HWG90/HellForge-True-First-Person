@@ -7,7 +7,7 @@
 // dispatch slot holds; the near distance of both cameras; the generation written; the error code; the stats
 // structure and the caller table. The first difference is printed and the test exits non-zero.
 // Every script runs in its own child process, so both helpers start from their start-up state.
-// The retail tree is read, never written. See docs/NEAR-HELPER-TRANSLATION.md, "Differential test".
+// The retail tree is read, never written. See docs/translation/NEAR-HELPER-TRANSLATION.md, "Differential test".
 #include <algorithm>
 #include <atomic>
 #include <cmath>

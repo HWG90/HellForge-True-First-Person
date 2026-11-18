@@ -4,7 +4,7 @@
  * 1d0d453), whole file. It makes no engine call and writes nothing; head
  * visibility (head_visibility.c) turns its rows into shadow-pass writes.
  * tests/vectors/model_shadow_source_vectors.h holds the retail file's own
- * answers. What differs from the Lua and why: docs/VISIBILITY-TRANSLATION.md.
+ * answers. What differs from the Lua and why: docs/translation/VISIBILITY-TRANSLATION.md.
  *
  * Addresses, unit references and counts are `double`, as in Lua: every sum
  * and comparison is then the one the Lua makes, whatever the bytes read. */
@@ -99,7 +99,7 @@ typedef struct TfpModelShadow {
 } TfpModelShadow;
 
 /* The appearance rows in the avatar owner: retail 26568081 and HellForge's build 25480438
- * (docs/BUILD-DATA-25480438.md; the same number as TfpHeadBuild.appearance). */
+ * (docs/build-25480438/BUILD-DATA-25480438.md; the same number as TfpHeadBuild.appearance). */
 #define TFP_VIS_APPEARANCE_RETAIL 0x546ab0
 #define TFP_VIS_APPEARANCE_25480438 0x546a70
 /* M.new(backend). `appearance`: one of the two numbers above. */

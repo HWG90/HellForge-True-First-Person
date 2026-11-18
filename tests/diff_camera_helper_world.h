@@ -1,6 +1,6 @@
 // Fake game memory for tests/diff_camera_helper.cpp: one logical scene, written into real pages twice,
 // once with the retail build's addresses and offsets (26568081, from native_ads_camera.cpp) and once with
-// this build's (25480438, from the table in docs/CAMERA-HELPER-TRANSLATION.md). The structure layout
+// this build's (25480438, from the table in docs/translation/CAMERA-HELPER-TRANSLATION.md). The structure layout
 // numbers (the ones both builds share) are written here once, as the retail source has them.
 #pragma once
 #include <algorithm>
@@ -27,7 +27,7 @@ static const Layout RETAIL = {
     "4c8d45c08b5308488b0b4c8b482041ff5120488b05c854bd014c8d45008b5308488b0b4c8b482041ff5128",
     0x2e287d0, 0x2ce1ee0, 0x2e381a8, 0x1ab76f8, 0x2ce1508, 0xac29c, 0x2ce14c8,
     0x53e888, 0x53e9c0, 0x1240};
-// docs/CAMERA-HELPER-TRANSLATION.md section 2, column "here". The three long byte strings are retail's with
+// docs/translation/CAMERA-HELPER-TRANSLATION.md section 2, column "here". The three long byte strings are retail's with
 // the one displacement the table names replaced.
 static const Layout HERE = {
     0x6ab3b43f, 0x4744000, 0x6ab382e4, 0x39e8000,

@@ -1,6 +1,6 @@
 // Fake game memory for tests/diff_blur_helper.cpp: one logical state, written into real pages twice, once
 // with the retail build's addresses and offsets (26568081, from native_ads_blur.cpp) and once with this
-// build's (25480438, from the table in docs/BLUR-HELPER-TRANSLATION.md, not from the #define block of
+// build's (25480438, from the table in docs/translation/BLUR-HELPER-TRANSLATION.md, not from the #define block of
 // src/blur_helper.c). The structure layout numbers both builds share are written here once, as the retail
 // source and its fixture (blur_fixture.cpp) have them.
 #pragma once
@@ -27,7 +27,7 @@ static const Layout RETAIL = {
     0x53e888, 0x1240,
     "e94b9c3800",
     "48895c2408574883ec200fb60133ff488bd984c0743e3c2e752f8bd34533c02bd1e89abcfaff48c1e82069c895e9d15b"};
-// docs/BLUR-HELPER-TRANSLATION.md section 2, column "here".
+// docs/translation/BLUR-HELPER-TRANSLATION.md section 2, column "here".
 static const Layout HERE = {
     0x6ab3b43f, 0x4744000, 0x6ab382e4, 0x39e8000,
     0x310050, 0x100a80b, 0x30ffc0, 0x62adb0, 0x310140, 0x62a0c0, 0x1677dc8, 0x2dd5e0, 0x27cc5e0, 0x27cc638, 0x3100c0, 0x1a100f0,

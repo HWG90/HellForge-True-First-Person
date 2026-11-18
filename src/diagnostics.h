@@ -2,7 +2,7 @@
  * 0.5.41-smooth.66 (commit 1d0d453). A ring of copied per-frame samples and event rows with
  * running counters; read only through the debug interface. It calls nothing outside itself.
  * tests/vectors/diagnostics_vectors.h holds the retail file's own answers;
- * docs/EFFECTS-MODULES-TRANSLATION.md lists what was dropped and why. */
+ * docs/translation/EFFECTS-MODULES-TRANSLATION.md lists what was dropped and why. */
 #ifndef TFP_DIAGNOSTICS_H
 #define TFP_DIAGNOSTICS_H
 #include <stdbool.h>

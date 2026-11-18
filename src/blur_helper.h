@@ -1,7 +1,7 @@
 /* The retail scoped-blur helper (native/first_person/native_ads_blur.cpp with
  * native_ads_blur.h at 0.5.41-smooth.66) in C11 for build 25480438.
  * Behaviour is retail's; what differs is listed in
- * docs/BLUR-HELPER-TRANSLATION.md. No Windows calls: everything the retail
+ * docs/translation/BLUR-HELPER-TRANSLATION.md. No Windows calls: everything the retail
  * file took from Windows or from its NADSB_FIXTURE seams comes through
  * TfpBlurHost. */
 #ifndef TFP_BLUR_HELPER_H

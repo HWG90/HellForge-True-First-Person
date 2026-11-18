@@ -4,7 +4,7 @@
  * the per-update order that drives every other module of the mode, with the state runtime.lua owns
  * and nothing else. Every module it calls is reached through TfpRtHost (tfp_runtime_host.h), one
  * function pointer per collaborator method, so this file includes no other module's header.
- * docs/RUNTIME-TRANSLATION.md has the binding table. (src/runtime.h is the older 0.5.34 plumbing
+ * docs/translation/RUNTIME-TRANSLATION.md has the binding table. (src/runtime.h is the older 0.5.34 plumbing
  * and is unrelated.)
  *
  * runtime.lua is dynamically typed and passes many values on without looking at them, so what

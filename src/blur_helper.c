@@ -1,7 +1,7 @@
 /* native/first_person/native_ads_blur.cpp (retail kit 0.5.41-smooth.66, build
  * 26568081) translated to C11 for build 25480438. "cpp:N" names a line of the
  * retail file. Owned native-weapon DoF maxima only; no global effect, lens or
- * transform writes. See docs/BLUR-HELPER-TRANSLATION.md. */
+ * transform writes. See docs/translation/BLUR-HELPER-TRANSLATION.md. */
 #include "blur_helper.h"
 #include <math.h>
 #include <stdatomic.h>

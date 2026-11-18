@@ -1,6 +1,6 @@
 /* See wire_engine.h. Line references: "rt:N" retail runtime.lua, "hv:N" head_visibility.lua,
  * "ap:N" arm_pieces.lua, "gh:N" grip_hand.lua, "census N" a line of
- * docs/research-0.5.34/live-sdk-census-g1-9472b065.tsv. No Windows. */
+ * docs/history/research-0.5.34/live-sdk-census-g1-9472b065.tsv. No Windows. */
 #include "wire_recent.h"
 #include "wire_engine.h"
 #include "wire_off.h"

@@ -4,7 +4,7 @@
  * lease (retail's Blur.new object) decides per update when to begin, read
  * health, retire, recheck a weapon without a blur source, and end. Every text
  * is retail's. tests/vectors/blur_adapter_vectors.h holds the retail file's own
- * answers; docs/LENS-ADAPTERS-TRANSLATION.md lists what was dropped and why. */
+ * answers; docs/translation/LENS-ADAPTERS-TRANSLATION.md lists what was dropped and why. */
 #ifndef TFP_BLUR_ADAPTER_H
 #define TFP_BLUR_ADAPTER_H
 #include "blur_helper.h"

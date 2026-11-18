@@ -28,8 +28,8 @@ import os
 import struct
 import sys
 
-GAME = "/home/goose/Documents/ChatGPT/Linux HD2/native-work/evidence/game-pre1020.dll"
-EXE = "/home/goose/Applications/HellForge/mods-retired/localappdata-1019/LocalAppData/LinksLinkToMemory/r6_reload_exe_20261017.bin"
+GAME = os.path.expanduser("~/Documents/ChatGPT/Linux HD2/native-work/evidence/game-pre1020.dll")
+EXE = os.path.expanduser("~/Applications/HellForge/mods-retired/localappdata-1019/LocalAppData/LinksLinkToMemory/r6_reload_exe_20261017.bin")
 STAMPS = {"game": (0x6AB3B43F, 0x4744000), "exe": (0x6AB382E4, 0x39E8000)}  # src/profile.h
 
 # Bytes that may differ between retail's witness and this build's: (first, last+1) spans.
@@ -100,7 +100,7 @@ def main():
     parser.add_argument("dump")
     parser.add_argument("--game", default=os.environ.get("TFP_GAME_IMAGE", GAME))
     parser.add_argument("--exe", default=os.environ.get("TFP_EXE_IMAGE", EXE))
-    parser.add_argument("--census", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs", "research-0.5.34",
+    parser.add_argument("--census", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs", "history", "research-0.5.34",
                                                          "live-sdk-census-g1-9472b065.tsv"))
     args = parser.parse_args()
     for path in (args.game, args.exe):

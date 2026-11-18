@@ -5,7 +5,7 @@
  *
  * A translation, not a rewrite: every check, its order, every reset, counter
  * and expression is retail's. "cpp:a-b" above a function is its line range in
- * the retail file. What differs is in docs/FOV-HELPER-TRANSLATION.md. */
+ * the retail file. What differs is in docs/translation/FOV-HELPER-TRANSLATION.md. */
 #include "fov_helper.h"
 #include <math.h>
 #include <stdatomic.h>

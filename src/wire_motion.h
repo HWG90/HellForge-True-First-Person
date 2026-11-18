@@ -8,7 +8,7 @@
  *   presentation:action / :resume                       -> src/transition.c
  *
  * tfp_wire_motion_bind is called after tfp_wire_init and tfp_wire_settings_bind, before the runtime's
- * on_enable; its state is w->ext[TFP_WIRE_EXT_MOTION]. No Windows. docs/WIRING-FEEL.md lists every
+ * on_enable; its state is w->ext[TFP_WIRE_EXT_MOTION]. No Windows. docs/wiring/WIRING-FEEL.md lists every
  * binding. */
 #ifndef TFP_WIRE_MOTION_H
 #define TFP_WIRE_MOTION_H

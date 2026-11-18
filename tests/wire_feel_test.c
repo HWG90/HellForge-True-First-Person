@@ -4,7 +4,7 @@
  * runtime's on_enable and its per-update order run through them without a fault, each module that
  * cannot work says so, and the adapters with logic of their own (snapshot and action-state shapes,
  * presentation:action / :resume, the Feel line, the markers table) answer as written.
- * It does not prove anything about the game: that is docs/WIRING-FEEL.md, "unproven". */
+ * It does not prove anything about the game: that is docs/wiring/WIRING-FEEL.md, "unproven". */
 #include "wire_feel.h"
 #include "wire_off.h"
 #include "feel_bound.h"
@@ -249,7 +249,7 @@ int main(void) {
   wire.controller.enabled = false;
   CHECK(text_is(tfp_wire_text("x"), "x"));
 
-  /* ---- live replace (docs/LIVE-REPLACE.md): idle and clean, or the first thing still held ---- */
+  /* ---- live replace (docs/guides/LIVE-REPLACE.md): idle and clean, or the first thing still held ---- */
   {
     TfpWireFeelFacts none, f;
     const char *why;

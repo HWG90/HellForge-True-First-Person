@@ -1,6 +1,6 @@
 // Fake game memory for tests/diff_near_helper.cpp: one logical state, written into real pages twice, once
 // with the retail build's addresses and offsets (26568081, from native_ads_near.cpp) and once with this
-// build's (25480438, from the table in docs/NEAR-HELPER-TRANSLATION.md, not from the #define block). The
+// build's (25480438, from the table in docs/translation/NEAR-HELPER-TRANSLATION.md, not from the #define block). The
 // structure layout numbers both builds share are written here once, as the retail source has them.
 #pragma once
 #include <algorithm>
@@ -25,7 +25,7 @@ static const Layout RETAIL = {
     "488b05d536bd01f30f100d01811301498b0f440f29bc2490010000488b5020ff5268", "f30f114928e9c66b1f00",
     0x2e287d0, 0x2ce1ee0, 0x2e381a8, 0x2ce14c8,
     0x53e888, 0x1240};
-// docs/NEAR-HELPER-TRANSLATION.md section 2, column "here".
+// docs/translation/NEAR-HELPER-TRANSLATION.md section 2, column "here".
 static const Layout HERE = {
     0x6ab3b43f, 0x4744000, 0x6ab382e4, 0x39e8000,
     0x30d960, 0x30d940, 0x127bf2c, 0x23c66d4, 0x1000, 0x2111000,

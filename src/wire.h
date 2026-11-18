@@ -8,7 +8,7 @@
  *
  * Nothing here is Windows: memory, native calls and page questions come in as a TfpOpsHost, time, the
  * mouse and the log as a TfpWirePlatform, the helpers as their function tables. src/mod_view.c and
- * src/wire_win.c supply the real ones; the tests supply scripted ones. docs/WIRING-VIEW.md lists
+ * src/wire_win.c supply the real ones; the tests supply scripted ones. docs/wiring/WIRING-VIEW.md lists
  * every binding. */
 #ifndef TFP_WIRE_H
 #define TFP_WIRE_H
@@ -25,7 +25,7 @@
 typedef struct TfpWirePlatform {
   void *user;
   /* Seconds, never going back; NAN: no clock. Retail's is Application.time_since_launch; the view
-   * build's is the performance counter (docs/WIRING-VIEW.md, differences). */
+   * build's is the performance counter (docs/wiring/WIRING-VIEW.md, differences). */
   double (*clock)(void *user);
   /* The level of a mouse button: 1 down, 0 up, -1 no answer. button 1: right, 2: middle. */
   int (*mouse)(void *user, int button);
@@ -67,7 +67,7 @@ typedef struct TfpWire {
   TfpOpsHost ops_host;         /* what the backend gets: the same through this binder, plus runtime.lua's four hooks */
   TfpOps ops;
   /* The pose (editor) helper is not wired in the view build: this stand-in arms at once, places
-   * nothing and reports a steady, error-free lease (docs/WIRING-VIEW.md, "no off path in retail"). */
+   * nothing and reports a steady, error-free lease (docs/wiring/WIRING-VIEW.md, "no off path in retail"). */
   TfpOpsPoseHelper null_pose;
   TfpOpsHandle null_handle;
   bool null_armed;
@@ -105,7 +105,7 @@ typedef struct TfpWire {
   double row_eye[3], row_fov_native, row_fov_applied;
   TfpViewLog log;
   char entry_fault[256];
-  /* ---- the feel build (docs/WIRING-FEEL.md): each module's binder hangs its state and hooks here.
+  /* ---- the feel build (docs/wiring/WIRING-FEEL.md): each module's binder hangs its state and hooks here.
    * All NULL in the view build, which then behaves exactly as before. ---- */
   void *ext[TFP_WIRE_EXT_N];
   /* The pose (editor) helper behind the backend; NULL: the stand-in above. Set before on_enable. */

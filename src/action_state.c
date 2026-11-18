@@ -6,7 +6,7 @@
  * Build constants, game build 25480438. Each line names the retail value and
  * how this build's value was established.
  *   build_map = tools/build_map.py --retail <kit> --to-here (the kit's own
- *               migration records; docs/BUILD-DATA-25480438.md lists them)
+ *               migration records; docs/build-25480438/BUILD-DATA-25480438.md lists them)
  *   image     = bytes read from this build's executable image
  *               (native-work/evidence/exe-25480438.bin: PE stamp 0x6ab382e4,
  *               image size 0x39e8000)

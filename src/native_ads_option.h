@@ -4,7 +4,7 @@
  * leased from 0 to 1 and written back on stop. The source (retail's M.source) finds, reads and
  * writes the byte; the lease (retail's M.new) decides when. Every text is retail's.
  * tests/vectors/native_ads_option_vectors.h holds the retail file's own answers;
- * docs/EFFECTS-MODULES-TRANSLATION.md lists what was dropped and why. */
+ * docs/translation/EFFECTS-MODULES-TRANSLATION.md lists what was dropped and why. */
 #ifndef TFP_NATIVE_ADS_OPTION_H
 #define TFP_NATIVE_ADS_OPTION_H
 #include <stdbool.h>

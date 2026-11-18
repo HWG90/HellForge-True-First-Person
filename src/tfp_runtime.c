@@ -1,6 +1,6 @@
 /* Retail src/first_person/runtime.lua (0.5.41-smooth.66, kit commit 1d0d453) in C. The Lua file is
  * the authority; the numbers in comments are its lines. See tfp_runtime.h and
- * docs/RUNTIME-TRANSLATION.md.
+ * docs/translation/RUNTIME-TRANSLATION.md.
  *
  * How Lua's behaviour is carried over:
  * - error() / pcall(): raise_value() / rt_pcall(), a setjmp frame per protected call. A host call

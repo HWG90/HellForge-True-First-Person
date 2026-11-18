@@ -8,7 +8,7 @@
 // holds; the request records of the camera context (where the FirdPerson policy writes); the generation
 // written; the error code; the statistics structure. The first difference is printed and the test exits
 // non-zero. Every script runs in its own child process, so both helpers start from their start-up state.
-// The retail tree is read, never written. See docs/FOV-HELPER-TRANSLATION.md, "Differential test".
+// The retail tree is read, never written. See docs/translation/FOV-HELPER-TRANSLATION.md, "Differential test".
 #include <algorithm>
 #include <atomic>
 #include <cmath>

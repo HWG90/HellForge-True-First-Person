@@ -1,6 +1,6 @@
 /* Translation of retail src/first_person/grip_hand.lua (0.5.41-smooth.66,
  * commit 1d0d453). Numbers in comments and in the engine calls are that
- * file's lines. See grip_hand.h and docs/ARMS-TRANSLATION.md.
+ * file's lines. See grip_hand.h and docs/translation/ARMS-TRANSLATION.md.
  *
  * A raised Lua error is a longjmp to the pcall the retail function wraps its
  * body in (arm_engine_calls.h). Where the Lua evaluates several engine calls

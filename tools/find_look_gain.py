@@ -5,7 +5,7 @@ The look-gain normalisation of src/pose_helper.c has 27 names for 20 values
 that the retail helper (26568081) knows and this build did not. This script
 finds each of them again from four memory-layout images (file offset = RVA),
 by matching the retail function's instructions in this build's image, and
-prints PASS / FAIL / OPEN per name. docs/LOOK-GAIN-CONSTANTS-25480438.md is
+prints PASS / FAIL / OPEN per name. docs/build-25480438/LOOK-GAIN-CONSTANTS-25480438.md is
 the write-up of what it prints.
 
   find_look_gain.py                      derive, compare with the values below
@@ -43,7 +43,7 @@ RETAIL_PINS = [
     ("EXIT", 0x11108a0, 0x1dd0, 0x1a26ca7b7bbba077, False), ("PIN_12", 0x1f3050, 51, 0xdafbc85ae8dffa23, True),
     ("PIN_13", 0x1f3090, 76, 0x9f25c14a58784f1f, True), ("WORLD_MATRIX", 0x1f30e0, 47, 0xd34dcd5634fed114, True),
     ("LOCAL_POSITION", 0x1f2310, 51, 0x542e94a63b7ebae6, True), ("GRAPH_GETTER", 0x28d3c0, 5, 0x86a7f411c046a30c, True)]
-# Already established in src/pose_helper.c before this work (docs/POSE-HELPER-TRANSLATION.md): the anchors.
+# Already established in src/pose_helper.c before this work (docs/translation/POSE-HELPER-TRANSLATION.md): the anchors.
 ANCHOR = {"EVALUATOR": 0x1286330, "SOLVER": 0x1277250, "STEERING": 0x128d820, "ENTER": 0x127de20, "EXIT": 0x127e9d0,
           "EXP": 0x21087d0, "INPUT_OWNER": (0x2e38250, 0x347cf18), "WORLD_MATRIX": 0x1fd220}
 RETAIL_CONST = {"B_CONST_ONE": (0x22465c4, "0000803f"), "B_CONST_MINUS_ONE": (0x2247894, "000080bf"),

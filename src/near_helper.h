@@ -1,7 +1,7 @@
 /* The retail near-clip helper (native/near_clip/native_ads_near.cpp with
  * native_ads_near.h at 0.5.41-smooth.66) in C11 for build 25480438.
  * Behaviour is retail's; what differs is listed in
- * docs/NEAR-HELPER-TRANSLATION.md. No Windows calls: everything the retail
+ * docs/translation/NEAR-HELPER-TRANSLATION.md. No Windows calls: everything the retail
  * file took from Windows or from its NADSN_FIXTURE seams comes through
  * TfpNearHost. */
 #ifndef TFP_NEAR_HELPER_H

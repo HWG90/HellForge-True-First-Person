@@ -4,7 +4,7 @@
  *
  * A translation, not a rewrite: every check, its order, every reset, counter
  * and expression is retail's. "cpp:a-b" above a function is its line range in
- * the retail file. What differs is in docs/POSE-HELPER-TRANSLATION.md. */
+ * the retail file. What differs is in docs/translation/POSE-HELPER-TRANSLATION.md. */
 #include "pose_helper.h"
 #include "pose_math.h"
 #include <stdatomic.h>
@@ -14,7 +14,7 @@
  * how this build's value was established.
  *   build_map  = tools/build_map.py --to-here (the kit's migration records)
  *   image      = bytes read from game-pre1020.dll / r6_reload_exe_20261017.bin
- *   input-json = docs/research-0.5.34/native-input-evidence.json (verified_old_mapping,
+ *   input-json = docs/history/research-0.5.34/native-input-evidence.json (verified_old_mapping,
  *                cross_build_comparisons, static_caller_frame)
  *   layout     = structure layout, same value in retail; the named file of
  *                this repository reads the same field on this build
@@ -106,7 +106,7 @@
 #define B_STACK_ROOT        0x240  /* retail the same; image: B_CARRIER_HEX_2 lea r8,[rbp+0x140] with rbp = S+0x100 (B_CARRIER_HEX_1) */
 #define B_STACK_ROOT_SOURCE 0x10   /* retail the same; image: B_CARRIER_HEX_3 lea r8,[rbp+0x130], the quaternion 16 bytes below the root position */
 /* -- look-gain normalisation. Refused on this build: see B_INPUT_ESTABLISHED -- */
-#define B_INPUT_ESTABLISHED 1                    /* all 16 pins entered; B_PIN_EXIT_FNV accepted 2026-11-17 on its preset use (see there). Evidence for each: docs/LOOK-GAIN-CONSTANTS-25480438.md. input_code still proves every pin in the running game before the first write. */
+#define B_INPUT_ESTABLISHED 1                    /* all 16 pins entered; B_PIN_EXIT_FNV accepted 2026-11-17 on its preset use (see there). Evidence for each: docs/build-25480438/LOOK-GAIN-CONSTANTS-25480438.md. input_code still proves every pin in the running game before the first write. */
 #define B_EXE_WORLD_MATRIX  UINT32_C(0x1fd220)   /* retail 0x1f30e0; build_map; native_contract.h unit_world_matrix; input-json */
 #define B_HEX_WORLD_MATRIX  "40534883ec204863dae89206eaff488bc84c8b0041ff90e8000000488bcb48c1e10648034828488bc14883c4205bc3"
                                                  /* 47 bytes as retail; retail call displacement e2d5eaff, here 9206eaff; image at exe+0x1fd220 */

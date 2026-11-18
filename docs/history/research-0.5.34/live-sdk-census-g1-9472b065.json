@@ -1,0 +1,5942 @@
+{
+  "status": "Live metadata observation; no discovered SDK functions invoked",
+  "session": "9472b065334c40c9a443d56cb03a3279",
+  "VM_generation": 1,
+  "mod_version": "0.5.34-hellforge.dev.3",
+  "source": "~/.local/share/hellforge-prefix/pfx/drive_c/users/steamuser/Documents/HellForge/logs/sessions/9472b065334c40c9a443d56cb03a3279/game/true-first-person-sdk-g1.tsv",
+  "source_sha256": "984b9e2dd56eb3bc88af678295615dc308d9dfc48e60fc4b7d9ca7e55e2b1d55",
+  "static_inventory_sha256": "b3b22a78b9a64f6e85c0bfb998c886256255592f69879adc463aeac2b146d30e",
+  "census_footer": "# rows=2645 tables=143 aliases=123 omitted=38 depth_limited=0 limit=0 complete=0",
+  "rows": 2645,
+  "type_counts": {
+    "5": 265,
+    "6": 1947,
+    "4": 168,
+    "3": 265
+  },
+  "function_paths": 1947,
+  "function_modules": {
+    "exe": 1876,
+    "other": 53,
+    "none": 18
+  },
+  "original_registered_paths_present": 1223,
+  "original_registered_paths_absent": [],
+  "original_callback_RVA_mismatches": [],
+  "additional_function_paths": 724,
+  "additional_namespace_counts": {
+    "AnimationBlenderComponent": 5,
+    "AnimationStateMachineComponent": 5,
+    "Application": 6,
+    "Color": 1,
+    "Console": 3,
+    "DataComponent": 5,
+    "DebugNameComponent": 5,
+    "FlowComponent": 5,
+    "Http": 1,
+    "Keyboard": 37,
+    "Level": 1,
+    "Material": 1,
+    "MeshComponent": 5,
+    "Mouse": 37,
+    "Pad1": 37,
+    "Pad2": 37,
+    "Pad3": 37,
+    "Pad4": 37,
+    "Pad5": 37,
+    "Pad6": 37,
+    "Pad7": 37,
+    "Pad8": 37,
+    "RenderDataComponent": 5,
+    "Renderer": 1,
+    "Rotation2D": 1,
+    "SceneGraphComponent": 5,
+    "Script": 2,
+    "ScriptComponent": 5,
+    "ShadingEnvironmentBlendComponent": 5,
+    "SimulatedTouchPanel": 41,
+    "SimulatedTouchPanel1": 41,
+    "SteamVoip": 1,
+    "Tablet": 37,
+    "TouchPanel": 40,
+    "TouchPanel1": 40,
+    "TransformComponent": 5,
+    "Unit": 2,
+    "UnitComponent": 5,
+    "Vector3": 3,
+    "World": 1,
+    "Wwise": 12,
+    "WwiseBankReference": 3,
+    "WwiseVisualization": 2,
+    "WwiseWorld": 41,
+    "components": 13
+  },
+  "additional_functions": [
+    {
+      "path": "AnimationBlenderComponent.create",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "465420",
+      "address_hex": "6ffff5f85420",
+      "table_alias": "0"
+    },
+    {
+      "path": "AnimationBlenderComponent.destroy",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "465550",
+      "address_hex": "6ffff5f85550",
+      "table_alias": "0"
+    },
+    {
+      "path": "AnimationBlenderComponent.get_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "466230",
+      "address_hex": "6ffff5f86230",
+      "table_alias": "0"
+    },
+    {
+      "path": "AnimationBlenderComponent.instances",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4662e0",
+      "address_hex": "6ffff5f862e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "AnimationBlenderComponent.set_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "465dc0",
+      "address_hex": "6ffff5f85dc0",
+      "table_alias": "0"
+    },
+    {
+      "path": "AnimationStateMachineComponent.create",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "465420",
+      "address_hex": "6ffff5f85420",
+      "table_alias": "0"
+    },
+    {
+      "path": "AnimationStateMachineComponent.destroy",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "465550",
+      "address_hex": "6ffff5f85550",
+      "table_alias": "0"
+    },
+    {
+      "path": "AnimationStateMachineComponent.get_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "466230",
+      "address_hex": "6ffff5f86230",
+      "table_alias": "0"
+    },
+    {
+      "path": "AnimationStateMachineComponent.instances",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4662e0",
+      "address_hex": "6ffff5f862e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "AnimationStateMachineComponent.set_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "465dc0",
+      "address_hex": "6ffff5f85dc0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Application.apply_win32_user_settings",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "1c3550",
+      "address_hex": "6ffff5ce3550",
+      "table_alias": "0"
+    },
+    {
+      "path": "Application.enum_display_modes",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "1c3550",
+      "address_hex": "6ffff5ce3550",
+      "table_alias": "0"
+    },
+    {
+      "path": "Application.save_win32_user_settings",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "1c3550",
+      "address_hex": "6ffff5ce3550",
+      "table_alias": "0"
+    },
+    {
+      "path": "Application.set_win32_user_setting",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "1c3550",
+      "address_hex": "6ffff5ce3550",
+      "table_alias": "0"
+    },
+    {
+      "path": "Application.source_platform",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "1c3550",
+      "address_hex": "6ffff5ce3550",
+      "table_alias": "0"
+    },
+    {
+      "path": "Application.win32_user_setting",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "1c3550",
+      "address_hex": "6ffff5ce3550",
+      "table_alias": "0"
+    },
+    {
+      "path": "Color",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "3e8560",
+      "address_hex": "6ffff5f08560",
+      "table_alias": "0"
+    },
+    {
+      "path": "Console.graph",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "48d980",
+      "address_hex": "6ffff5fad980",
+      "table_alias": "0"
+    },
+    {
+      "path": "Console.perfhud",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "48daf0",
+      "address_hex": "6ffff5fadaf0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Console.statistics",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "48d6d0",
+      "address_hex": "6ffff5fad6d0",
+      "table_alias": "0"
+    },
+    {
+      "path": "DataComponent.create",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "466630",
+      "address_hex": "6ffff5f86630",
+      "table_alias": "0"
+    },
+    {
+      "path": "DataComponent.destroy",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "466780",
+      "address_hex": "6ffff5f86780",
+      "table_alias": "0"
+    },
+    {
+      "path": "DataComponent.get_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "467410",
+      "address_hex": "6ffff5f87410",
+      "table_alias": "0"
+    },
+    {
+      "path": "DataComponent.instances",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "467770",
+      "address_hex": "6ffff5f87770",
+      "table_alias": "0"
+    },
+    {
+      "path": "DataComponent.set_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "466fd0",
+      "address_hex": "6ffff5f86fd0",
+      "table_alias": "0"
+    },
+    {
+      "path": "DebugNameComponent.create",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "465420",
+      "address_hex": "6ffff5f85420",
+      "table_alias": "0"
+    },
+    {
+      "path": "DebugNameComponent.destroy",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "465550",
+      "address_hex": "6ffff5f85550",
+      "table_alias": "0"
+    },
+    {
+      "path": "DebugNameComponent.get_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "466230",
+      "address_hex": "6ffff5f86230",
+      "table_alias": "0"
+    },
+    {
+      "path": "DebugNameComponent.instances",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4662e0",
+      "address_hex": "6ffff5f862e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "DebugNameComponent.set_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "465dc0",
+      "address_hex": "6ffff5f85dc0",
+      "table_alias": "0"
+    },
+    {
+      "path": "FlowComponent.create",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "466630",
+      "address_hex": "6ffff5f86630",
+      "table_alias": "0"
+    },
+    {
+      "path": "FlowComponent.destroy",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "466780",
+      "address_hex": "6ffff5f86780",
+      "table_alias": "0"
+    },
+    {
+      "path": "FlowComponent.get_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "467410",
+      "address_hex": "6ffff5f87410",
+      "table_alias": "0"
+    },
+    {
+      "path": "FlowComponent.instances",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "467770",
+      "address_hex": "6ffff5f87770",
+      "table_alias": "0"
+    },
+    {
+      "path": "FlowComponent.set_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "466fd0",
+      "address_hex": "6ffff5f86fd0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Http.get",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "41d1f0",
+      "address_hex": "6ffff5f3d1f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.active",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483620",
+      "address_hex": "6ffff5fa3620",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.any_pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825a0",
+      "address_hex": "6ffff5fa25a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.any_released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825e0",
+      "address_hex": "6ffff5fa25e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.axis",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826f0",
+      "address_hex": "6ffff5fa26f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.axis_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.axis_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.axis_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483200",
+      "address_hex": "6ffff5fa3200",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.button",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482480",
+      "address_hex": "6ffff5fa2480",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.button_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.button_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.button_locale_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483040",
+      "address_hex": "6ffff5fa3040",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.button_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f90",
+      "address_hex": "6ffff5fa2f90",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.category",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482370",
+      "address_hex": "6ffff5fa2370",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.connected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483660",
+      "address_hex": "6ffff5fa3660",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.dead_zone",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482870",
+      "address_hex": "6ffff5fa2870",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.disconnected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4836b0",
+      "address_hex": "6ffff5fa36b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.down_threshold",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482680",
+      "address_hex": "6ffff5fa2680",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.is_rumble_effect_playing",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482ea0",
+      "address_hex": "6ffff5fa2ea0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.link_to_camera_shake",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483560",
+      "address_hex": "6ffff5fa3560",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482420",
+      "address_hex": "6ffff5fa2420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.num_axes",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826c0",
+      "address_hex": "6ffff5fa26c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.num_buttons",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482450",
+      "address_hex": "6ffff5fa2450",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.num_rumble_motors",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4829f0",
+      "address_hex": "6ffff5fa29f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4824e0",
+      "address_hex": "6ffff5fa24e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482540",
+      "address_hex": "6ffff5fa2540",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.rumble_effect",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482b00",
+      "address_hex": "6ffff5fa2b00",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.rumble_motor_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483420",
+      "address_hex": "6ffff5fa3420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.rumble_motor_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483420",
+      "address_hex": "6ffff5fa3420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.rumble_motor_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4833b0",
+      "address_hex": "6ffff5fa33b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.set_dead_zone",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4828f0",
+      "address_hex": "6ffff5fa28f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.set_down_threshold",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482620",
+      "address_hex": "6ffff5fa2620",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.set_rumble",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482a20",
+      "address_hex": "6ffff5fa2a20",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.set_rumble_enabled",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4829a0",
+      "address_hex": "6ffff5fa29a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.stop_all_rumble_effects",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f40",
+      "address_hex": "6ffff5fa2f40",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.stop_rumble_effect",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482e40",
+      "address_hex": "6ffff5fa2e40",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.type",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4823f0",
+      "address_hex": "6ffff5fa23f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Keyboard.unlink_to_camera_shake",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4835c0",
+      "address_hex": "6ffff5fa35c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Level.object_set_names",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "1c3510",
+      "address_hex": "6ffff5ce3510",
+      "table_alias": "0"
+    },
+    {
+      "path": "Material.set_color",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "1c3550",
+      "address_hex": "6ffff5ce3550",
+      "table_alias": "0"
+    },
+    {
+      "path": "MeshComponent.create",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "466630",
+      "address_hex": "6ffff5f86630",
+      "table_alias": "0"
+    },
+    {
+      "path": "MeshComponent.destroy",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "466780",
+      "address_hex": "6ffff5f86780",
+      "table_alias": "0"
+    },
+    {
+      "path": "MeshComponent.get_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "467410",
+      "address_hex": "6ffff5f87410",
+      "table_alias": "0"
+    },
+    {
+      "path": "MeshComponent.instances",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "467770",
+      "address_hex": "6ffff5f87770",
+      "table_alias": "0"
+    },
+    {
+      "path": "MeshComponent.set_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "466fd0",
+      "address_hex": "6ffff5f86fd0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.active",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483620",
+      "address_hex": "6ffff5fa3620",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.any_pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825a0",
+      "address_hex": "6ffff5fa25a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.any_released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825e0",
+      "address_hex": "6ffff5fa25e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.axis",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826f0",
+      "address_hex": "6ffff5fa26f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.axis_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.axis_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.axis_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483200",
+      "address_hex": "6ffff5fa3200",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.button",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482480",
+      "address_hex": "6ffff5fa2480",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.button_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.button_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.button_locale_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483040",
+      "address_hex": "6ffff5fa3040",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.button_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f90",
+      "address_hex": "6ffff5fa2f90",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.category",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482370",
+      "address_hex": "6ffff5fa2370",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.connected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483660",
+      "address_hex": "6ffff5fa3660",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.dead_zone",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482870",
+      "address_hex": "6ffff5fa2870",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.disconnected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4836b0",
+      "address_hex": "6ffff5fa36b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.down_threshold",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482680",
+      "address_hex": "6ffff5fa2680",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.is_rumble_effect_playing",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482ea0",
+      "address_hex": "6ffff5fa2ea0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.link_to_camera_shake",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483560",
+      "address_hex": "6ffff5fa3560",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482420",
+      "address_hex": "6ffff5fa2420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.num_axes",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826c0",
+      "address_hex": "6ffff5fa26c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.num_buttons",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482450",
+      "address_hex": "6ffff5fa2450",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.num_rumble_motors",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4829f0",
+      "address_hex": "6ffff5fa29f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4824e0",
+      "address_hex": "6ffff5fa24e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482540",
+      "address_hex": "6ffff5fa2540",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.rumble_effect",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482b00",
+      "address_hex": "6ffff5fa2b00",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.rumble_motor_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483420",
+      "address_hex": "6ffff5fa3420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.rumble_motor_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483420",
+      "address_hex": "6ffff5fa3420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.rumble_motor_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4833b0",
+      "address_hex": "6ffff5fa33b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.set_dead_zone",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4828f0",
+      "address_hex": "6ffff5fa28f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.set_down_threshold",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482620",
+      "address_hex": "6ffff5fa2620",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.set_rumble",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482a20",
+      "address_hex": "6ffff5fa2a20",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.set_rumble_enabled",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4829a0",
+      "address_hex": "6ffff5fa29a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.stop_all_rumble_effects",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f40",
+      "address_hex": "6ffff5fa2f40",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.stop_rumble_effect",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482e40",
+      "address_hex": "6ffff5fa2e40",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.type",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4823f0",
+      "address_hex": "6ffff5fa23f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Mouse.unlink_to_camera_shake",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4835c0",
+      "address_hex": "6ffff5fa35c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.active",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483620",
+      "address_hex": "6ffff5fa3620",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.any_pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825a0",
+      "address_hex": "6ffff5fa25a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.any_released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825e0",
+      "address_hex": "6ffff5fa25e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.axis",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826f0",
+      "address_hex": "6ffff5fa26f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.axis_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.axis_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.axis_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483200",
+      "address_hex": "6ffff5fa3200",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.button",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482480",
+      "address_hex": "6ffff5fa2480",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.button_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.button_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.button_locale_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483040",
+      "address_hex": "6ffff5fa3040",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.button_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f90",
+      "address_hex": "6ffff5fa2f90",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.category",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482370",
+      "address_hex": "6ffff5fa2370",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.connected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483660",
+      "address_hex": "6ffff5fa3660",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.dead_zone",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482870",
+      "address_hex": "6ffff5fa2870",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.disconnected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4836b0",
+      "address_hex": "6ffff5fa36b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.down_threshold",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482680",
+      "address_hex": "6ffff5fa2680",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.is_rumble_effect_playing",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482ea0",
+      "address_hex": "6ffff5fa2ea0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.link_to_camera_shake",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483560",
+      "address_hex": "6ffff5fa3560",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482420",
+      "address_hex": "6ffff5fa2420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.num_axes",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826c0",
+      "address_hex": "6ffff5fa26c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.num_buttons",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482450",
+      "address_hex": "6ffff5fa2450",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.num_rumble_motors",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4829f0",
+      "address_hex": "6ffff5fa29f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4824e0",
+      "address_hex": "6ffff5fa24e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482540",
+      "address_hex": "6ffff5fa2540",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.rumble_effect",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482b00",
+      "address_hex": "6ffff5fa2b00",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.rumble_motor_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483420",
+      "address_hex": "6ffff5fa3420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.rumble_motor_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483420",
+      "address_hex": "6ffff5fa3420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.rumble_motor_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4833b0",
+      "address_hex": "6ffff5fa33b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.set_dead_zone",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4828f0",
+      "address_hex": "6ffff5fa28f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.set_down_threshold",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482620",
+      "address_hex": "6ffff5fa2620",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.set_rumble",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482a20",
+      "address_hex": "6ffff5fa2a20",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.set_rumble_enabled",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4829a0",
+      "address_hex": "6ffff5fa29a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.stop_all_rumble_effects",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f40",
+      "address_hex": "6ffff5fa2f40",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.stop_rumble_effect",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482e40",
+      "address_hex": "6ffff5fa2e40",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.type",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4823f0",
+      "address_hex": "6ffff5fa23f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad1.unlink_to_camera_shake",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4835c0",
+      "address_hex": "6ffff5fa35c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.active",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483620",
+      "address_hex": "6ffff5fa3620",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.any_pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825a0",
+      "address_hex": "6ffff5fa25a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.any_released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825e0",
+      "address_hex": "6ffff5fa25e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.axis",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826f0",
+      "address_hex": "6ffff5fa26f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.axis_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.axis_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.axis_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483200",
+      "address_hex": "6ffff5fa3200",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.button",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482480",
+      "address_hex": "6ffff5fa2480",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.button_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.button_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.button_locale_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483040",
+      "address_hex": "6ffff5fa3040",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.button_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f90",
+      "address_hex": "6ffff5fa2f90",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.category",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482370",
+      "address_hex": "6ffff5fa2370",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.connected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483660",
+      "address_hex": "6ffff5fa3660",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.dead_zone",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482870",
+      "address_hex": "6ffff5fa2870",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.disconnected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4836b0",
+      "address_hex": "6ffff5fa36b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.down_threshold",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482680",
+      "address_hex": "6ffff5fa2680",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.is_rumble_effect_playing",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482ea0",
+      "address_hex": "6ffff5fa2ea0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.link_to_camera_shake",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483560",
+      "address_hex": "6ffff5fa3560",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482420",
+      "address_hex": "6ffff5fa2420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.num_axes",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826c0",
+      "address_hex": "6ffff5fa26c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.num_buttons",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482450",
+      "address_hex": "6ffff5fa2450",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.num_rumble_motors",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4829f0",
+      "address_hex": "6ffff5fa29f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4824e0",
+      "address_hex": "6ffff5fa24e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482540",
+      "address_hex": "6ffff5fa2540",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.rumble_effect",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482b00",
+      "address_hex": "6ffff5fa2b00",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.rumble_motor_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483420",
+      "address_hex": "6ffff5fa3420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.rumble_motor_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483420",
+      "address_hex": "6ffff5fa3420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.rumble_motor_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4833b0",
+      "address_hex": "6ffff5fa33b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.set_dead_zone",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4828f0",
+      "address_hex": "6ffff5fa28f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.set_down_threshold",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482620",
+      "address_hex": "6ffff5fa2620",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.set_rumble",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482a20",
+      "address_hex": "6ffff5fa2a20",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.set_rumble_enabled",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4829a0",
+      "address_hex": "6ffff5fa29a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.stop_all_rumble_effects",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f40",
+      "address_hex": "6ffff5fa2f40",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.stop_rumble_effect",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482e40",
+      "address_hex": "6ffff5fa2e40",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.type",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4823f0",
+      "address_hex": "6ffff5fa23f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad2.unlink_to_camera_shake",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4835c0",
+      "address_hex": "6ffff5fa35c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.active",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483620",
+      "address_hex": "6ffff5fa3620",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.any_pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825a0",
+      "address_hex": "6ffff5fa25a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.any_released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825e0",
+      "address_hex": "6ffff5fa25e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.axis",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826f0",
+      "address_hex": "6ffff5fa26f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.axis_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.axis_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.axis_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483200",
+      "address_hex": "6ffff5fa3200",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.button",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482480",
+      "address_hex": "6ffff5fa2480",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.button_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.button_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.button_locale_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483040",
+      "address_hex": "6ffff5fa3040",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.button_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f90",
+      "address_hex": "6ffff5fa2f90",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.category",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482370",
+      "address_hex": "6ffff5fa2370",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.connected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483660",
+      "address_hex": "6ffff5fa3660",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.dead_zone",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482870",
+      "address_hex": "6ffff5fa2870",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.disconnected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4836b0",
+      "address_hex": "6ffff5fa36b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.down_threshold",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482680",
+      "address_hex": "6ffff5fa2680",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.is_rumble_effect_playing",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482ea0",
+      "address_hex": "6ffff5fa2ea0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.link_to_camera_shake",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483560",
+      "address_hex": "6ffff5fa3560",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482420",
+      "address_hex": "6ffff5fa2420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.num_axes",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826c0",
+      "address_hex": "6ffff5fa26c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.num_buttons",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482450",
+      "address_hex": "6ffff5fa2450",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.num_rumble_motors",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4829f0",
+      "address_hex": "6ffff5fa29f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4824e0",
+      "address_hex": "6ffff5fa24e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482540",
+      "address_hex": "6ffff5fa2540",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.rumble_effect",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482b00",
+      "address_hex": "6ffff5fa2b00",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.rumble_motor_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483420",
+      "address_hex": "6ffff5fa3420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.rumble_motor_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483420",
+      "address_hex": "6ffff5fa3420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.rumble_motor_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4833b0",
+      "address_hex": "6ffff5fa33b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.set_dead_zone",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4828f0",
+      "address_hex": "6ffff5fa28f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.set_down_threshold",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482620",
+      "address_hex": "6ffff5fa2620",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.set_rumble",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482a20",
+      "address_hex": "6ffff5fa2a20",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.set_rumble_enabled",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4829a0",
+      "address_hex": "6ffff5fa29a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.stop_all_rumble_effects",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f40",
+      "address_hex": "6ffff5fa2f40",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.stop_rumble_effect",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482e40",
+      "address_hex": "6ffff5fa2e40",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.type",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4823f0",
+      "address_hex": "6ffff5fa23f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad3.unlink_to_camera_shake",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4835c0",
+      "address_hex": "6ffff5fa35c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.active",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483620",
+      "address_hex": "6ffff5fa3620",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.any_pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825a0",
+      "address_hex": "6ffff5fa25a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.any_released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825e0",
+      "address_hex": "6ffff5fa25e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.axis",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826f0",
+      "address_hex": "6ffff5fa26f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.axis_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.axis_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.axis_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483200",
+      "address_hex": "6ffff5fa3200",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.button",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482480",
+      "address_hex": "6ffff5fa2480",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.button_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.button_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.button_locale_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483040",
+      "address_hex": "6ffff5fa3040",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.button_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f90",
+      "address_hex": "6ffff5fa2f90",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.category",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482370",
+      "address_hex": "6ffff5fa2370",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.connected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483660",
+      "address_hex": "6ffff5fa3660",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.dead_zone",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482870",
+      "address_hex": "6ffff5fa2870",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.disconnected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4836b0",
+      "address_hex": "6ffff5fa36b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.down_threshold",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482680",
+      "address_hex": "6ffff5fa2680",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.is_rumble_effect_playing",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482ea0",
+      "address_hex": "6ffff5fa2ea0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.link_to_camera_shake",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483560",
+      "address_hex": "6ffff5fa3560",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482420",
+      "address_hex": "6ffff5fa2420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.num_axes",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826c0",
+      "address_hex": "6ffff5fa26c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.num_buttons",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482450",
+      "address_hex": "6ffff5fa2450",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.num_rumble_motors",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4829f0",
+      "address_hex": "6ffff5fa29f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4824e0",
+      "address_hex": "6ffff5fa24e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482540",
+      "address_hex": "6ffff5fa2540",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.rumble_effect",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482b00",
+      "address_hex": "6ffff5fa2b00",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.rumble_motor_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483420",
+      "address_hex": "6ffff5fa3420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.rumble_motor_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483420",
+      "address_hex": "6ffff5fa3420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.rumble_motor_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4833b0",
+      "address_hex": "6ffff5fa33b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.set_dead_zone",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4828f0",
+      "address_hex": "6ffff5fa28f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.set_down_threshold",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482620",
+      "address_hex": "6ffff5fa2620",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.set_rumble",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482a20",
+      "address_hex": "6ffff5fa2a20",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.set_rumble_enabled",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4829a0",
+      "address_hex": "6ffff5fa29a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.stop_all_rumble_effects",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f40",
+      "address_hex": "6ffff5fa2f40",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.stop_rumble_effect",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482e40",
+      "address_hex": "6ffff5fa2e40",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.type",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4823f0",
+      "address_hex": "6ffff5fa23f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad4.unlink_to_camera_shake",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4835c0",
+      "address_hex": "6ffff5fa35c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.active",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483620",
+      "address_hex": "6ffff5fa3620",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.any_pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825a0",
+      "address_hex": "6ffff5fa25a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.any_released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825e0",
+      "address_hex": "6ffff5fa25e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.axis",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826f0",
+      "address_hex": "6ffff5fa26f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.axis_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.axis_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.axis_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483200",
+      "address_hex": "6ffff5fa3200",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.button",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482480",
+      "address_hex": "6ffff5fa2480",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.button_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.button_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.button_locale_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483040",
+      "address_hex": "6ffff5fa3040",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.button_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f90",
+      "address_hex": "6ffff5fa2f90",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.category",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482370",
+      "address_hex": "6ffff5fa2370",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.connected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483660",
+      "address_hex": "6ffff5fa3660",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.dead_zone",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482870",
+      "address_hex": "6ffff5fa2870",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.disconnected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4836b0",
+      "address_hex": "6ffff5fa36b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.down_threshold",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482680",
+      "address_hex": "6ffff5fa2680",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.is_rumble_effect_playing",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482ea0",
+      "address_hex": "6ffff5fa2ea0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.link_to_camera_shake",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483560",
+      "address_hex": "6ffff5fa3560",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482420",
+      "address_hex": "6ffff5fa2420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.num_axes",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826c0",
+      "address_hex": "6ffff5fa26c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.num_buttons",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482450",
+      "address_hex": "6ffff5fa2450",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.num_rumble_motors",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4829f0",
+      "address_hex": "6ffff5fa29f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4824e0",
+      "address_hex": "6ffff5fa24e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482540",
+      "address_hex": "6ffff5fa2540",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.rumble_effect",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482b00",
+      "address_hex": "6ffff5fa2b00",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.rumble_motor_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483420",
+      "address_hex": "6ffff5fa3420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.rumble_motor_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483420",
+      "address_hex": "6ffff5fa3420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.rumble_motor_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4833b0",
+      "address_hex": "6ffff5fa33b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.set_dead_zone",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4828f0",
+      "address_hex": "6ffff5fa28f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.set_down_threshold",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482620",
+      "address_hex": "6ffff5fa2620",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.set_rumble",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482a20",
+      "address_hex": "6ffff5fa2a20",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.set_rumble_enabled",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4829a0",
+      "address_hex": "6ffff5fa29a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.stop_all_rumble_effects",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f40",
+      "address_hex": "6ffff5fa2f40",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.stop_rumble_effect",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482e40",
+      "address_hex": "6ffff5fa2e40",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.type",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4823f0",
+      "address_hex": "6ffff5fa23f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad5.unlink_to_camera_shake",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4835c0",
+      "address_hex": "6ffff5fa35c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.active",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483620",
+      "address_hex": "6ffff5fa3620",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.any_pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825a0",
+      "address_hex": "6ffff5fa25a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.any_released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825e0",
+      "address_hex": "6ffff5fa25e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.axis",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826f0",
+      "address_hex": "6ffff5fa26f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.axis_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.axis_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.axis_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483200",
+      "address_hex": "6ffff5fa3200",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.button",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482480",
+      "address_hex": "6ffff5fa2480",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.button_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.button_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.button_locale_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483040",
+      "address_hex": "6ffff5fa3040",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.button_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f90",
+      "address_hex": "6ffff5fa2f90",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.category",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482370",
+      "address_hex": "6ffff5fa2370",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.connected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483660",
+      "address_hex": "6ffff5fa3660",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.dead_zone",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482870",
+      "address_hex": "6ffff5fa2870",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.disconnected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4836b0",
+      "address_hex": "6ffff5fa36b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.down_threshold",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482680",
+      "address_hex": "6ffff5fa2680",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.is_rumble_effect_playing",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482ea0",
+      "address_hex": "6ffff5fa2ea0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.link_to_camera_shake",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483560",
+      "address_hex": "6ffff5fa3560",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482420",
+      "address_hex": "6ffff5fa2420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.num_axes",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826c0",
+      "address_hex": "6ffff5fa26c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.num_buttons",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482450",
+      "address_hex": "6ffff5fa2450",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.num_rumble_motors",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4829f0",
+      "address_hex": "6ffff5fa29f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4824e0",
+      "address_hex": "6ffff5fa24e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482540",
+      "address_hex": "6ffff5fa2540",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.rumble_effect",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482b00",
+      "address_hex": "6ffff5fa2b00",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.rumble_motor_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483420",
+      "address_hex": "6ffff5fa3420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.rumble_motor_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483420",
+      "address_hex": "6ffff5fa3420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.rumble_motor_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4833b0",
+      "address_hex": "6ffff5fa33b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.set_dead_zone",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4828f0",
+      "address_hex": "6ffff5fa28f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.set_down_threshold",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482620",
+      "address_hex": "6ffff5fa2620",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.set_rumble",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482a20",
+      "address_hex": "6ffff5fa2a20",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.set_rumble_enabled",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4829a0",
+      "address_hex": "6ffff5fa29a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.stop_all_rumble_effects",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f40",
+      "address_hex": "6ffff5fa2f40",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.stop_rumble_effect",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482e40",
+      "address_hex": "6ffff5fa2e40",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.type",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4823f0",
+      "address_hex": "6ffff5fa23f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad6.unlink_to_camera_shake",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4835c0",
+      "address_hex": "6ffff5fa35c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.active",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483620",
+      "address_hex": "6ffff5fa3620",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.any_pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825a0",
+      "address_hex": "6ffff5fa25a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.any_released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825e0",
+      "address_hex": "6ffff5fa25e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.axis",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826f0",
+      "address_hex": "6ffff5fa26f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.axis_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.axis_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.axis_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483200",
+      "address_hex": "6ffff5fa3200",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.button",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482480",
+      "address_hex": "6ffff5fa2480",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.button_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.button_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.button_locale_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483040",
+      "address_hex": "6ffff5fa3040",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.button_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f90",
+      "address_hex": "6ffff5fa2f90",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.category",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482370",
+      "address_hex": "6ffff5fa2370",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.connected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483660",
+      "address_hex": "6ffff5fa3660",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.dead_zone",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482870",
+      "address_hex": "6ffff5fa2870",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.disconnected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4836b0",
+      "address_hex": "6ffff5fa36b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.down_threshold",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482680",
+      "address_hex": "6ffff5fa2680",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.is_rumble_effect_playing",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482ea0",
+      "address_hex": "6ffff5fa2ea0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.link_to_camera_shake",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483560",
+      "address_hex": "6ffff5fa3560",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482420",
+      "address_hex": "6ffff5fa2420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.num_axes",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826c0",
+      "address_hex": "6ffff5fa26c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.num_buttons",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482450",
+      "address_hex": "6ffff5fa2450",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.num_rumble_motors",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4829f0",
+      "address_hex": "6ffff5fa29f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4824e0",
+      "address_hex": "6ffff5fa24e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482540",
+      "address_hex": "6ffff5fa2540",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.rumble_effect",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482b00",
+      "address_hex": "6ffff5fa2b00",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.rumble_motor_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483420",
+      "address_hex": "6ffff5fa3420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.rumble_motor_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483420",
+      "address_hex": "6ffff5fa3420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.rumble_motor_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4833b0",
+      "address_hex": "6ffff5fa33b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.set_dead_zone",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4828f0",
+      "address_hex": "6ffff5fa28f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.set_down_threshold",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482620",
+      "address_hex": "6ffff5fa2620",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.set_rumble",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482a20",
+      "address_hex": "6ffff5fa2a20",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.set_rumble_enabled",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4829a0",
+      "address_hex": "6ffff5fa29a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.stop_all_rumble_effects",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f40",
+      "address_hex": "6ffff5fa2f40",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.stop_rumble_effect",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482e40",
+      "address_hex": "6ffff5fa2e40",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.type",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4823f0",
+      "address_hex": "6ffff5fa23f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad7.unlink_to_camera_shake",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4835c0",
+      "address_hex": "6ffff5fa35c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.active",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483620",
+      "address_hex": "6ffff5fa3620",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.any_pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825a0",
+      "address_hex": "6ffff5fa25a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.any_released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825e0",
+      "address_hex": "6ffff5fa25e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.axis",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826f0",
+      "address_hex": "6ffff5fa26f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.axis_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.axis_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.axis_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483200",
+      "address_hex": "6ffff5fa3200",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.button",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482480",
+      "address_hex": "6ffff5fa2480",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.button_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.button_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.button_locale_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483040",
+      "address_hex": "6ffff5fa3040",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.button_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f90",
+      "address_hex": "6ffff5fa2f90",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.category",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482370",
+      "address_hex": "6ffff5fa2370",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.connected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483660",
+      "address_hex": "6ffff5fa3660",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.dead_zone",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482870",
+      "address_hex": "6ffff5fa2870",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.disconnected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4836b0",
+      "address_hex": "6ffff5fa36b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.down_threshold",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482680",
+      "address_hex": "6ffff5fa2680",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.is_rumble_effect_playing",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482ea0",
+      "address_hex": "6ffff5fa2ea0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.link_to_camera_shake",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483560",
+      "address_hex": "6ffff5fa3560",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482420",
+      "address_hex": "6ffff5fa2420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.num_axes",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826c0",
+      "address_hex": "6ffff5fa26c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.num_buttons",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482450",
+      "address_hex": "6ffff5fa2450",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.num_rumble_motors",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4829f0",
+      "address_hex": "6ffff5fa29f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4824e0",
+      "address_hex": "6ffff5fa24e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482540",
+      "address_hex": "6ffff5fa2540",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.rumble_effect",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482b00",
+      "address_hex": "6ffff5fa2b00",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.rumble_motor_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483420",
+      "address_hex": "6ffff5fa3420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.rumble_motor_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483420",
+      "address_hex": "6ffff5fa3420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.rumble_motor_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4833b0",
+      "address_hex": "6ffff5fa33b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.set_dead_zone",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4828f0",
+      "address_hex": "6ffff5fa28f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.set_down_threshold",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482620",
+      "address_hex": "6ffff5fa2620",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.set_rumble",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482a20",
+      "address_hex": "6ffff5fa2a20",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.set_rumble_enabled",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4829a0",
+      "address_hex": "6ffff5fa29a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.stop_all_rumble_effects",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f40",
+      "address_hex": "6ffff5fa2f40",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.stop_rumble_effect",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482e40",
+      "address_hex": "6ffff5fa2e40",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.type",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4823f0",
+      "address_hex": "6ffff5fa23f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Pad8.unlink_to_camera_shake",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4835c0",
+      "address_hex": "6ffff5fa35c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "RenderDataComponent.create",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "466630",
+      "address_hex": "6ffff5f86630",
+      "table_alias": "0"
+    },
+    {
+      "path": "RenderDataComponent.destroy",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "466780",
+      "address_hex": "6ffff5f86780",
+      "table_alias": "0"
+    },
+    {
+      "path": "RenderDataComponent.get_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "467410",
+      "address_hex": "6ffff5f87410",
+      "table_alias": "0"
+    },
+    {
+      "path": "RenderDataComponent.instances",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "467770",
+      "address_hex": "6ffff5f87770",
+      "table_alias": "0"
+    },
+    {
+      "path": "RenderDataComponent.set_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "466fd0",
+      "address_hex": "6ffff5f86fd0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Renderer.resource",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "417cd0",
+      "address_hex": "6ffff5f37cd0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Rotation2D",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "3e8190",
+      "address_hex": "6ffff5f08190",
+      "table_alias": "0"
+    },
+    {
+      "path": "SceneGraphComponent.create",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "465420",
+      "address_hex": "6ffff5f85420",
+      "table_alias": "0"
+    },
+    {
+      "path": "SceneGraphComponent.destroy",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "465550",
+      "address_hex": "6ffff5f85550",
+      "table_alias": "0"
+    },
+    {
+      "path": "SceneGraphComponent.get_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "466230",
+      "address_hex": "6ffff5f86230",
+      "table_alias": "0"
+    },
+    {
+      "path": "SceneGraphComponent.instances",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4662e0",
+      "address_hex": "6ffff5f862e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SceneGraphComponent.set_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "465dc0",
+      "address_hex": "6ffff5f85dc0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Script.set_temp_count",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "1c3550",
+      "address_hex": "6ffff5ce3550",
+      "table_alias": "0"
+    },
+    {
+      "path": "Script.temp_count",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "1c3550",
+      "address_hex": "6ffff5ce3550",
+      "table_alias": "0"
+    },
+    {
+      "path": "ScriptComponent.create",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "466630",
+      "address_hex": "6ffff5f86630",
+      "table_alias": "0"
+    },
+    {
+      "path": "ScriptComponent.destroy",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "466780",
+      "address_hex": "6ffff5f86780",
+      "table_alias": "0"
+    },
+    {
+      "path": "ScriptComponent.get_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "467410",
+      "address_hex": "6ffff5f87410",
+      "table_alias": "0"
+    },
+    {
+      "path": "ScriptComponent.instances",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "467770",
+      "address_hex": "6ffff5f87770",
+      "table_alias": "0"
+    },
+    {
+      "path": "ScriptComponent.set_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "466fd0",
+      "address_hex": "6ffff5f86fd0",
+      "table_alias": "0"
+    },
+    {
+      "path": "ShadingEnvironmentBlendComponent.create",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "465420",
+      "address_hex": "6ffff5f85420",
+      "table_alias": "0"
+    },
+    {
+      "path": "ShadingEnvironmentBlendComponent.destroy",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "465550",
+      "address_hex": "6ffff5f85550",
+      "table_alias": "0"
+    },
+    {
+      "path": "ShadingEnvironmentBlendComponent.get_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "466230",
+      "address_hex": "6ffff5f86230",
+      "table_alias": "0"
+    },
+    {
+      "path": "ShadingEnvironmentBlendComponent.instances",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4662e0",
+      "address_hex": "6ffff5f862e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "ShadingEnvironmentBlendComponent.set_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "465dc0",
+      "address_hex": "6ffff5f85dc0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.accelerator_resolution",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483880",
+      "address_hex": "6ffff5fa3880",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.active",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483620",
+      "address_hex": "6ffff5fa3620",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.any_pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825a0",
+      "address_hex": "6ffff5fa25a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.any_released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825e0",
+      "address_hex": "6ffff5fa25e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.axis",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826f0",
+      "address_hex": "6ffff5fa26f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.axis_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.axis_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.axis_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483200",
+      "address_hex": "6ffff5fa3200",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.button",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482480",
+      "address_hex": "6ffff5fa2480",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.button_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.button_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.button_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f90",
+      "address_hex": "6ffff5fa2f90",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.connected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483660",
+      "address_hex": "6ffff5fa3660",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.contacts",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4844e0",
+      "address_hex": "6ffff5fa44e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.disconnected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4836b0",
+      "address_hex": "6ffff5fa36b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.edge",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4841d0",
+      "address_hex": "6ffff5fa41d0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.gesture_long_press",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483ca0",
+      "address_hex": "6ffff5fa3ca0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.gesture_pinch",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483d80",
+      "address_hex": "6ffff5fa3d80",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.gesture_rotate",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483ec0",
+      "address_hex": "6ffff5fa3ec0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.gesture_swipe",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484000",
+      "address_hex": "6ffff5fa4000",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.gesture_tap",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483ac0",
+      "address_hex": "6ffff5fa3ac0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.gesture_tap_sequence",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483bb0",
+      "address_hex": "6ffff5fa3bb0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.has_contact",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484480",
+      "address_hex": "6ffff5fa4480",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.is_primary",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484040",
+      "address_hex": "6ffff5fa4040",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.is_touch_down",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483a60",
+      "address_hex": "6ffff5fa3a60",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.is_touch_up",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483a00",
+      "address_hex": "6ffff5fa3a00",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.location",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4842c0",
+      "address_hex": "6ffff5fa42c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.location_delta",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4843a0",
+      "address_hex": "6ffff5fa43a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.major_axis_size",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484130",
+      "address_hex": "6ffff5fa4130",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.minor_axis_size",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4840e0",
+      "address_hex": "6ffff5fa40e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482420",
+      "address_hex": "6ffff5fa2420",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.num_axes",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826c0",
+      "address_hex": "6ffff5fa26c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.num_buttons",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482450",
+      "address_hex": "6ffff5fa2450",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.num_contacts",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484560",
+      "address_hex": "6ffff5fa4560",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4824e0",
+      "address_hex": "6ffff5fa24e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.pressure",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484180",
+      "address_hex": "6ffff5fa4180",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482540",
+      "address_hex": "6ffff5fa2540",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.resolution",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483940",
+      "address_hex": "6ffff5fa3940",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.set_enabled",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "487df0",
+      "address_hex": "6ffff5fa7df0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.size",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484090",
+      "address_hex": "6ffff5fa4090",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel.type",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4823f0",
+      "address_hex": "6ffff5fa23f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.accelerator_resolution",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483880",
+      "address_hex": "6ffff5fa3880",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.active",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483620",
+      "address_hex": "6ffff5fa3620",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.any_pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825a0",
+      "address_hex": "6ffff5fa25a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.any_released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825e0",
+      "address_hex": "6ffff5fa25e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.axis",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826f0",
+      "address_hex": "6ffff5fa26f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.axis_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.axis_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.axis_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483200",
+      "address_hex": "6ffff5fa3200",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.button",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482480",
+      "address_hex": "6ffff5fa2480",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.button_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.button_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.button_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f90",
+      "address_hex": "6ffff5fa2f90",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.connected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483660",
+      "address_hex": "6ffff5fa3660",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.contacts",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4844e0",
+      "address_hex": "6ffff5fa44e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.disconnected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4836b0",
+      "address_hex": "6ffff5fa36b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.edge",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4841d0",
+      "address_hex": "6ffff5fa41d0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.gesture_long_press",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483ca0",
+      "address_hex": "6ffff5fa3ca0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.gesture_pinch",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483d80",
+      "address_hex": "6ffff5fa3d80",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.gesture_rotate",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483ec0",
+      "address_hex": "6ffff5fa3ec0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.gesture_swipe",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484000",
+      "address_hex": "6ffff5fa4000",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.gesture_tap",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483ac0",
+      "address_hex": "6ffff5fa3ac0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.gesture_tap_sequence",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483bb0",
+      "address_hex": "6ffff5fa3bb0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.has_contact",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484480",
+      "address_hex": "6ffff5fa4480",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.is_primary",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484040",
+      "address_hex": "6ffff5fa4040",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.is_touch_down",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483a60",
+      "address_hex": "6ffff5fa3a60",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.is_touch_up",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483a00",
+      "address_hex": "6ffff5fa3a00",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.location",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4842c0",
+      "address_hex": "6ffff5fa42c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.location_delta",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4843a0",
+      "address_hex": "6ffff5fa43a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.major_axis_size",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484130",
+      "address_hex": "6ffff5fa4130",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.minor_axis_size",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4840e0",
+      "address_hex": "6ffff5fa40e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482420",
+      "address_hex": "6ffff5fa2420",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.num_axes",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826c0",
+      "address_hex": "6ffff5fa26c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.num_buttons",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482450",
+      "address_hex": "6ffff5fa2450",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.num_contacts",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484560",
+      "address_hex": "6ffff5fa4560",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4824e0",
+      "address_hex": "6ffff5fa24e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.pressure",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484180",
+      "address_hex": "6ffff5fa4180",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482540",
+      "address_hex": "6ffff5fa2540",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.resolution",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483940",
+      "address_hex": "6ffff5fa3940",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.set_enabled",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "487df0",
+      "address_hex": "6ffff5fa7df0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.size",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484090",
+      "address_hex": "6ffff5fa4090",
+      "table_alias": "0"
+    },
+    {
+      "path": "SimulatedTouchPanel1.type",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4823f0",
+      "address_hex": "6ffff5fa23f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "SteamVoip.create_room",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "775b80",
+      "address_hex": "6ffff6295b80",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.active",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483620",
+      "address_hex": "6ffff5fa3620",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.any_pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825a0",
+      "address_hex": "6ffff5fa25a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.any_released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825e0",
+      "address_hex": "6ffff5fa25e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.axis",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826f0",
+      "address_hex": "6ffff5fa26f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.axis_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.axis_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.axis_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483200",
+      "address_hex": "6ffff5fa3200",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.button",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482480",
+      "address_hex": "6ffff5fa2480",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.button_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.button_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.button_locale_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483040",
+      "address_hex": "6ffff5fa3040",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.button_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f90",
+      "address_hex": "6ffff5fa2f90",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.category",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482370",
+      "address_hex": "6ffff5fa2370",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.connected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483660",
+      "address_hex": "6ffff5fa3660",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.dead_zone",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482870",
+      "address_hex": "6ffff5fa2870",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.disconnected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4836b0",
+      "address_hex": "6ffff5fa36b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.down_threshold",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482680",
+      "address_hex": "6ffff5fa2680",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.is_rumble_effect_playing",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482ea0",
+      "address_hex": "6ffff5fa2ea0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.link_to_camera_shake",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483560",
+      "address_hex": "6ffff5fa3560",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482420",
+      "address_hex": "6ffff5fa2420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.num_axes",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826c0",
+      "address_hex": "6ffff5fa26c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.num_buttons",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482450",
+      "address_hex": "6ffff5fa2450",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.num_rumble_motors",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4829f0",
+      "address_hex": "6ffff5fa29f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4824e0",
+      "address_hex": "6ffff5fa24e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482540",
+      "address_hex": "6ffff5fa2540",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.rumble_effect",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482b00",
+      "address_hex": "6ffff5fa2b00",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.rumble_motor_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483420",
+      "address_hex": "6ffff5fa3420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.rumble_motor_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483420",
+      "address_hex": "6ffff5fa3420",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.rumble_motor_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4833b0",
+      "address_hex": "6ffff5fa33b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.set_dead_zone",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4828f0",
+      "address_hex": "6ffff5fa28f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.set_down_threshold",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482620",
+      "address_hex": "6ffff5fa2620",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.set_rumble",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482a20",
+      "address_hex": "6ffff5fa2a20",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.set_rumble_enabled",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4829a0",
+      "address_hex": "6ffff5fa29a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.stop_all_rumble_effects",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f40",
+      "address_hex": "6ffff5fa2f40",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.stop_rumble_effect",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482e40",
+      "address_hex": "6ffff5fa2e40",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.type",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4823f0",
+      "address_hex": "6ffff5fa23f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Tablet.unlink_to_camera_shake",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4835c0",
+      "address_hex": "6ffff5fa35c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.accelerator_resolution",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483880",
+      "address_hex": "6ffff5fa3880",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.active",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483620",
+      "address_hex": "6ffff5fa3620",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.any_pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825a0",
+      "address_hex": "6ffff5fa25a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.any_released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825e0",
+      "address_hex": "6ffff5fa25e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.axis",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826f0",
+      "address_hex": "6ffff5fa26f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.axis_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.axis_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.axis_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483200",
+      "address_hex": "6ffff5fa3200",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.button",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482480",
+      "address_hex": "6ffff5fa2480",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.button_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.button_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.button_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f90",
+      "address_hex": "6ffff5fa2f90",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.connected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483660",
+      "address_hex": "6ffff5fa3660",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.contacts",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4844e0",
+      "address_hex": "6ffff5fa44e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.disconnected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4836b0",
+      "address_hex": "6ffff5fa36b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.edge",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4841d0",
+      "address_hex": "6ffff5fa41d0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.gesture_long_press",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483ca0",
+      "address_hex": "6ffff5fa3ca0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.gesture_pinch",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483d80",
+      "address_hex": "6ffff5fa3d80",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.gesture_rotate",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483ec0",
+      "address_hex": "6ffff5fa3ec0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.gesture_swipe",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484000",
+      "address_hex": "6ffff5fa4000",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.gesture_tap",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483ac0",
+      "address_hex": "6ffff5fa3ac0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.gesture_tap_sequence",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483bb0",
+      "address_hex": "6ffff5fa3bb0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.has_contact",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484480",
+      "address_hex": "6ffff5fa4480",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.is_primary",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484040",
+      "address_hex": "6ffff5fa4040",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.is_touch_down",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483a60",
+      "address_hex": "6ffff5fa3a60",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.is_touch_up",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483a00",
+      "address_hex": "6ffff5fa3a00",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.location",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4842c0",
+      "address_hex": "6ffff5fa42c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.location_delta",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4843a0",
+      "address_hex": "6ffff5fa43a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.major_axis_size",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484130",
+      "address_hex": "6ffff5fa4130",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.minor_axis_size",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4840e0",
+      "address_hex": "6ffff5fa40e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482420",
+      "address_hex": "6ffff5fa2420",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.num_axes",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826c0",
+      "address_hex": "6ffff5fa26c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.num_buttons",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482450",
+      "address_hex": "6ffff5fa2450",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.num_contacts",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484560",
+      "address_hex": "6ffff5fa4560",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4824e0",
+      "address_hex": "6ffff5fa24e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.pressure",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484180",
+      "address_hex": "6ffff5fa4180",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482540",
+      "address_hex": "6ffff5fa2540",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.resolution",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483940",
+      "address_hex": "6ffff5fa3940",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.size",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484090",
+      "address_hex": "6ffff5fa4090",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel.type",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4823f0",
+      "address_hex": "6ffff5fa23f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.accelerator_resolution",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483880",
+      "address_hex": "6ffff5fa3880",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.active",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483620",
+      "address_hex": "6ffff5fa3620",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.any_pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825a0",
+      "address_hex": "6ffff5fa25a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.any_released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4825e0",
+      "address_hex": "6ffff5fa25e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.axis",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826f0",
+      "address_hex": "6ffff5fa26f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.axis_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.axis_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483270",
+      "address_hex": "6ffff5fa3270",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.axis_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483200",
+      "address_hex": "6ffff5fa3200",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.button",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482480",
+      "address_hex": "6ffff5fa2480",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.button_id",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.button_index",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4830c0",
+      "address_hex": "6ffff5fa30c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.button_name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482f90",
+      "address_hex": "6ffff5fa2f90",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.connected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483660",
+      "address_hex": "6ffff5fa3660",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.contacts",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4844e0",
+      "address_hex": "6ffff5fa44e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.disconnected",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4836b0",
+      "address_hex": "6ffff5fa36b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.edge",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4841d0",
+      "address_hex": "6ffff5fa41d0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.gesture_long_press",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483ca0",
+      "address_hex": "6ffff5fa3ca0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.gesture_pinch",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483d80",
+      "address_hex": "6ffff5fa3d80",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.gesture_rotate",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483ec0",
+      "address_hex": "6ffff5fa3ec0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.gesture_swipe",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484000",
+      "address_hex": "6ffff5fa4000",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.gesture_tap",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483ac0",
+      "address_hex": "6ffff5fa3ac0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.gesture_tap_sequence",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483bb0",
+      "address_hex": "6ffff5fa3bb0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.has_contact",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484480",
+      "address_hex": "6ffff5fa4480",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.is_primary",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484040",
+      "address_hex": "6ffff5fa4040",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.is_touch_down",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483a60",
+      "address_hex": "6ffff5fa3a60",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.is_touch_up",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483a00",
+      "address_hex": "6ffff5fa3a00",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.location",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4842c0",
+      "address_hex": "6ffff5fa42c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.location_delta",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4843a0",
+      "address_hex": "6ffff5fa43a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.major_axis_size",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484130",
+      "address_hex": "6ffff5fa4130",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.minor_axis_size",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4840e0",
+      "address_hex": "6ffff5fa40e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.name",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482420",
+      "address_hex": "6ffff5fa2420",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.num_axes",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4826c0",
+      "address_hex": "6ffff5fa26c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.num_buttons",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482450",
+      "address_hex": "6ffff5fa2450",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.num_contacts",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484560",
+      "address_hex": "6ffff5fa4560",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.pressed",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4824e0",
+      "address_hex": "6ffff5fa24e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.pressure",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484180",
+      "address_hex": "6ffff5fa4180",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.released",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "482540",
+      "address_hex": "6ffff5fa2540",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.resolution",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "483940",
+      "address_hex": "6ffff5fa3940",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.size",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "484090",
+      "address_hex": "6ffff5fa4090",
+      "table_alias": "0"
+    },
+    {
+      "path": "TouchPanel1.type",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4823f0",
+      "address_hex": "6ffff5fa23f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TransformComponent.create",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "465420",
+      "address_hex": "6ffff5f85420",
+      "table_alias": "0"
+    },
+    {
+      "path": "TransformComponent.destroy",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "465550",
+      "address_hex": "6ffff5f85550",
+      "table_alias": "0"
+    },
+    {
+      "path": "TransformComponent.get_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "466230",
+      "address_hex": "6ffff5f86230",
+      "table_alias": "0"
+    },
+    {
+      "path": "TransformComponent.instances",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4662e0",
+      "address_hex": "6ffff5f862e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "TransformComponent.set_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "465dc0",
+      "address_hex": "6ffff5f85dc0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Unit.landscape",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "1c3550",
+      "address_hex": "6ffff5ce3550",
+      "table_alias": "0"
+    },
+    {
+      "path": "Unit.num_landscapes",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "1c3550",
+      "address_hex": "6ffff5ce3550",
+      "table_alias": "0"
+    },
+    {
+      "path": "UnitComponent.create",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "465420",
+      "address_hex": "6ffff5f85420",
+      "table_alias": "0"
+    },
+    {
+      "path": "UnitComponent.destroy",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "465550",
+      "address_hex": "6ffff5f85550",
+      "table_alias": "0"
+    },
+    {
+      "path": "UnitComponent.get_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "466230",
+      "address_hex": "6ffff5f86230",
+      "table_alias": "0"
+    },
+    {
+      "path": "UnitComponent.instances",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "4662e0",
+      "address_hex": "6ffff5f862e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "UnitComponent.set_property",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "465dc0",
+      "address_hex": "6ffff5f85dc0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Vector3.x_axis",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "1c3550",
+      "address_hex": "6ffff5ce3550",
+      "table_alias": "0"
+    },
+    {
+      "path": "Vector3.y_axis",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "1c3550",
+      "address_hex": "6ffff5ce3550",
+      "table_alias": "0"
+    },
+    {
+      "path": "Vector3.z_axis",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "1c3550",
+      "address_hex": "6ffff5ce3550",
+      "table_alias": "0"
+    },
+    {
+      "path": "World.level",
+      "lua_type": "6",
+      "module": "exe",
+      "rva_hex": "1c3510",
+      "address_hex": "6ffff5ce3510",
+      "table_alias": "0"
+    },
+    {
+      "path": "Wwise.duration_type",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15ba30",
+      "table_alias": "0"
+    },
+    {
+      "path": "Wwise.has_event",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15d810",
+      "table_alias": "0"
+    },
+    {
+      "path": "Wwise.load_bank",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15b440",
+      "table_alias": "0"
+    },
+    {
+      "path": "Wwise.max_attenuation",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15b8f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Wwise.max_duration",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15bb80",
+      "table_alias": "0"
+    },
+    {
+      "path": "Wwise.min_duration",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15bcc0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Wwise.position_type",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15b730",
+      "table_alias": "0"
+    },
+    {
+      "path": "Wwise.set_language",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15b370",
+      "table_alias": "0"
+    },
+    {
+      "path": "Wwise.set_panning_rule",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15bec0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Wwise.set_state",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15bdd0",
+      "table_alias": "0"
+    },
+    {
+      "path": "Wwise.unload_bank",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15b500",
+      "table_alias": "0"
+    },
+    {
+      "path": "Wwise.wwise_world",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15b290",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseBankReference.add",
+      "lua_type": "6",
+      "module": "none",
+      "rva_hex": "0",
+      "address_hex": "0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseBankReference.count",
+      "lua_type": "6",
+      "module": "none",
+      "rva_hex": "0",
+      "address_hex": "0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseBankReference.remove",
+      "lua_type": "6",
+      "module": "none",
+      "rva_hex": "0",
+      "address_hex": "0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseVisualization.add_soundscape_unit",
+      "lua_type": "6",
+      "module": "none",
+      "rva_hex": "0",
+      "address_hex": "0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseVisualization.render",
+      "lua_type": "6",
+      "module": "none",
+      "rva_hex": "0",
+      "address_hex": "0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.add_default_listeners",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15c470",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.add_soundscape_listener",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15f100",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.add_soundscape_unit_source",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15f500",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.add_source_listeners",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15d150",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.destroy_manual_source",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15c9b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.enabled",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15fcc0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.get_playing_elapsed",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15e2b0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.has_source",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15c720",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.is_playing",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15e1a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.make_auto_source",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15c830",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.make_manual_source",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15c8e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.pause_all",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15dfd0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.pause_event",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15dc70",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.post_trigger",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15e6a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.remove_default_listeners",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15c550",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.remove_soundscape_listener",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15f1f0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.remove_soundscape_source",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15f580",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.remove_source_listeners",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15d2a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.reset_aux_environment",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15eab0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.reset_environment_for_source",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15ef70",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.resume_all",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15e0a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.resume_event",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15ddc0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.set_dry_environment",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15ea10",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.set_dry_environment_for_source",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15edf0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.set_enabled",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15fc00",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.set_environment",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15e8e0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.set_environment_for_source",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15ec00",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.set_global_parameter",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15d630",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.set_listener",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15c1d0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.set_source_lifetime",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15caf0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.set_source_parameter",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15d480",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.set_source_pose",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15cfe0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.set_source_position",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15ce10",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.set_switch",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15e4a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.stop_all",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15df30",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.stop_audio_input_sound",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15fb10",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.stop_event",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15db50",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.trigger_audio_input_event",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15f7a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.trigger_audio_input_sound",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15f9a0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.trigger_event",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15d9c0",
+      "table_alias": "0"
+    },
+    {
+      "path": "WwiseWorld.unlink_source",
+      "lua_type": "6",
+      "module": "other",
+      "rva_hex": "0",
+      "address_hex": "6fffec15cc20",
+      "table_alias": "0"
+    },
+    {
+      "path": "components.ReflectionProbe.editor_apply_pre_render_visibility",
+      "lua_type": "6",
+      "module": "none",
+      "rva_hex": "0",
+      "address_hex": "0",
+      "table_alias": "0"
+    },
+    {
+      "path": "components.ReflectionProbe.editor_get_bounds",
+      "lua_type": "6",
+      "module": "none",
+      "rva_hex": "0",
+      "address_hex": "0",
+      "table_alias": "0"
+    },
+    {
+      "path": "components.ReflectionProbe.editor_highlight_changed",
+      "lua_type": "6",
+      "module": "none",
+      "rva_hex": "0",
+      "address_hex": "0",
+      "table_alias": "0"
+    },
+    {
+      "path": "components.ReflectionProbe.editor_inside_frustum",
+      "lua_type": "6",
+      "module": "none",
+      "rva_hex": "0",
+      "address_hex": "0",
+      "table_alias": "0"
+    },
+    {
+      "path": "components.ReflectionProbe.editor_intersects_frustum",
+      "lua_type": "6",
+      "module": "none",
+      "rva_hex": "0",
+      "address_hex": "0",
+      "table_alias": "0"
+    },
+    {
+      "path": "components.ReflectionProbe.editor_raycast",
+      "lua_type": "6",
+      "module": "none",
+      "rva_hex": "0",
+      "address_hex": "0",
+      "table_alias": "0"
+    },
+    {
+      "path": "components.ReflectionProbe.editor_spawned",
+      "lua_type": "6",
+      "module": "none",
+      "rva_hex": "0",
+      "address_hex": "0",
+      "table_alias": "0"
+    },
+    {
+      "path": "components.ReflectionProbe.editor_unspawned",
+      "lua_type": "6",
+      "module": "none",
+      "rva_hex": "0",
+      "address_hex": "0",
+      "table_alias": "0"
+    },
+    {
+      "path": "components.ReflectionProbe.editor_update",
+      "lua_type": "6",
+      "module": "none",
+      "rva_hex": "0",
+      "address_hex": "0",
+      "table_alias": "0"
+    },
+    {
+      "path": "components.ReflectionProbe.spawned",
+      "lua_type": "6",
+      "module": "none",
+      "rva_hex": "0",
+      "address_hex": "0",
+      "table_alias": "0"
+    },
+    {
+      "path": "components.ReflectionProbe.unspawned",
+      "lua_type": "6",
+      "module": "none",
+      "rva_hex": "0",
+      "address_hex": "0",
+      "table_alias": "0"
+    },
+    {
+      "path": "components.ReflectionProbe.world_created",
+      "lua_type": "6",
+      "module": "none",
+      "rva_hex": "0",
+      "address_hex": "0",
+      "table_alias": "0"
+    },
+    {
+      "path": "components.ReflectionProbe.world_destroyed",
+      "lua_type": "6",
+      "module": "none",
+      "rva_hex": "0",
+      "address_hex": "0",
+      "table_alias": "0"
+    }
+  ],
+  "native_pointer_rows": [
+    {
+      "name": "UnitAPI.local_position",
+      "readable": true,
+      "slot_hex": "6ffff82e8f10",
+      "target_hex": "6ffff5d1c450"
+    },
+    {
+      "name": "UnitAPI.set_local_position",
+      "readable": true,
+      "slot_hex": "6ffff82e8f48",
+      "target_hex": "6ffff5d1c720"
+    },
+    {
+      "name": "UnitAPI.set_local_rotation",
+      "readable": true,
+      "slot_hex": "6ffff82e8f50",
+      "target_hex": "6ffff5d1c7a0"
+    },
+    {
+      "name": "UnitAPI.pre_input_world_pose",
+      "readable": true,
+      "slot_hex": "6ffff82e8fa0",
+      "target_hex": "6ffff5d1d220"
+    },
+    {
+      "name": "CameraAPI.set_local_position",
+      "readable": true,
+      "slot_hex": "6ffff82e9840",
+      "target_hex": "6ffff5e2deb0"
+    },
+    {
+      "name": "CameraAPI.set_local_rotation",
+      "readable": true,
+      "slot_hex": "6ffff82e9848",
+      "target_hex": "6ffff5e2df60"
+    },
+    {
+      "name": "CameraAPI.near_range",
+      "readable": true,
+      "slot_hex": "6ffff82e9878",
+      "target_hex": "6ffff5e2d940"
+    },
+    {
+      "name": "CameraAPI.set_near_range",
+      "readable": true,
+      "slot_hex": "6ffff82e9888",
+      "target_hex": "6ffff5e2d960"
+    },
+    {
+      "name": "CameraAPI.vertical_fov",
+      "readable": true,
+      "slot_hex": "6ffff82e9898",
+      "target_hex": "6ffff5e2d980"
+    },
+    {
+      "name": "CameraAPI.set_vertical_fov",
+      "readable": true,
+      "slot_hex": "6ffff82e98a0",
+      "target_hex": "6ffff5e2d990"
+    },
+    {
+      "name": "CameraAPI.set_post_projection_transform",
+      "readable": true,
+      "slot_hex": "6ffff82e98c0",
+      "target_hex": "6ffff5e2da00"
+    }
+  ],
+  "limitations": [
+    "Metadata presence/RVA agreement does not qualify signatures, effects, lifetimes or safe invocation.",
+    "38 non-string/unsupported-key/path entries omitted by bounded walker; full SDK coverage not claimed.",
+    "123 table aliases not recursively expanded; alias target paths not recorded.",
+    "No discovered SDK function executed; native FPS gameplay/visual acceptance still pending."
+  ]
+}

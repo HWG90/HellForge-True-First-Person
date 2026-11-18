@@ -15,7 +15,7 @@ for tfp_unit in wire_effects wire_win_effects dof vignette aim_markers first_per
     fov_adapter near_adapter blur_adapter; do TFP_SOURCES+=("$TFP_ROOT/src/$tfp_unit.c"); done
 "$TFP_CC" -std=c11 -Wall -Wextra -Werror -ffp-contract=off -fsanitize=address,undefined -fno-sanitize-recover=all -g \
   -I "$TFP_ROOT/src" "${TFP_SOURCES[@]}" "$TFP_ROOT/tests/wire_effects_test.c" -lm -o "$TFP_WORK/wire_effects"
-TFP_CENSUS="$TFP_ROOT/docs/research-0.5.34/live-sdk-census-g1-9472b065.tsv" ASAN_OPTIONS=detect_leaks=0 "$TFP_WORK/wire_effects"
+TFP_CENSUS="$TFP_ROOT/docs/history/research-0.5.34/live-sdk-census-g1-9472b065.tsv" ASAN_OPTIONS=detect_leaks=0 "$TFP_WORK/wire_effects"
 "$TFP_WORK/wire_effects" --constants > "$TFP_WORK/wire_effects_constants.txt"
 python3 "$TFP_ROOT/tools/verify_effects_constants.py" "$TFP_WORK/wire_effects_constants.txt" > "$TFP_WORK/wire_effects_constants.log" || {
   cat "$TFP_WORK/wire_effects_constants.log"; exit 1; }

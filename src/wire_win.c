@@ -32,7 +32,7 @@ static uint64_t hook_address[TFP_WIN_HOOKS];
 /* The function each dispatch slot must point at before this mod's hook goes in: exe RVA and the
  * bytes there. camera, fov, near: src/native_contract.h (verified in the game by the probe); the
  * weapon parameter setter: src/blur_helper.c B_EXE_SETTER / B_HEX_SETTER. All four compared with the
- * exe image of build 25480438 on 2026-11-16 (docs/WIRING-VIEW.md). */
+ * exe image of build 25480438 on 2026-11-16 (docs/wiring/WIRING-VIEW.md). */
 static const struct { const char *name; uint32_t rva; const char *hex; } TARGET[TFP_WIN_HOOKS] = {
     {"camera position setter", 0x30deb0, "48895c2408574883ec60488bd9498bf88bcae8f9f9d8ff4c8b4b184c8bd04c6343208b4708498bd048c1e206498b4920"},
     {"camera FOV setter", 0x30d990, "f30f114934c7415000000000e90f211c00"},
@@ -309,7 +309,7 @@ static bool ops_call(void *u, TfpOpsNative which, uint64_t address, const uint64
   uint64_t value = 0;
   bool done = false;
   (void)u;
-  if (which == TFP_OPS_PRESENTATION) { /* open on this build (docs/BACKEND-OPS-TRANSLATION.md); the backend refuses before it gets here */
+  if (which == TFP_OPS_PRESENTATION) { /* open on this build (docs/translation/BACKEND-OPS-TRANSLATION.md); the backend refuses before it gets here */
     raised->present = true;
     snprintf(raised->text, sizeof raised->text, "FP presentation is not established on build 25480438");
     return false;
