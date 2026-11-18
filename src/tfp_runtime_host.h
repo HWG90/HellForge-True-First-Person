@@ -62,6 +62,9 @@ struct TfpRtHost {
   bool (*backend_read)(TfpRtHost *h, TfpRtValue address, double size, TfpRtValue *out1);
   bool (*backend_alignment_context)(TfpRtHost *h, const TfpRtValue *actx /* TFP_RT_ACTX_N */, TfpRtTable *out1 /* AOBJ */);
   bool (*backend_keep_aim_view)(TfpRtHost *h, const TfpRtTable *snapshot); /* optional */
+  /* Not retail; optional. Every frame, just before the aim button is read: the snapshot, and whether the
+   * keeper's own conditions hold this frame (src/wire_action.h reads the button again between ticks). */
+  void (*backend_aim_view_watch)(TfpRtHost *h, const TfpRtTable *snapshot, bool armed);
   bool (*backend_detach_seated_camera)(TfpRtHost *h); /* optional */
   bool (*backend_prepare_pose)(TfpRtHost *h, const TfpRtTable *snapshot, TfpRtValue *out1, TfpRtValue *out2);
   bool (*backend_pose_status)(TfpRtHost *h, const TfpRtTable *lease, TfpRtValue *out1);

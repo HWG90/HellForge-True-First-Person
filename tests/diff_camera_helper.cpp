@@ -295,9 +295,20 @@ struct Run {
   // posing
   float right[3] = {1, 0, 0}, ahead[3] = {0, 1, 0}, above[3] = {0, 0, 1};
 
+  // Beyond retail (docs/design/ACTION-CAMERA.md): the translation may be shown another action mask than retail
+  // (an opt-in value must then make it answer as retail does for retail's mask), and a script may stop comparing
+  // and judge the translation's forwarded position by itself.
+  uint32_t translation_mask = UINT32_MAX; bool compare = true;
   void sync() {
     for (int w = 0; w < 2; ++w) { W[w].apply(s, index); for (const Poke &p : pokes) store(w, p.at, p.value); }
+    if (translation_mask != UINT32_MAX) World::put<uint32_t>(W[1].a[A_CONTROLLER], translation_mask);
   }
+  // The position each side forwarded to the game's setter in the last frame.
+  bool forwarded_position(int w, float out[3]) const {
+    for (auto e = events_kept[w].rbegin(); e != events_kept[w].rend(); ++e) if (e->kind == EV_FORWARD) { std::memcpy(out, &e->v[2], 12); return true; }
+    return false;
+  }
+  std::vector<Event> events_kept[2];
   void poke(int id, uint64_t offset, Value v) { pokes.push_back({{id, offset}, v}); }
 
   void observe() {
@@ -338,6 +349,8 @@ struct Run {
     const uint32_t b = translation(); finish(1);
     inject.active = false;
     if (probe_here) { if (discovering) shared->probe_reads = static_cast<uint64_t>(reads_in_call[0]); inject.mode = INJECT_NONE; }
+    for (int w = 0; w < 2; ++w) events_kept[w] = events[w];
+    if (!compare) { if (lock_depth[0] || lock_depth[1] || lock_depth[2]) fail("the translation returned holding a lock"); ++counted.calls; return result = a; }
     if (a != b) fail("return value: retail %u, translation %u", a, b);
     compare_events("during the call");
     compare_bytes("the caller's argument buffer (position, then rotation at +64)", W[0].native(), W[1].native(), 96);

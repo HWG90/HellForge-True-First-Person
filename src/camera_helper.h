@@ -129,4 +129,10 @@ uint32_t tfp_camera_set_cut_hold(uint64_t generation, uint32_t mode);
 uint32_t tfp_camera_entry_trace(TfpCameraEntryTraceData *out);
 uint32_t tfp_camera_set_weapon_key(uint64_t generation, uint32_t key);
 uint32_t tfp_camera_anchor_stats(TfpCameraAnchorData *out);
+/* Beyond retail (docs/design/ACTION-CAMERA.md), for what build 25480438 does differently. Process-wide, set once
+ * by the binder; the defaults (0, 300, false) are retail's behaviour exactly.
+ *   extra_head_mask  one more action mask the head camera accepts beside 0, 2 and 0x20 (0: none)
+ *   eye_idle_ms      how long the held eye tolerates mask 0 around a swap (retail: 300)
+ *   eye_return       after the eye let go, glide back to the incoming weapon's remembered eye while it is drawn */
+void tfp_camera_set_action_tuning(uint32_t extra_head_mask, uint32_t eye_idle_ms, bool eye_return);
 #endif

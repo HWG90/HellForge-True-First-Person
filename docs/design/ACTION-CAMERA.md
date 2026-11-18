@@ -104,3 +104,45 @@ Each of these changes what the player sees in a way retail does not, so none is 
 ## 4. What the next session should do
 
 With the view on: aim and release ten times; swap weapons; use a stim; pick a weapon up from the ground; throw a grenade; vault; dive; use a terminal. Then the log answers, per action: mask, which camera, size of the cut.
+
+## 5. What the session showed, and 0.6.0-feel.9
+
+Session `76bf7718` (0.6.0-feel.8, 2026-11-18, about seven minutes in a mission): 49 drops of the native view. Read from the `Drop` / `Wait` / `Return` / `Cut` lines.
+
+| What happened | Times | Seen | Camera in the gap | Jump leaving | Jump returning |
+|---|---|---|---|---|---|
+| Picking something up | 5 | mask 0x22, then 0x20, then 2 | **the game's third-person camera** while 0x22 (0.2 to 0.5 s), then the head camera | **2.73 to 2.84 m** | 0.24 to 0.40 m |
+| Stim | 6 or 7 | mask 2 (0.4 s), 0 (0.65 s), 2 (0.3 s): always 1.46 s | head camera | under 0.02 m | **0.42 to 0.58 m** |
+| Grenade | 5 | mask 2, 0 for as long as it is held, 2 | head camera | under 0.02 m | 0.28 to 0.56 m |
+| Weapon swap, support weapon picked up | 5 | mask 2 | head camera | under 0.25 m | 0.25 to 0.39 m |
+| Vault-like action ending crouched | 4 | mask 0x20 | head camera | under 0.06 m | 0.23 to 0.29 m |
+| Leaving full aim | 6 | mask 0; the game's request changes | one frame without the native view | 0.30 to 0.37 m | 0.31 to 0.37 m |
+| Dive, going prone | 5 | mask 0; the game's request changes | one frame | under 0.01 m | 0.16 to 0.82 m |
+| Killed | 2 or more | camera kinds 11 and 10 follow | the game's | 1.5 to 1.7 m | not ours |
+
+The jump is the largest change of the eye's frame-to-frame step in the 0.3 s after the edge. Which action a mask belongs to is read from timing and head height, not from a name in the game: 0x22 as "picking up" and the 1.46 s sequence as "stim" are the best reading, not a proven one.
+
+Three things differ from retail's build.
+
+1. **Mask 0x22 is not in retail's list** (0, 2, 0x20), so the third-person camera was forwarded. This is proposal 1 of section 3, for the one mask the log shows.
+2. **A stim is not mask 64 here.** Retail's native view stays through a stim; here the stim is a put-away and a draw with empty hands between, and retail's held eye tolerates only 300 ms of empty hands. The eye let go mid-stim (a 0.45 m glide to the head) and the native view came back with a cut.
+3. **The aim-view keeper never saw a release in time.** With the engine's `Mouse.button` read in HellForge's tick, all 6 releases were logged on the frame the game had already dropped the view; and `State: aim kept` appeared on 5 *presses*, on the very frame full aim began: the change of the button arrived after the game had acted on it, in both directions. 0.6.0-feel.5 (Windows' level) kept 10 of 18. So the engine's level in the tick is a frame behind the game's own input on this build; section 2.1's fix made it worse.
+
+### What feel.9 changes
+
+All in `src/wire_action.h` (values and the aim watch), `src/camera_helper.c` (`tfp_camera_set_action_tuning`: three opt-in values whose defaults are retail's behaviour, so the comparison with retail's source still holds call for call), `src/wire_rt.c`, `src/engine.c` (a probe at `lua_pcall`), `src/mod_view.c`.
+
+- **Pick-up in first person.** The head camera accepts mask 0x22 as it accepts a vault's 0x20, and head, torso and shoulders hide with it. The direction stays the game's own, which is where the player looks. The head camera follows the head, so the view dips as the body bends down.
+- **Eye held through a stim.** The tolerance for empty hands is 900 ms instead of 300, so the eye stays where the native eye was for the whole 1.46 s.
+- **Glide back before the weapon returns.** When the eye has let go (a grenade held longer than 900 ms) and a weapon whose eye is remembered is being drawn (mask 2), the eye glides to that remembered eye (70 ms time constant, retail's swap glide), so the native view returns to a camera that is already near it.
+- **Aim button.** Windows' level first again. Read once more when the engine's script update begins (the first `lua_pcall` on the engine's state after the tick, at most three times a frame, only while full aim is on in the native view): if the button changed there, the keeper's own two writes are made at once, on the tick's snapshot, after comparing the controller's bytes with it. And no keeping in the first 150 ms of full aim: a change seen then is the press that raised the weapon.
+- **Log.** `State: aim kept (n; m of them at the script call, k late presses ignored)`; `Entry: the eye moved … (level, up)` after each return, from the helper's own record of the first native frames.
+
+No new kind of write: the keeper's two (retail's), from one more place in the frame.
+
+### Not verified, and what is left
+
+- None of this has run in the game. Whether the script-call read sees the button before the game acts is the open question; the `aim kept` line counts it.
+- **The cut on return is reduced, not removed.** Even a plain swap, where the eye is held the whole time, returned with 0.25 to 0.39 m. The held eye follows the third-person head; the native eye sits on the first-person rig; they differ by the head's own movement in the animation. The `Entry` line gives its direction. Removing it needs either the eased entry (proposal 3; retail found it did not work live on its build) or holding the eye relative to the body instead of the head.
+- **A vault-like action and a dive** return with 0.2 to 0.8 m: the body's height changed in between. Not touched.
+- **Arms.** In the gaps the arms are the third-person body's, seen from the eye. The sleeves and hand grips that cover the native view's arms still refuse at start-up (section 2.2). Moving the third-person arms into view was tried in retail on 2026-11-12 and judged bad (arms sweep through the lens during a swap).

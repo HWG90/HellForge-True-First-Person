@@ -85,7 +85,8 @@ void tfp_view_log_frame(TfpViewLog *log, const TfpViewSample *s) {
     if (s->enabled && log->enabled && s->has_identity && log->has_identity && s->identity != log->identity)
       tfp_view_log_event(log, "State: swap (weapon identity changed)");
     if (s->aim_keeps != log->aim_keeps) {
-      tfp_view_log_event(log, "State: aim kept (%u)", s->aim_keeps);
+      tfp_view_log_event(log, "State: aim kept (%u; %u of them at the script call, %u late presses ignored)", s->aim_keeps, s->aim_probe_keeps,
+                         s->aim_guarded);
       log->has_keep = true, log->keep_time = s->time;
     }
     /* The game left full aim and the keeper had not acted just before: the release was seen too late, or not at all. */

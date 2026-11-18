@@ -21,6 +21,9 @@ typedef int EngRef;
 
 bool eng_init(const HfApi* hf, HfMod* mod); /* from hellforge_mod_init: hooks lua51.dll */
 bool eng_ready(void);                        /* the engine's main Lua state is known and `stingray` exists */
+/* A function run each time the engine pcalls on its main state, before the call goes on (NULL: none). It runs
+ * on the engine's thread with a script call pending: it must not use any eng_ call, and must return quickly. */
+void eng_set_script_probe(void (*probe)(void));
 const char* eng_status(void);                /* why eng_ready is false, or "ready" */
 const char* eng_error(void);                 /* the last failed call's message */
 uint64_t eng_state_generation(void);         /* changes when the state is replaced: every EngRef is then dead */

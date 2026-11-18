@@ -506,11 +506,33 @@ static bool rt_backend_read(TfpRtHost *h, V address, double size, V *o1) {
   o1->kind = TFP_RT_TEXT, o1->text = bytes, o1->length = (size_t)size, o1->number = 0, o1->ref = NULL;
   return true;
 }
+/* The platform's own clock: the probe runs outside the runtime's frame, whose clock is a runtime entry. */
+static double aim_now(TfpWire *w) { return w->platform.clock ? w->platform.clock(w->platform.user) : NAN; }
 static bool rt_backend_keep_aim_view(TfpRtHost *h, const TfpRtTable *snapshot) {
   TfpWire *w = W(h);
   TfpWireSnap *p = snap_of(w, snapshot);
   TfpOpsText why;
+  /* Not retail: a change of the button seen as full aim begins is the press arriving late (src/wire_action.h). */
+  if (!tfp_aim_watch_allowed(&w->aim, aim_now(w))) return true;
   if (tfp_ops_keep_aim_view(&w->ops, p ? &p->s : NULL, &why) == TFP_OPS_RAISED) return raise(h, why.text);
+  return true;
+}
+static void rt_backend_aim_view_watch(TfpRtHost *h, const TfpRtTable *snapshot, bool armed) {
+  TfpWire *w = W(h);
+  TfpWireSnap *p = snap_of(w, snapshot);
+  const bool view = p && p->s.safe && p->s.camera_kind == 6 && !p->s.seated;
+  tfp_aim_watch_frame(&w->aim, aim_now(w), p && p->s.controller_active, armed && view);
+  w->aim_has_snapshot = w->aim.armed;
+  if (w->aim.armed) w->aim_snapshot = p->s;
+}
+bool tfp_wire_aim_due(TfpWire *w) { return w->aim_has_snapshot && tfp_aim_watch_due(&w->aim, aim_now(w)); }
+bool tfp_wire_aim_probe(TfpWire *w, int right, int middle) {
+  TfpOpsText why;
+  if (!tfp_aim_watch_probe(&w->aim, right, middle) || !w->aim_has_snapshot || !tfp_aim_watch_allowed(&w->aim, aim_now(w))) return false;
+  /* One change, one try: the keeper compares the controller's bytes with the snapshot's before it writes. */
+  w->aim_has_snapshot = false;
+  if (tfp_ops_keep_aim_view(&w->ops, &w->aim_snapshot, &why) != TFP_OPS_TRUE) return false;
+  w->aim.probe_keeps++;
   return true;
 }
 static bool rt_backend_detach_seated_camera(TfpRtHost *h) {
@@ -1020,6 +1042,7 @@ static bool rt_mouse_button_index(TfpRtHost *h, const char *name, V *o1) {
 static bool rt_mouse_button(TfpRtHost *h, double index, V *o1) {
   TfpWire *w = W(h);
   int level = w->platform.mouse(w->platform.user, (int)index);
+  tfp_aim_watch_note(&w->aim, (int)index, level);
   *o1 = level < 0 ? nil() : num(level);
   return true;
 }
@@ -1111,6 +1134,7 @@ void tfp_wire_init(TfpWire *w, const TfpOpsHost *memory, const TfpWirePlatform *
   h->backend_ptr = rt_backend_ptr;
   h->backend_read = rt_backend_read;
   h->backend_keep_aim_view = rt_backend_keep_aim_view;
+  h->backend_aim_view_watch = rt_backend_aim_view_watch;
   h->backend_detach_seated_camera = rt_backend_detach_seated_camera;
   h->backend_set_pin_first_person = rt_set_ignored;
   h->backend_set_camera_update_token = rt_set_ignored;
@@ -1204,6 +1228,7 @@ void tfp_wire_frame(TfpWire *w, const char *extra) {
   s.has_identity = w->frame_full;
   s.identity = w->frame_identity;
   s.aim_keeps = w->ops.aim_view_keeps, s.seated_detaches = w->ops.seated_detaches;
+  s.aim_probe_keeps = w->aim.probe_keeps, s.aim_guarded = w->aim.guarded;
   s.fault[0] = fov.error_message;
   s.fault[1] = blur.error_message;
   s.fault[2] = camera.error_message.present ? camera.error_message.text : NULL;
@@ -1226,7 +1251,8 @@ void tfp_wire_frame(TfpWire *w, const char *extra) {
              "shoulder=%d reloading=%d weapon=%d reason=%s",
              (unsigned)p->camera_kind, (int)p->safe, (int)p->engine_safe, (int)p->request_local, (int)p->blocked, p->controller_bytes[3],
              p->controller_bytes[2], p->controller_bytes[1], p->controller_bytes[0], (unsigned)p->controller_bytes[4],
-             (unsigned)p->controller_bytes[5], (int)p->seated, (int)p->weapon_transition, (int)p->head_camera_transition, (int)p->aiming,
+             (unsigned)p->controller_bytes[5], (int)p->seated, (int)p->weapon_transition,
+             (int)tfp_action_head_camera(p->head_camera_transition, p->camera_kind, p->seated, p->controller_bytes), (int)p->aiming,
              (int)p->shoulder_aim, (int)p->reloading, (int)p->full, p->has_reason ? p->reason : "-");
     if (p->has_action) {
       size_t used = (size_t)snprintf(action, sizeof action, "layers=");

@@ -159,7 +159,7 @@ typedef struct Policy {
   uint32_t sample_reasons[8], entry_delay_frames, entry_last_delay, entry_max_delay; bool entry_waiting;
   uint32_t pending_paths[4]; float turn_start_gap;
   bool hold_exit, last_native_valid; float last_native[4], last_head_world[3];
-  bool hold_eye, native_eye_valid, eye_delta_active;
+  bool hold_eye, native_eye_valid, eye_delta_active, eye_returning;
   float native_eye[3], eye_delta[3]; double native_eye_tick, eye_hold_started, eye_swap_tick; uint32_t control_mask, eye_hold_frames;
   uint32_t weapon_key, native_weapon_key, stretch_key, stretch_key_frames, eye_glides;
   bool guard_only, guard_grace; double last_view_tick; uint32_t guard_grace_frames;
@@ -168,6 +168,8 @@ typedef struct Policy {
 } Policy;
 /* Policy{}: the default member initialisers. Everything 0/false except the
  * correction's (progress 1, duration 150) and the identity quaternions. */
+/* Beyond retail (tfp_camera_set_action_tuning); the defaults are retail's behaviour. */
+static _Atomic uint32_t tuning_extra_mask, tuning_eye_idle_ms = 300, tuning_eye_return;
 static void policy_init(Policy *p) {
   memset(p, 0, sizeof *p);
   tfp_correction_reset(&p->correction);
@@ -201,6 +203,11 @@ static EyeMemory *eye_memory_entry(uint32_t key) {
   EyeMemory *entry = eye_memory_find(key);
   if (!entry) { entry = &eye_memory[eye_memory_next++ % 16]; memset(entry, 0, sizeof *entry); entry->key = key; }
   return entry;
+}
+/* Beyond retail: an entry made for the aim anchor alone has no eye yet. */
+static bool eye_memory_recorded(uint32_t key) {
+  const EyeMemory *entry = eye_memory_find(key);
+  return entry && entry->delta[0]*entry->delta[0]+entry->delta[1]*entry->delta[1]+entry->delta[2]*entry->delta[2] > 1e-6f;
 }
 /* cpp:97-99 */
 static void eye_memory_store(uint32_t key, const float *delta) {
@@ -363,7 +370,8 @@ static bool owner(Policy *p, bool capture) {
   p->fire = (flags[L_FLAG_FIRE] & 0x40) != 0; p->full_ads = controls[L_CONTROL_AIM] != 0; p->shoulder = !p->full_ads && (flags[L_FLAG_SHOULDER_A] & 4) != 0 && (flags[L_FLAG_SHOULDER_B] & 32) != 0;
   const bool seated = (flags[L_FLAG_SEATED] & 4) != 0, available = controls[L_CONTROL_GUARD] == 0 && !seated;
   p->safe = (mask == 0 || mask == 2) && available;
-  p->fallback_safe = (mask == 0 || mask == 2 || mask == 0x20) && available;
+  const uint32_t extra = atomic_load_explicit(&tuning_extra_mask, memory_order_relaxed);
+  p->fallback_safe = (mask == 0 || mask == 2 || mask == 0x20 || (extra && mask == extra)) && available;
   p->seated_now = seated;
   if (p->hold_seated && seated && mask == 0 && controls[L_CONTROL_GUARD] == 0) p->fallback_safe = true;
   p->guard_only = mask == 0 && controls[L_CONTROL_GUARD] != 0 && (flags[L_FLAG_SEATED] & 4) == 0;
@@ -919,7 +927,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
             bool eye_held = false;
             if (policy.hold_eye && policy.presentation_enabled) {
               if (from_native) {
-                policy.eye_delta_active = false;
+                policy.eye_delta_active = false; policy.eye_returning = false;
                 if (policy.native_eye_valid && tick >= policy.native_eye_tick && tick-policy.native_eye_tick <= policy.c.max_gap_ms) {
                   float square = 0;
                   for (unsigned axis = 0; axis < 3; ++axis) { policy.eye_delta[axis] = policy.native_eye[axis]-desired_relative[axis]; square += policy.eye_delta[axis]*policy.eye_delta[axis]; }
@@ -930,13 +938,23 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
                   }
                 }
               }
+              else if (!policy.eye_delta_active && policy.control_mask == 2 && policy.weapon_key
+                  && atomic_load_explicit(&tuning_eye_return, memory_order_relaxed) && eye_memory_recorded(policy.weapon_key)) {
+                /* Beyond retail: the eye let go (hands empty for longer than the tolerance) and a weapon whose eye
+                 * is known is being drawn. Start from where the eye is and glide to that eye, so the native view
+                 * returns to a camera that is already there. */
+                memset(policy.eye_delta, 0, sizeof policy.eye_delta);
+                policy.eye_delta_active = true; policy.eye_returning = true; policy.eye_hold_started = tick; policy.eye_swap_tick = tick;
+              }
               if (policy.eye_delta_active) {
-                /* Kept through a weapon swap (mask 2) for at most 2500 ms, and for 300 ms of mask 0 around it. */
+                /* Kept through a weapon swap (mask 2) for at most 2500 ms, and for 300 ms of mask 0 around it
+                 * (the tolerance is tuning_eye_idle_ms: retail's 300 unless the binder set another). */
                 if (policy.control_mask == 2) policy.eye_swap_tick = tick;
+                const double idle = (double)atomic_load_explicit(&tuning_eye_idle_ms, memory_order_relaxed);
                 const bool keep = tick-policy.eye_hold_started <= 2500.0 && (policy.control_mask == 2
-                    || (policy.control_mask == 0 && tick >= policy.eye_swap_tick && tick-policy.eye_swap_tick <= 300.0));
+                    || (policy.control_mask == 0 && tick >= policy.eye_swap_tick && tick-policy.eye_swap_tick <= idle));
                 /* A different weapon is coming up and its eye is known: glide there during the swap. */
-                const EyeMemory *incoming = keep && policy.weapon_key != policy.native_weapon_key ? eye_memory_find(policy.weapon_key) : NULL;
+                const EyeMemory *incoming = keep && (policy.weapon_key != policy.native_weapon_key || policy.eye_returning) ? eye_memory_find(policy.weapon_key) : NULL;
                 if (incoming) {
                   const float step = dt > 0 ? 1-expf(-dt/.07f) : 0; bool moved = false;
                   for (unsigned axis = 0; axis < 3; ++axis) {
@@ -1253,6 +1271,10 @@ void tfp_camera_set_host(const TfpCameraHost *supplied) {
   if (supplied) host = *supplied; else memset(&host, 0, sizeof host);
  
 }
+void tfp_camera_set_action_tuning(uint32_t extra_head_mask, uint32_t eye_idle_ms, bool eye_return) {
+  atomic_store(&tuning_extra_mask, extra_head_mask); atomic_store(&tuning_eye_idle_ms, eye_idle_ms ? eye_idle_ms : 300u);
+  atomic_store(&tuning_eye_return, eye_return ? 1u : 0u);
+}
 void tfp_camera_reset_for_tests(void) {
   atomic_store(&original, 0);
   atomic_store(&installed, 0); atomic_store(&armed, 0); atomic_store(&reserved, 0); atomic_store(&last_error, 0);
@@ -1261,6 +1283,7 @@ void tfp_camera_reset_for_tests(void) {
   slot = 0; slot_image = 0; generation_counter = 0; owned_generation = 0; retired_generation = 0; possible = false;
   policy_init(&policy);
   memset(eye_memory, 0, sizeof eye_memory); eye_memory_next = 0;
+  atomic_store(&tuning_extra_mask, 0); atomic_store(&tuning_eye_idle_ms, 300); atomic_store(&tuning_eye_return, 0);
   display_cache.blend = 0; display_cache.head_distance = 0; display_cache.last_dt = 0;
   atomic_store(&display_sequence, 0); atomic_store(&display_blend, 0); atomic_store(&display_head_distance, 0); atomic_store(&display_last_dt, 0);
   owner_read_probe = NULL;

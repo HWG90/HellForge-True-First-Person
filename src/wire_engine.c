@@ -1,6 +1,7 @@
 /* See wire_engine.h. Line references: "rt:N" retail runtime.lua, "hv:N" head_visibility.lua,
  * "ap:N" arm_pieces.lua, "gh:N" grip_hand.lua, "census N" a line of
  * docs/history/research-0.5.34/live-sdk-census-g1-9472b065.tsv. No Windows. */
+#include "wire_action.h"
 #include "wire_recent.h"
 #include "wire_engine.h"
 #include "wire_off.h"
@@ -1032,7 +1033,9 @@ static void vis_snapshot(const TfpOpsSnapshot *s, TfpVisSnapshot *t) {
   t->request_weapon = s->request_weapon, t->world = (double)s->world, t->avatar_owner = (double)s->avatar_owner;
   t->avatar_index = s->avatar_index, t->body = s->body;
   t->has_viewmodel = true, t->viewmodel = s->viewmodel;
-  t->safe = s->safe, t->seated = s->seated, t->weapon_transition = s->weapon_transition, t->head_camera_transition = s->head_camera_transition;
+  t->safe = s->safe, t->seated = s->seated, t->weapon_transition = s->weapon_transition;
+  /* The pick-up mask of build 25480438 beside the vault's (src/wire_action.h): the head camera shows it, so the head hides. */
+  t->head_camera_transition = tfp_action_head_camera(s->head_camera_transition, s->camera_kind, s->seated, s->controller_bytes);
   t->controller_active = s->controller_active, t->aiming = s->aiming;
   t->has_controller_bytes = true, t->controller_len = 6; memcpy(t->controller_bytes, s->controller_bytes, 6);
   t->has_flags = true, t->flags_len = 24; memcpy(t->flags, s->flags, 24);

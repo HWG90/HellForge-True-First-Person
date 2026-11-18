@@ -13,3 +13,6 @@ ASAN_OPTIONS=detect_leaks=0 "$TFP_ROOT/work/tests/wire_glue"
 "$TFP_CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -g -I "$TFP_ROOT/src" \
   "$TFP_ROOT/src/wire_mouse.c" "$TFP_ROOT/tests/wire_mouse_test.c" -o "$TFP_ROOT/work/tests/wire_mouse"
 "$TFP_ROOT/work/tests/wire_mouse"
+"$TFP_CC" -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -g -I "$TFP_ROOT/src" \
+  "$TFP_ROOT/tests/wire_action_test.c" -o "$TFP_ROOT/work/tests/wire_action"
+"$TFP_ROOT/work/tests/wire_action"

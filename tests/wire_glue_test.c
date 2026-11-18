@@ -39,6 +39,19 @@ static bool no_call(void *u, TfpOpsNative which, uint64_t address, const uint64_
   return false;
 }
 static double test_clock(void *u) { (void)u; return now_seconds; }
+/* A controller (6 bytes) and a camera request's sight distance, for the aim keeper between ticks. */
+enum { AIM_CONTROLLER = 0x500000000, AIM_RECORD = 0x300000200 };
+static uint8_t aim_controller[6], aim_sight[4];
+static unsigned aim_writes;
+static uint8_t *aim_at(uint64_t at, size_t size) {
+  if (at >= AIM_CONTROLLER && at + size <= AIM_CONTROLLER + 6) return aim_controller + (at - AIM_CONTROLLER);
+  if (at >= AIM_RECORD + 0x98 && at + size <= AIM_RECORD + 0x98 + 4) return aim_sight + (at - AIM_RECORD - 0x98);
+  return NULL;
+}
+static bool aim_read(void *u, uint64_t at, void *out, size_t size) { (void)u; uint8_t *p = aim_at(at, size); if (p) memcpy(out, p, size); return p != NULL; }
+static bool aim_write(void *u, uint64_t at, const void *bytes, size_t size) {
+  (void)u; uint8_t *p = aim_at(at, size); if (p) memcpy(p, bytes, size), aim_writes++; return p != NULL;
+}
 static int test_mouse(void *u, int button) { (void)u; return button == 1 ? mouse_level : 0; }
 static unsigned helper_calls;
 static uint32_t h_validate_c(const TfpCameraConfig *c) { (void)c; helper_calls++; return 0; }
@@ -202,7 +215,7 @@ int main(void) {
   tfp_view_log_frame(&log, &s);
   s.aim_keeps = 1, s.controller_active = false, s.identity = 6;
   tfp_view_log_frame(&log, &s);
-  CHECK(logged("State: aim in") && logged("State: aim out") && logged("State: aim kept (1)") && logged("State: swap"));
+  CHECK(logged("State: aim in") && logged("State: aim out") && logged("State: aim kept (1;") && logged("State: swap"));
   s.fault[2] = "Camera helper refused: code 5";
   tfp_view_log_frame(&log, &s);
   s.fault[2] = NULL, s.has_lease = false, s.wait = "Gameplay action or camera owns the view", s.phase = "waiting";
@@ -396,6 +409,61 @@ int main(void) {
     wire.ops.has_placement_weapon_key = false;
     wire.placement_decode = NULL;
     free(lease);
+  }
+  { /* the aim button between ticks (src/wire_action.h): the keeper from a probe, on the tick's snapshot */
+    static TfpWire between;
+    static const uint8_t active[6] = {0, 0, 0, 0, 1, 0};
+    TfpOpsHost real = memory;
+    TfpOpsSnapshot view;
+    real.read = aim_read, real.write = aim_write;
+    tfp_wire_init(&between, &real, &platform, &helpers);
+    CHECK(tfp_wire_call(&between, TFP_RT_E_on_enable, NULL, r) == TFP_RT_OK); /* the backend exists from here */
+    memset(&view, 0, sizeof view);
+    view.safe = view.controller_active = view.request_local = true;
+    view.camera_kind = 6, view.controller = AIM_CONTROLLER, view.record = AIM_RECORD;
+    memcpy(view.controller_bytes, active, 6);
+    memcpy(aim_controller, active, 6), aim_sight[0] = 0x3f;
+    CHECK(!tfp_wire_aim_due(&between)); /* nothing armed */
+    now_seconds += 1;
+    tfp_aim_watch_frame(&between.aim, now_seconds, true, true);
+    between.aim_snapshot = view, between.aim_has_snapshot = true;
+    tfp_aim_watch_note(&between.aim, 1, 1), tfp_aim_watch_note(&between.aim, 2, 0);
+    /* full aim has only just begun: a change is the press arriving late, nothing is written */
+    now_seconds += .010;
+    CHECK(tfp_wire_aim_due(&between) && !tfp_wire_aim_probe(&between, 0, 0) && aim_writes == 0 && between.aim.guarded == 1);
+    /* the next tick; held; then the release, seen between ticks */
+    now_seconds += .5;
+    tfp_aim_watch_frame(&between.aim, now_seconds, true, true);
+    between.aim_snapshot = view, between.aim_has_snapshot = true;
+    tfp_aim_watch_note(&between.aim, 1, 1);
+    now_seconds += .002;
+    CHECK(tfp_wire_aim_due(&between) && !tfp_wire_aim_probe(&between, 1, 0) && aim_writes == 0);
+    now_seconds += .002;
+    CHECK(tfp_wire_aim_due(&between) && tfp_wire_aim_probe(&between, 0, 0));
+    CHECK(aim_controller[4] == 0 && aim_sight[0] == 0 && aim_writes == 2 && between.ops.aim_view_keeps == 1 && between.aim.probe_keeps == 1);
+    /* one change, one try: nothing more this frame */
+    aim_controller[4] = 1;
+    now_seconds += .002;
+    CHECK(!tfp_wire_aim_due(&between) && !tfp_wire_aim_probe(&between, 1, 0) && aim_writes == 2);
+    /* the controller changed since the tick's snapshot (the game acted first): no write */
+    now_seconds += .5;
+    tfp_aim_watch_frame(&between.aim, now_seconds, true, true);
+    between.aim_snapshot = view, between.aim_has_snapshot = true;
+    tfp_aim_watch_note(&between.aim, 1, 1);
+    aim_controller[0] = 2, aim_sight[0] = 0x3f;
+    now_seconds += .002;
+    CHECK(tfp_wire_aim_due(&between) && !tfp_wire_aim_probe(&between, 0, 0) && aim_writes == 2 && aim_sight[0] == 0x3f && between.aim.probe_keeps == 1);
+    /* the runtime's own call obeys the same guard: young full aim is not kept */
+    aim_controller[0] = 0, aim_controller[4] = 1;
+    tfp_aim_watch_frame(&between.aim, now_seconds + 1, false, true);
+    tfp_aim_watch_frame(&between.aim, now_seconds + 1.01, true, true);
+    now_seconds += 1.02;
+    TfpRtTable table;
+    tfp_wire_snapshot_table(&between, &view, &table);
+    CHECK(between.host.backend_keep_aim_view(&between.host, &table) && aim_writes == 2);
+    now_seconds += 1;
+    CHECK(between.host.backend_keep_aim_view(&between.host, &table) && aim_writes == 4 && between.ops.aim_view_keeps == 2);
+    CHECK(tfp_wire_call(&between, TFP_RT_E_on_disable, NULL, r) == TFP_RT_OK);
   }
   CHECK(tfp_wire_call(&wire, TFP_RT_E_on_disable, NULL, r) == TFP_RT_OK && r[0].kind == TFP_RT_TRUE);
   CHECK(!wire.rt.has[TFP_RT_O_CONTROLLER]);

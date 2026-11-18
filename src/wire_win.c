@@ -344,12 +344,18 @@ static int windows_button(void *u, int button) {
   (void)u;
   return tfp_win_focused() && tfp_win_key_down(button == 1 ? VK_RBUTTON : VK_MBUTTON) ? 1 : 0;
 }
+int tfp_win_button(int button) { return windows_button(NULL, button); }
+void tfp_win_buttons(int *right, int *middle) {
+  const bool focused = tfp_win_focused();
+  *right = focused && tfp_win_key_down(VK_RBUTTON) ? 1 : 0, *middle = focused && tfp_win_key_down(VK_MBUTTON) ? 1 : 0;
+}
 static void mouse_setup(const TfpWireMouseHost *engine) {
   TfpWireMouseHost host;
   memset(&host, 0, sizeof host);
   if (engine) host = *engine;
   host.windows_button = windows_button;
   tfp_wire_mouse_init(&mouse, &host);
+  mouse.windows_first = true; /* build 25480438: src/wire_action.h */
   mouse_ready = true;
 }
 void tfp_win_mouse_engine(const TfpWireMouseHost *engine) { mouse_setup(engine); }

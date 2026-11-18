@@ -856,7 +856,88 @@ static void script_reset(Run &r) {
     native_frames(r, c, 12, 10, true); hip_frames(r, c, 10, 10); r.end(r.gen); r.end(r.gen); }
 }
 
+
+// ---- beyond retail: the three opt-in values of tfp_camera_set_action_tuning (docs/design/ACTION-CAMERA.md) ----
+// Retail is shown the mask it accepts, the translation the one seen on build 25480438; with the value set the
+// translation must answer exactly as retail does. Without it, it must not.
+static void hip_frames_as(Run &r, Clock &c, int count, double dt, uint32_t retail_mask, uint32_t translation_mask) {
+  r.translation_mask = translation_mask; hip_frames(r, c, count, dt, retail_mask); r.translation_mask = UINT32_MAX;
+}
+static float apart(Run &r) {
+  float a[3] = {}, b[3] = {}; if (!r.forwarded_position(0, a) || !r.forwarded_position(1, b)) fail("a frame forwarded no position");
+  return std::sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
+}
+// The pick-up action (mask 0x22) is given the head camera, as retail gives it to a vault (mask 0x20).
+static void script_extra_mask(Run &r, bool set) {
+  Clock c; start(r, c); r.weapon_key(r.gen, KEY_A);
+  tfp_camera_set_action_tuning(set ? 0x22 : 0, 300, false);
+  hip_frames(r, c, 10, 16); native_frames(r, c, 8, 16);
+  if (set) { hip_frames_as(r, c, 40, 16, 0x20, 0x22); need(r.got.replaced >= 50, "the head camera through the pick-up"); }
+  else { // retail's own answer to 0x22: the game's camera is forwarded untouched
+    const uint64_t before = r.got.replaced; hip_frames(r, c, 40, 16, 0x22); need(r.got.replaced == before, "no head camera for mask 0x22 without the value");
+  }
+  hip_frames(r, c, 10, 16, 2); native_frames(r, c, 6, 16); hip_frames(r, c, 10, 16);
+  r.end(r.gen);
+}
+// A stim on build 25480438 is mask 2, then 0 for 650 ms, then 2: with a 900 ms tolerance the eye is held as
+// through one unbroken swap.
+static void script_eye_idle(Run &r, double dt) {
+  Clock c; start(r, c); r.weapon_key(r.gen, KEY_A);
+  tfp_camera_set_action_tuning(0, 900, false);
+  hip_frames(r, c, 10, dt); native_frames(r, c, 8, dt);
+  hip_frames(r, c, static_cast<int>(400 / dt), dt, 2);
+  hip_frames_as(r, c, static_cast<int>(650 / dt), dt, 2, 0);
+  hip_frames(r, c, static_cast<int>(300 / dt), dt, 2);
+  // The tail stays inside retail's own 300 ms: beyond it the two tolerances differ by design.
+  native_frames(r, c, 8, dt); hip_frames(r, c, static_cast<int>(200 / dt), dt);
+  need(r.got.eye_hold > static_cast<uint64_t>(1300 / dt), "the eye held through the whole stim");
+  r.end(r.gen);
+}
+// A thrown grenade: the eye lets go while the hands are empty (retail), and with the value set it glides back to
+// the weapon's remembered eye while the weapon is drawn, so the native view returns without a cut. Retail is
+// shown one unbroken swap (its eye never lets go): that is where the glide has to end up.
+static void script_eye_return(Run &r, bool set, double dt) {
+  Clock c; c.moving = false; start(r, c); r.weapon_key(r.gen, KEY_A);
+  tfp_camera_set_action_tuning(0, 300, set);
+  hip_frames(r, c, 10, dt); native_frames(r, c, 8, dt);
+  hip_frames(r, c, static_cast<int>(200 / dt), dt, 2);
+  r.compare = false;
+  hip_frames_as(r, c, static_cast<int>(1200 / dt), dt, 2, 0);
+  const float let_go = apart(r);
+  if (let_go < .04f) fail("the eye did not let go while the hands were empty (%.4f m from the held eye)", let_go);
+  hip_frames(r, c, static_cast<int>(500 / dt), dt, 2);
+  const float back = apart(r);
+  if (set && back > .002f) fail("the eye is %.4f m from the weapon's remembered eye after the glide back", back);
+  if (!set && back < .04f) fail("without the value the eye must stay let go (retail); it is %.4f m from the held eye", back);
+  // No step of the glide is a cut: the eye never moves more than 2 cm in a frame.
+  r.end(r.gen);
+}
+static void script_eye_return_steps(Run &r, double dt) {
+  Clock c; c.moving = false; start(r, c); r.weapon_key(r.gen, KEY_A);
+  tfp_camera_set_action_tuning(0, 300, true);
+  hip_frames(r, c, 10, dt); native_frames(r, c, 8, dt); hip_frames(r, c, static_cast<int>(200 / dt), dt, 2);
+  r.compare = false;
+  hip_frames_as(r, c, static_cast<int>(1200 / dt), dt, 2, 0);
+  float last[3] = {}, now_at[3] = {}, largest = 0; r.forwarded_position(1, last);
+  for (int i = 0; i < static_cast<int>(500 / dt); ++i) {
+    hip_frames(r, c, 1, dt, 2); r.forwarded_position(1, now_at);
+    const float step = std::sqrt((now_at[0] - last[0]) * (now_at[0] - last[0]) + (now_at[1] - last[1]) * (now_at[1] - last[1]) + (now_at[2] - last[2]) * (now_at[2] - last[2]));
+    if (step > largest) largest = step;
+    std::memcpy(last, now_at, 12);
+  }
+  if (largest > .03f) fail("the glide back moved the eye %.4f m in one frame", largest);
+  if (largest < .001f) fail("the eye did not glide back at all");
+  r.end(r.gen);
+}
 static void register_scripts() {
+  add("beyond retail: pick-up mask 0x22 given the head camera", [](Run &r) { script_extra_mask(r, true); });
+  add("beyond retail: mask 0x22 without the value is retail's", [](Run &r) { script_extra_mask(r, false); });
+  for (double dt : {16.0, 1000.0 / 144}) {
+    char name[96]; std::snprintf(name, sizeof name, "beyond retail: eye held through a stim, step %.2f ms", dt); add(name, [=](Run &r) { script_eye_idle(r, dt); });
+    std::snprintf(name, sizeof name, "beyond retail: eye glides back before the weapon returns, step %.2f ms", dt); add(name, [=](Run &r) { script_eye_return(r, true, dt); });
+    std::snprintf(name, sizeof name, "beyond retail: no glide back without the value, step %.2f ms", dt); add(name, [=](Run &r) { script_eye_return(r, false, dt); });
+    std::snprintf(name, sizeof name, "beyond retail: the glide back has no cut, step %.2f ms", dt); add(name, [=](Run &r) { script_eye_return_steps(r, dt); });
+  }
   for (double fps : {30.0, 60.0, 144.0}) for (int moving = 0; moving < 2; ++moving) for (int present = 0; present < 2; ++present) {
     char name[96]; std::snprintf(name, sizeof name, "hip view, %g fps, head %s, %s", fps, moving ? "moving" : "still", present ? "presentation and mode 15" : "plain");
     add(name, [=](Run &r) { script_hip(r, 1000.0 / fps, moving != 0, present != 0); });

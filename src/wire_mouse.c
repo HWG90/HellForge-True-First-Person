@@ -42,6 +42,10 @@ static bool prove(TfpWireMouse *m, const char **index_path) {
 int tfp_wire_mouse_level(TfpWireMouse *m, int button) {
   const TfpWireMouseHost *h = &m->host;
   if (button != 1 && button != 2) return -1;
+  if (m->windows_first && h->windows_button) {
+    const int level = h->windows_button(h->user, button);
+    if (level >= 0) { note(m, "aim button from Windows first: the engine's level arrives after the game has acted"); m->source = TFP_MOUSE_WINDOWS; return level; }
+  }
   if (!h->engine_ready || !h->engine_function || !h->exe_base || !h->engine_index || !h->engine_button || !h->engine_generation)
     return from_windows(m, button, "aim button from Windows: this build has no engine caller");
   if (m->refused) { m->source = TFP_MOUSE_WINDOWS; return h->windows_button ? h->windows_button(h->user, button) : -1; }

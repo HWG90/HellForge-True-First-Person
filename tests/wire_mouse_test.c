@@ -101,6 +101,20 @@ int main(void) {
   g.windows = 1;
   CHECK(tfp_wire_mouse_level(&m, 1) == 1 && m.source == TFP_MOUSE_WINDOWS);
 
+  /* build 25480438: Windows first (the engine's level arrives after the game has acted); the engine only
+   * when Windows gives no answer */
+  tfp_wire_mouse_init(&m, &host);
+  m.windows_first = true;
+  g.ready = true, g.index_not_number = g.button_fails = false, g.level = 0, g.windows = 1, g.button_calls = 0;
+  CHECK(tfp_wire_mouse_level(&m, 1) == 1 && m.source == TFP_MOUSE_WINDOWS && g.button_calls == 0 && strstr(m.note, "first"));
+  g.windows = 0;
+  CHECK(tfp_wire_mouse_level(&m, 2) == 0 && m.source == TFP_MOUSE_WINDOWS && g.button_calls == 0);
+  g.windows = -1, g.level = 1;
+  CHECK(tfp_wire_mouse_level(&m, 1) == 1 && m.source == TFP_MOUSE_ENGINE && g.button_calls == 1);
+  g.button_fails = true;
+  CHECK(tfp_wire_mouse_level(&m, 1) == -1); /* neither answers */
+  g.button_fails = false;
+
   if (failures) return 1;
   printf("wire mouse: %d checks passed (engine once proven, Windows otherwise, never an unproven function)\n", checks);
   return 0;

@@ -41,6 +41,7 @@ typedef struct TfpViewSample {
   /* What decides whether the native view may be held, for the Drop / Wait / Return lines. NULL or
    * empty: those lines are not written. gate: its changes are logged; action and camera ride along. */
   const char *gate, *action, *camera;
+  unsigned aim_probe_keeps, aim_guarded; /* of aim_keeps: made at the script call; changes ignored as full aim began */
   const char *aim_source;            /* where the aim button's level came from ("engine", "windows"); may be NULL */
 } TfpViewSample;
 typedef struct TfpViewLog {

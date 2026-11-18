@@ -180,9 +180,13 @@ static void Capture(lua_State* L)
     Log("the engine's Lua state is %p (generation %ld)", (void*)L, (long)g_stateGeneration);
 }
 
+static void (*volatile s_scriptProbe)(void);
+void eng_set_script_probe(void (*probe)(void)) { s_scriptProbe = probe; }
 static int PcallHook(lua_State* L, int nargs, int nresults, int errfunc)
 {
     if (s_captureEnabled && g_state == NULL) Capture(L);
+    void (*probe)(void) = s_scriptProbe;
+    if (probe && L == g_state) probe();
     return s_pcall(L, nargs, nresults, errfunc);
 }
 static void CloseHook(lua_State* L)

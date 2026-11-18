@@ -37,6 +37,10 @@ bool tfp_win_key_down(int virtual_key);
  * not used ("" = the engine answers), for one log line. */
 struct TfpWireMouseHost;
 void tfp_win_mouse_engine(const struct TfpWireMouseHost *engine);
+/* Windows' own level of button 1 (right) or 2 (middle), 0 while the game is not the foreground window. No
+ * engine call: usable between ticks (src/wire_action.h). */
+int tfp_win_button(int button);
+void tfp_win_buttons(int *right, int *middle); /* both, with one look at the foreground window */
 const char *tfp_win_mouse_source(void);
 bool tfp_win_mouse_note(char *out, size_t size);
 /* For src/wire_win_pose.c: the page and write rules the four helper hosts use (native_memory.h,

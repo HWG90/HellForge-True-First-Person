@@ -10,6 +10,10 @@
  * The engine is used once its two functions are proven to be this build's own (the addresses of the
  * live census, docs/history/research-0.5.34/live-sdk-census-g1-9472b065.tsv) and the button's index
  * is a number; until then, and whenever a call fails, the answer is Windows' and the source says so.
+ *
+ * 0.6.0-feel.8 ran that way (session 76bf7718): all 6 aim releases were seen after the game had dropped the
+ * view, and 5 presses were taken for releases. The engine's level, read in HellForge's tick before the game's
+ * update, is a frame behind the game's own input on build 25480438. windows_first puts Windows back in front.
  * Platform-free: the engine and Windows come in as function pointers. */
 #ifndef TFP_WIRE_MOUSE_H
 #define TFP_WIRE_MOUSE_H
@@ -37,6 +41,9 @@ struct TfpWireMouseHost {
 typedef enum TfpWireMouseSource { TFP_MOUSE_UNKNOWN, TFP_MOUSE_ENGINE, TFP_MOUSE_WINDOWS } TfpWireMouseSource;
 typedef struct TfpWireMouse {
   TfpWireMouseHost host;
+  /* Set after init by a build where the engine's level arrives too late for the aim-view keeper (25480438,
+   * src/wire_action.h): Windows answers first, the engine only when Windows gives no answer. */
+  bool windows_first;
   bool proven, refused;       /* refused: the engine's functions are not this build's; Windows for the session */
   uint64_t generation;
   bool has_index[3], tried[3]; double index[3];   /* by button: 1 right, 2 middle */

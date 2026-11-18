@@ -911,6 +911,7 @@ static void record_presentation(TfpRt *rt, void *arg) {
   CALL(H->diagnostics_record(H, rt->context.tick, rec));
   bool running = enabled && text_is(phase, "running");
   /* Last in the frame: every reader above saw the game's own aim state. */
+  if (H->backend_aim_view_watch) H->backend_aim_view_watch(H, &s, running && open_view);
   if (aim_released(rt) && running && open_view) {
     NEED(BACKEND, 537, "upvalue 'backend'");
     if (H->backend_keep_aim_view) H->backend_keep_aim_view(H, &s);

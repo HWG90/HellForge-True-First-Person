@@ -8,6 +8,7 @@
  * One tick on the game thread; four dispatch-slot hooks that the helpers install while the view is
  * on and take out again when it goes off; nothing else is hooked, no code byte is written. */
 #define WIN32_LEAN_AND_MEAN
+#include <math.h>
 #include <windows.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -24,9 +25,11 @@
 #include "engine.h"
 #include "mod_menu.h"
 #include "mod_editor.h"
-#define TFP_VIEW_VERSION "0.6.0-feel.8"
+#define TFP_VIEW_VERSION "0.6.0-feel.9"
 #else
 #include "wire_win.h"
+#include "wire_action.h"
+#include "camera_helper.h"
 #define TFP_VIEW_VERSION "0.6.0-view.1"
 #endif
 #define TFP_CONFLICT_ID "goose.first-person-controller"
@@ -44,6 +47,7 @@ static uint64_t next_pin_check;
  * nothing. in_tick: a tick is between its first and last line. Each side sets its own flag and then
  * reads the other's, both with interlocked operations, so one of the two always sees the other. */
 static volatile LONG closing, in_tick;
+static DWORD tick_thread; /* the game thread, as the tick last saw it */
 #ifdef TFP_FEEL
 static TfpWireFeel feel;
 static TfpFxPlatform fx_platform;
@@ -227,6 +231,45 @@ static const TfpWireMouseHost mouse_engine = {NULL, mouse_engine_ready, mouse_en
                                               mouse_engine_button, mouse_engine_generation, NULL};
 #endif
 
+#ifdef TFP_FEEL
+/* The aim button once more as the engine's script update begins (src/wire_action.h): the game's own input is
+ * newer there than in the tick. Runs inside lua_pcall's hook, so: the tick's thread only, never inside the tick
+ * (its own engine calls pass through the same hook), Windows' level only, and at most a few times a frame. */
+static void aim_script_probe(void) {
+  if (stage != RUNNING || GetCurrentThreadId() != tick_thread || InterlockedCompareExchange(&in_tick, 0, 0) ||
+      InterlockedCompareExchange(&closing, 0, 0)) return;
+  if (!tfp_wire_aim_due(&wire)) return;
+  int right, middle;
+  tfp_win_buttons(&right, &middle);
+  tfp_wire_aim_probe(&wire, right, middle);
+}
+#endif
+
+#ifdef TFP_FEEL
+/* How far the eye moves when the native view comes back, and in which direction: the helper's own record of
+ * the first native frames (read-only), a few frames after each return. Level and up are world axes. */
+static void entry_note(void) {
+  static bool was_leased;
+  static int countdown;
+  static float told[3];
+  const bool leased = wire.log.has_lease;
+  if (leased && !was_leased) countdown = 8;
+  was_leased = leased;
+  if (!countdown || --countdown) return;
+  TfpCameraEntryTraceData trace;
+  memset(&trace, 0, sizeof trace);
+  if (!tfp_camera_entry_trace(&trace) || trace.count < 2 || trace.rows[0].frame != 0) return;
+  const TfpCameraEntryTraceRow *last = &trace.rows[0], *first = &trace.rows[1];
+  if (!memcmp(told, last->head_world, sizeof told)) return; /* this return came from no head-camera frame: an old record */
+  memcpy(told, last->head_world, sizeof told);
+  const double x = first->camera_world[0] - last->head_world[0], y = first->camera_world[1] - last->head_world[1],
+               z = first->camera_world[2] - last->head_world[2];
+  say("Entry: the eye moved %.3f m (%.3f level, %+.3f up) from the head camera's last frame to the native view's first; "
+      "camera %s the rig on that frame",
+      sqrt(x * x + y * y + z * z), sqrt(x * x + y * y), z, last->linked ? "linked to" : "not yet linked to");
+}
+#endif
+
 static void start(void) {
   TfpOpsHost memory;
   TfpWirePlatform platform;
@@ -238,8 +281,14 @@ static void start(void) {
 #endif
   tfp_wire_init(&wire, &memory, &platform, &helpers);
   wire.mouse_source = tfp_win_mouse_source;
+  /* What build 25480438 does differently during actions (src/wire_action.h). */
+  tfp_camera_set_action_tuning(TFP_ACTION_PICKUP_MASK, TFP_ACTION_EYE_IDLE_MS, TFP_ACTION_EYE_RETURN);
+  say("Ready: action camera: the head camera also takes the pick-up action (mask 0x%x); the eye is held through %u ms without an action "
+      "(a stim) and glides back before the weapon returns; the aim button is read from Windows, again as the script update begins",
+      TFP_ACTION_PICKUP_MASK, TFP_ACTION_EYE_IDLE_MS);
 #ifdef TFP_FEEL
   tfp_win_mouse_engine(&mouse_engine);
+  eng_set_script_probe(aim_script_probe);
 #endif
   measure_reads();
 #ifdef TFP_FEEL
@@ -302,6 +351,7 @@ static void release_on_game_thread(void) {
 #endif
 static void tick_body(void) {
   if (stage == REFUSED) return;
+  tick_thread = GetCurrentThreadId();
   if (!told_tick_thread) {
     told_tick_thread = true;
     say("Tick: game-thread callback on thread %lu (HellForge runs it before the game's own update)", (unsigned long)GetCurrentThreadId());
@@ -364,6 +414,7 @@ static void tick_body(void) {
   editor_key_held = editor_down;
   if (tfp_mod_editor_settled()) tfp_mod_menu_tick(hf, owner, &wire, menu_unavailable(), tfp_wire_editor_toggle);
   tfp_wire_frame(&wire, extra);
+  entry_note();
   tfp_wire_menu_frame(&wire);          /* what the user did in MCM since the last tick, and the two status rows */
   tfp_wire_settings_save_frame(&wire); /* writes only when the store changed since the last write */
   eng_temp_end();
@@ -456,6 +507,7 @@ __declspec(dllexport) int hellforge_mod_unload(const HfApi *api, HfMod *mod, uin
     hf->log(mod, "Refused: live %s: %s. This build stays for the session.", reason == HF_UNLOAD_REPLACE ? "replace" : "removal", why);
     return 1;
   }
+  eng_set_script_probe(NULL);
   tfp_mod_editor_retire();   /* its panel stays registered with the overlay host: closed, and drawing nothing */
   unsigned restored = tfp_win_restore_slots() + tfp_win_pose_restore_slots();
   hf->log(mod, "Live %s: the mod held nothing in the game; %u dispatch slot(s) put back; this build does nothing from here on.",

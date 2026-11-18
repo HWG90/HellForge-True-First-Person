@@ -21,6 +21,7 @@
 #include "blur_adapter.h"
 #include "transition.h"
 #include "wire_log.h"
+#include "wire_action.h"
 
 typedef struct TfpWirePlatform {
   void *user;
@@ -99,6 +100,10 @@ typedef struct TfpWire {
   int depth;                    /* nesting of tfp_wire_call */
   double revision;              /* backend.action_placement_revision */
   bool has_revision, global_ours;
+  /* The aim button between ticks (src/wire_action.h): the snapshot the keeper would act on, kept for the probe. */
+  TfpAimWatch aim;
+  TfpOpsSnapshot aim_snapshot;
+  bool aim_has_snapshot;
   /* F11: set by the key poll, taken by menu:update() at the end of the frame, as retail's menu does. */
   bool toggle_requested;
   /* The last diagnostics row (runtime.lua:513), for the session log. */
@@ -134,6 +139,11 @@ void tfp_wire_init(TfpWire *w, const TfpOpsHost *memory, const TfpWirePlatform *
 TfpRtStatus tfp_wire_call(TfpWire *w, TfpRtEntry entry, const TfpRtArgs *args, TfpRtValue *ret);
 /* The per-update order: on_update, then one session-log sample. `extra` goes on the View line. */
 void tfp_wire_frame(TfpWire *w, const char *extra);
+/* Between ticks, from the engine's script call (game thread only). due: a probe may be made now (armed, and
+ * not too many this frame). probe: the levels just read (1 down, 0 up, -1 no answer); true when the keeper
+ * acted. Its writes are the keeper's own two, on the tick's snapshot, re-checked against memory. */
+bool tfp_wire_aim_due(TfpWire *w);
+bool tfp_wire_aim_probe(TfpWire *w, int right, int middle);
 
 /* Glue with logic, exported for tests/wire_glue_test.c. */
 void tfp_wire_snapshot_table(TfpWire *w, const TfpOpsSnapshot *s, TfpRtTable *out);
