@@ -7,7 +7,7 @@ action_placement.lua, menu.lua):
 
   defaults   no saved settings at all
   user       import/retail-config-2026-11-16.cfg with the user's menu values
-             (tests/vectors/retail-menu-first-person-2026-11-16.ini)
+             (import/retail-menu-first-person-2026-11-16.ini)
   synthetic  a made-up saved table for what the user's file does not hold (SYNTHETIC below)
 
 Retail is given the RAW saved table; the C store is given the CONVERTED file. Equal answers on every
@@ -400,7 +400,7 @@ def main():
     parser.add_argument("--retail", required=True, type=pathlib.Path)
     parser.add_argument("--out", type=pathlib.Path, default=ROOT / "tests" / "vectors")
     parser.add_argument("--config", type=pathlib.Path, default=ROOT / "import" / "retail-config-2026-11-16.cfg")
-    parser.add_argument("--menu", type=pathlib.Path, default=ROOT / "tests" / "vectors" / "retail-menu-first-person-2026-11-16.ini")
+    parser.add_argument("--menu", type=pathlib.Path, default=ROOT / "import" / "retail-menu-first-person-2026-11-16.ini")
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     text = build(args.retail, args.config, args.menu)

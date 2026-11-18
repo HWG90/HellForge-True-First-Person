@@ -80,7 +80,9 @@ void tfp_wire_feel_facts(TfpWire *w, TfpWireFeelFacts *out) {
   out->phase = w->controller.phase;
   out->lease = tfp_wire_held(w) != NULL;
   out->recovering = tfp_wire_recovery_busy();
+  out->unsaved = tfp_wire_settings_unsaved(w);
   if (!f) return;
+  out->editor = f->editor_open;
   if (f->has_pose) {
     unsigned pose = tfp_wire_pose_held(w);
     out->pose_lease = pose & 1u, out->look_pending = (pose & 2u) != 0;
@@ -114,6 +116,8 @@ const char *tfp_wire_feel_held_of(const TfpWireFeelFacts *f) {
   if (f->markers) return "the aim markers have not been shown again";
   if (f->movement) return "the movement focus byte has not been restored";
   if (f->aim_option) return "the native aim option has not been restored";
+  if (f->editor) return "the placement editor is open; close it first";
+  if (f->unsaved) return "there are settings that could not be saved; see the Refused line above";
   return NULL;
 }
 const char *tfp_wire_feel_held(TfpWire *w) {

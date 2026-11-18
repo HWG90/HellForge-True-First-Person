@@ -80,6 +80,17 @@ static void new_wire(void) {
   tfp_wire_init(&wire, &memory, &platform, &helpers);
 }
 
+static unsigned saves;
+static bool save_fails;
+static char saved_text[TFP_SETTINGS_MAX];
+static size_t saved_length;
+static bool test_save(void *user, const char *text, size_t length, char *why, size_t why_size) {
+  (void)user;
+  saves++;
+  if (save_fails) { snprintf(why, why_size, "disk full"); return false; }
+  memcpy(saved_text, text, length); saved_text[length] = 0; saved_length = length;
+  return true;
+}
 static V text(const char *t) { return tfp_wire_text(t); }
 static bool text_is(V v, const char *t) { return v.kind == TFP_RT_TEXT && t && v.length == strlen(t) && !memcmp(v.text, t, v.length); }
 static bool same_placement(const TfpActionPlacement *p, unsigned mask, const double v[6]) {
@@ -551,6 +562,47 @@ int main(int argc, char **argv) {
     CHECK(tfp_wire_call(&wire, TFP_RT_E_on_disable, NULL, r) == TFP_RT_OK && r[0].kind == TFP_RT_TRUE);
   }
   tfp_wire_settings_free(&wire);
+  { /* ---- saving: one write per change, on the edge; the text loads back to the same store ---- */
+    new_wire();
+    CHECK(tfp_wire_settings_bind(&wire, settings_user_json, sizeof settings_user_json - 1, "settings.json"));
+    TfpSettings *s = tfp_wire_settings(&wire);
+    CHECK(!tfp_wire_settings_unsaved(&wire));
+    tfp_wire_settings_save_frame(&wire);                       /* no saver yet: nothing happens */
+    saves = 0, save_fails = false;
+    tfp_wire_settings_saver(&wire, test_save, NULL);
+    for (int i = 0; i < 5; i++) tfp_wire_settings_save_frame(&wire);
+    CHECK(saves == 0 && !tfp_wire_settings_unsaved(&wire));    /* nothing changed: never a write */
+    TfpActionPlacement moved = {.present = 63, .x = .11, .y = .02, .z = -.03, .yaw = 1, .pitch = 2, .roll = 3};
+    const char *why = NULL;
+    CHECK(tfp_settings_set(s, TFP_SET_placement, tfp_settings_new_placement(s, &moved), &why));
+    CHECK(tfp_wire_settings_unsaved(&wire));
+    for (int i = 0; i < 5; i++) tfp_wire_settings_save_frame(&wire);
+    CHECK(saves == 1 && !tfp_wire_settings_unsaved(&wire) && logged("Saved: settings"));
+    TfpSettings again;
+    char problem[200];
+    memset(&again, 0, sizeof again);
+    CHECK(tfp_settings_load(&again, saved_text, saved_length, problem, sizeof problem));
+    CHECK(again.field[TFP_SET_placement] && again.field[TFP_SET_placement]->placement.x == .11 && again.field[TFP_SET_placement]->placement.roll == 3);
+    CHECK(again.field[TFP_SET_action_placements] && again.field[TFP_SET_action_placements]->count == s->field[TFP_SET_action_placements]->count);
+    tfp_settings_free(&again);
+    CHECK(tfp_wire_settings_menu_set(&wire, TFP_MENU_motion_strength, false, false, 135));
+    CHECK(tfp_wire_settings_unsaved(&wire));
+    CHECK(tfp_wire_settings_menu_set(&wire, TFP_MENU_motion_strength, false, false, 135) && saves == 1); /* the same value again: still one change */
+    tfp_wire_settings_save_frame(&wire);
+    CHECK(saves == 2 && strstr(saved_text, "135"));
+    tfp_wire_settings_save_frame(&wire);
+    CHECK(saves == 2);
+    CHECK(!tfp_wire_settings_menu_set(&wire, TFP_MENU_motion_strength, true, true, 0)); /* the wrong kind */
+    save_fails = true;
+    CHECK(tfp_wire_settings_menu_set(&wire, TFP_MENU_show_torso, true, true, 0));
+    for (int i = 0; i < 5; i++) tfp_wire_settings_save_frame(&wire);
+    CHECK(saves == 3 && tfp_wire_settings_unsaved(&wire) && logged("Refused: settings were not saved: disk full")); /* one try per change, not one a frame */
+    save_fails = false;
+    CHECK(tfp_wire_settings_menu_set(&wire, TFP_MENU_show_torso, true, false, 0));
+    tfp_wire_settings_save_frame(&wire);
+    CHECK(saves == 4 && !tfp_wire_settings_unsaved(&wire));
+    tfp_wire_settings_free(&wire);
+  }
   printf("wire settings: %u checks passed (%zu refusals of the reader and loader; retail's answers on %zu + %zu + %zu operations, the defaults "
          "also with no file and with a broken one; placement refs; mod.set; the runtime's entry placement, near clip and weapon line)\n",
          checks, COUNT(refused), COUNT(settings_defaults_ops), COUNT(settings_user_ops), COUNT(settings_synthetic_ops));

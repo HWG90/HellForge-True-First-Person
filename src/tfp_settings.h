@@ -85,6 +85,7 @@ typedef struct TfpSettings {
   TfpSettingsValue *made;                       /* everything the store made, newest first */
   bool from_file;                               /* the last load took a text (false: defaults) */
   uint64_t writes;                              /* tfp_settings_set calls that changed a field */
+  uint64_t menu_writes;                         /* tfp_settings_set_menu calls that changed a control's value */
 } TfpSettings;
 
 const char *tfp_settings_field_name(TfpSettingsField field);

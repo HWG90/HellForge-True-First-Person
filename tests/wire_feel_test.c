@@ -286,6 +286,9 @@ int main(void) {
     HELD(look_pending, "look-gain") HELD(head, "head visibility") HELD(sleeves, "arm pieces") HELD(grip, "grip hand")
     HELD(dof, "depth of field") HELD(vignette, "vignette") HELD(markers, "aim markers") HELD(movement, "movement")
     HELD(aim_option, "native aim option")
+    HELD(editor, "the placement editor is open");
+    HELD(unsaved, "settings that could not be saved");
+    f = none; f.editor = f.unsaved = true; CHECK(strstr(tfp_wire_feel_held_of(&f), "placement editor")); /* the editor first: closing it may save */
 #undef HELD
     f = none; f.phase = TFP_PHASE_RUNNING; CHECK((why = tfp_wire_feel_held_of(&f)) && strstr(why, "has not finished switching off"));
     f = none; f.phase = TFP_PHASE_DISABLED; CHECK(!tfp_wire_feel_held_of(&f));

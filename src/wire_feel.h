@@ -30,6 +30,7 @@ typedef struct TfpWireFeel {
   TfpFx fx;
   bool has_pose, has_motion, has_engine, has_effects;
   bool second_open;
+  bool editor_open;                    /* set by the placement editor's binder (src/wire_editor.c) */
   double second_start;
   char line[900];
 } TfpWireFeel;
@@ -52,6 +53,8 @@ typedef struct TfpWireFeelFacts {
   bool pose_lease, look_pending;
   bool head, sleeves, grip;
   bool dof, vignette, markers, movement, aim_option;
+  bool editor;         /* the placement editor is open (or closing) */
+  bool unsaved;        /* a settings change the file does not hold (the last write failed) */
 } TfpWireFeelFacts;
 void tfp_wire_feel_facts(TfpWire *w, TfpWireFeelFacts *out);
 /* NULL: idle and clean. Otherwise one plain sentence naming the first thing still held. */

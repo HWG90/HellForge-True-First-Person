@@ -45,8 +45,9 @@ if [ "${1:-}" = --feel ]; then
   -I "$TFP_HF/app/sdk" -I "$TFP_ROOT/src" "${TFP_FEEL_SOURCES[@]}" "$TFP_ROOT/src/pose_input_thunks.S" -luser32 \
   -o "$TFP_OUT/goose_true_first_person.dll"
  cp "$TFP_ROOT/manifests/feel/hellforge-mod.json" "$TFP_OUT/hellforge-mod.json"
- # The user's own retail settings, converted for the C settings store and shipped beside the DLL.
- python3 "$TFP_ROOT/tools/convert_settings.py" --config "$TFP_ROOT/import/retail-config-2026-11-16.cfg" --out "$TFP_OUT/settings.json"
+ # The user's own retail settings and menu values, converted for the C settings store and shipped beside the DLL.
+ python3 "$TFP_ROOT/tools/convert_settings.py" --config "$TFP_ROOT/import/retail-config-2026-11-16.cfg" \
+  --menu "$TFP_ROOT/import/retail-menu-first-person-2026-11-16.ini" --out "$TFP_OUT/settings.json"
  echo "Built the True First Person feel build"
  exit 0
 fi

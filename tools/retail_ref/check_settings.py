@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import convert_settings as C  # noqa: E402
 
 CONFIG = ROOT / "import" / "retail-config-2026-11-16.cfg"
-MENU = ROOT / "tests" / "vectors" / "retail-menu-first-person-2026-11-16.ini"
+MENU = ROOT / "import" / "retail-menu-first-person-2026-11-16.ini"
 checks = 0
 
 

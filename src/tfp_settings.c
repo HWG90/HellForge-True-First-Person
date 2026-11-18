@@ -464,7 +464,9 @@ bool tfp_settings_set(TfpSettings *s, TfpSettingsField field, const TfpSettingsV
 }
 bool tfp_settings_set_menu(TfpSettings *s, TfpSettingsMenuId id, bool is_bool, bool boolean, double number) {
   if ((unsigned)id >= TFP_MENU_COUNT || menu_defaults[id].is_bool != is_bool) return false;
-  s->menu[id] = (TfpSettingsMenuValue){is_bool, is_bool && boolean, is_bool ? 0 : number};
+  TfpSettingsMenuValue next = {is_bool, is_bool && boolean, is_bool ? 0 : number};
+  if (s->menu[id].is_bool != next.is_bool || s->menu[id].boolean != next.boolean || s->menu[id].number != next.number) s->menu_writes++;
+  s->menu[id] = next;
   return true;
 }
 void tfp_settings_action_config(const TfpSettings *s, TfpActionConfig *out) {

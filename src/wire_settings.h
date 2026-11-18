@@ -48,6 +48,19 @@ const char *tfp_wire_settings_source(TfpWire *w, const char *key, TfpAct action,
  * weapon key changes. (tfp_wire_motion_frame calls it.) */
 void tfp_wire_settings_frame(TfpWire *w);
 
+/* ---- saving (docs/guides/POSER-AND-MENU.md) ---------------------------------------------------------
+ * The store is written when it changed, never on a timer: tfp_wire_settings_save_frame compares the
+ * store's two change counters with what was last written and calls the saver once per change. (One
+ * compare a tick instead of a callback in every unit that calls mod.set.) The saver gets the whole
+ * settings.json text and must replace the file atomically; false with a reason leaves the store
+ * unsaved until its next change, so a failing disk is tried once per change and not once a frame. */
+typedef bool (*TfpSettingsSaveFn)(void *user, const char *text, size_t length, char *why, size_t why_size);
+void tfp_wire_settings_saver(TfpWire *w, TfpSettingsSaveFn save, void *user); /* NULL: nothing is ever written */
+void tfp_wire_settings_save_frame(TfpWire *w);                                /* once per tick, after the runtime's update */
+bool tfp_wire_settings_unsaved(TfpWire *w);                                   /* a change the file does not hold */
+/* A menu control's value (the MCM binder's changed callback). false: not bound, or the wrong kind. */
+bool tfp_wire_settings_menu_set(TfpWire *w, TfpSettingsMenuId id, bool is_bool, bool boolean, double number);
+
 /* Actions.actions (action_placement.lua:66-67) is handed to the editor as this value: a ref to
  * tfp_wire_settings_actions, TFP_ACT_COUNT rows of {name, label}. */
 extern const char *const tfp_wire_settings_actions[TFP_ACT_COUNT][2];

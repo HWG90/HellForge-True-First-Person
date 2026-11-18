@@ -18,6 +18,8 @@ enum { RING = 64, TEXTS = 8, TEXT = 64 };
 
 typedef struct NearAnswer { double hip, aim; bool profile; } NearAnswer;
 typedef struct Settings {
+  TfpSettingsSaveFn save; void *save_user;
+  uint64_t saved_revision, tried_revision; /* the store's change count last written, and last tried */
   TfpWire *w;
   TfpSettings store;
   TfpActionCatalogue catalogue;
@@ -422,6 +424,43 @@ bool tfp_wire_settings_bind(TfpWire *w, const char *json, size_t length, const c
   tfp_wire_say(w, line);
   return true;
 }
+/* ---- saving ---- */
+static uint64_t revision(const Settings *st) { return st->store.writes + st->store.menu_writes; }
+void tfp_wire_settings_saver(TfpWire *w, TfpSettingsSaveFn save, void *user) {
+  Settings *st = state(w);
+  if (!st) return;
+  st->save = save, st->save_user = user;
+  st->saved_revision = st->tried_revision = revision(st); /* what is loaded is what the file holds */
+}
+bool tfp_wire_settings_unsaved(TfpWire *w) { Settings *st = state(w); return st && st->save && revision(st) != st->saved_revision; }
+bool tfp_wire_settings_menu_set(TfpWire *w, TfpSettingsMenuId id, bool is_bool, bool boolean, double number) {
+  Settings *st = state(w);
+  return st && tfp_settings_set_menu(&st->store, id, is_bool, boolean, number);
+}
+void tfp_wire_settings_save_frame(TfpWire *w) {
+  Settings *st = state(w);
+  if (!st || !st->save) return;
+  uint64_t now = revision(st);
+  if (now == st->tried_revision) return;
+  st->tried_revision = now;
+  char line[300], why[160] = "";
+  size_t length = tfp_settings_write(&st->store, NULL, 0);
+  char *text = length < TFP_SETTINGS_MAX ? malloc(length + 1) : NULL;
+  if (!text) snprintf(why, sizeof why, "the text is %zu bytes (most: %d)", length, TFP_SETTINGS_MAX);
+  else if (tfp_settings_write(&st->store, text, length + 1) != length) snprintf(why, sizeof why, "the store changed while it was written");
+  else if (st->save(st->save_user, text, length, why, sizeof why)) {
+    st->saved_revision = now;
+    snprintf(line, sizeof line, "Saved: settings (%zu bytes, change %llu)", length, (unsigned long long)now);
+    tfp_wire_say(w, line);
+    free(text);
+    return;
+  }
+  free(text);
+  snprintf(line, sizeof line, "Refused: settings were not saved: %s; they stay as they are for this session and are tried again at the next change",
+           why[0] ? why : "no reason given");
+  tfp_wire_say(w, line);
+}
+
 void tfp_wire_settings_free(TfpWire *w) {
   Settings *st = state(w);
   if (!st) return;

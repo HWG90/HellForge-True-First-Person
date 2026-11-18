@@ -44,11 +44,39 @@ static TfpWireFeel feel;
 static TfpFxPlatform fx_platform;
 static bool engine_hooked, pose_hook_told[TFP_WIN_POSE_HOOKS];
 static char settings_text[TFP_SETTINGS_MAX];
-/* settings.json beside this DLL (made at build time by tools/convert_settings.py). 0: no file. */
+/* Two places hold settings.json. The one beside this DLL is made at build time (tools/convert_settings.py)
+ * and is the first run's; HellForge holds a session's mod files read-only, so what the menu and the poser
+ * change is saved to the user's own file, which is read first from then on:
+ *   %LOCALAPPDATA%\Goose\HellForge\TrueFirstPerson\settings.json */
+#define TFP_USER_FOLDERS {"Goose", "Goose\\HellForge", "Goose\\HellForge\\TrueFirstPerson"}
+static bool user_settings_path(char *path, size_t size, bool make_folders) {
+  char base[MAX_PATH];
+  static const char *const folders[] = TFP_USER_FOLDERS;
+  DWORD n = GetEnvironmentVariableA("LOCALAPPDATA", base, sizeof base);
+  if (!n || n >= sizeof base) return false;
+  for (size_t i = 0; make_folders && i < sizeof folders / sizeof *folders; i++) {
+    snprintf(path, size, "%s\\%s", base, folders[i]);
+    CreateDirectoryA(path, NULL); /* an existing folder is fine; a real failure shows when the file is made */
+  }
+  return (size_t)snprintf(path, size, "%s\\%s\\settings.json", base, folders[sizeof folders / sizeof *folders - 1]) < size;
+}
+static size_t read_file(const char *path) {
+  HANDLE file = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (file == INVALID_HANDLE_VALUE) return 0;
+  DWORD got = 0, total = 0;
+  while (total < sizeof settings_text && ReadFile(file, settings_text + total, (DWORD)(sizeof settings_text - total), &got, NULL) && got) total += got;
+  CloseHandle(file);
+  return total;
+}
+/* 0: no file in either place. */
 static size_t read_settings(char *where, size_t where_size) {
   HMODULE self = NULL;
   char path[MAX_PATH + 16];
   where[0] = 0;
+  if (user_settings_path(path, sizeof path, false)) {
+    size_t total = read_file(path);
+    if (total) { snprintf(where, where_size, "%s", path); return total; }
+  }
   if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)(void *)read_settings, &self))
     return 0;
   DWORD n = GetModuleFileNameA(self, path, MAX_PATH);
@@ -57,12 +85,24 @@ static size_t read_settings(char *where, size_t where_size) {
   if (!slash) return 0;
   strcpy(slash + 1, "settings.json");
   snprintf(where, where_size, "%s", path);
-  HANDLE file = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-  if (file == INVALID_HANDLE_VALUE) return 0;
-  DWORD got = 0, total = 0;
-  while (total < sizeof settings_text && ReadFile(file, settings_text + total, (DWORD)(sizeof settings_text - total), &got, NULL) && got) total += got;
+  return read_file(path);
+}
+/* TfpSettingsSaveFn: a temporary file beside the target, flushed, then renamed over it. Game thread only
+ * (tfp_wire_settings_save_frame is called from the tick). */
+static bool save_settings(void *user, const char *text, size_t length, char *why, size_t why_size) {
+  char path[MAX_PATH + 16], temp[MAX_PATH + 24];
+  (void)user;
+  if (!user_settings_path(path, sizeof path, true)) { snprintf(why, why_size, "LOCALAPPDATA is not set"); return false; }
+  snprintf(temp, sizeof temp, "%s.new", path);
+  HANDLE file = CreateFileA(temp, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (file == INVALID_HANDLE_VALUE) { snprintf(why, why_size, "%s could not be made (Windows error %lu)", temp, (unsigned long)GetLastError()); return false; }
+  DWORD put = 0;
+  bool ok = WriteFile(file, text, (DWORD)length, &put, NULL) && put == length && FlushFileBuffers(file);
+  DWORD code = GetLastError();
   CloseHandle(file);
-  return total;
+  if (ok && !MoveFileExA(temp, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) ok = false, code = GetLastError();
+  if (!ok) { DeleteFileA(temp); snprintf(why, why_size, "%s could not be written (Windows error %lu)", path, (unsigned long)code); }
+  return ok;
 }
 #endif
 
@@ -181,6 +221,7 @@ static void start(void) {
     tfp_win_effects_platform(&fx_platform, tfp_win_exe());
     parts.effects = &fx_platform;
     tfp_wire_feel_bind(&wire, &feel, &parts);
+    tfp_wire_settings_saver(&wire, save_settings, NULL);
     int slots = tfp_win_pose_check(text, sizeof text);
     say(slots == 1 ? "Ready: pose slots: %s" : slots == 0 ? "Refused: pose: %s" : "Waiting: pose slots are not readable yet: %s", text);
   }
@@ -253,6 +294,7 @@ static void tick_body(void) {
   eng_temp_begin();
   tfp_wire_feel_begin(&wire);
   tfp_wire_frame(&wire, extra);
+  tfp_wire_settings_save_frame(&wire); /* writes only when the store changed since the last write */
   eng_temp_end();
   for (int i = 0; i < TFP_WIN_POSE_HOOKS; i++) {
     const TfpWinHook *hook = tfp_win_pose_hook(i);
