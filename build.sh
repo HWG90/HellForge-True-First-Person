@@ -19,7 +19,7 @@ if [ "${1:-}" = --view ]; then
  # -ffp-contract=off: the translations were proven without fused multiply-add (docs/translation/RUNTIME-TRANSLATION.md).
  mkdir -p "$TFP_ROOT/dist/true-first-person-view"
  TFP_VIEW=(mod_view wire_win wire_rt wire_off wire_recovery wire_log tfp_runtime backend_ops controller recovery transition
-  camera_adapter fov_adapter near_adapter blur_adapter camera_helper fov_helper near_helper blur_helper slot_atomic)
+  camera_adapter fov_adapter near_adapter blur_adapter camera_helper fov_helper near_helper blur_helper slot_atomic wire_mouse)
  TFP_VIEW_SOURCES=();for tfp_module in "${TFP_VIEW[@]}";do TFP_VIEW_SOURCES+=("$TFP_ROOT/src/$tfp_module.c");done
  "$TFP_ZIG" cc -std=c11 -fms-extensions -target x86_64-windows-gnu -shared -O2 -ffp-contract=off -Wall -Wextra -Werror \
   -I "$TFP_HF/app/sdk" -I "$TFP_ROOT/src" "${TFP_VIEW_SOURCES[@]}" -luser32 \
@@ -34,7 +34,7 @@ if [ "${1:-}" = --feel ]; then
  TFP_OUT="$TFP_ROOT/dist/true-first-person-feel"
  mkdir -p "$TFP_OUT"
  TFP_FEEL=(mod_view wire_win wire_rt wire_off wire_recovery wire_log tfp_runtime backend_ops controller recovery transition
-  camera_adapter fov_adapter near_adapter blur_adapter camera_helper fov_helper near_helper blur_helper slot_atomic
+  camera_adapter fov_adapter near_adapter blur_adapter camera_helper fov_helper near_helper blur_helper slot_atomic wire_mouse
   wire_feel wire_settings tfp_settings action_select
   pose_helper pose_adapter wire_pose wire_win_pose
   wire_motion motion_runtime motion_math action_state locomotion backend snapshot

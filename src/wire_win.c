@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "wire_win.h"
+#include "wire_mouse.h"
 #include "camera_helper.h"
 #include "fov_helper.h"
 #include "near_helper.h"
@@ -333,12 +334,36 @@ bool tfp_win_focused(void) {
   return window && GetWindowThreadProcessId(window, &process) && process == GetCurrentProcessId();
 }
 bool tfp_win_key_down(int virtual_key) { return (GetAsyncKeyState(virtual_key) & 0x8000) != 0; }
-/* Retail reads stingray.Mouse.button('right' / 'middle') (runtime.lua:395-421); the level of the
- * same two buttons from Windows, 0 while the game is not the foreground window. */
+/* Retail reads stingray.Mouse.button('right' / 'middle') (runtime.lua:395-421). src/wire_mouse.c chooses:
+ * the engine's own answer once the feel build has installed its engine caller and the two functions
+ * are proven, else the level of the same two buttons from Windows (0 while the game is not the
+ * foreground window). */
+static TfpWireMouse mouse;
+static bool mouse_ready;
+static int windows_button(void *u, int button) {
+  (void)u;
+  return tfp_win_focused() && tfp_win_key_down(button == 1 ? VK_RBUTTON : VK_MBUTTON) ? 1 : 0;
+}
+static void mouse_setup(const TfpWireMouseHost *engine) {
+  TfpWireMouseHost host;
+  memset(&host, 0, sizeof host);
+  if (engine) host = *engine;
+  host.windows_button = windows_button;
+  tfp_wire_mouse_init(&mouse, &host);
+  mouse_ready = true;
+}
+void tfp_win_mouse_engine(const TfpWireMouseHost *engine) { mouse_setup(engine); }
+const char *tfp_win_mouse_source(void) { return mouse_ready ? tfp_wire_mouse_source_name(&mouse) : "windows"; }
+bool tfp_win_mouse_note(char *out, size_t size) {
+  if (!mouse_ready || !mouse.note_fresh) return false;
+  mouse.note_fresh = false;
+  snprintf(out, size, "%s", mouse.note);
+  return true;
+}
 static int platform_mouse(void *u, int button) {
   (void)u;
-  if (button != 1 && button != 2) return -1;
-  return tfp_win_focused() && tfp_win_key_down(button == 1 ? VK_RBUTTON : VK_MBUTTON) ? 1 : 0;
+  if (!mouse_ready) mouse_setup(NULL);
+  return tfp_wire_mouse_level(&mouse, button);
 }
 
 void tfp_win_hosts(TfpOpsHost *memory, TfpWirePlatform *platform, TfpWireHelpers *helpers) {

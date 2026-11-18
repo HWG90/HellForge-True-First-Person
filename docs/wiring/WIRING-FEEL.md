@@ -289,3 +289,9 @@ Full table, bytes and method: `docs/build-25480438/LOOK-GAIN-CONSTANTS-25480438.
 - The three steering cells are writable data: the images show where they are, not what they hold in play.
 - `B_INPUT_DEVICE` meaning (0 mouse, 1 or 2 pad) rests on the evaluator being the same code; not watched while switching devices.
 - The normalisation has never run on this build (its two assembly thunks are wired in the feel build and do nothing while the proof refuses).
+
+## Action camera (branch `action-camera`, 0.6.0-actioncam.1)
+
+- **Aim button:** `mouse_button_index` / `mouse_button` are answered by `src/wire_mouse.c`: the engine's `Mouse.button_index` (`exe+0x4830c0`) and `Mouse.button` (`exe+0x482480`) once both are proven registered at those addresses, as retail reads them; Windows' button level until then and whenever a call fails. One `Aim button: …` log line per change of source. The view build has no engine caller and stays on Windows.
+- **Session log:** `Drop:` / `Wait:` / `Return:` lines with the snapshot's gate, the animation layers and the head-camera helper's counters, a `Cut:` line after each leave and entry, and `Aim: release not kept …` (`src/wire_log.h`).
+- What retail does per action, what is proposed and not built: `docs/design/ACTION-CAMERA.md`.

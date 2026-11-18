@@ -62,6 +62,8 @@ typedef struct TfpWire {
   TfpRt rt;
   TfpRtHost host;
   TfpWirePlatform platform;
+  /* Optional, set after tfp_wire_init: where the last mouse answer came from ("engine", "windows"), for the session log. */
+  const char *(*mouse_source)(void);
   TfpWireHelpers helpers;
   TfpOpsHost memory;           /* the caller's: memory, native calls, page questions */
   TfpOpsHost ops_host;         /* what the backend gets: the same through this binder, plus runtime.lua's four hooks */

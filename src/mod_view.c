@@ -23,7 +23,7 @@
 #include "wire_win_effects.h"
 #include "engine.h"
 #include "mod_menu.h"
-#define TFP_VIEW_VERSION "0.6.0-feel.6"
+#define TFP_VIEW_VERSION "0.6.0-actioncam.1"
 #else
 #include "wire_win.h"
 #define TFP_VIEW_VERSION "0.6.0-view.1"
@@ -197,6 +197,32 @@ static void measure_reads(void) { /* docs/wiring/WIRING-INVENTORY.md section 4: 
   say("Reads: %.2f microseconds per guarded 8-byte read (2000 reads)", (double)(b.QuadPart - a.QuadPart) * 1e6 / (double)f.QuadPart / 2000.0);
 }
 
+#ifdef TFP_FEEL
+/* The aim button from the engine, as retail reads it (src/wire_mouse.h). Called inside the tick's eng_temp scope. */
+#include "wire_mouse.h"
+static bool mouse_engine_ready(void *u) { (void)u; return eng_ready(); }
+static uint64_t mouse_engine_function(void *u, const char *path) { (void)u; return (uint64_t)eng_cfunction(path); }
+static uint64_t mouse_exe_base(void *u) { (void)u; return tfp_win_exe(); }
+static uint64_t mouse_engine_generation(void *u) { (void)u; return eng_state_generation(); }
+static bool mouse_number(EngRef *value, bool *has, double *out) {
+  *has = eng_type(*value) == 3 /* LUA_TNUMBER */ && eng_tonumber(*value, out);
+  eng_unref(value);
+  return true;
+}
+static bool mouse_engine_index(void *u, const char *path, const char *name, bool *has, double *index) {
+  EngRef value = 0;
+  (void)u;
+  return eng_call(path, "s>r", name, &value) && mouse_number(&value, has, index);
+}
+static bool mouse_engine_button(void *u, double index, bool *has, double *level) {
+  EngRef value = 0;
+  (void)u;
+  return eng_call("Mouse.button", "n>r", index, &value) && mouse_number(&value, has, level);
+}
+static const TfpWireMouseHost mouse_engine = {NULL, mouse_engine_ready, mouse_engine_function, mouse_exe_base, mouse_engine_index,
+                                              mouse_engine_button, mouse_engine_generation, NULL};
+#endif
+
 static void start(void) {
   TfpOpsHost memory;
   TfpWirePlatform platform;
@@ -207,6 +233,10 @@ static void start(void) {
   tfp_win_pose_hosts();
 #endif
   tfp_wire_init(&wire, &memory, &platform, &helpers);
+  wire.mouse_source = tfp_win_mouse_source;
+#ifdef TFP_FEEL
+  tfp_win_mouse_engine(&mouse_engine);
+#endif
   measure_reads();
 #ifdef TFP_FEEL
   {
@@ -338,6 +368,11 @@ static void tick_body(void) {
   tfp_wire_frame(&wire, extra);
 #endif
 
+  {
+    char why[160];
+    if (tfp_win_mouse_note(why, sizeof why))
+      say(*why ? "Aim button: %s" : "Aim button: read from the engine (Mouse.button at exe+0x482480, proven), as retail reads it%s", *why ? why : "");
+  }
   for (int i = 0; i < TFP_WIN_HOOKS; i++) {
     const TfpWinHook *hook = tfp_win_hook(i);
     if (hook->refused) {

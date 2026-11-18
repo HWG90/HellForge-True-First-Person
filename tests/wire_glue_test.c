@@ -213,6 +213,80 @@ int main(void) {
   tfp_view_log_frame(&log, &s);
   CHECK(logged("State: exit complete"));
 
+  /* ---- what the log says at each drop out of the view, and how large the cut was ---- */
+  tfp_view_log_init(&log, capture, NULL);
+  memset(&s, 0, sizeof s);
+  line_count = 0;
+  s.phase = "idle", s.label = "Idle";
+  tfp_view_log_frame(&log, &s);
+  s.time = 100, s.enabled = true, s.has_lease = true, s.request = 0x1200, s.camera_kind = 6, s.phase = "running", s.safe = true;
+  s.label = "First person enabled until manually stopped", s.has_eye = true;
+  s.gate = "kind=6 safe=1", s.action = "layers=3:12", s.camera = "cam=active replaced=0", s.aim_source = "engine";
+  tfp_view_log_frame(&log, &s);
+  CHECK(logged("Return: kind=6 safe=1 | layers=3:12 | cam=active replaced=0"));
+  for (int i = 0; i < 30; i++) { s.time += 1 / 100.0, s.eye[0] += .01; tfp_view_log_frame(&log, &s); }
+  CHECK(logged("Cut: largest camera jump 0.000 m in the 0.30 s after entering the native view")); /* said even when smooth */
+  for (int i = 0; i < 30; i++) { s.time += 1 / 100.0, s.eye[0] += .01; tfp_view_log_frame(&log, &s); }
+  /* the game takes the camera: the drop line names the gate, the action layers and the camera helper's state */
+  s.has_lease = false, s.phase = "waiting", s.wait = "Gameplay action or camera owns the view", s.camera_kind = 4, s.safe = false;
+  s.gate = "kind=4 safe=0 mask=0x20", s.action = "layers=3:44", s.camera = "cam=active replaced=7";
+  s.time += 1 / 100.0, s.eye[0] += .01;
+  tfp_view_log_frame(&log, &s);
+  CHECK(logged("Drop: kind=4 safe=0 mask=0x20 | layers=3:44 | cam=active replaced=7"));
+  s.time += 1 / 100.0, s.eye[0] += .01, s.eye[2] += .40; /* the cut, one frame later */
+  tfp_view_log_frame(&log, &s);
+  int lines_before = line_count;
+  for (int i = 0; i < 10; i++) { s.time += 1 / 100.0, s.eye[0] += .01; s.action = i & 1 ? "layers=3:45" : "layers=3:46"; tfp_view_log_frame(&log, &s); }
+  CHECK(line_count == lines_before); /* the same gate: silent, whatever the animation layers do */
+  s.gate = "kind=4 safe=0 mask=0x02";
+  s.time += 1 / 100.0, s.eye[0] += .01;
+  tfp_view_log_frame(&log, &s);
+  CHECK(logged("Wait: kind=4 safe=0 mask=0x02 | layers=3:45 | cam=active replaced=7"));
+  for (int i = 0; i < 30; i++) { s.time += 1 / 100.0, s.eye[0] += .01; tfp_view_log_frame(&log, &s); }
+  CHECK(logged("Cut: largest camera jump 0.400 m in the 0.30 s after leaving the native view"));
+  /* a gate that keeps changing is said seven times in one stretch (one above already), then once that more are left out */
+  static char gates[12][24];
+  lines_before = line_count;
+  for (int i = 0; i < 12; i++) {
+    snprintf(gates[i], sizeof gates[i], "kind=4 mask=0x%02x", 0x40 + i);
+    s.gate = gates[i], s.time += 1 / 100.0;
+    tfp_view_log_frame(&log, &s);
+  }
+  CHECK(line_count == lines_before + 7 && logged("Wait: more gate changes are not logged until the view returns"));
+  /* the view returns before the cut window of the leave closed: that window is closed first */
+  s.has_lease = true, s.phase = "running", s.camera_kind = 6, s.safe = true, s.gate = "kind=6 safe=1";
+  s.time += 1 / 100.0, s.eye[2] -= .25;
+  tfp_view_log_frame(&log, &s);
+  CHECK(logged("Return: kind=6 safe=1 | "));
+  s.has_lease = false, s.gate = "kind=4 safe=1";
+  s.time += 1 / 100.0;
+  tfp_view_log_frame(&log, &s);
+  CHECK(logged("Cut: largest camera jump 0.250 m in the 0.01 s after entering the native view"));
+  /* aim release: kept (the keeper acted on the frame before) says nothing more; not kept says where the button came from */
+  s.has_lease = true, s.gate = "kind=6 safe=1 active=1", s.controller_active = true, s.time += 1;
+  tfp_view_log_frame(&log, &s);
+  s.aim_keeps = 1, s.time += 1 / 100.0;
+  tfp_view_log_frame(&log, &s);
+  s.controller_active = false, s.gate = "kind=6 safe=1 active=0", s.time += 1 / 100.0;
+  tfp_view_log_frame(&log, &s);
+  CHECK(logged("State: aim out") && !logged("Aim: release not kept"));
+  s.controller_active = true, s.time += 1;
+  tfp_view_log_frame(&log, &s);
+  s.controller_active = false, s.has_lease = false, s.gate = "kind=4 safe=1 active=0", s.time += 1 / 100.0;
+  tfp_view_log_frame(&log, &s);
+  CHECK(logged("Aim: release not kept (aim button from engine): kind=4 safe=1 active=0"));
+  /* a build that fills none of the new fields logs as before */
+  tfp_view_log_init(&log, capture, NULL);
+  memset(&s, 0, sizeof s);
+  line_count = 0;
+  s.phase = "idle", s.label = "Idle";
+  tfp_view_log_frame(&log, &s);
+  s.time = 5, s.enabled = s.has_lease = true, s.phase = "running", s.label = "On";
+  tfp_view_log_frame(&log, &s);
+  s.has_lease = false, s.time += .5;
+  tfp_view_log_frame(&log, &s);
+  CHECK(!logged("Drop:") && !logged("Return:") && !logged("Wait:"));
+
   /* ---- the whole binder with no game behind it ---- */
   static const TfpCameraHelperApi camera = {h_validate_c, h_begin_c, h_end, h_stats_c, h_error, h_generation, h_handoff, h_u32, h_u32};
   static const TfpFovHelperApi fov = {h_validate_f, h_begin_f, h_bind_f, h_transition_f, h_end, h_stats_f, h_error};
