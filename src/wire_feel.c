@@ -69,6 +69,12 @@ void tfp_wire_feel_bind(TfpWire *w, TfpWireFeel *f, const TfpWireFeelParts *part
     tfp_wire_effects_bind(w, &f->fx, parts->effects, &options);
     f->has_effects = true;
   } else tfp_wire_say(w, "Refused: depth of field, vignette, aim markers, movement, native aim option: no platform");
+  /* Last: its placements go through the settings binder's decoder, which it chains to. */
+  if (parts->editor && settings && tfp_wire_editor_bind(w, parts->editor)) {
+    f->has_editor = true;
+    tfp_wire_say(w, "Ready: placement editor bound (retail's editor through the runtime's own controller and store; the weapon mode only: "
+                    "the eye-camera mode needs the head positioner, which is off)");
+  } else tfp_wire_say(w, "Off: placement editor (no overlay platform, or no settings store)");
   w->frame_extra = frame;
 }
 
@@ -81,8 +87,8 @@ void tfp_wire_feel_facts(TfpWire *w, TfpWireFeelFacts *out) {
   out->lease = tfp_wire_held(w) != NULL;
   out->recovering = tfp_wire_recovery_busy();
   out->unsaved = tfp_wire_settings_unsaved(w);
+  out->editor = tfp_wire_editor_active(w);
   if (!f) return;
-  out->editor = f->editor_open;
   if (f->has_pose) {
     unsigned pose = tfp_wire_pose_held(w);
     out->pose_lease = pose & 1u, out->look_pending = (pose & 2u) != 0;

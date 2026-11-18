@@ -13,4 +13,7 @@ void tfp_mod_menu_tick(const HfApi *hf, HfMod *mod, TfpWire *w, unsigned unavail
 /* Takes the registration out of MCM (a live replace). true: nothing is registered any more. */
 bool tfp_mod_menu_release(const HfApi *hf, HfMod *mod, TfpWire *w);
 bool tfp_mod_menu_registered(void);
+/* DBF-MCM's own window, for the placement editor: closed (true also when MCM is absent), and whether it is open. */
+bool tfp_mod_menu_close(void);
+bool tfp_mod_menu_is_open(void);
 #endif

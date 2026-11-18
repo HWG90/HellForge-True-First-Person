@@ -21,7 +21,7 @@ This is a C rewrite of the True First Person mode of Goose Gadget Kit (a Lua mod
 | Replacing the mod in a running game | Built in 0.6.0-feel.5, never run |
 | Settings menu (DBF-MCM: toggles, sliders, keys, per-weapon clipping) | Built in 0.6.0-feel.6, never run |
 | Saving settings (your own file, written when something changes) | Built in 0.6.0-feel.6, never run |
-| Placement editor ("poser") | Not built; its menu button and key are shown disabled |
+| Placement editor ("poser") | Built in 0.6.0-feel.7, never run: Page Up, or the menu button; needs Goose Overlay Host. The eye-camera editor is not built |
 | Sharing the camera with Photo Mode | Not built: do not open Photo Mode with the view on |
 
 ## Install

@@ -23,7 +23,8 @@
 #include "wire_win_effects.h"
 #include "engine.h"
 #include "mod_menu.h"
-#define TFP_VIEW_VERSION "0.6.0-feel.6"
+#include "mod_editor.h"
+#define TFP_VIEW_VERSION "0.6.0-feel.7"
 #else
 #include "wire_win.h"
 #define TFP_VIEW_VERSION "0.6.0-view.1"
@@ -35,6 +36,9 @@ static HfMod *owner;
 static TfpWire wire;
 static enum { WAIT_MODULES, WAIT_PINS, RUNNING, REFUSED } stage;
 static bool key_held, told_waiting, told_tick_thread, hook_told[TFP_WIN_HOOKS];
+#ifdef TFP_FEEL
+static bool editor_key_held;
+#endif
 static uint64_t next_pin_check;
 /* Live replace (docs/guides/LIVE-REPLACE.md). closing: hellforge_mod_unload has taken over, the tick does
  * nothing. in_tick: a tick is between its first and last line. Each side sets its own flag and then
@@ -221,6 +225,7 @@ static void start(void) {
     if (!engine_hooked) say("Refused: engine bridge: %s", eng_status());
     tfp_win_effects_platform(&fx_platform, tfp_win_exe());
     parts.effects = &fx_platform;
+    parts.editor = tfp_mod_editor_platform(&fx_platform);
     tfp_wire_feel_bind(&wire, &feel, &parts);
     tfp_wire_settings_saver(&wire, save_settings, NULL);
     int slots = tfp_win_pose_check(text, sizeof text);
@@ -241,8 +246,8 @@ static void start(void) {
 #ifdef TFP_FEEL
   say("Ready. F11 toggles True First Person (view, weapon and arm placement, motion; head hiding, sleeves, hand grips and the effects once "
       "their checks pass: see the Ready / Check / Refused lines). The settings menu is in DBF-MCM when goose.mcm is loaded; "
-      "settings are saved when they change. Not in this build: a placement editor (F8 opens HellForge's own editor), Photo Mode camera "
-      "sharing.");
+      "settings are saved when they change. Page Up (the menu's editor key) opens the placement editor when Goose Overlay Host is "
+      "loaded; F8 is HellForge's own editor. Not in this build: the eye-camera editor, Photo Mode camera sharing.");
 #else
   say("Ready. F11 toggles the view. Not in this build: arms and weapon placement, sleeves, hand grips, motion, head and body hiding, "
       "depth of field, vignette, aiming markers, movement policy, the F8 editor, the menu, Photo Mode camera sharing.");
@@ -252,7 +257,7 @@ static void start(void) {
 #ifdef TFP_FEEL
 static unsigned menu_unavailable(void) {
   bool arms = tfp_wire_engine_state(&wire, TFP_WE_SLEEVES) != TFP_WE_REFUSED || tfp_wire_engine_state(&wire, TFP_WE_GRIP) != TFP_WE_REFUSED;
-  return (arms ? 0 : TFP_MENU_NO_ARMS) | TFP_MENU_NO_EDITOR;
+  return (arms ? 0 : TFP_MENU_NO_ARMS) | (tfp_mod_editor_available() ? 0 : TFP_MENU_NO_EDITOR);
 }
 /* A live replace asked for the mod's registrations with other mods to be taken out; this is the game
  * thread, where DBF-MCM allows it. Nothing is released while the mod still holds something in the game. */
@@ -317,7 +322,17 @@ static void tick_body(void) {
   /* Engine values made in the tick live in the engine's per-frame buffer (src/engine.h). */
   eng_temp_begin();
   tfp_wire_feel_begin(&wire);
-  tfp_mod_menu_tick(hf, owner, &wire, menu_unavailable(), NULL);
+  /* The editor's key (the menu's; default Page Up), on its edge. The panel is registered before the menu, so
+   * the menu knows whether to offer the editor. */
+  int editor_key = tfp_wire_menu_editor_key(&wire, TFP_EDITOR_KEY);
+  tfp_mod_editor_tick(hf, owner, editor_key);
+  bool editor_down = editor_key && tfp_win_focused() && tfp_win_key_down(editor_key);
+  if (editor_down && !editor_key_held) {
+    const char *refused = tfp_wire_editor_toggle(&wire);
+    if (refused) say("Placement editor: %s", refused);
+  }
+  editor_key_held = editor_down;
+  if (tfp_mod_editor_settled()) tfp_mod_menu_tick(hf, owner, &wire, menu_unavailable(), tfp_wire_editor_toggle);
   tfp_wire_frame(&wire, extra);
   tfp_wire_menu_frame(&wire);          /* what the user did in MCM since the last tick, and the two status rows */
   tfp_wire_settings_save_frame(&wire); /* writes only when the store changed since the last write */
@@ -406,6 +421,7 @@ __declspec(dllexport) int hellforge_mod_unload(const HfApi *api, HfMod *mod, uin
     hf->log(mod, "Refused: live %s: %s. This build stays for the session.", reason == HF_UNLOAD_REPLACE ? "replace" : "removal", why);
     return 1;
   }
+  tfp_mod_editor_retire();   /* its panel stays registered with the overlay host: closed, and drawing nothing */
   unsigned restored = tfp_win_restore_slots() + tfp_win_pose_restore_slots();
   hf->log(mod, "Live %s: the mod held nothing in the game; %u dispatch slot(s) put back; this build does nothing from here on.",
           reason == HF_UNLOAD_REPLACE ? "replace" : "removal", restored);

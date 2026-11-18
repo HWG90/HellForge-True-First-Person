@@ -289,3 +289,32 @@ Full table, bytes and method: `docs/build-25480438/LOOK-GAIN-CONSTANTS-25480438.
 - The three steering cells are writable data: the images show where they are, not what they hold in play.
 - `B_INPUT_DEVICE` meaning (0 mouse, 1 or 2 pad) rests on the evaluator being the same code; not watched while switching devices.
 - The normalisation has never run on this build (its two assembly thunks are wired in the feel build and do nothing while the proof refuses).
+
+## 11. Placement editor (0.6.0-feel.7)
+
+### Bound
+
+| Runtime host pointer | Goes to |
+|---|---|
+| `editor_new`, `editor_update`, `editor_is_active`, `editor_cancel`, `editor_shutdown`, `editor_request_open`, `editor_status` | `src/wire_editor.c` -> `src/placement_editor.c` (retail `placement_editor.lua`) |
+
+| The editor's | Goes to |
+|---|---|
+| controller (`is_enabled`, `is_clean`, `result`, `get_placement`, `set_placement`, `start`) | the runtime's own `pc_*` entries (`runtime.lua:739-752`) |
+| store (`select_mode`, `can_start`, `target`, `get`, `get_action`, `save`, `reset_all`, `baseline`, `action_supported`, and its plain fields) | the runtime's `store_*` entries and `store_fields` (`runtime.lua:753-814`) |
+| clock | the runtime's `clock` entry |
+| MCM provider and its `camera_input` (close, is_open, input_status, acquire, release, set_focus, menu_sample, down, focused, photo_resolution, the view's draw / release) | `TfpEditorPlatform`: `src/mod_editor.c` (Goose Overlay Host) and `src/mod_menu.c` (DBF-MCM open / close) |
+| `stingray.Window.mouse_focus` / `show_cursor` | the effects platform's two functions |
+| Epic LUT check | never active: there is no Epic LUT on HellForge |
+
+A placement the editor hands to the runtime travels as the identity of one struct in the binder, read back by `w->placement_decode` (chained in front of the settings store's). `controller:get_placement()` is read by its numbers through `tfp_wire_controller_placement`.
+
+### Still off
+
+- The eye-camera mode (`request_open('camera')`): `head_positioner_*` stays off, and the binder only ever asks for the weapon mode.
+
+### Tests
+
+- `tests/run-vectors-placement-editor.sh`: 20,094 operations against retail; every executable line of the Lua file reached; six deliberate breaks of the C caught.
+- `tests/run-wire-feel.sh`: the binder with no game and a scripted platform: opened, cancelled by the key, the settings menu closed first, first-person entry refused without a game and the prepared placement put back, another frontend holding the input, the live-replace check while it is open; two deliberate breaks of the binder caught.
+- `src/mod_editor.c` (the panel, the two threads' hand-over) has no native test.

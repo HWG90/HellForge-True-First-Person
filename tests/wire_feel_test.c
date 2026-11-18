@@ -114,6 +114,23 @@ static TfpWire wire;
 static TfpWireFeel feel;
 static bool text_is(TfpRtValue v, const char *text) { return v.kind == TFP_RT_TEXT && v.length == strlen(text) && !memcmp(v.text, text, v.length); }
 
+/* The placement editor's platform, scripted: what the overlay host and DBF-MCM would answer. */
+static struct { bool available, menu_open, busy, acquired, focused; int closes, draws, released, last_count; TfpEditorSample sample; bool down[256]; } ed;
+static bool ed_available(void *u) { (void)u; return ed.available; }
+static bool ed_menu_close(void *u) { (void)u; ed.closes++; ed.menu_open = false; return true; }
+static bool ed_menu_is_open(void *u) { (void)u; return ed.menu_open; }
+static bool ed_busy(void *u) { (void)u; return ed.busy; }
+static bool ed_acquire(void *u) { (void)u; ed.acquired = true; return true; }
+static bool ed_release(void *u) { (void)u; ed.acquired = false; ed.released++; return true; }
+static bool ed_focused(void *u) { (void)u; return ed.focused; }
+static bool ed_sample(void *u, TfpEditorSample *out) { (void)u; *out = ed.sample; return true; }
+static bool ed_down(void *u, int key) { (void)u; return ed.down[key & 255]; }
+static bool ed_resolution(void *u, double *w, double *h) { (void)u; *w = 1920; *h = 1080; return true; }
+static void ed_draw(void *u, const TfpEdCommand *c, int n) { (void)u; (void)c; ed.draws++; ed.last_count = n; }
+static bool ed_window(void *u, bool *focus, bool *cursor) { (void)u; *focus = true; *cursor = false; return true; }
+static const TfpEditorPlatform editor_platform = {NULL, ed_available, ed_menu_close, ed_menu_is_open, ed_busy, ed_acquire, ed_release, ed_focused,
+                                                  ed_sample, ed_down, ed_resolution, ed_draw, ed_window};
+
 int main(void) {
   static const TfpCameraHelperApi camera = {h_validate_c, h_begin_c, h_end, h_stats_c, h_error, h_generation, h_handoff, h_u32, h_u32};
   static const TfpFovHelperApi fov = {h_validate_f, h_begin_f, h_bind_f, h_transition_f, h_end, h_stats_f, h_error};
@@ -159,9 +176,9 @@ int main(void) {
   /* ---- everything bound, no game ---- */
   tfp_wire_init(&wire, &memory, &platform, &helpers);
   TfpRtHost off = wire.host;
-  TfpWireFeelParts parts = {NULL, 0, "settings.json", &pose, &pose_io, &engine, &effects};
+  TfpWireFeelParts parts = {NULL, 0, "settings.json", &pose, &pose_io, &engine, &effects, &editor_platform};
   tfp_wire_feel_bind(&wire, &feel, &parts);
-  CHECK(feel.has_pose && feel.has_motion && feel.has_engine && feel.has_effects);
+  CHECK(feel.has_pose && feel.has_motion && feel.has_engine && feel.has_effects && feel.has_editor && logged("Ready: placement editor bound"));
   CHECK(logged("Refused: settings:") && logged("Ready: settings are retail's defaults")); /* no file */
   CHECK(logged("Ready: pose") && logged("Ready: motion bound") && logged("Ready: model shadows"));
   TfpRtHost *h = &wire.host;
@@ -171,7 +188,8 @@ int main(void) {
   CHECK(h->dof_update != off.dof_update && h->movement_update != off.movement_update && h->native_aim_update != off.native_aim_update);
   CHECK(h->aim_markers_update != off.aim_markers_update && h->helper_depth_stats != off.helper_depth_stats);
   /* what stays the view build's off answer */
-  CHECK(h->editor_request_open == off.editor_request_open && h->compat_update == off.compat_update && h->fird_start == off.fird_start);
+  CHECK(h->editor_request_open != off.editor_request_open && h->editor_update != off.editor_update && h->compat_update == off.compat_update &&
+        h->fird_start == off.fird_start);
   CHECK(h->head_positioner_start == off.head_positioner_start && h->camera_free_aim == off.camera_free_aim && h->menu_update == off.menu_update);
 
   /* tests/feel_bound.h is exactly what the binders replaced: every pointer of wire_off.h's lists is
@@ -233,6 +251,33 @@ int main(void) {
   CHECK(!tfp_wire_feel_markers(&wire, tfp_wire_number(1), &saved) && !tfp_wire_feel_markers(&wire, tfp_wire_ref(tfp_rt_default_placement), &saved));
   CHECK(tfp_wire_call(&wire, TFP_RT_E_markers_settings, NULL, r) == TFP_RT_OK && tfp_wire_feel_markers(&wire, r[0], &saved) && saved.count == 0);
 
+  /* ---- the placement editor with no game: retail's own steps and refusals, through the runtime's controller and store ---- */
+  {
+    const char *why;
+    line_count = 0;
+    CHECK(!tfp_wire_editor_active(&wire) && !tfp_wire_feel_held(&wire));
+    CHECK((why = tfp_wire_editor_toggle(&wire)) && strstr(why, "DBF-MCM captured placement input is unavailable")); /* no overlay platform yet */
+    ed.available = ed.focused = true; ed.menu_open = true;
+    CHECK(!tfp_wire_editor_toggle(&wire) && tfp_wire_editor_active(&wire) && logged("Placement editor: Opening placement editor"));
+    CHECK((why = tfp_wire_feel_held(&wire)) && strstr(why, "the placement editor is open"));            /* a live replace waits for it */
+    CHECK(wire.rt.store_mode == 1);                                                                     /* store.select_mode('weapon') reached the runtime */
+    CHECK((why = tfp_wire_editor_toggle(&wire)) == NULL && !tfp_wire_editor_active(&wire));              /* the key again: cancelled */
+    CHECK(logged("Placement editor: Placement editing cancelled; first person stays on"));
+    CHECK(!tfp_wire_editor_toggle(&wire));
+    now_seconds += 1 / 60.0; tfp_wire_feel_begin(&wire); tfp_wire_frame(&wire, NULL);                    /* queued: the settings menu is closed first */
+    CHECK(ed.closes == 1 && tfp_wire_editor_active(&wire) && !ed.acquired);
+    now_seconds += 1 / 60.0; tfp_wire_feel_begin(&wire); tfp_wire_frame(&wire, NULL);                    /* handoff: first person cannot start without a game */
+    CHECK(logged("Placement editor: First-person entry refused: Start refused: game.dll unavailable"));
+    CHECK(!tfp_wire_editor_active(&wire) && !ed.acquired && !ed.draws && !tfp_wire_editor_holds_draft(&wire) && !tfp_wire_feel_held(&wire));
+    CHECK(wire.ops.pose_placement.x == .15 && wire.ops.pose_placement.z == -.12);                        /* the placement it prepared was put back */
+    ed.busy = true;                                                                                      /* another frontend holds the input */
+    CHECK(!tfp_wire_editor_toggle(&wire));
+    for (int i = 0; i < 2; i++) { now_seconds += 1 / 60.0; tfp_wire_feel_begin(&wire); tfp_wire_frame(&wire, NULL); }
+    CHECK(logged("Placement editor: Close other menus before positioning the weapon") && !tfp_wire_editor_active(&wire));
+    ed.busy = false;
+    CHECK(!strcmp(tfp_wire_editor_status(&wire), "Close other menus before positioning the weapon"));
+    if (getenv("TFP_SHOW_LOG")) for (int i = 0; i < line_count; i++) printf("  log: %s\n", lines[i]);
+  }
   /* ---- the Feel line: once a second while the controller is enabled ---- */
   if (getenv("TFP_SHOW_LOG")) for (int i = 0; i < line_count; i++) printf("  log: %s\n", lines[i]);
   line_count = 0;
@@ -299,7 +344,7 @@ int main(void) {
   line_count = 0;
   CHECK(tfp_wire_call(&wire, TFP_RT_E_on_disable, NULL, r) == TFP_RT_OK && !logged("Refused"));
   CHECK(!tfp_wire_feel_held(&wire));                          /* and nothing is held afterwards */
-  printf("wire feel: %u checks passed (all five module binders joined with no game: enable, 90 frames, F11 refused, disable, what a live replace finds held; the motion "
+  printf("wire feel: %u checks passed (all five module binders joined with no game: enable, 90 frames, F11 refused, the placement editor opened and refused, disable, what a live replace finds held; the motion "
          "binder's shapes and presentation calls; the markers table; the Feel line)\n", checks);
   return 0;
 }

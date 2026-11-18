@@ -1,12 +1,12 @@
-# The settings menu, saving, and the placement editor (0.6.0-feel.6)
+# The settings menu, saving, and the placement editor (0.6.0-feel.7)
 
-Three things retail has that the first HellForge builds lacked. Two are built in 0.6.0-feel.6; the placement editor ("poser") is not. None of it has run in the game yet.
+Three things retail has that the first HellForge builds lacked. All three are built as of 0.6.0-feel.7 (the editor's eye-camera mode is not). The menu and saving ran in no game yet, nor has the editor: none of it has run in the game yet.
 
-| Part | State in 0.6.0-feel.6 |
+| Part | State in 0.6.0-feel.7 |
 |---|---|
 | Saving settings | Built. `src/wire_settings.c` (when), `src/mod_view.c` (the file) |
 | Settings menu | Built, on DBF-MCM for HellForge. `src/wire_menu.c`, `src/mod_menu.c` |
-| Placement editor | Not built. Its menu button and key are shown disabled |
+| Placement editor | Built for the weapon and arms. `src/placement_editor.c` (retail's editor), `src/wire_editor.c` (binder), `src/mod_editor.c` (the panel) |
 
 ## Saving
 
@@ -27,7 +27,7 @@ Controls, labels, ranges, steps and descriptions are retail's (`src/first_person
 |---|---|
 | Enable True First Person / Turn first-person view off | The same as the toggle key |
 | Show aim markers | Retail's global aim-marker setting; refused and put back if the markers module is off |
-| Edit arms and weapon placement, Open / close placement editor (key) | **Disabled**: the editor is not built |
+| Edit arms and weapon placement, Open / close placement editor (key) | Opens and closes the editor (below). **Disabled** when Goose Overlay Host is not loaded |
 | Toggle True First Person (key) | The key the mod listens for. Default F11; unbound means no key |
 | True First Person: native ADS, show torso | Stored and read by the translated units as in retail |
 | Fird Person Arms | **Disabled when sleeves and hand grips refused at start-up** (they do on current builds); the log says so |
@@ -55,16 +55,50 @@ MCM keeps each control's value in its own file once you change it. After registe
 - The registration is taken out of DBF-MCM on the game thread (MCM refuses it from any other). `hellforge_mod_unload` asks, the next tick checks that nothing is held, unregisters and answers; with no tick within two seconds a registered menu refuses the replace.
 - DBF-MCM's header says it does not support live mods. That is about a registration it cannot take out; this build takes its own out first. Unproven until tried.
 
-## The placement editor: what is planned
+## The placement editor
 
-Retail's editor is `src/first_person/placement_editor.lua` (397 lines): a draft placement per weapon and per action, previewed live through the controller, saved for this weapon or all weapons, reset to the default, cancelled on weapon change. The runtime translation already carries what it needs: the `pc_*` entries (the controller as the editor sees it), the `store_*` entries (get, get_action, target, save, baseline, reset_all, select_mode) and seven `editor_*` host pointers that still answer "off".
+Retail's editor (`src/first_person/placement_editor.lua`) translated to C and compared with the unmodified Lua on 20,094 operations (`tests/run-vectors-placement-editor.sh`): results, state, the order of every call it makes and every item it draws. The panel, the cursor and the mouse come from Goose Overlay Host; the editor needs it loaded.
 
-Plan: translate the editor's logic to C with vectors from the unmodified Lua, replace its drawn panel with a Dear ImGui panel through Goose Overlay Host (colours from `ov->theme()`, layout per `HD2-UI-Style/DESIGN.md`), keep its mouse drags (left: move, right: yaw and pitch, middle: roll, wheel: depth) and keys, open it with Page Up and from the menu button. `tfp_wire_feel_held` already refuses a live replace while an editor is open (`editor`), and the binder has a slot for it (`TFP_WIRE_EXT_EDITOR`).
+**Open and close:** Page Up (the menu's "Open / close placement editor" key), or the menu's "Edit arms and weapon placement" button. Opening closes the settings menu first and switches first person on if it was off. F8 is HellForge's own editor and is not used.
 
-Known constraints found while preparing it:
+**What it edits:** the placement of weapon and arms for the weapon in your hands and one action at a time.
 
-- Overlay Host has no way to unregister a panel and refuses a second panel with the same id. A replaced build's panel stays registered, so the panel must be opened by this mod's own key poll (not a host hotkey) and a retired build's panel must draw nothing.
-- The eye-camera editor (retail's Shift+F8) depends on the head positioner, which is still off.
+| Input | Effect |
+|---|---|
+| `<` `>` buttons | The action being edited (idle, aim, ADS, sprint, …). Switching discards unsaved edits of the action you leave |
+| Left drag (outside the panel) | Right / left and up / down |
+| Right drag | Yaw and pitch |
+| Middle drag | Roll |
+| Wheel | Forward / back (depth) |
+| Arrow keys, Page Down | Move; Page Down pulls back. Page Up would push forward in retail, but it is the editor's own key here, so use the wheel |
+| Shift | Fine steps (a tenth) |
+| Save weapon / Enter | Saves this action for this weapon and closes |
+| Save all | Saves this action for all weapons and closes |
+| Cancel / Esc / Page Up | Closes and puts the placement back |
+| Reset | Previews the default for this weapon and action; save to keep it |
+| Reset all | Clears every saved placement the editor manages (retail's rule), at once |
+
+Limits are retail's: 50 cm on each axis, 90 degrees on each angle. A weapon swap, the first-person view ending, the settings menu opening or the game losing focus cancels the edit and puts the placement back.
+
+**Saving:** a save goes through the same store as the menu, so the file is written once, on the save.
+
+**How it is drawn:** the editor lays out its own panel (retail's geometry, top left of the screen) and hit-tests its own buttons. `src/mod_editor.c` draws those rectangles and texts with the overlay host's theme tokens (`ov->theme()`), shaped per `HD2-UI-Style/DESIGN.md` (panel rounding 10 with a 1 px line border, buttons rounding 6, hover fill under the pointer). It holds no placement logic.
+
+**While it is open** the overlay host has the game's keyboard and mouse, as retail's captured input did: you cannot move or look around.
+
+### Not built
+
+- **The eye-camera editor** (retail's Shift+F8). It needs the head positioner, which this build leaves off; the editor only opens in its weapon mode.
+
+### Live replace and the panel
+
+- A live replace is refused while the editor is open, opening or closing.
+- Overlay Host cannot take a panel out and refuses a second one with the same id. Each load of the mod therefore registers its panel under an id of its own, and a replaced build closes its panel and draws nothing from then on. Its entry stays in the host's panel list (F7) as a dead "True First Person: placement" until the game restarts.
+
+### Decisions you may want different
+
+- **Page Up** both opens the editor and, in retail, moves the weapon forward. Here it only opens and closes; rebind the editor key in the menu to get Page Up back for depth.
+- The panel sits where retail puts it and is not movable.
 
 ## Unproven until it runs in the game
 
@@ -73,3 +107,5 @@ Known constraints found while preparing it:
 3. That this mod's tick and MCM's update are the same thread (MCM refuses calls from any other).
 4. `set_label` and `set_disabled` on the status rows, and the per-weapon drafts following the weapon.
 5. Unregistering during a live replace.
+6. The editor in the game, all of it: that the overlay host's window gives the cursor and the mouse as the panel expects (buttons and wheel are read in the host's draw callback on the render thread and handed to the game thread), that the first frame arrives before the editor's first input sample, that `Window.mouse_focus()` / `show_cursor()` answer true / false when it opens, text sizes and positions against the panel, and the key poll while the host holds the keyboard.
+7. `%+.1f` number texts are formatted by the C library of the build (zig's), compared natively with glibc only.

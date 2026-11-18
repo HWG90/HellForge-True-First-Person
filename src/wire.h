@@ -166,6 +166,8 @@ bool tfp_wire_pose_offset(const TfpWire *w);
 const char *tfp_wire_phase_text(TfpPhase phase);
 /* A placement value: the shipped default table, or whatever placement_decode knows. */
 bool tfp_wire_placement_of(TfpWire *w, TfpRtValue value, TfpOpsPlacement *out);
+/* controller:get_placement() by its numbers (its table carries the identity &w->ops.pose_placement). false: a field is not a number. */
+bool tfp_wire_controller_placement(TfpWire *w, TfpOpsPlacement *out);
 /* A number that is an address (a Lua number holding an integer below 2^53). */
 bool tfp_wire_address_of(double value, uint64_t *out);
 #endif

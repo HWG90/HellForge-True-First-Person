@@ -8,7 +8,7 @@
 #include <string.h>
 static bool feel_bound(const char *name) {
   static const char *const groups[] = {"motion_", "head_", "model_shadows_", "arm_pieces_", "grip_hand_", "dof_", "movement_", "native_aim_",
-                                       "aim_markers_", "actions_", "config_", "profile_", "helper_"};
+                                       "aim_markers_", "actions_", "config_", "profile_", "helper_", "editor_"};
   static const char *const singles[] = {"menu_fird_person_arms", "menu_show_torso", "menu_near_options", "menu_motion_options", "menu_native_ads",
                                         "menu_ads_mode", "mod_set", "backend_prepare_pose", "transition_action", "transition_resume"};
   if (!strncmp(name, "head_positioner_", 16)) return false; /* the editor's parked camera mode: still off */

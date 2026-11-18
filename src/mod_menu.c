@@ -47,6 +47,12 @@ static void changed(void *user, const char *id, const McmValue *value, const Mcm
 static const char *activate(void *user, const char *id) { (void)user; return bound ? tfp_wire_menu_activate(bound, id) : "The mod is not ready"; }
 
 bool tfp_mod_menu_registered(void) { return registered != NULL; }
+bool tfp_mod_menu_is_open(void) { return mcm && mcm->is_open && mcm->is_open() != 0; }
+bool tfp_mod_menu_close(void) {
+  if (!tfp_mod_menu_is_open()) return true;
+  if (mcm->close) mcm->close();
+  return true;   /* the editor checks is_open again an update later, as retail's handoff does */
+}
 void tfp_mod_menu_tick(const HfApi *hf, HfMod *mod, TfpWire *w, unsigned unavailable, TfpMenuEditFn edit) {
   ULONGLONG now = GetTickCount64();
   if (registered || gave_up || now < next_try) return;

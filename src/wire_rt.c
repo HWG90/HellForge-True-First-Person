@@ -675,6 +675,20 @@ static bool rt_controller_get_placement(TfpRtHost *h, TfpRtTable *o1) { /* ctl:1
   for (int i = 0; i < TFP_AXIS_N; i++) o1->f[TFP_RT_PLACE_X + i] = value.kind[i] == TFP_AXIS_NUMBER ? num(value.v[i]) : nil();
   return true;
 }
+/* controller:get_placement() by its numbers, for the placement editor's binder: the runtime hands such a
+ * table on by its identity only. */
+bool tfp_wire_controller_placement(TfpWire *w, TfpOpsPlacement *out) {
+  TfpPlacementApi api = place_api(w);
+  TfpPlacementValue value;
+  double *field[TFP_AXIS_N] = {&out->x, &out->y, &out->z, &out->yaw, &out->pitch, &out->roll};
+  tfp_controller_get_placement(&w->controller, &api, &value);
+  memset(out, 0, sizeof *out);
+  for (int i = 0; i < TFP_AXIS_N; i++) {
+    if (value.kind[i] == TFP_AXIS_OTHER) return false;
+    if (value.kind[i] == TFP_AXIS_NUMBER) { *field[i] = value.v[i]; out->present |= 1u << i; }
+  }
+  return true;
+}
 static bool rt_controller_placement_target(TfpRtHost *h, V *o1, V *o2) { /* ctl:106-109 */
   TfpWire *w = W(h);
   TfpPlacementApi api = place_api(w);

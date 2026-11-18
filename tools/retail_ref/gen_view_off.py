@@ -36,7 +36,8 @@ def off(s, feel=False):
         s.set(f"has.{name}", 0)
     s.group("compat_result")
     s.group("backend_alignment_context", present_=False)
-    s.set("editor_request_open#1", False).set("editor_request_open#2", OFF_EDITOR)
+    if not feel:   # the feel build binds the placement editor (src/wire_editor.c)
+        s.set("editor_request_open#1", False).set("editor_request_open#2", OFF_EDITOR)
     s.set("fird_module_native_animation_default", False).set("fird_module_render_pose_verified", False)
     s.set("camera_free_aim#1", False).set("camera_free_aim#2", OFF_CAMERA_DEBUG)
     if feel:

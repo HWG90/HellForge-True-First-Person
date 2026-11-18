@@ -15,6 +15,7 @@
 #include "wire_motion.h"
 #include "wire_engine.h"
 #include "wire_effects.h"
+#include "wire_editor.h"
 
 typedef struct TfpWireFeelParts {
   const char *settings_json;           /* the bytes of settings.json; NULL: no file (retail's defaults) */
@@ -24,13 +25,13 @@ typedef struct TfpWireFeelParts {
   const TfpPoseAdapterIo *pose_io;
   const TfpWireEngineApi *engine;      /* NULL: head, shadows, sleeves and grips stay off */
   const TfpFxPlatform *effects;        /* NULL: the five effect modules stay off */
+  const TfpEditorPlatform *editor;     /* NULL: the placement editor stays off */
 } TfpWireFeelParts;
 typedef struct TfpWireFeel {
   TfpWirePose pose;
   TfpFx fx;
-  bool has_pose, has_motion, has_engine, has_effects;
+  bool has_pose, has_motion, has_engine, has_effects, has_editor;
   bool second_open;
-  bool editor_open;                    /* set by the placement editor's binder (src/wire_editor.c) */
   double second_start;
   char line[900];
 } TfpWireFeel;
