@@ -107,6 +107,10 @@ double tfp_wire_engine_address(const TfpWire *w, const void *handle);
 /* Whose units: the fields of a snapshot the checks ask the backend with. */
 typedef struct TfpWireEngineBody { uint32_t body, viewmodel, avatar_index; uint64_t avatar_owner; bool has_owner; } TfpWireEngineBody;
 bool tfp_wire_engine_check_head(TfpWire *w, const TfpWireEngineBody *s);
+/* A failed run of those checks does not end head visibility for the session: it is tried again every 120
+ * frames, saying only the first failure and the pass. due: a run may be made now. checked: what a run found. */
+bool tfp_wire_engine_head_due(TfpWire *w);
+void tfp_wire_engine_head_checked(TfpWire *w, bool passed);
 /* 1 passed, 0 refused, -1 cannot be judged yet (nothing hangs on the rig). `sleeves` / `grip`: each module's verdict. */
 int tfp_wire_engine_check_arms(TfpWire *w, const TfpWireEngineBody *s, const TfpArmHandles *handles, bool *sleeves, bool *grip);
 bool tfp_wire_engine_check_maths(TfpWire *w);

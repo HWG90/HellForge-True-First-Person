@@ -657,6 +657,31 @@ int main(void) {
   raise_in = NULL;
   CHECK(tfp_wire_engine_check_head(&wire, &body));
 
+  /* ---- a failed check is tried again, not kept for the session (session 3850350d: the pass id was still 0
+   * when the view was first switched on, before a mission world, and the helmet showed for the whole session) ---- */
+  tfp_wire_engine_force(&wire, TFP_WE_HEAD, TFP_WE_RESOLVED);
+  CHECK(tfp_wire_engine_head_due(&wire));
+  put32(EXE + hb->context_default, 0);
+  fresh();
+  CHECK(!tfp_wire_engine_check_head(&wire, &body) && logged("Refused: head visibility: default pass id observed=00000000"));
+  tfp_wire_engine_head_checked(&wire, false);
+  CHECK(tfp_wire_engine_state(&wire, TFP_WE_HEAD) == TFP_WE_RESOLVED && logged("Waiting: head visibility: its checks are tried again"));
+  CHECK(!tfp_wire_engine_head_due(&wire)); /* not every frame */
+  fresh();
+  for (int i = 0; i < 119; i++) tfp_wire_engine_begin(&wire);
+  CHECK(!tfp_wire_engine_head_due(&wire));
+  tfp_wire_engine_begin(&wire);
+  CHECK(tfp_wire_engine_head_due(&wire));
+  CHECK(!tfp_wire_engine_check_head(&wire, &body) && !logged("Refused") && !logged("Check:")); /* the same failure is not said again */
+  tfp_wire_engine_head_checked(&wire, false);
+  CHECK(!logged("Waiting: head visibility"));
+  put32(EXE + hb->context_default, hb->context_default_value);
+  for (int i = 0; i < 120; i++) tfp_wire_engine_begin(&wire);
+  CHECK(tfp_wire_engine_head_due(&wire) && tfp_wire_engine_check_head(&wire, &body));
+  tfp_wire_engine_head_checked(&wire, true);
+  CHECK(tfp_wire_engine_state(&wire, TFP_WE_HEAD) == TFP_WE_READY && logged("Ready: head visibility: the in-game checks passed on try 3"));
+  CHECK(logged("Check: head visibility: default pass id ok")); /* the passing run is said in full */
+
   /* ---- the in-game checks of the arms ---- */
   CHECK(head->World_units(head->user, world, &list, &count, &error) && count == UNITS);
   TfpArmHandle rows[4] = {{BODY, (TfpArmUnit)list[0]}, {RIG, (TfpArmUnit)list[1]}, {PIECE, (TfpArmUnit)list[2]}, {WEAPON, (TfpArmUnit)list[3]}};

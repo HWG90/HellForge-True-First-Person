@@ -129,6 +129,10 @@ typedef struct TfpWireEngine {
   /* checks */
   bool maths_ok, arms_checked, link_checked, link_failed, told_arms_waiting, told_head_off;
   uint32_t arms_retry;
+  /* Head visibility's in-game checks are tried again after a failure (tfp_wire_engine_head_due). After the
+   * first failure a run's lines are kept back: said in full when it passes, or when it fails another way. */
+  uint32_t head_retry, head_tries, head_line_count;
+  char head_lines[10][420], head_told[420];
   TfpWireEngineBody body;              /* of the last arm update: whose units a link is read back for */
   bool has_body;
   /* the session log */
@@ -151,6 +155,14 @@ static void sayf(St *st, const char *format, ...) {
 static bool verdict(St *st, unsigned mask, bool ok, const char *check, const char *observed, const char *expected) {
   for (int m = 0; m < TFP_WE_MODULES; m++) {
     if (!(mask & BIT(m))) continue;
+    if (m == TFP_WE_HEAD) {
+      char line[420];
+      if (ok) snprintf(line, sizeof line, "Check: %s: %s ok observed=%s", module_names[m], check, observed);
+      else snprintf(line, sizeof line, "Refused: %s: %s observed=%s expected=%s", module_names[m], check, observed, expected);
+      if (st->head_tries) { if (st->head_line_count < 10) snprintf(st->head_lines[st->head_line_count++], sizeof st->head_lines[0], "%s", line); }
+      else { sayf(st, "%s", line); if (!ok) snprintf(st->head_told, sizeof st->head_told, "%s", line); }
+      continue;
+    }
     if (ok) sayf(st, "Check: %s: %s ok observed=%s", module_names[m], check, observed);
     else sayf(st, "Refused: %s: %s observed=%s expected=%s", module_names[m], check, observed, expected);
   }
@@ -696,6 +708,7 @@ bool tfp_wire_engine_check_head(TfpWire *w, const TfpWireEngineBody *s) {
   const TfpHeadBuild *b = &tfp_head_build_25480438;
   const unsigned M = HEAD;
   char observed[200], expected[200], text[200];
+  st->head_line_count = 0;
   /* (e) the three fields of the build table that rested on the kit's records (VISIBILITY-TRANSLATION.md, open issue 3) */
   uint8_t code[22];
   uint32_t id = 0;
@@ -1284,20 +1297,41 @@ static void refuse_arms_without_head(St *st) {
   sayf(st, "Refused: grip hand: head visibility is off, so there are no unit handles to place hands with");
   for (int m = TFP_WE_SLEEVES; m <= TFP_WE_GRIP; m++) if (st->state[m] != TFP_WE_WAITING) st->state[m] = TFP_WE_REFUSED;
 }
-/* The read-only checks of head visibility, once a player exists. */
+/* The read-only checks of head visibility, once a player exists. A failure is not final: the view can be
+ * switched on before a mission world exists (the pass ids are still 0 then), so they are tried again. */
+enum { HEAD_RETRY_FRAMES = 120 };
+bool tfp_wire_engine_head_due(TfpWire *w) {
+  St *st = ST(w);
+  return st && st->state[TFP_WE_HEAD] == TFP_WE_RESOLVED && st->frame >= st->head_retry;
+}
+void tfp_wire_engine_head_checked(TfpWire *w, bool passed) {
+  St *st = ST(w);
+  if (!st) return;
+  if (passed) {
+    for (uint32_t i = 0; i < st->head_line_count && st->head_tries; i++) sayf(st, "%s", st->head_lines[i]);
+    st->state[TFP_WE_HEAD] = TFP_WE_READY;
+    if (st->head_tries) sayf(st, "Ready: head visibility: the in-game checks passed on try %u; it owns the head, torso, shoulder and shadow passes while the view is on", st->head_tries + 1);
+    else sayf(st, "Ready: head visibility: the in-game checks passed; it owns the head, torso, shoulder and shadow passes while the view is on");
+    st->head_tries = 0, st->head_line_count = 0;
+    return;
+  }
+  if (!st->head_tries) sayf(st, "Waiting: head visibility: its checks are tried again every %d frames until they pass", HEAD_RETRY_FRAMES);
+  else if (st->head_line_count) {
+    /* Kept back unless it fails another way than was said. */
+    const char *last = st->head_lines[st->head_line_count - 1];
+    if (strcmp(last, st->head_told)) { sayf(st, "%s", last); snprintf(st->head_told, sizeof st->head_told, "%s", last); }
+  }
+  st->head_tries++, st->head_line_count = 0;
+  st->head_retry = st->frame + HEAD_RETRY_FRAMES;
+}
 static void head_preflight(St *st) {
   TfpOpsSnapshot s;
   TfpOpsText why;
   TfpWireEngineBody body;
+  if (!tfp_wire_engine_head_due(st->w)) return;
   if (tfp_ops_player_snapshot(&st->w->ops, &s, &why) != TFP_OPS_TRUE) return;
   body_of(&s, &body);
-  if (tfp_wire_engine_check_head(st->w, &body)) {
-    st->state[TFP_WE_HEAD] = TFP_WE_READY;
-    sayf(st, "Ready: head visibility: the in-game checks passed; it owns the head, torso, shoulder and shadow passes while the view is on");
-  } else {
-    st->state[TFP_WE_HEAD] = TFP_WE_REFUSED;
-    refuse_arms_without_head(st);
-  }
+  tfp_wire_engine_head_checked(st->w, tfp_wire_engine_check_head(st->w, &body));
 }
 static bool rt_model_shadows_new(TfpRtHost *h) {
   St *st = SH(h);
@@ -1516,6 +1550,7 @@ static void lost(St *st) {
   st->grip_frames_seen = 0;
   st->arms_checked = st->link_checked = st->link_failed = st->told_arms_waiting = st->told_head_off = false;
   st->arms_retry = 0;
+  st->head_retry = st->head_tries = st->head_line_count = 0, st->head_told[0] = 0;
   st->arm_handles.count = 0;
 }
 void tfp_wire_engine_begin(TfpWire *w) {
