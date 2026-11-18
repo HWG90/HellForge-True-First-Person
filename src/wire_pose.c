@@ -454,3 +454,8 @@ size_t tfp_wire_pose_second(TfpWire *w, char *out, size_t size) {
   if (n < 0) return 0;
   return (size_t)n < size ? (size_t)n : size - 1;
 }
+unsigned tfp_wire_pose_held(const TfpWire *w) {
+  TfpWirePose *p = POSE(w);
+  if (!p) return 0;
+  return (owned(p) ? 1u : 0u) | (p->adapter.api == tfp_wire_pose_linked() && tfp_pose_input_held() ? 2u : 0u);
+}

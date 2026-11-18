@@ -85,6 +85,9 @@ void tfp_wire_engine_frame(TfpWire *w);
 /* Once a second while the mode is on: "head=active:3 sleeves=linked:8 grip=on corr=12
  * max=0.004m/1.2deg"; the accumulators start again. Returns the characters written. */
 size_t tfp_wire_engine_second(TfpWire *w, char *out, size_t size);
+/* For a live replace: bit 0 head visibility owns rows, bit 1 arm pieces are hung, bit 2 the grip hand
+ * has written bones or hidden a hand. Reads only. */
+unsigned tfp_wire_engine_held(const TfpWire *w);
 TfpWireEngineState tfp_wire_engine_state(const TfpWire *w, TfpWireEngineModule module);
 
 /* The 27 Vector3 / Quaternion / Matrix4x4 value functions, computed here on 32-bit floats with the

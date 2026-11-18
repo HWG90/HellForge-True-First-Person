@@ -249,10 +249,54 @@ int main(void) {
   wire.controller.enabled = false;
   CHECK(text_is(tfp_wire_text("x"), "x"));
 
+  /* ---- live replace (docs/LIVE-REPLACE.md): idle and clean, or the first thing still held ---- */
+  {
+    TfpWireFeelFacts none, f;
+    const char *why;
+    TfpFx *fx = tfp_wire_effects_of(&wire);
+    CHECK(!tfp_wire_feel_held(&wire));                        /* enabled, never entered: nothing is held */
+    tfp_wire_feel_facts(&wire, &none);
+    CHECK(!none.view_on && none.phase == TFP_PHASE_IDLE && !none.lease && !none.recovering && !none.pose_lease && !none.look_pending);
+    CHECK(!none.head && !none.sleeves && !none.grip && !none.dof && !none.vignette && !none.markers && !none.movement && !none.aim_option);
+    /* the gathering reads the modules' own state */
+    wire.controller.enabled = true;
+    CHECK((why = tfp_wire_feel_held(&wire)) && strstr(why, "the view is on") && strstr(why, "F11"));
+    wire.controller.enabled = false;
+    wire.controller.phase = TFP_PHASE_WAITING;
+    CHECK((why = tfp_wire_feel_held(&wire)) && strstr(why, "has not finished switching off"));
+    wire.controller.phase = TFP_PHASE_CLEANUP_PENDING;
+    CHECK((why = tfp_wire_feel_held(&wire)) && strstr(why, "cleanup is still pending"));
+    wire.controller.phase = TFP_PHASE_IDLE;
+    fx->movement.has_owned = true;
+    CHECK((why = tfp_wire_feel_held(&wire)) && strstr(why, "movement"));
+    fx->movement.has_owned = false;
+    fx->markers.has_lease = true;
+    CHECK((why = tfp_wire_feel_held(&wire)) && strstr(why, "aim markers"));
+    fx->markers.has_lease = false;
+    fx->aim.has_lease = true;
+    CHECK((why = tfp_wire_feel_held(&wire)) && strstr(why, "native aim option"));
+    fx->aim.has_lease = false;
+    fx->dof.dof.has_record = true;
+    CHECK((why = tfp_wire_feel_held(&wire)) && strstr(why, "depth of field"));
+    fx->dof.dof.has_record = false;
+    CHECK(!tfp_wire_feel_held(&wire));
+    /* each fact has its own answer, and the view comes first */
+#define HELD(field, text) f = none; f.field = true; CHECK((why = tfp_wire_feel_held_of(&f)) && strstr(why, text));
+    HELD(view_on, "the view is on") HELD(lease, "native-view lease") HELD(recovering, "being recovered") HELD(pose_lease, "pose helper")
+    HELD(look_pending, "look-gain") HELD(head, "head visibility") HELD(sleeves, "arm pieces") HELD(grip, "grip hand")
+    HELD(dof, "depth of field") HELD(vignette, "vignette") HELD(markers, "aim markers") HELD(movement, "movement")
+    HELD(aim_option, "native aim option")
+#undef HELD
+    f = none; f.phase = TFP_PHASE_RUNNING; CHECK((why = tfp_wire_feel_held_of(&f)) && strstr(why, "has not finished switching off"));
+    f = none; f.phase = TFP_PHASE_DISABLED; CHECK(!tfp_wire_feel_held_of(&f));
+    f = none; f.head = f.view_on = true; CHECK(strstr(tfp_wire_feel_held_of(&f), "the view is on"));
+  }
+
   /* ---- disable: every module shuts down clean ---- */
   line_count = 0;
   CHECK(tfp_wire_call(&wire, TFP_RT_E_on_disable, NULL, r) == TFP_RT_OK && !logged("Refused"));
-  printf("wire feel: %u checks passed (all five module binders joined with no game: enable, 90 frames, F11 refused, disable; the motion "
+  CHECK(!tfp_wire_feel_held(&wire));                          /* and nothing is held afterwards */
+  printf("wire feel: %u checks passed (all five module binders joined with no game: enable, 90 frames, F11 refused, disable, what a live replace finds held; the motion "
          "binder's shapes and presentation calls; the markers table; the Feel line)\n", checks);
   return 0;
 }

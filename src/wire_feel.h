@@ -40,4 +40,21 @@ void tfp_wire_feel_bind(TfpWire *w, TfpWireFeel *feel, const TfpWireFeelParts *p
 void tfp_wire_feel_begin(TfpWire *w);
 /* The aim_markers table of the settings store as the keys that are true (TfpFxOptions.markers_decode). */
 bool tfp_wire_feel_markers(TfpWire *w, TfpRtValue value, TfpAimMarkersSaved *out);
+
+/* ---- live replace (docs/LIVE-REPLACE.md) ---------------------------------------------------------
+ * What the mod still holds in the game. Gathered by reading the modules' own state: no game call, no
+ * engine call, no write, so it may run on the loader's change thread once no tick is in flight. */
+typedef struct TfpWireFeelFacts {
+  bool view_on;        /* the controller is enabled (F11 on, running or waiting) */
+  TfpPhase phase;      /* the controller's phase */
+  bool lease;          /* a native-view lease is held */
+  bool recovering;     /* the recovery ledger has a row */
+  bool pose_lease, look_pending;
+  bool head, sleeves, grip;
+  bool dof, vignette, markers, movement, aim_option;
+} TfpWireFeelFacts;
+void tfp_wire_feel_facts(TfpWire *w, TfpWireFeelFacts *out);
+/* NULL: idle and clean. Otherwise one plain sentence naming the first thing still held. */
+const char *tfp_wire_feel_held_of(const TfpWireFeelFacts *facts);
+const char *tfp_wire_feel_held(TfpWire *w);
 #endif

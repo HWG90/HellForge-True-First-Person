@@ -1642,3 +1642,9 @@ bool tfp_wire_engine_bind(TfpWire *w, const TfpWireEngineApi *api, const TfpWire
   sayf(st, "Ready: model shadows: no engine function; reads the appearance rows at avatar owner +%#x", (unsigned)TFP_VIS_APPEARANCE_25480438);
   return true;
 }
+unsigned tfp_wire_engine_held(const TfpWire *w) {
+  const St *st = ST(w);
+  if (!st) return 0;
+  return (st->head && !tfp_head_is_clean(st->head) ? 1u : 0u) | (st->has_pieces && !tfp_arm_pieces_is_clean(&st->pieces) ? 2u : 0u) |
+         (st->has_grip && st->grip && !tfp_grip_hand_is_clean(st->grip) ? 4u : 0u);
+}

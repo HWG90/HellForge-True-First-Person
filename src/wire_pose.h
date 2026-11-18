@@ -112,6 +112,9 @@ size_t tfp_wire_pose_second(TfpWire *w, char *out, size_t size);
 
 /* The helper's running counts from the last status poll (for controller.lua's weapon_updates /
  * zero_restores); false: no poll yet. */
+/* For a live replace: bit 0, the adapter owns a helper lease; bit 1, the linked helper's look-gain
+ * normalisation holds something in the game (tfp_pose_input_held). Reads only. */
+unsigned tfp_wire_pose_held(const TfpWire *w);
 bool tfp_wire_pose_counts(const TfpWire *w, double *weapon_updates, double *zero_restores);
 
 /* Exported for tests/wire_pose_test.c. */

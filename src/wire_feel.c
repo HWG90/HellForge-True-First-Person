@@ -1,5 +1,6 @@
 /* See wire_feel.h. */
 #include "wire_feel.h"
+#include "wire_recovery.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -69,4 +70,54 @@ void tfp_wire_feel_bind(TfpWire *w, TfpWireFeel *f, const TfpWireFeelParts *part
     f->has_effects = true;
   } else tfp_wire_say(w, "Refused: depth of field, vignette, aim markers, movement, native aim option: no platform");
   w->frame_extra = frame;
+}
+
+/* ---- live replace -------------------------------------------------------------------------------- */
+void tfp_wire_feel_facts(TfpWire *w, TfpWireFeelFacts *out) {
+  const TfpWireFeel *f = feel_of(w);
+  memset(out, 0, sizeof *out);
+  out->view_on = w->controller.enabled;
+  out->phase = w->controller.phase;
+  out->lease = tfp_wire_held(w) != NULL;
+  out->recovering = tfp_wire_recovery_busy();
+  if (!f) return;
+  if (f->has_pose) {
+    unsigned pose = tfp_wire_pose_held(w);
+    out->pose_lease = pose & 1u, out->look_pending = (pose & 2u) != 0;
+  }
+  if (f->has_engine) {
+    unsigned engine = tfp_wire_engine_held(w);
+    out->head = engine & 1u, out->sleeves = (engine & 2u) != 0, out->grip = (engine & 4u) != 0;
+  }
+  if (f->has_effects) {
+    const TfpFx *fx = tfp_wire_effects_of(w);
+    out->dof = !tfp_dof_setting_is_clean(&fx->dof.dof);
+    out->vignette = !tfp_vignette_is_clean(&fx->vignette);
+    out->markers = !tfp_aim_markers_is_clean(&fx->markers);
+    out->movement = !tfp_movement_is_clean(&fx->movement);
+    out->aim_option = !tfp_native_aim_is_clean(&fx->aim);
+  }
+}
+const char *tfp_wire_feel_held_of(const TfpWireFeelFacts *f) {
+  if (f->view_on) return "the view is on; press F11 to switch it off first";
+  if (f->phase == TFP_PHASE_CLEANUP_PENDING) return "the view's cleanup is still pending; wait a moment and try again";
+  if (f->phase != TFP_PHASE_IDLE && f->phase != TFP_PHASE_DISABLED) return "the view has not finished switching off; wait a moment and try again";
+  if (f->lease) return "a native-view lease is still held";
+  if (f->recovering) return "a part that failed is still being recovered";
+  if (f->pose_lease) return "the pose helper still holds its lease on the weapon and arms";
+  if (f->look_pending) return "the look-gain normalisation still holds a value in the game's input";
+  if (f->head) return "head visibility still owns hidden meshes";
+  if (f->sleeves) return "arm pieces are still linked to the first-person arms";
+  if (f->grip) return "the grip hand has not put its bones back";
+  if (f->dof) return "depth of field has not been restored";
+  if (f->vignette) return "the vignette has not been restored";
+  if (f->markers) return "the aim markers have not been shown again";
+  if (f->movement) return "the movement focus byte has not been restored";
+  if (f->aim_option) return "the native aim option has not been restored";
+  return NULL;
+}
+const char *tfp_wire_feel_held(TfpWire *w) {
+  TfpWireFeelFacts facts;
+  tfp_wire_feel_facts(w, &facts);
+  return tfp_wire_feel_held_of(&facts);
 }

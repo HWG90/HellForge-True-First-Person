@@ -176,6 +176,10 @@ uint32_t tfp_pose_end(uint64_t generation);
 uint32_t tfp_pose_read_stats(uint64_t generation, TfpPoseStats *stats);
 uint32_t tfp_pose_read_depth_stats(uint64_t generation, TfpPoseDepthStats *stats);
 uint32_t tfp_pose_error(void);
+/* Not in retail's helper; read-only, for a live replace of the mod (docs/LIVE-REPLACE.md): 1 while a
+ * private preset index is published or waiting, or a private row is in use; 0 when the look-gain
+ * normalisation holds nothing in the game. */
+uint32_t tfp_pose_input_held(void);
 uint32_t tfp_pose_set_transition(uint64_t generation, uint64_t epoch, float progress, uint32_t ads);
 uint32_t tfp_pose_rotation_trace(TfpPoseRotationTraceData *out);
 uint32_t tfp_pose_set_rotation_guard(uint32_t enabled);

@@ -1993,3 +1993,9 @@ void tfp_pose_reset_for_tests(void) {
   memset(entry_positions, 0, sizeof entry_positions); entry_position_next = 0; entry_position_writes = 0;
   atomic_store(&entry_position_enabled, 1);
 }
+/* Not in retail (pose_helper.h). Reads only. */
+uint32_t tfp_pose_input_held(void) {
+  if (input_state.pending.ready || input_state.pending.published) return 1;
+  for (unsigned i = 0; i < INPUT_CLONES; ++i) if (input_clones[i].busy) return 1;
+  return 0;
+}

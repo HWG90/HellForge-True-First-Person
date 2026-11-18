@@ -126,3 +126,4 @@ void tfp_wire_recovery_bind(TfpRtHost *h, TfpWireFailureOf lookup) {
   h->recovery_snapshot = rc_snapshot;
   h->recovery_blocks_view = rc_blocks_view;
 }
+bool tfp_wire_recovery_busy(void) { return tfp_recovery_has_policies(&ledger); }

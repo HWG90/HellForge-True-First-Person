@@ -22,7 +22,7 @@
 #include "wire_win_engine.h"
 #include "wire_win_effects.h"
 #include "engine.h"
-#define TFP_VIEW_VERSION "0.6.0-feel.4"
+#define TFP_VIEW_VERSION "0.6.0-feel.5"
 #else
 #include "wire_win.h"
 #define TFP_VIEW_VERSION "0.6.0-view.1"
@@ -35,6 +35,10 @@ static TfpWire wire;
 static enum { WAIT_MODULES, WAIT_PINS, RUNNING, REFUSED } stage;
 static bool key_held, told_waiting, told_tick_thread, hook_told[TFP_WIN_HOOKS];
 static uint64_t next_pin_check;
+/* Live replace (docs/LIVE-REPLACE.md). closing: hellforge_mod_unload has taken over, the tick does
+ * nothing. in_tick: a tick is between its first and last line. Each side sets its own flag and then
+ * reads the other's, both with interlocked operations, so one of the two always sees the other. */
+static volatile LONG closing, in_tick;
 #ifdef TFP_FEEL
 static TfpWireFeel feel;
 static TfpFxPlatform fx_platform;
@@ -194,16 +198,15 @@ static void start(void) {
   stage = RUNNING;
 #ifdef TFP_FEEL
   say("Ready. F11 toggles True First Person (view, weapon and arm placement, motion; head hiding, sleeves, hand grips and the effects once "
-      "their checks pass: see the Ready / Check / Refused lines). Not in this build: the F8 editor, the menu, "
-      "Photo Mode camera sharing.");
+      "their checks pass: see the Ready / Check / Refused lines). Not in this build: a placement editor (F8 opens "
+      "HellForge's own editor), the menu, Photo Mode camera sharing.");
 #else
   say("Ready. F11 toggles the view. Not in this build: arms and weapon placement, sleeves, hand grips, motion, head and body hiding, "
       "depth of field, vignette, aiming markers, movement policy, the F8 editor, the menu, Photo Mode camera sharing.");
 #endif
 }
 
-static void tick(HfMod *mod, float dt, void *unused) {
-  (void)mod; (void)dt; (void)unused;
+static void tick_body(void) {
   if (stage == REFUSED) return;
   if (!told_tick_thread) {
     told_tick_thread = true;
@@ -282,6 +285,13 @@ static void tick(HfMod *mod, float dt, void *unused) {
   }
 }
 
+static void tick(HfMod *mod, float dt, void *unused) {
+  (void)mod; (void)dt; (void)unused;
+  InterlockedExchange(&in_tick, 1);
+  if (!InterlockedCompareExchange(&closing, 0, 0)) tick_body();
+  InterlockedExchange(&in_tick, 0);
+}
+
 /* The session is ending (possibly under the loader lock, other threads gone): no game call, no
  * lock, no helper state. Only put the dispatch slots back if they still hold this mod's hooks. */
 static void session_end(HfMod *mod, HfEvent event, void *unused) {
@@ -293,6 +303,33 @@ static void session_end(HfMod *mod, HfEvent event, void *unused) {
   hf->log(mod, "Session end: %u dispatch slot(s) put back", restored);
 }
 
+#ifdef TFP_FEEL
+/* SDK 16, "live": true. HellForge is taking this build out of the running game (reason: removed, or
+ * replaced by a new build). Called on the loader's change thread: no game call, no engine call and
+ * no helper call from here. It only succeeds when the mod already holds nothing in the game, which
+ * the tick's own stop paths (F11 off) bring about; then the dispatch slots are put back as at the
+ * session's end. Anything else: 1, and HellForge keeps this build for the session. */
+__declspec(dllexport) int hellforge_mod_unload(const HfApi *api, HfMod *mod, uint32_t reason) {
+  const char *why = NULL;
+  (void)api;
+  InterlockedExchange(&closing, 1);
+  for (int waited = 0; InterlockedCompareExchange(&in_tick, 0, 0); waited++) {
+    if (waited >= 2000) { why = "a game update of this mod did not finish within 2 seconds"; break; }
+    Sleep(1);
+  }
+  if (!why && stage == RUNNING) why = tfp_wire_feel_held(&wire);
+  if (why) {
+    InterlockedExchange(&closing, 0);
+    hf->log(mod, "Refused: live %s: %s. This build stays for the session.", reason == HF_UNLOAD_REPLACE ? "replace" : "removal", why);
+    return 1;
+  }
+  unsigned restored = tfp_win_restore_slots() + tfp_win_pose_restore_slots();
+  hf->log(mod, "Live %s: the mod held nothing in the game; %u dispatch slot(s) put back; this build does nothing from here on.",
+          reason == HF_UNLOAD_REPLACE ? "replace" : "removal", restored);
+  return 0;
+}
+#endif
+
 __declspec(dllexport) int hellforge_mod_init(const HfApi *api, HfMod *mod) {
   if (!api || !mod || api->version < 16 || api->size < offsetof(HfApi, read_code) + sizeof api->read_code || !api->log || !api->read ||
       !api->write || !api->read_code || !api->module_base || !api->build_id || !api->on_game_thread || !api->on) return 1;
@@ -303,7 +340,9 @@ __declspec(dllexport) int hellforge_mod_init(const HfApi *api, HfMod *mod) {
     return 1;
   }
 #ifdef TFP_FEEL
-  say("True First Person " TFP_VIEW_VERSION " (feel build): retail 0.5.41-smooth.66 in C for build 25480438.");
+  bool live = api->size >= offsetof(HfApi, load_phase) + sizeof api->load_phase && api->load_phase && api->load_phase(mod) == HF_LOAD_LIVE;
+  say("True First Person " TFP_VIEW_VERSION " (feel build): retail 0.5.41-smooth.66 in C for build 25480438. %s", live
+      ? "Set up live, while the game runs: the same set-up as at the game's start." : "Set up as the game started.");
   engine_hooked = tfp_win_engine_init(api, mod); /* hooks lua51.dll's lua_pcall / lua_close, from the loader's thread as the donor did */
 #else
   say("True First Person " TFP_VIEW_VERSION " (view only): retail 0.5.41-smooth.66 in C for build 25480438.");

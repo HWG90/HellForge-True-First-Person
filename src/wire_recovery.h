@@ -11,4 +11,6 @@ void tfp_wire_recovery_bind(TfpRtHost *h, TfpWireFailureOf lookup);
 /* Retail's texts. NULL: not a phase. -1: not one of the five managed policies. */
 const char *tfp_wire_recovery_phase(int phase);
 int tfp_wire_recovery_policy(const char *name);
+/* For a live replace: a policy has a row in the ledger (a failed part is being cleaned up or retried). */
+bool tfp_wire_recovery_busy(void);
 #endif
