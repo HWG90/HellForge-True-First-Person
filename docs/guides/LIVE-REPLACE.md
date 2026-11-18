@@ -1,5 +1,7 @@
 # Replacing the mod while the game runs (0.6.0-feel.5)
 
+> **0.6.0-feel.6:** the answer now comes from the game thread. `hellforge_mod_unload` asks; the mod's next tick checks that nothing is held, takes the settings menu out of DBF-MCM (only that thread may) and answers. If no tick comes within two seconds the change thread judges it itself as before, and refuses when a menu is registered. Two more things refuse a replace: an open placement editor and a settings change that could not be saved. See [POSER-AND-MENU.md](POSER-AND-MENU.md).
+
 From feel.5 the feel build declares `"live": true` (HellForge SDK 16) and exports `hellforge_mod_unload`, so HellForge
 may take it out of a running game and set a new build up in its place. HellForge's side is described in the SDK's
 `docs/modding/live.md` and `docs/mods.md` ("Changing mods while you play"). Nothing here has run in the game yet.

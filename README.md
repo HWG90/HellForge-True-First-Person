@@ -19,7 +19,9 @@ This is a C rewrite of the True First Person mode of Goose Gadget Kit (a Lua mod
 | Depth of field and vignette handling, aim markers | In game |
 | Sleeves and hand grips | Refused at start-up (a maths check is 0.004 off its 0.0001 limit) |
 | Replacing the mod in a running game | Built in 0.6.0-feel.5, never run |
-| Placement editor, settings menu, saving settings | Not built |
+| Settings menu (DBF-MCM: toggles, sliders, keys, per-weapon clipping) | Built in 0.6.0-feel.6, never run |
+| Saving settings (your own file, written when something changes) | Built in 0.6.0-feel.6, never run |
+| Placement editor ("poser") | Not built; its menu button and key are shown disabled |
 | Sharing the camera with Photo Mode | Not built: do not open Photo Mode with the view on |
 
 ## Install
@@ -27,6 +29,9 @@ This is a C rewrite of the True First Person mode of Goose Gadget Kit (a Lua mod
 1. Build it (below), or take a build from Releases when there is one.
 2. With HellForge and the game closed, copy `goose_true_first_person.dll`, `hellforge-mod.json` and `settings.json` into `HellForge/mods/true-first-person/`.
 3. Switch the mod on on HellForge's Mods page. Switch any other first-person mod off.
+4. For the settings menu, also have DBF-MCM for HellForge (`goose.mcm`) switched on; it opens with DEL. Without it the mod runs on its saved settings.
+
+Keys: **F11** toggles the view (changeable in the menu). What the menu and the mod change is saved to `%LOCALAPPDATA%\Goose\HellForge\TrueFirstPerson\settings.json`; see [docs/guides/POSER-AND-MENU.md](docs/guides/POSER-AND-MENU.md).
 
 ## Build
 

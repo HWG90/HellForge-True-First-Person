@@ -14,6 +14,10 @@
 #include "wire.h"
 #include "wire_off.h"
 #include "wire_settings.h"
+#include "wire_menu.h"
+#ifdef TFP_HAVE_MCM_SCHEMA
+#include "schema.h"
+#endif
 #include "vectors/settings_vectors.h"
 
 static unsigned checks;
@@ -91,6 +95,39 @@ static bool test_save(void *user, const char *text, size_t length, char *why, si
   memcpy(saved_text, text, length); saved_text[length] = 0; saved_length = length;
   return true;
 }
+/* ---- a stand-in for MCM: the saved values, and what the binder asked of it ---- */
+static struct { const char *id; TfpMenuValue v; } mcm_values[40];
+static unsigned mcm_count, mcm_sets, mcm_labels, mcm_disables;
+static char mcm_last_label[2][300], mcm_disabled[400];
+static TfpMenuValue *mcm_slot(const char *id) {
+  for (unsigned i = 0; i < mcm_count; i++) if (!strcmp(mcm_values[i].id, id)) return &mcm_values[i].v;
+  return NULL;
+}
+static void mcm_put(const char *id, int kind, bool b, double n) {
+  TfpMenuValue *v = mcm_slot(id);
+  if (!v) { mcm_values[mcm_count].id = id; v = &mcm_values[mcm_count++].v; }
+  *v = (TfpMenuValue){kind, b, n};
+}
+static bool mcm_get(void *u, const char *id, TfpMenuValue *out) { (void)u; TfpMenuValue *v = mcm_slot(id); if (v) *out = *v; return v != NULL; }
+static bool mcm_set(void *u, const char *id, const TfpMenuValue *value) {
+  (void)u; mcm_sets++;
+  TfpMenuValue before = {0, false, 0}, *v = mcm_slot(id);
+  if (v) before = *v;
+  mcm_put(id, value->kind, value->boolean, value->number);
+  tfp_wire_menu_changed(&wire, id, value, &before); /* MCM calls `changed` back after a set */
+  return true;
+}
+static bool mcm_set_disabled(void *u, const char *id, bool disabled) {
+  (void)u; mcm_disables++;
+  if (disabled) { strcat(mcm_disabled, id); strcat(mcm_disabled, " "); }
+  return true;
+}
+static bool mcm_set_label(void *u, const char *id, const char *label) {
+  (void)u; mcm_labels++;
+  snprintf(mcm_last_label[!strcmp(id, "runtime_status") ? 0 : 1], 300, "%s", label);
+  return true;
+}
+static const char *test_edit(TfpWire *w) { (void)w; return "editor asked"; }
 static V text(const char *t) { return tfp_wire_text(t); }
 static bool text_is(V v, const char *t) { return v.kind == TFP_RT_TEXT && t && v.length == strlen(t) && !memcmp(v.text, t, v.length); }
 static bool same_placement(const TfpActionPlacement *p, unsigned mask, const double v[6]) {
@@ -601,6 +638,90 @@ int main(int argc, char **argv) {
     CHECK(tfp_wire_settings_menu_set(&wire, TFP_MENU_show_torso, true, false, 0));
     tfp_wire_settings_save_frame(&wire);
     CHECK(saves == 4 && !tfp_wire_settings_unsaved(&wire));
+    tfp_wire_settings_free(&wire);
+  }
+  { /* ---- the menu on MCM (src/wire_menu.c) ---- */
+    static char definition[16384];
+    TfpRtValue r[30];
+    new_wire();
+    CHECK(tfp_wire_settings_bind(&wire, settings_user_json, sizeof settings_user_json - 1, "settings.json"));
+    TfpSettings *s = tfp_wire_settings(&wire);
+    CHECK(tfp_wire_settings_menu_set(&wire, TFP_MENU_motion_strength, false, false, 135));
+    size_t n = tfp_wire_menu_definition(&wire, 33, definition, sizeof definition);
+    CHECK(n > 2000 && n < sizeof definition && strlen(definition) == n);
+    CHECK(tfp_wire_menu_definition(&wire, 33, NULL, 0) == n);                  /* measuring writes nothing */
+    CHECK(strstr(definition, "\"id\":\"motion_strength\",\"type\":\"slider\",\"label\":\"Weapon movement strength\",\"min\":0,\"max\":200,\"step\":5,\"default\":135"));
+    CHECK(strstr(definition, "\"id\":\"editor_key\",\"type\":\"keybind\",\"label\":\"Open / close placement editor\",\"default\":33")); /* retail's F8 is HellForge's editor */
+    CHECK(strstr(definition, "\"id\":\"toggle_key\",\"type\":\"keybind\",\"label\":\"Toggle True First Person\",\"default\":122"));
+    CHECK(strstr(definition, "\"id\":\"weapon_sway_speed\",\"type\":\"slider\",\"label\":\"Weapon sway response speed\",\"min\":25,\"max\":200,\"step\":5"));
+    CHECK(!strstr(definition, "start_free_aim") && !strstr(definition, "start_native_test"));
+#ifdef TFP_HAVE_MCM_SCHEMA
+    {
+      char error[256] = "";
+      McmModDef *def = schema_parse(definition, n, error, sizeof error);
+      if (!def) printf("wire settings: DBF-MCM refuses the definition: %s\n", error);
+      CHECK(def && !strcmp(def->id, TFP_MENU_MOD_ID) && def->page_count == 2 && !def->pages[0].require_confirmation);
+      int strength = schema_find(def, "motion_strength"), preset = schema_find(def, "motion_preset"), key = schema_find(def, "editor_key");
+      CHECK(strength >= 0 && def->controls[strength].type == MCM_SLIDER && def->controls[strength].def.number == 135 && def->controls[strength].max == 200);
+      CHECK(preset >= 0 && def->controls[preset].type == MCM_CHOICE && key >= 0 && def->controls[key].type == MCM_KEYBIND && def->controls[key].def.number == 33);
+      CHECK(schema_find(def, "save_weapon_near") >= 0 && schema_find(def, "runtime_status") >= 0 && schema_find(def, "sprint_motion_strength") >= 0);
+      schema_free(def);
+    }
+#endif
+    /* MCM's file holds other values than settings.json: they win */
+    mcm_count = mcm_sets = mcm_labels = mcm_disables = 0, mcm_disabled[0] = 0;
+    mcm_put("motion_strength", TFP_MENU_VALUE_NUMBER, false, 150), mcm_put("show_torso", TFP_MENU_VALUE_BOOL, true, 0);
+    mcm_put("toggle_key", TFP_MENU_VALUE_NUMBER, false, 121), mcm_put("editor_key", TFP_MENU_VALUE_NUMBER, false, 119);
+    mcm_put("weapon_near_hip_cm", TFP_MENU_VALUE_NUMBER, false, 9), mcm_put("weapon_near_aim_cm", TFP_MENU_VALUE_NUMBER, false, 9);
+    mcm_put("show_aim_markers", TFP_MENU_VALUE_BOOL, true, 0), mcm_put("family_placement_defaults", TFP_MENU_VALUE_BOOL, false, 0);
+    TfpMenuHost host = {NULL, mcm_get, mcm_set, mcm_set_disabled, mcm_set_label};
+    CHECK(!tfp_wire_menu_bound(&wire) && tfp_wire_menu_toggle_key(&wire) == 122);
+    CHECK(tfp_wire_menu_bind(&wire, &host, TFP_MENU_NO_ARMS, NULL) && tfp_wire_menu_bound(&wire));
+    CHECK(tfp_settings_menu_number(s, TFP_MENU_motion_strength) == 150 && tfp_settings_menu_flag(s, TFP_MENU_show_torso));
+    CHECK(tfp_wire_menu_toggle_key(&wire) == 121 && tfp_wire_menu_editor_key(&wire, 33) == 33);
+    CHECK(strstr(mcm_disabled, "fird_person_arms") && strstr(mcm_disabled, "edit_placement") && logged("Ready: menu: registered"));
+    CHECK(logged("\"Fird Person Arms\" is shown disabled"));
+    /* a slider moved in MCM reaches the store at once and is saved by the next save frame */
+    TfpMenuValue v = {TFP_MENU_VALUE_NUMBER, false, 80}, before = {TFP_MENU_VALUE_NUMBER, false, 150};
+    tfp_wire_menu_changed(&wire, "motion_strength", &v, &before);
+    CHECK(tfp_settings_menu_number(s, TFP_MENU_motion_strength) == 80);
+    v = (TfpMenuValue){TFP_MENU_VALUE_BOOL, true, 0};
+    tfp_wire_menu_changed(&wire, "motion_strength", &v, &before);              /* the wrong kind changes nothing */
+    CHECK(tfp_settings_menu_number(s, TFP_MENU_motion_strength) == 80);
+    tfp_wire_menu_changed(&wire, "no_such_control", &v, &before);
+    /* buttons and the two config toggles wait for the tick */
+    CHECK(tfp_wire_call(&wire, TFP_RT_E_on_enable, NULL, r) == TFP_RT_OK);
+    unsigned sets = mcm_sets;
+    TfpMenuValue on = {TFP_MENU_VALUE_BOOL, true, 0}, off = {TFP_MENU_VALUE_BOOL, false, 0};
+    int family = tfp_settings_flag(s, TFP_SET_family_placement_defaults);  /* the user's file has it on */
+    tfp_wire_menu_changed(&wire, "family_placement_defaults", family == 1 ? &off : &on, family == 1 ? &on : &off);
+    CHECK(tfp_settings_flag(s, TFP_SET_family_placement_defaults) == family);  /* not yet: MCM's callback is outside the tick */
+    CHECK(!tfp_wire_menu_activate(&wire, "save_weapon_near") && !tfp_wire_menu_activate(&wire, "edit_placement"));
+    CHECK(tfp_wire_menu_activate(&wire, "motion_strength") && tfp_wire_menu_activate(&wire, "nothing"));   /* not buttons */
+    tfp_wire_menu_changed(&wire, "show_aim_markers", &off, &on);               /* the markers module is off in this binder: refused, put back */
+    tfp_wire_menu_frame(&wire);
+    CHECK(tfp_settings_flag(s, TFP_SET_family_placement_defaults) == (family == 1 ? 0 : 1) && tfp_wire_settings_unsaved(&wire) == false);
+    CHECK(logged("Menu: \"Save clipping for this weapon\": Weapon changed; reopen its clipping controls"));
+    CHECK(logged("Menu: \"Edit arms and weapon placement\": Placement editor is unavailable"));
+    CHECK(logged("Menu: \"Show aim markers\" was not changed:") && mcm_slot("show_aim_markers")->boolean && mcm_sets >= sets + 1);
+    /* labels: sent when they change, not every frame */
+    CHECK(!strncmp(mcm_last_label[0], "Status: ", 8) && !strcmp(mcm_last_label[1], "Weapon: enable First Person with a firearm to edit its clipping"));
+    CHECK(strstr(mcm_disabled, "weapon_near_hip_cm") && strstr(mcm_disabled, "reset_weapon_near"));
+    unsigned labels = mcm_labels, disables = mcm_disables;
+    sets = mcm_sets;
+    for (int i = 0; i < 10; i++) tfp_wire_menu_frame(&wire);
+    CHECK(mcm_labels == labels && mcm_disables == disables && mcm_sets == sets);
+    /* with no weapon the per-weapon drafts show the global clipping (near_clip_cm 5 here, aim off: 5 / 5) */
+    CHECK(mcm_slot("weapon_near_hip_cm")->number == tfp_settings_menu_number(s, TFP_MENU_near_clip_cm) && mcm_slot("weapon_near_aim_cm")->number == 5);
+    /* an editor is offered: the button reaches it */
+    CHECK(tfp_wire_menu_bind(&wire, &host, 0, test_edit));
+    CHECK(!tfp_wire_menu_activate(&wire, "edit_placement"));
+    tfp_wire_menu_frame(&wire);
+    CHECK(logged("Menu: \"Edit arms and weapon placement\": editor asked"));
+    CHECK(tfp_wire_call(&wire, TFP_RT_E_on_disable, NULL, r) == TFP_RT_OK);
+    tfp_wire_menu_unbind(&wire);
+    CHECK(!tfp_wire_menu_bound(&wire) && tfp_wire_menu_activate(&wire, "stop_test"));
+    tfp_wire_menu_frame(&wire);
     tfp_wire_settings_free(&wire);
   }
   printf("wire settings: %u checks passed (%zu refusals of the reader and loader; retail's answers on %zu + %zu + %zu operations, the defaults "

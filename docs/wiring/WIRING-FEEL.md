@@ -42,7 +42,8 @@ A failed check leaves the game untouched and the module off for the session.
 |---|---|---|
 | Look-gain normalisation | refuses: `Refused: look gain: …`, `look=refused(2)` | `B_INPUT_ESTABLISHED` 0: one of the 20 constants is open (section 10) and none has run in the game. Scoped hip sensitivity is the game's own. Retail's two input hooks are installed and do nothing, as retail does when its proof fails (`docs/build-25480438/BUILD-DIFFERENCES.md`) |
 | The two unconfirmed sprint tests | off (`B_SPRINT_GAIT_ESTABLISHED`, `B_BRIDGE_SPRINT_ESTABLISHED` 0, `src/locomotion.c:55`, `:59`) | sprint is seen through animation layer 3 = 71 only; sprinting with a secondary or on the bridge may read as walking |
-| F8 editor, menu | `editor_*` off answers; `menu_update` is the F11 poll | not written. Motion's two editor pointers are NULL ("no editor") |
+| Placement editor | `editor_*` off answers | not written (0.6.0-feel.6: the menu shows its button and key disabled). Motion's two editor pointers are NULL ("no editor") |
+| Menu | bound since 0.6.0-feel.6: `src/wire_menu.c` on DBF-MCM, `src/mod_menu.c` the Windows half; `menu_update` is still the key poll, with the menu's toggle key | free aim and the native ADS comparison (retail's 30-second test tools) are not offered; `docs/guides/POSER-AND-MENU.md` |
 | Photo Mode camera sharing (`compat_*`) | off answers; `Off: camera sharing with Photo Mode …` | nothing to bind to on HellForge; Photo Mode is **not detected**: do not open it while the view is on |
 | Fird Person, ready stance, held fire, capture gate, head positioner, camera debug calls | the view build's answers | parked in retail / non-goals |
 | `backend_alignment_context` of the diagnostics row, `backend_pose_status` | nil | `+0x80`, `+0x88`, node 5 not established on this build; only the parked Fird capture asks the second |

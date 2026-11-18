@@ -22,7 +22,8 @@
 #include "wire_win_engine.h"
 #include "wire_win_effects.h"
 #include "engine.h"
-#define TFP_VIEW_VERSION "0.6.0-feel.5"
+#include "mod_menu.h"
+#define TFP_VIEW_VERSION "0.6.0-feel.6"
 #else
 #include "wire_win.h"
 #define TFP_VIEW_VERSION "0.6.0-view.1"
@@ -239,14 +240,31 @@ static void start(void) {
   stage = RUNNING;
 #ifdef TFP_FEEL
   say("Ready. F11 toggles True First Person (view, weapon and arm placement, motion; head hiding, sleeves, hand grips and the effects once "
-      "their checks pass: see the Ready / Check / Refused lines). Not in this build: a placement editor (F8 opens "
-      "HellForge's own editor), the menu, Photo Mode camera sharing.");
+      "their checks pass: see the Ready / Check / Refused lines). The settings menu is in DBF-MCM when goose.mcm is loaded; "
+      "settings are saved when they change. Not in this build: a placement editor (F8 opens HellForge's own editor), Photo Mode camera "
+      "sharing.");
 #else
   say("Ready. F11 toggles the view. Not in this build: arms and weapon placement, sleeves, hand grips, motion, head and body hiding, "
       "depth of field, vignette, aiming markers, movement policy, the F8 editor, the menu, Photo Mode camera sharing.");
 #endif
 }
 
+#ifdef TFP_FEEL
+static unsigned menu_unavailable(void) {
+  bool arms = tfp_wire_engine_state(&wire, TFP_WE_SLEEVES) != TFP_WE_REFUSED || tfp_wire_engine_state(&wire, TFP_WE_GRIP) != TFP_WE_REFUSED;
+  return (arms ? 0 : TFP_MENU_NO_ARMS) | TFP_MENU_NO_EDITOR;
+}
+/* A live replace asked for the mod's registrations with other mods to be taken out; this is the game
+ * thread, where DBF-MCM allows it. Nothing is released while the mod still holds something in the game. */
+static volatile LONG release_state; /* 0 not answered, 1 released, 2 refused (release_why) */
+static const char *volatile release_why;
+static void release_on_game_thread(void) {
+  const char *why = stage == RUNNING ? tfp_wire_feel_held(&wire) : NULL;
+  if (!why && !tfp_mod_menu_release(hf, owner, &wire)) why = "DBF-MCM did not release the settings menu";
+  release_why = why;
+  InterlockedExchange(&release_state, why ? 2 : 1);
+}
+#endif
 static void tick_body(void) {
   if (stage == REFUSED) return;
   if (!told_tick_thread) {
@@ -267,7 +285,13 @@ static void tick_body(void) {
     say("Image: game.dll and helldivers2.exe are build 25480438");
     stage = WAIT_PINS;
   }
+#ifdef TFP_FEEL
+  /* The toggle key is the menu's (default F11; 0: unbound). Polled as before: the SDK has no key event. */
+  int toggle_key = stage == RUNNING ? tfp_wire_menu_toggle_key(&wire) : VK_F11;
+  bool down = toggle_key && tfp_win_focused() && tfp_win_key_down(toggle_key);
+#else
   bool down = tfp_win_focused() && tfp_win_key_down(VK_F11);
+#endif
   bool pressed = down && !key_held;
   key_held = down;
   if (stage == WAIT_PINS) {
@@ -293,7 +317,9 @@ static void tick_body(void) {
   /* Engine values made in the tick live in the engine's per-frame buffer (src/engine.h). */
   eng_temp_begin();
   tfp_wire_feel_begin(&wire);
+  tfp_mod_menu_tick(hf, owner, &wire, menu_unavailable(), NULL);
   tfp_wire_frame(&wire, extra);
+  tfp_wire_menu_frame(&wire);          /* what the user did in MCM since the last tick, and the two status rows */
   tfp_wire_settings_save_frame(&wire); /* writes only when the store changed since the last write */
   eng_temp_end();
   for (int i = 0; i < TFP_WIN_POSE_HOOKS; i++) {
@@ -331,6 +357,9 @@ static void tick(HfMod *mod, float dt, void *unused) {
   (void)mod; (void)dt; (void)unused;
   InterlockedExchange(&in_tick, 1);
   if (!InterlockedCompareExchange(&closing, 0, 0)) tick_body();
+#ifdef TFP_FEEL
+  else if (!InterlockedCompareExchange(&release_state, 0, 0)) release_on_game_thread();
+#endif
   InterlockedExchange(&in_tick, 0);
 }
 
@@ -354,13 +383,25 @@ static void session_end(HfMod *mod, HfEvent event, void *unused) {
 __declspec(dllexport) int hellforge_mod_unload(const HfApi *api, HfMod *mod, uint32_t reason) {
   const char *why = NULL;
   (void)api;
+  /* The game thread answers: it checks that nothing is held and takes the menu out of DBF-MCM, which
+   * only that thread may do. */
+  InterlockedExchange(&release_state, 0);
   InterlockedExchange(&closing, 1);
-  for (int waited = 0; InterlockedCompareExchange(&in_tick, 0, 0); waited++) {
-    if (waited >= 2000) { why = "a game update of this mod did not finish within 2 seconds"; break; }
-    Sleep(1);
+  for (int waited = 0; !InterlockedCompareExchange(&release_state, 0, 0) && waited < 2000; waited++) Sleep(1);
+  LONG answer = InterlockedCompareExchange(&release_state, 0, 0);
+  if (answer == 2) why = release_why;
+  else if (!answer) {
+    /* No game update came in two seconds. Without a menu registration this thread can still judge it, once no update is in flight. */
+    for (int waited = 0; InterlockedCompareExchange(&in_tick, 0, 0); waited++) {
+      if (waited >= 2000) { why = "a game update of this mod did not finish within 2 seconds"; break; }
+      Sleep(1);
+    }
+    if (!why && tfp_mod_menu_registered())
+      why = "the game thread did not run during the change, and the settings menu can only be taken out of DBF-MCM from it";
+    if (!why && stage == RUNNING) why = tfp_wire_feel_held(&wire);
   }
-  if (!why && stage == RUNNING) why = tfp_wire_feel_held(&wire);
   if (why) {
+    InterlockedExchange(&release_state, 0);
     InterlockedExchange(&closing, 0);
     hf->log(mod, "Refused: live %s: %s. This build stays for the session.", reason == HF_UNLOAD_REPLACE ? "replace" : "removal", why);
     return 1;

@@ -39,7 +39,8 @@ if [ "${1:-}" = --feel ]; then
   pose_helper pose_adapter wire_pose wire_win_pose
   wire_motion motion_runtime motion_math action_state locomotion backend snapshot
   engine wire_engine wire_win_engine head_visibility model_shadow_source arm_pieces grip_hand
-  wire_effects wire_win_effects dof vignette aim_markers first_person_movement native_ads_option)
+  wire_effects wire_win_effects dof vignette aim_markers first_person_movement native_ads_option
+  wire_menu mod_menu)
  TFP_FEEL_SOURCES=();for tfp_module in "${TFP_FEEL[@]}";do TFP_FEEL_SOURCES+=("$TFP_ROOT/src/$tfp_module.c");done
  "$TFP_ZIG" cc -std=c11 -fms-extensions -target x86_64-windows-gnu -shared -O2 -ffp-contract=off -Wall -Wextra -Werror -DTFP_FEEL=1 \
   -I "$TFP_HF/app/sdk" -I "$TFP_ROOT/src" "${TFP_FEEL_SOURCES[@]}" "$TFP_ROOT/src/pose_input_thunks.S" -luser32 \

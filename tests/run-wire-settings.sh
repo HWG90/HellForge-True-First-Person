@@ -18,8 +18,17 @@ else
 fi
 TFP_SOURCES=()
 for tfp_unit in wire_rt wire_off wire_recovery wire_log tfp_runtime backend_ops controller recovery transition camera_adapter \
-    fov_adapter near_adapter blur_adapter action_select tfp_settings wire_settings; do TFP_SOURCES+=("$TFP_ROOT/src/$tfp_unit.c"); done
+    fov_adapter near_adapter blur_adapter action_select tfp_settings wire_settings wire_menu; do TFP_SOURCES+=("$TFP_ROOT/src/$tfp_unit.c"); done
+# The menu definition also goes through DBF-MCM's own schema parser when its source is beside this repository.
+TFP_MCM="${TFP_MCM:-$TFP_ROOT/../dbf-mcm/hellforge/mcm/src}"
+TFP_MCM_FLAGS=()
+if [ -f "$TFP_MCM/schema.c" ]; then
+  for tfp_unit in schema json num; do "$TFP_CC" -std=c11 -w -c -I "$TFP_MCM" "$TFP_MCM/$tfp_unit.c" -o "$TFP_WORK/mcm_$tfp_unit.o"; done
+  TFP_MCM_FLAGS=(-DTFP_HAVE_MCM_SCHEMA -I "$TFP_MCM" "$TFP_WORK/mcm_schema.o" "$TFP_WORK/mcm_json.o" "$TFP_WORK/mcm_num.o")
+else
+  echo "wire settings: DBF-MCM's source is not at $TFP_MCM; the menu definition is not run through its schema parser"
+fi
 "$TFP_CC" -std=c11 -Wall -Wextra -Werror -ffp-contract=off -fsanitize=address,undefined -fno-sanitize-recover=all -g \
-  -I "$TFP_ROOT/src" -I "$TFP_ROOT/tests" "${TFP_SOURCES[@]}" "$TFP_ROOT/tests/wire_settings_test.c" -lm -o "$TFP_WORK/wire_settings_test"
+  -I "$TFP_ROOT/src" -I "$TFP_ROOT/tests" "${TFP_SOURCES[@]}" "$TFP_ROOT/tests/wire_settings_test.c" "${TFP_MCM_FLAGS[@]}" -lm -o "$TFP_WORK/wire_settings_test"
 ASAN_OPTIONS=detect_leaks=0 "$TFP_WORK/wire_settings_test"
 ASAN_OPTIONS=detect_leaks=0 python3 "$TFP_ROOT/tools/retail_ref/check_settings.py" --binary "$TFP_WORK/wire_settings_test" --work "$TFP_WORK"
