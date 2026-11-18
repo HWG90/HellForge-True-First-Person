@@ -1215,5 +1215,36 @@ void tfp_wire_frame(TfpWire *w, const char *extra) {
   s.has_near = near_clip.stats.has;
   s.near_applied = near_clip.stats.last_applied;
   s.extra = extra;
+  /* What decided this frame, for the Drop / Wait / Return lines (src/wire_log.h): the snapshot's own
+   * fields as backend.lua:205-290 derives them, the animation layers, the head-camera helper's counters. */
+  char gate[320], action[320], camera_note[200];
+  gate[0] = action[0] = camera_note[0] = 0;
+  if (last && w->has_row) {
+    const TfpOpsSnapshot *p = &last->s;
+    snprintf(gate, sizeof gate,
+             "kind=%u safe=%d engine_safe=%d local=%d blocked=%d mask=%02x%02x%02x%02x active=%u byte5=%u seated=%d swap=%d headcam=%d aiming=%d "
+             "shoulder=%d reloading=%d weapon=%d reason=%s",
+             (unsigned)p->camera_kind, (int)p->safe, (int)p->engine_safe, (int)p->request_local, (int)p->blocked, p->controller_bytes[3],
+             p->controller_bytes[2], p->controller_bytes[1], p->controller_bytes[0], (unsigned)p->controller_bytes[4],
+             (unsigned)p->controller_bytes[5], (int)p->seated, (int)p->weapon_transition, (int)p->head_camera_transition, (int)p->aiming,
+             (int)p->shoulder_aim, (int)p->reloading, (int)p->full, p->has_reason ? p->reason : "-");
+    if (p->has_action) {
+      size_t used = (size_t)snprintf(action, sizeof action, "layers=");
+      for (unsigned layer = 1; layer <= p->action.layer_count && layer <= 32 && used + 12 < sizeof action; layer++)
+        if (p->action.sampled >> layer & 1)
+          used += (size_t)snprintf(action + used, sizeof action - used, "%u:%d%s ", layer, (int)p->action.states[layer],
+                                   p->action.unknown >> layer & 1 ? "?" : "");
+    } else snprintf(action, sizeof action, "layers=- %s", p->has_action_error ? p->action_error : "");
+  }
+  {
+    static const char *const phases[] = {"idle", "waiting", "active", "cleanup_pending"};
+    if (camera.has_stats)
+      snprintf(camera_note, sizeof camera_note, "cam=%s armed=%d error=%u seen=%.0f replaced=%.0f forwarded=%.0f native6=%.0f resets=%.0f head=%.3f blend=%.2f",
+               phases[camera.phase], (int)camera.stats.armed, (unsigned)camera.stats.error, camera.stats.seen, camera.stats.replaced,
+               camera.stats.forwarded, camera.stats.native6_forwarded, camera.stats.resets, camera.stats.head_distance, camera.stats.blend);
+    else snprintf(camera_note, sizeof camera_note, "cam=%s (no statistics)", phases[camera.phase]);
+  }
+  s.gate = gate, s.action = action, s.camera = camera_note;
+  s.aim_source = w->mouse_source ? w->mouse_source() : NULL;
   tfp_view_log_frame(&w->log, &s);
 }

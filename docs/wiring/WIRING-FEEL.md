@@ -318,3 +318,9 @@ A placement the editor hands to the runtime travels as the identity of one struc
 - `tests/run-vectors-placement-editor.sh`: 20,094 operations against retail; every executable line of the Lua file reached; six deliberate breaks of the C caught.
 - `tests/run-wire-feel.sh`: the binder with no game and a scripted platform: opened, cancelled by the key, the settings menu closed first, first-person entry refused without a game and the prepared placement put back, another frontend holding the input, the live-replace check while it is open; two deliberate breaks of the binder caught.
 - `src/mod_editor.c` (the panel, the two threads' hand-over) has no native test.
+
+## Action camera (branch `action-camera`, 0.6.0-actioncam.1)
+
+- **Aim button:** `mouse_button_index` / `mouse_button` are answered by `src/wire_mouse.c`: the engine's `Mouse.button_index` (`exe+0x4830c0`) and `Mouse.button` (`exe+0x482480`) once both are proven registered at those addresses, as retail reads them; Windows' button level until then and whenever a call fails. One `Aim button: …` log line per change of source. The view build has no engine caller and stays on Windows.
+- **Session log:** `Drop:` / `Wait:` / `Return:` lines with the snapshot's gate, the animation layers and the head-camera helper's counters, a `Cut:` line after each leave and entry, and `Aim: release not kept …` (`src/wire_log.h`).
+- What retail does per action, what is proposed and not built: `docs/design/ACTION-CAMERA.md`.

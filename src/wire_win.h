@@ -32,6 +32,13 @@ unsigned tfp_win_restore_slots(void);
 /* F11 and focus. */
 bool tfp_win_focused(void);
 bool tfp_win_key_down(int virtual_key);
+/* The aim button (src/wire_mouse.h). The feel build installs its engine caller; without one the
+ * level comes from Windows. tfp_win_mouse_note: true once per change of why the engine is or is
+ * not used ("" = the engine answers), for one log line. */
+struct TfpWireMouseHost;
+void tfp_win_mouse_engine(const struct TfpWireMouseHost *engine);
+const char *tfp_win_mouse_source(void);
+bool tfp_win_mouse_note(char *out, size_t size);
 /* For src/wire_win_pose.c: the page and write rules the four helper hosts use (native_memory.h,
  * native_ads_camera.cpp:228-232, :432-445, native_ads_fov.cpp:355-361), and a code pin compared
  * through hf->read_code (false too when read_code is not there). */
