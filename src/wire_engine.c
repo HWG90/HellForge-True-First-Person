@@ -804,8 +804,15 @@ static double v_gap(V3 a, const float b[3]) {
   double x = fabs((double)a.x - b[0]), y = fabs((double)a.y - b[1]), z = fabs((double)a.z - b[2]);
   return x > y ? (x > z ? x : z) : (y > z ? y : z);
 }
+/* Beyond retail. False: sleeves and hand grips stay off, with one Refused line each. The mod sets it (mod_view.c). */
+static bool arms_allowed = true;
+void tfp_wire_engine_allow_arms(bool allowed) { arms_allowed = allowed; }
 bool tfp_wire_engine_check_maths(TfpWire *w) {
   St *st = ST(w);
+  if (!arms_allowed)
+    return verdict(st, ARMS, false, "held back on build 25480438",
+                   "in 0.6.0-feel.18 the hand grips turned a hand bone by 70 degrees every frame and by up to 180 degrees and 0.55 m at times",
+                   "a file arms_on.txt beside the DLL switches them on for testing");
   const Q4 a = q_axis((V3){.3f, -.5f, .8f}, 1.1), b = q_axis((V3){-.7f, .2f, .4f}, 1.25);
   const V3 p = {.31f, -1.7f, .9f}, t = {-2.5f, .4f, 1.2f};
   const float af[4] = {a.x, a.y, a.z, a.w}, bf[4] = {b.x, b.y, b.z, b.w}, pf[3] = {p.x, p.y, p.z}, tf[3] = {t.x, t.y, t.z};

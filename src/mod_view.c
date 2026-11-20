@@ -15,6 +15,7 @@
 #include <string.h>
 #include "quit_guard.h"
 void tfp_head_set_parts(unsigned parts); /* head_visibility.c: beyond-retail test switch */
+void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail switch */
 #include "hellforge_mod.h"
 #include "profile.h"
 #include "native_contract.h"
@@ -27,7 +28,7 @@ void tfp_head_set_parts(unsigned parts); /* head_visibility.c: beyond-retail tes
 #include "engine.h"
 #include "mod_menu.h"
 #include "mod_editor.h"
-#define TFP_VIEW_VERSION "0.6.0-feel.18"
+#define TFP_VIEW_VERSION "0.6.0-feel.19"
 #else
 #include "wire_win.h"
 #include "wire_action.h"
@@ -295,6 +296,11 @@ static void start(void) {
         FILE *parts_file = fopen(parts_path, "r");
         int digit = parts_file ? fgetc(parts_file) : EOF;
         if (parts_file) fclose(parts_file);
+        strcpy(slash + 1, "arms_on.txt");
+        FILE *arms_file = fopen(parts_path, "r");
+        if (arms_file) fclose(arms_file);
+        tfp_wire_engine_allow_arms(arms_file != NULL);
+        if (arms_file) say("Test: arms_on.txt: sleeves and hand grips are allowed to run");
         if (digit >= '1' && digit <= '7') {
           tfp_head_set_parts((unsigned)(digit - '0'));
           say("Test: head_parts.txt: hiding parts mask %d (1 head, 2 torso, 4 shoulders)", digit - '0');
