@@ -1,4 +1,4 @@
-# True First Person for HellForge: test build 0.6.0-feel.14
+# True First Person for HellForge: test build 0.6.0-feel.18
 
 For HellForge on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
@@ -24,7 +24,7 @@ hear what breaks.
 - Hip fire, holding aim, firing while aiming, reloading: the view stays first person.
 - Weapon swap, grenade, stim: the view stays first person (see the limits below).
 - The helmet, torso and shoulder pads are hidden from the camera; sleeves and hand grips are on.
-- Leaving a mission with the view on.
+- Leaving a mission with the view on, and quitting the game afterwards.
 
 ## Limits you will see
 
@@ -38,10 +38,10 @@ hear what breaks.
 - **Holding aim raises the weapon to the shoulder.** Looking through the sight is a separate option
   ("true native ADS" in the menu) and was not part of this check.
 - **Dying leaves first person.** The game's death camera takes over.
-- **The game sometimes reports a crash while it is closing.** I traced it to the game's own shutdown code
-  (it releases one of its tables through the wrong allocator, and whether that faults depends on where the
-  table happened to sit in memory). It happens after the session has ended and nothing is lost. I have not
-  been able to rule out that mods make it more likely.
+- **The crash while the game closes is guarded.** Build 25480438 has a fault in its own shutdown (it
+  releases some of its tables through the wrong allocator) that crashed about half of my sessions, with or
+  without first person in use. This build skips that faulty release. In 12 sessions since, none produced the
+  crash report; one still ended with an error code and no report. Tell me if you see a crash on quit.
 
 ## Not checked yet
 

@@ -13,6 +13,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include "quit_guard.h"
 void tfp_head_set_parts(unsigned parts); /* head_visibility.c: beyond-retail test switch */
 #include "hellforge_mod.h"
 #include "profile.h"
@@ -26,7 +27,7 @@ void tfp_head_set_parts(unsigned parts); /* head_visibility.c: beyond-retail tes
 #include "engine.h"
 #include "mod_menu.h"
 #include "mod_editor.h"
-#define TFP_VIEW_VERSION "0.6.0-feel.14"
+#define TFP_VIEW_VERSION "0.6.0-feel.18"
 #else
 #include "wire_win.h"
 #include "wire_action.h"
@@ -369,7 +370,40 @@ static void release_on_game_thread(void) {
   InterlockedExchange(&release_state, why ? 2 : 1);
 }
 #endif
+/* docs/design/QUIT-CRASH.md. The engine's own release routine for a {pointer, count} pair is hooked once; when it is
+ * called for the one object whose release faults, each of its three pairs that the block allocator cannot own is
+ * emptied first, so the routine skips it. Those few pages are then simply left to the process exit. Every other call passes through untouched. */
+static void (*quit_release_original)(uint64_t *pair);
+static void quit_release_hook(uint64_t *pair) {
+  uint64_t state = 0;
+  if (pair && tfp_win_read(tfp_win_game() + TFP_QUIT_GUARD_STATE, &state, sizeof state) && state
+      && (uint64_t)(uintptr_t)pair == state + TFP_QUIT_GUARD_TABLE) {
+    for (int i = 0; i < TFP_QUIT_GUARD_PAIRS; i++)
+      if (tfp_quit_guard_faulty(pair[i * 2])) pair[i * 2] = 0, *(uint32_t *)&pair[i * 2 + 1] = 0;
+  }
+  quit_release_original(pair);
+}
+static void quit_guard(void) {
+  static bool tried;
+  static const uint8_t expected[20] = {0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x6c, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57, 0x48, 0x83, 0xec, 0x20};
+  uint8_t code[20];
+  if (tried) return;
+  tried = true;
+  uint64_t at = tfp_win_game() + TFP_QUIT_GUARD_RELEASE;
+  if (!tfp_win_read(at, code, sizeof code) || memcmp(code, expected, sizeof code)) {
+    say("Quit guard: off: game.dll+0x%x is not the release routine of build 25480438 (or another mod already hooks it)", TFP_QUIT_GUARD_RELEASE);
+    return;
+  }
+  if (hf->hook(owner, (uintptr_t)at, (void *)quit_release_hook, (void **)&quit_release_original) != 0 || !quit_release_original) {
+    quit_release_original = NULL;
+    say("Quit guard: off: HellForge refused the hook at game.dll+0x%x", TFP_QUIT_GUARD_RELEASE);
+    return;
+  }
+  say("Quit guard: on: the game's faulty release of its table at state+0x%x is skipped while closing (game.dll+0x%x)", TFP_QUIT_GUARD_TABLE, TFP_QUIT_GUARD_RELEASE);
+}
+
 static void tick_body(void) {
+  if (stage == RUNNING) quit_guard();   /* not earlier: the game module and the guarded reader are set up in WAIT_MODULES */
   if (stage == REFUSED) return;
   tick_thread = GetCurrentThreadId();
   if (!told_tick_thread) {

@@ -1,11 +1,16 @@
 /* src/wire_action.h: the pick-up mask for the head camera, and the aim button between ticks. */
 #include <stdio.h>
 #include "wire_action.h"
+#include "quit_guard.h"
 
 static int failures, checks;
 #define CHECK(c) do { checks++; if (!(c)) { printf("FAILED %s:%d: %s\n", __FILE__, __LINE__, #c); failures++; } } while (0)
 
 int main(void) {
+  /* the quit guard: only pointers the block allocator cannot own are withheld from the engine's release */
+  CHECK(tfp_quit_guard_faulty(UINT64_C(0x335d20000)) && tfp_quit_guard_faulty(UINT64_C(0x336030000)));
+  CHECK(!tfp_quit_guard_faulty(UINT64_C(0x1989750)));   /* an ordinary block: released as the engine means to */
+  CHECK(!tfp_quit_guard_faulty(0) && !tfp_quit_guard_faulty(UINT64_C(0x335d20080)));
   const uint8_t pickup[6] = {0x22, 0, 0, 0, 0, 0}, guarded[6] = {0x22, 0, 0, 0, 0, 1}, other[6] = {0x40, 0, 0, 0, 0, 0}, wide[6] = {0x22, 0, 1, 0, 0, 0};
   /* the head camera's flag: retail's answer stands; the pick-up mask adds to it on the ordinary camera only */
   CHECK(tfp_action_head_camera(true, 6, true, other));

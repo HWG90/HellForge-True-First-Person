@@ -33,9 +33,36 @@ taken to be at `pointer & ~0xFFFF`, here the array itself). The free reads array
 The array pointer and its entries did not change at any point of a session. Where the 420 objects land is
 decided at start-up.
 
+## More sessions (ship only, the view never used)
+
+feel.16, no working guard: 6 sessions, entries at 0x3_… in 2, both crashed; at 0x1_… in 4, all clean.
+The fault needs neither the view nor a mission.
+
+## The guard (feel.18)
+
+Mapping the page below the table does not work: that memory is the unusable tail of the allocation before
+it (feel.16: `VirtualAlloc` refused in 5 of 6 sessions).
+
+The release routine `game.dll+0x873a70` frees three `{pointer, count}` pairs of its argument (+0x00, +0x10,
++0x20). For this object the first and third are 64 KiB-aligned blocks, 0x10000 apart; the second is an
+ordinary block. feel.17 emptied only the first pair and the fault moved to the third (`+0x66a403`, called from
+`game.dll+0x873ae3`).
+
+feel.18 hooks the routine (after checking its first 20 bytes). When it is called with
+`[game.dll+0x3326340] + 0xF846C8`, every pair whose pointer sits exactly at a 64 KiB boundary is emptied
+before the engine's own code runs, so that pair is skipped; the block allocator can never have handed out such
+a pointer. All other calls pass through.
+
+| Build | Sessions with entries at 0x3_… | Crash dump at +0x66a371/+0x66a403 |
+|---|---|---|
+| feel.14, feel.16 (no guard) | 7 | 7 |
+| feel.17 (first pair only) | 5 | 5 |
+| feel.18 | 4 (one of them a full mission with the view used) | 0 |
+
+One feel.18 session of the four still ended with exit code 0xC0000005 and no crash dump: a later fault, after
+the crash reporter had gone, not yet looked at.
+
 ## Open
 
-- Not established: whether loading more mods makes the high placement more likely. Read the entries at
-  start-up over more sessions with and without mods (`tools/harness/watch_field.py`).
-- A fix would be a separate small mod that clears the field just before shutdown, or corrects the release.
-  Not attempted.
+- The late fault without a dump (1 of 12 feel.18 sessions).
+- The guard lives in True First Person; the fault does not need this mod. It belongs in a small mod of its own.
