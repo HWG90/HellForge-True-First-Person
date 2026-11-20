@@ -25,7 +25,7 @@
 #include "engine.h"
 #include "mod_menu.h"
 #include "mod_editor.h"
-#define TFP_VIEW_VERSION "0.6.0-feel.10"
+#define TFP_VIEW_VERSION "0.6.0-feel.12"
 #else
 #include "wire_win.h"
 #include "wire_action.h"

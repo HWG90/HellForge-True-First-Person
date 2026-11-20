@@ -721,7 +721,10 @@ bool tfp_wire_engine_check_head(TfpWire *w, const TfpWireEngineBody *s) {
     read = mread(st, st->exe + at, &id, 4);
     if (read) snprintf(observed, sizeof observed, "%08x at exe+%#x", id, at); else snprintf(observed, sizeof observed, "unreadable at exe+%#x", at);
     snprintf(expected, sizeof expected, "%08x", value);
-    if (!verdict(st, M, read && id == value, i ? "shadow pass id" : "default pass id", observed, expected)) return false;
+    /* The engine fills these two the first time its own Unit.set_mesh_visibility runs (a guarded static: the code
+     * before exe+0x412875 on build 25480438). On HellForge nothing has called it before the first F11, so 0 here
+     * means "not filled yet", not "another build": the setter fills them itself on the mod's first write. */
+    if (!verdict(st, M, read && (id == value || id == 0), i ? "shadow pass id" : "default pass id", observed, expected)) return false;
   }
   /* (d) the World handle: its userdata holds the native world (hv:51), the one the body's unit object names at +0x18 (hv:390-391) */
   const void *world = NULL;
@@ -806,7 +809,10 @@ bool tfp_wire_engine_check_maths(TfpWire *w) {
   const Q4 a = q_axis((V3){.3f, -.5f, .8f}, 1.1), b = q_axis((V3){-.7f, .2f, .4f}, 1.25);
   const V3 p = {.31f, -1.7f, .9f}, t = {-2.5f, .4f, 1.2f};
   const float af[4] = {a.x, a.y, a.z, a.w}, bf[4] = {b.x, b.y, b.z, b.w}, pf[3] = {p.x, p.y, p.z}, tf[3] = {t.x, t.y, t.z};
-  const float axis[3] = {.3f, -.5f, .8f};
+  /* A unit axis: the engine uses the axis as given (a 0.99-long one came back 0.99-scaled, measured in game,
+   * 0.00425 off), while q_axis normalises as the reference harness does. Every caller passes a unit axis. */
+  const V3 unit_axis = v_norm((V3){.3f, -.5f, .8f});
+  const float axis[3] = {unit_axis.x, unit_axis.y, unit_axis.z};
   const M4 ma = m_of(a, p), mb = m_of(b, t), mul = m_mul(&ma, &mb), inv = m_inv(&ma);
   float q[4], v[3];
   double n = 0, worst = 0, gap;

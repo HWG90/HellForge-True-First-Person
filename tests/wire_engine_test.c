@@ -634,6 +634,11 @@ int main(void) {
   put32(EXE + hb->context_shadow, 7);
   CHECK(REFUSES("Refused: head visibility: shadow pass id observed=00000007 at exe+0x27ce5c8 expected=3100c3d2"));
   put32(EXE + hb->context_shadow, hb->context_shadow_value);
+  /* not filled yet (the engine's setter has never run, as on HellForge before the first F11): accepted */
+  put32(EXE + hb->context_default, 0), put32(EXE + hb->context_shadow, 0);
+  fresh();
+  CHECK(tfp_wire_engine_check_head(&wire, &body) && logged("default pass id ok observed=00000000") && logged("shadow pass id ok observed=00000000") && !logged("Refused"));
+  put32(EXE + hb->context_default, hb->context_default_value), put32(EXE + hb->context_shadow, hb->context_shadow_value);
   unreadable = EXE + hb->context_default;
   CHECK(REFUSES("Refused: head visibility: default pass id observed=unreadable at exe+0x27ce5b0 expected=f2760503"));
   unreadable = 0;
@@ -657,13 +662,13 @@ int main(void) {
   raise_in = NULL;
   CHECK(tfp_wire_engine_check_head(&wire, &body));
 
-  /* ---- a failed check is tried again, not kept for the session (session 3850350d: the pass id was still 0
-   * when the view was first switched on, before a mission world, and the helmet showed for the whole session) ---- */
+  /* ---- a failed check is tried again, not kept for the session (session 3850350d latched a refusal for the whole session and
+   * the helmet showed; that refusal was the unfilled pass id, which is accepted since feel.12) ---- */
   tfp_wire_engine_force(&wire, TFP_WE_HEAD, TFP_WE_RESOLVED);
   CHECK(tfp_wire_engine_head_due(&wire));
-  put32(EXE + hb->context_default, 0);
+  put32(EXE + hb->context_default, 7);
   fresh();
-  CHECK(!tfp_wire_engine_check_head(&wire, &body) && logged("Refused: head visibility: default pass id observed=00000000"));
+  CHECK(!tfp_wire_engine_check_head(&wire, &body) && logged("Refused: head visibility: default pass id observed=00000007"));
   tfp_wire_engine_head_checked(&wire, false);
   CHECK(tfp_wire_engine_state(&wire, TFP_WE_HEAD) == TFP_WE_RESOLVED && logged("Waiting: head visibility: its checks are tried again"));
   CHECK(!tfp_wire_engine_head_due(&wire)); /* not every frame */
