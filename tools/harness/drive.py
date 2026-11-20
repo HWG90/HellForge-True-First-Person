@@ -1,0 +1,239 @@
+#!/usr/bin/env python3
+"""Drive a HellForge game started by the Bingus Development Harness.
+
+The game runs as a native Wayland window, so it only reads input while it really has desktop focus and
+only the compositor can capture it. This module therefore:
+  - brings the game window to the front through a KWin script (focus),
+  - plays key, button and pointer messages into the game window from inside its Wine prefix (Input),
+  - captures the active window with Spectacle (shot),
+  - runs Lua inside the game through the harness (lua).
+
+While a run is going the keyboard and mouse belong to the game. Every action first checks that the game
+still has focus and refuses to type into another window.
+
+Command line:
+  drive.py focus
+  drive.py shot OUT.png
+  drive.py run "wait 0.5; key r; hold w 0.7; click left 0.6; look 0 -40; key f11"
+"""
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+HARNESS = Path(os.environ.get("HD2H_DIR", Path.home() / "hellforge-research/tools/BingusDevelopmentHarness"))
+WINDOW_CLASS = "helldivers2.exe"
+
+
+class DriveError(RuntimeError):
+    pass
+
+
+def lua(code, timeout=40):
+    """Run Lua in the game; returns the first returned value."""
+    env = dict(os.environ, HD2H_TARGET="hellforge")
+    out = subprocess.run([sys.executable, "harness.py", "lua", code], cwd=HARNESS, env=env, capture_output=True,
+                         text=True, timeout=timeout)
+    try:
+        reply = json.loads(out.stdout)
+    except ValueError as error:
+        raise DriveError(f"harness lua gave no JSON: {out.stdout[-300:]!r} {out.stderr[-300:]!r}") from error
+    if reply.get("error"):
+        raise DriveError(f"lua error: {reply['error']}")
+    values = reply.get("values") or [None]
+    return values[0]
+
+
+def has_focus():
+    return lua("return stingray.Window.has_focus()") is True
+
+
+def _kwin(script):
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as handle:
+        handle.write(script)
+    name = f"tfp-drive-{os.getpid()}-{time.monotonic_ns()}"
+    try:
+        ident = subprocess.run(["qdbus6", "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.loadScript",
+                                handle.name, name], capture_output=True, text=True, timeout=10).stdout.strip()
+        if not ident.lstrip("-").isdigit() or int(ident) < 0:
+            raise DriveError(f"KWin refused the script: {ident!r}")
+        subprocess.run(["qdbus6", "org.kde.KWin", f"/Scripting/Script{ident}", "org.kde.kwin.Script.run"],
+                       capture_output=True, timeout=10)
+        time.sleep(0.3)
+        subprocess.run(["qdbus6", "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.unloadScript", name],
+                       capture_output=True, timeout=10)
+    finally:
+        os.unlink(handle.name)
+
+
+def focus(tries=5):
+    """Bring the game window to the front; true once the engine itself reports focus."""
+    script = ("for (const w of workspace.windowList()) { if (w.resourceClass == '%s') {"
+              " w.minimized = false; workspace.activeWindow = w; } }" % WINDOW_CLASS)
+    for _ in range(tries):
+        _kwin(script)
+        time.sleep(0.5)
+        if has_focus():
+            return True
+    return False
+
+
+def shot(path):
+    """Capture the active window (the game, once focused) to path."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["spectacle", "-b", "-n", "-a", "-o", str(path)], capture_output=True, timeout=30)
+    if not path.exists() or path.stat().st_size < 1000:
+        raise DriveError(f"no capture at {path}")
+    return path
+
+
+VK = {"shift": 0x10, "ctrl": 0x11, "alt": 0x12, "space": 0x20, "tab": 0x09, "esc": 0x1B, "f9": 0x78, "f10": 0x79,
+      "f11": 0x7A}
+BUTTONS = {"left": "L", "right": "R", "middle": "M"}
+PREFIX = Path.home() / ".local/share/hellforge-prefix/pfx"
+GAME_EXE = r"C:\users\steamuser\Documents\HellForge\game\bin\helldivers2.exe"
+
+
+def _code(name):
+    if name in BUTTONS:
+        return BUTTONS[name]
+    if name in VK:
+        return str(VK[name])
+    if len(name) == 1 and name.isalnum():
+        return str(ord(name.upper()))
+    raise DriveError(f"unknown key {name!r}")
+
+
+def events(script):
+    """Turn 'wait S; key NAME; hold NAME S; click BUTTON [S]; down NAME; up NAME; look DX DY' into timed lines."""
+    at, lines = 0.0, []
+    def add(text):
+        lines.append(f"{int(at * 1000)} {text}")
+    for step in filter(None, (part.strip() for part in script.split(";"))):
+        word, *rest = step.split()
+        if word == "wait":
+            at += float(rest[0])
+        elif word in ("key", "hold", "click"):
+            add(f"d {_code(rest[0])}")
+            at += float(rest[1]) if len(rest) > 1 else 0.08
+            add(f"u {_code(rest[0])}")
+            at += 0.03
+        elif word == "down":
+            add(f"d {_code(rest[0])}")
+            at += 0.03
+        elif word == "up":
+            add(f"u {_code(rest[0])}")
+            at += 0.03
+        elif word == "look":
+            for _ in range(10):
+                add(f"m {int(rest[0]) // 10} {int(rest[1]) // 10}")
+                at += 0.02
+        else:
+            raise DriveError(f"unknown step {step!r}")
+    return lines
+
+
+def _wine_session():
+    """The running game's Wine server and environment, so the helper joins that prefix and never starts another."""
+    game = server = None
+    for proc in Path("/proc").glob("[0-9]*"):
+        try:
+            if proc.stat().st_uid != os.getuid():
+                continue
+            name = (proc / "comm").read_text().strip().lower()
+            env = dict(os.fsdecode(item).split("=", 1) for item in (proc / "environ").read_bytes().split(b"\0") if b"=" in item)
+            if Path(env.get("WINEPREFIX", "/")).resolve() != PREFIX.resolve():
+                continue
+            if name == "wineserver":
+                server = proc
+            elif os.fsdecode((proc / "cmdline").read_bytes().split(b"\0", 1)[0]).casefold() == GAME_EXE.casefold():
+                game = (proc, env)
+        except (OSError, ValueError):
+            continue
+    if not game or not server:
+        raise DriveError("no running HellForge game with its Wine server was found")
+    return game[1], (server / "exe").resolve(strict=True)
+
+
+def _helper():
+    import hashlib
+    source = Path(__file__).resolve().parent / "win_input.c"
+    cache = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "tfp-harness-input"
+    cache.mkdir(mode=0o700, parents=True, exist_ok=True)
+    executable = cache / (hashlib.sha256(source.read_bytes()).hexdigest() + ".exe")
+    if not executable.is_file():
+        zig = PREFIX / "drive_c/users/steamuser/Documents/HellForge/tools/zig-linux/zig"
+        staging = executable.with_suffix(".tmp.exe")
+        subprocess.run([zig, "cc", "-target", "x86_64-windows-gnu", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+                        source, "-Wl,--subsystem,windows", "-Wl,-e,mainCRTStartup", "-luser32", "-o", staging], check=True)
+        staging.replace(executable)
+    return executable
+
+
+class Input:
+    """Plays input scripts as window messages posted from inside the game's Wine prefix (win_input.c)."""
+
+    def __init__(self, check_focus=True):
+        self.check_focus = check_focus
+        self.executable = _helper()
+
+    def run(self, script):
+        lines = events(script)
+        if not lines:
+            for step in script.split(";"):
+                if step.strip().startswith("wait"):
+                    time.sleep(float(step.split()[1]))
+            return ""
+        if self.check_focus and not has_focus() and not focus():
+            raise DriveError("the game does not have focus; no input was sent")
+        env, server = _wine_session()
+        for name in ("WINESERVERSOCKET", "WINELOADERNOEXEC", "WINEPRELOADRESERVE", "LD_PRELOAD", "WINELOADER"):
+            env.pop(name, None)
+        env.update(WINESERVER="/usr/bin/false", WINEPREFIX=str(PREFIX), PATH="/usr/bin:/bin", WINEDEBUG="-all")
+        with tempfile.TemporaryDirectory(prefix="tfp-harness-input-") as scratch:
+            (Path(scratch) / "script.txt").write_text("\n".join(lines) + "\n")
+            # The server executable is masked, so this client can only join the game's server, never start one.
+            command = ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--ro-bind", "/usr/bin/false",
+                       str(server), "--bind", scratch, scratch, "--chdir", scratch, "--", str(server.with_name("wine")),
+                       "Z:" + str(self.executable)]
+            result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=120)
+            report = Path(scratch) / "result.txt"
+            text = report.read_text() if report.is_file() else ""
+        if result.returncode:
+            raise DriveError(f"input helper failed ({result.returncode}): {text or result.stderr[-300:]}")
+        return text
+
+    def hold(self, name, seconds=0.08):
+        return self.run(f"hold {name} {seconds}")
+
+    def close(self):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+
+def main(argv):
+    if len(argv) >= 2 and argv[1] == "focus":
+        print(json.dumps({"focus": focus()}))
+    elif len(argv) == 3 and argv[1] == "shot":
+        print(json.dumps({"shot": str(shot(argv[2]))}))
+    elif len(argv) == 3 and argv[1] == "run":
+        with Input() as device:
+            device.run(argv[2])
+        print(json.dumps({"ran": argv[2]}))
+    else:
+        print(__doc__)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
