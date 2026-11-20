@@ -278,6 +278,37 @@ int main(void) {
     CHECK(!strcmp(tfp_wire_editor_status(&wire), "Close other menus before positioning the weapon"));
     if (getenv("TFP_SHOW_LOG")) for (int i = 0; i < line_count; i++) printf("  log: %s\n", lines[i]);
   }
+  /* An idle motion phase retains the previous sampled action during disable or a lost lease. */
+  {
+    TfpMotionRuntime *motion = (TfpMotionRuntime *)tfp_wire_motion_runtime(&wire);
+    CHECK(motion != NULL);
+    TfpMotionRuntimeState previous = motion->state;
+    line_count = 0;
+    motion->state.action = TFP_ACT_IDLE;
+    motion->state.phase = TFP_MOTION_PHASE_IDLE;
+    for (unsigned frame = 0; frame < 120; ++frame) tfp_wire_motion_frame(&wire);
+    CHECK(line_count == 0);
+    wire.controller.enabled = true;
+    motion->state.phase = TFP_MOTION_PHASE_ACTIVE;
+    const TfpAct actions[] = {TFP_ACT_IDLE, TFP_ACT_SPRINT, TFP_ACT_IDLE};
+    for (int i = 0; i < 3; ++i) {
+      motion->state.action = actions[i];
+      for (unsigned frame = 0; frame < 120; ++frame) tfp_wire_motion_frame(&wire);
+      CHECK(line_count == i + 1 && strstr(lines[i], tfp_action_name(actions[i])));
+    }
+    motion->state.phase = TFP_MOTION_PHASE_IDLE;
+    tfp_wire_motion_frame(&wire);
+    motion->state.phase = TFP_MOTION_PHASE_ACTIVE;
+    tfp_wire_motion_frame(&wire);
+    CHECK(line_count == 3);
+    wire.controller.enabled = false;
+    tfp_wire_motion_frame(&wire);
+    wire.controller.enabled = true;
+    tfp_wire_motion_frame(&wire);
+    CHECK(line_count == 4 && strstr(lines[3], "Motion: action=idle"));
+    wire.controller.enabled = false;
+    motion->state = previous;
+  }
   /* ---- the Feel line: once a second while the controller is enabled ---- */
   if (getenv("TFP_SHOW_LOG")) for (int i = 0; i < line_count; i++) printf("  log: %s\n", lines[i]);
   line_count = 0;

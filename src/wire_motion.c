@@ -40,7 +40,6 @@ typedef struct Motion {
   char why[TFP_MOTION_RUNTIME_TEXT], sample_why[TFP_LOCOMOTION_ERROR];
   /* the session log */
   TfpAct logged_action;
-  bool has_logged_action;
   unsigned frames;
   double peak_move, peak_turn;
   uint64_t applied, coalesced, softened, refused;
@@ -366,7 +365,7 @@ static bool rt_motion_new(TfpRtHost *h) { /* rt:816 MotionRuntime.new(controller
   refresh(m);
   if (!tfp_motion_runtime_init(&m->rt, &m->host, NULL, &error)) return tfp_wire_raise(h, error ? error : "Motion runtime dependencies required");
   m->made = true;
-  m->has_logged_action = false;
+  m->logged_action = TFP_ACT_NONE;
   return true;
 }
 static bool raise_kept(TfpRtHost *h, Motion *m) { return tfp_wire_raise(h, m->raised[0] ? m->raised : "attempt to index a nil value"); }
@@ -465,9 +464,15 @@ const TfpMotionRuntime *tfp_wire_motion_runtime(TfpWire *w) {
 void tfp_wire_motion_frame(TfpWire *w) {
   Motion *m = state(w);
   tfp_wire_settings_frame(w);
+  if (m && !w->controller.enabled) {
+    m->logged_action = TFP_ACT_NONE;
+    return;
+  }
   if (!m || !m->made || !w->rt.has[TFP_RT_O_MOTION]) return;
   const TfpMotionRuntimeState *s = &m->rt.state;
-  if (s->action != TFP_ACT_NONE && (!m->has_logged_action || m->logged_action != s->action)) {
+  /* The runtime keeps its last sampled action while the pose lease is unavailable. */
+  if (s->phase == TFP_MOTION_PHASE_IDLE || s->phase == TFP_MOTION_PHASE_NONE) return;
+  if (s->action != TFP_ACT_NONE && m->logged_action != s->action) {
     TfpActionPlacement p = {0, 0, 0, 0, 0, 0, 0};
     char line[320], source[48];
     const char *key = w->ops.has_placement_weapon_key ? w->ops.placement_weapon_key : NULL;
@@ -477,9 +482,8 @@ void tfp_wire_motion_frame(TfpWire *w) {
              p.present & TFP_PLACE_YAW ? p.yaw : 0, p.present & TFP_PLACE_PITCH ? p.pitch : 0, p.present & TFP_PLACE_ROLL ? p.roll : 0,
              (unsigned long long)s->softened, tfp_motion_runtime_phase_name(s->phase));
     tfp_wire_say(w, line);
-    m->logged_action = s->action, m->has_logged_action = true;
   }
-  if (s->phase == TFP_MOTION_PHASE_IDLE || s->phase == TFP_MOTION_PHASE_NONE) { m->has_logged_action = false; return; }
+  m->logged_action = s->action;
   double move = sqrt(s->dx * s->dx + s->dy * s->dy + s->dz * s->dz);
   double qw = fabs(s->qw) > 1 ? 1 : fabs(s->qw), turn = 2 * acos(qw) * 57.29577951308232;
   m->frames++;
