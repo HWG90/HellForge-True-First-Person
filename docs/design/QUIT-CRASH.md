@@ -64,5 +64,5 @@ the crash reporter had gone, not yet looked at.
 
 ## Open
 
-- The late fault without a dump (1 of 12 feel.18 sessions).
+- The late fault without a dump (1 of 9 feel.18 sessions).
 - The guard lives in True First Person; the fault does not need this mod. It belongs in a small mod of its own.

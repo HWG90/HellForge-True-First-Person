@@ -40,7 +40,7 @@ hear what breaks.
 - **Dying leaves first person.** The game's death camera takes over.
 - **The crash while the game closes is guarded.** Build 25480438 has a fault in its own shutdown (it
   releases some of its tables through the wrong allocator) that crashed about half of my sessions, with or
-  without first person in use. This build skips that faulty release. In 12 sessions since, none produced the
+  without first person in use. This build skips that faulty release. In 9 sessions since, none produced the
   crash report; one still ended with an error code and no report. Tell me if you see a crash on quit.
 
 ## Not checked yet
