@@ -134,7 +134,7 @@ def events(script):
                 at += 0.02
         else:
             raise DriveError(f"unknown step {step!r}")
-    return lines
+    return lines, at
 
 
 def _wine_session():
@@ -182,11 +182,10 @@ class Input:
         self.executable = _helper()
 
     def run(self, script):
-        lines = events(script)
+        lines, total = events(script)
+        started = time.monotonic()
         if not lines:
-            for step in script.split(";"):
-                if step.strip().startswith("wait"):
-                    time.sleep(float(step.split()[1]))
+            time.sleep(total)
             return ""
         if self.check_focus and not has_focus() and not focus():
             raise DriveError("the game does not have focus; no input was sent")
@@ -203,6 +202,7 @@ class Input:
             result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=120)
             report = Path(scratch) / "result.txt"
             text = report.read_text() if report.is_file() else ""
+        time.sleep(max(0.0, total - (time.monotonic() - started)))  # a trailing wait is part of the script
         if result.returncode:
             raise DriveError(f"input helper failed ({result.returncode}): {text or result.stderr[-300:]}")
         return text

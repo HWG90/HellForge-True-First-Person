@@ -101,6 +101,7 @@ typedef struct TfpHead TfpHead;
  * read on every call, so the pointers they hold may change. */
 TfpHead *tfp_head_new(const TfpHeadIo *io, const TfpEngineIface *engine, TfpModelShadow *models, const TfpHeadBuild *build);
 void tfp_head_free(TfpHead *h);
+void tfp_head_set_parts(unsigned parts);   /* beyond retail: bit 0 head, 1 torso, 2 shoulders; 7 = retail */
 /* Each returns Lua's first result and puts the second in `why` (absent: nil; may be NULL). */
 bool tfp_head_update(TfpHead *h, TfpVisText *why);     /* head:update(controller) */
 bool tfp_head_stop(TfpHead *h, TfpVisText *why);

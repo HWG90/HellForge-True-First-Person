@@ -13,6 +13,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+void tfp_head_set_parts(unsigned parts); /* head_visibility.c: beyond-retail test switch */
 #include "hellforge_mod.h"
 #include "profile.h"
 #include "native_contract.h"
@@ -25,7 +26,7 @@
 #include "engine.h"
 #include "mod_menu.h"
 #include "mod_editor.h"
-#define TFP_VIEW_VERSION "0.6.0-feel.12"
+#define TFP_VIEW_VERSION "0.6.0-feel.14"
 #else
 #include "wire_win.h"
 #include "wire_action.h"
@@ -281,6 +282,25 @@ static void start(void) {
 #endif
   tfp_wire_init(&wire, &memory, &platform, &helpers);
   wire.mouse_source = tfp_win_mouse_source;
+  {
+    /* Test switch: a file "head_parts.txt" beside the DLL holding one digit 1-7 (bit 0 head, 1 torso, 2 shoulders). */
+    char parts_path[MAX_PATH];
+    HMODULE self_module;
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)(void *)read_settings, &self_module)) {
+      DWORD length = GetModuleFileNameA(self_module, parts_path, MAX_PATH);
+      char *slash = length && length < MAX_PATH - 20 ? strrchr(parts_path, '\\') : NULL;
+      if (slash) {
+        strcpy(slash + 1, "head_parts.txt");
+        FILE *parts_file = fopen(parts_path, "r");
+        int digit = parts_file ? fgetc(parts_file) : EOF;
+        if (parts_file) fclose(parts_file);
+        if (digit >= '1' && digit <= '7') {
+          tfp_head_set_parts((unsigned)(digit - '0'));
+          say("Test: head_parts.txt: hiding parts mask %d (1 head, 2 torso, 4 shoulders)", digit - '0');
+        }
+      }
+    }
+  }
   /* What build 25480438 does differently during actions (src/wire_action.h). */
   tfp_camera_set_action_tuning(TFP_ACTION_PICKUP_MASK, TFP_ACTION_EYE_IDLE_MS, TFP_ACTION_EYE_RETURN);
   say("Ready: action camera: the head camera also takes the pick-up action (mask 0x%x); the eye is held through %u ms without an action "

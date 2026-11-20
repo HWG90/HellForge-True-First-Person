@@ -53,6 +53,8 @@ The design the rewrite follows and the plans it was built from.
 - [True First Person for HellForge: C rewrite of retail smooth.66 (design)](design/specs/2026-11-16-c-rewrite-design.md)
 - [The camera during actions: what retail does, what build 25480438 does, what this build changes](design/ACTION-CAMERA.md)
 - [Testing in the running game: the harness, input, captures, and the first-person rig probe](design/HARNESS.md)
+- [The crash while the game closes: an engine fault, not the mod](design/QUIT-CRASH.md)
+- [Test build notes for testers](guides/TEST-BUILD.md)
 
 ## History
 

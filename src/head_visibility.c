@@ -22,6 +22,10 @@
 #define NONE 4294967295.0
 
 typedef bool (*Setter)(void *user, TfpEngineUnit unit, int mesh_index, bool visible, const char *pass_name, TfpEngineError *error);
+/* Beyond retail: which of retail's parts may be hidden (bit PART_HEAD = 1, PART_TORSO = 2, PART_SHOULDER = 4).
+ * 7 is retail. Set once before the view is first used. */
+static unsigned tfp_head_parts = 7;
+void tfp_head_set_parts(unsigned parts) { tfp_head_parts = parts & 7u; }
 typedef enum Part { PART_HEAD, PART_TORSO, PART_SHOULDER, PART_BACKPACK, PART_BODY, PART_MODEL } Part;
 static const char *const PART_NAMES[] = {"head", "torso", "shoulder", "backpack", "body", "model"};
 typedef struct Selected { int slot; Part part; } Selected;
@@ -386,6 +390,13 @@ const TfpHeadBuild tfp_head_build_25480438 = {
   0x9d8c0, {0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xec, 0x20, 0x48, 0x8b, 0x35, 0x1a, 0x28, 0x97, 0x01},
   0x1a100f0,                                                                        /* profile.h FP_REGISTRY; what registry_code loads */
   0x2bd890, 0x2c3990, 0x546a70};                                                    /* build_map */
+/* Beyond retail: 0 is "not filled yet". The engine fills both ids inside its own Unit.set_mesh_visibility the first
+ * time that runs (a guarded static before exe+0x412875 on build 25480438); on HellForge nothing calls it before this
+ * module's first write. The two code sites that compare with them are still checked byte for byte above. */
+static bool pass_id(TfpHead *h, double at, uint32_t value) {
+  uint32_t seen = u32(h, at);
+  return seen == value || seen == 0;
+}
 static void contract(TfpHead *h, const TfpVisSnapshot *s) {   /* :97-121 */
   const TfpEngineIface *sr = h->engine;
   CHECK(sr && sr->Application_main_world && sr->World_units && sr->Unit_set_mesh_visibility, 98, "Head mesh SDK unavailable");
@@ -399,7 +410,7 @@ static void contract(TfpHead *h, const TfpVisSnapshot *s) {   /* :97-121 */
   CHECK(bytes_at(h, exe + b->binding, 8, b->binding_bytes), 113, "Head mesh visibility binding changed");
   CHECK(bytes_at(h, exe + b->mask_layout, 14, b->mask_layout_bytes), 114, "Head mesh pass-mask layout changed");
   CHECK(bytes_at(h, exe + b->context_a, 24, b->context_a_bytes) && bytes_at(h, exe + b->context_b, 26, b->context_b_bytes)
-        && u32(h, exe + b->context_default) == b->context_default_value && u32(h, exe + b->context_shadow) == b->context_shadow_value, 115,
+        && pass_id(h, exe + b->context_default, b->context_default_value) && pass_id(h, exe + b->context_shadow, b->context_shadow_value), 115,
         "Head camera/shadow visibility contexts changed");
   CHECK(bytes_at(h, exe + b->registry_code, 22, b->registry_code_bytes), 119, "Head Unit registry changed");
   h->checked = exe; h->has_checked = true; h->checked_game = s->base;
@@ -868,6 +879,7 @@ static void resolve(TfpHead *h, void *arg) {
   if (!unchanged) {
     for (int layer = 0; layer <= 2; layer++) for (size_t i = 0; i < 4; i++) {
       const Selected *selected = &SELECTED[i];
+      if (!(tfp_head_parts & (1u << selected->part))) continue;   /* beyond retail; all parts by default */
       if (!((!full_body && !(show_torso && selected->part == PART_TORSO)) || selected->part == PART_HEAD
             || (hide_torso && selected->part == PART_TORSO))) continue;
       int offset = layer * 40 + selected->slot * 4;

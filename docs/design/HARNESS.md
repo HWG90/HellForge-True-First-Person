@@ -34,6 +34,8 @@ only while the game and launcher are closed, and keep a copy.
 | `win_input.c` | started inside the game's Wine prefix; plays a timed event list with `SendInput` |
 | `rig_motion.lua` | per-frame recorder inside the game: largest joint change per 0.1 s for the first-person rig and the body |
 | `probe_rig.py` | runs named phases (input + recording + capture) and prints one strip per rig |
+| `session.sh` | `up`: install a build with a backup, set the mod list, launch to a mission; `down`: quit and restore the list |
+| `peek.py`, `watch_field.py` | read the running game's memory from Linux by module offset |
 
 Input script words: `wait S`, `key NAME`, `hold NAME S`, `click left|right|middle [S]`, `down NAME`,
 `up NAME`, `look DX DY`. Names: letters, digits, `shift ctrl alt space tab esc f9 f10 f11`.
@@ -55,7 +57,17 @@ Input script words: `wait S`, `key NAME`, `hold NAME S`, `click left|right|middl
   True First Person switched on ("waiting: Empty entity" was its last status). Which one hung the load is
   not known yet. `probe_rig.py` now switches the recorder off when it finishes; test the other by leaving
   a mission with the view on and no recorder.
-- Node 0 of a character unit reports the world origin; read a joint (`r_hand`) for a position.
+- Lua node indices start at 1: `Unit.world_position(unit, 0)` answers the origin or NaN.
+- The hang on the way back to the ship did not repeat once the recorder was off (three later sessions left
+  a mission with the view on): do not leave a per-frame `World.units` scan running across a level change.
+- The menu's own store wins: `userdata/environment/Local/DBF/HellForge/MCM/true_first_person.ini` overrides
+  the mod's `settings.json` at start-up. Change a menu option for a test there, with the game closed.
+- Forcing meshes visible from Lua (`Unit.set_mesh_visibility(unit, i, true)` on every mesh) also shows the
+  shadow-only meshes: grey untextured armour in the view for the rest of the session. A probe that does
+  this needs a fresh session before any capture counts.
+- A trailing `wait` in an input script is honoured now; before 2026-11-20 midday, captures after
+  `run()` were taken too early.
+- The game often reports a crash on quit that is not the mod's: see [QUIT-CRASH.md](QUIT-CRASH.md).
 
 ## First-person rig probe, 2026-11-20
 
