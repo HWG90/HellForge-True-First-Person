@@ -1,4 +1,4 @@
-# True First Person for HellForge: test build 0.6.0-feel.18
+# True First Person for HellForge: test build 0.6.0-feel.19
 
 For HellForge on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
@@ -17,13 +17,23 @@ hear what breaks.
 - **F11** switches first person on and off. Use it in a mission, on foot, with a weapon in hand.
 - The settings menu is "True First Person" in DBF-MCM.
 
+## Changed since 0.6.0-feel.18
+
+- **Sleeves and hand grips are off.** They attach armour pieces to the first-person arms and correct the
+  hand's grip every frame. They had never run on this game build before feel.18, and a tester reported the
+  hands doing odd things. In my own captures the hands looked the same with them on and off, so I cannot
+  say this fixes that report; it removes the part I trust least. A file `arms_on.txt` beside the DLL
+  switches them back on.
+
 ## What was checked in the game (2026-11-20, solo missions)
 
 - F11 on and off, also pressed four times within a second.
 - Standing, walking, sprinting, strafing, crouching, diving: the view stays first person.
 - Hip fire, holding aim, firing while aiming, reloading: the view stays first person.
 - Weapon swap, grenade, stim: the view stays first person (see the limits below).
-- The helmet, torso and shoulder pads are hidden from the camera; sleeves and hand grips are on.
+- The helmet, torso and shoulder pads are hidden from the camera.
+- Most of this list was run on feel.18. On feel.19 I ran two missions (F11, hip, looking down, walking,
+  aiming, rifle and pistol, leaving and quitting), once with sleeves and grips off and once with them on.
 - Leaving a mission with the view on, and quitting the game afterwards.
 
 ## Limits you will see
@@ -54,7 +64,9 @@ and a pistol.
 Send the file `logs/sessions/<newest folder>/mod-goose.true-first-person.log` from the HellForge folder,
 and say what you did in the seconds before it went wrong. A clip helps most.
 
-## Test switch
+## Test switches
 
 A file `head_parts.txt` beside the DLL holding one digit chooses which armour parts are hidden from the
 camera: 1 head, 2 torso, 4 shoulder pads, added together (7 is the default). Only for testing.
+
+An empty file `arms_on.txt` beside the DLL switches sleeves and hand grips on. Only for testing.

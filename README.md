@@ -17,7 +17,7 @@ This is a C rewrite of the True First Person mode of Goose Gadget Kit (a Lua mod
 | Hiding your own head, torso and shoulders | In game; a fix for backpacks is in 0.6.0-feel.4, not yet confirmed |
 | Hip sensitivity that does not change with zoom level | In game since 0.6.0-feel.2 |
 | Depth of field and vignette handling, aim markers | In game |
-| Sleeves and hand grips | Refused at start-up (a maths check is 0.004 off its 0.0001 limit) |
+| Sleeves and hand grips | Held back since 0.6.0-feel.19 (they pass their checks, but are unproven in play); a file `arms_on.txt` beside the DLL switches them on |
 | Replacing the mod in a running game | Built in 0.6.0-feel.5, never run |
 | Settings menu (DBF-MCM: toggles, sliders, keys, per-weapon clipping) | Built in 0.6.0-feel.6, never run |
 | Saving settings (your own file, written when something changes) | Built in 0.6.0-feel.6, never run |
