@@ -5,12 +5,22 @@ hear what breaks.
 
 ## Install
 
+Take the **complete** ZIP unless you already run DBF-MCM and NEST for HellForge.
+
 1. Close the game and the HellForge launcher.
-2. Put the ZIP in HellForge's `mods` folder (or unpack it into `mods/true-first-person`).
+2. Unpack `True-First-Person-0.6.0-feel.19-HellForge-25480438-complete.zip` into HellForge's `mods` folder.
+   It adds three folders:
+   - `true-first-person`: the mod.
+   - `mcm`: DBF-MCM 0.1.74-hellforge.3, the settings menu (DEL).
+   - `overlay-host`: NEST 0.8.3-tfp.1, the shared in-game UI the menu and the weapon placement editor
+     (Page Up) draw through.
 3. Switch off any other first-person mod (First Person Controller, First Person + VR Mode, the rig trial).
    Two of them cannot run together.
-4. Optional: DBF-MCM for HellForge gives the settings menu (DEL). Goose Overlay Host gives the weapon
-   placement editor (Page Up). The mod runs without both.
+4. Start HellForge and check that all three are switched on in the mod list.
+
+If you already have `mcm` or `overlay-host`, keep yours when they are newer and take only
+`true-first-person` (or the smaller `-test.zip`, which holds just the mod). The mod itself starts without
+the other two; you then have F11 and the default settings, but no menu and no editor.
 
 ## Use
 
