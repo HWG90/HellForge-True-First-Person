@@ -396,3 +396,7 @@ sprinting and 0.25 s into a weapon swap. Each stayed at the head as the body fel
 1.09 m, 1.66 to 0.98 m), with the one handover frame missed. The eye's step changed by 0.02 m, 0.19 m and 0.04 m at
 most between two frames; the 0.19 m is the sprint's body going down. On the ground the lens shows what lies in front
 of the face: the dropped rifle after the aiming death, the character's arm after the sprint, grass after the swap.
+
+0.6.0-feel.29: the menu's per-weapon drafts following the weapon are no longer saved as a change (four swaps in the
+game: no write of `settings.json`). The panel's sliders were exercised by click: field of view to 69 (the screen
+showed 69.0 by the `Fov:` line) and back to 80; view kick strength to 30 and back to 35 (5 % steps).
