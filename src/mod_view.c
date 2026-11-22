@@ -30,6 +30,8 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "mod_panel.h"
 #include "wire_panel.h"
 #include "mod_editor.h"
+#include "render_slot.h"
+#include "arm_drive.h"
 #define TFP_VIEW_VERSION "0.6.0-feel.20"
 #else
 #include "wire_win.h"
@@ -58,6 +60,11 @@ static TfpWireFeel feel;
 static TfpFxPlatform fx_platform;
 static bool lock_wanted = true;
 static bool mcm_wanted; /* test switch mcm_on.txt: the settings menu in DBF-MCM instead of the mod's own panel */
+/* Test switches of the arm drive (src/arm_drive.h), files beside the DLL read once at the start: arms_live.txt
+ * switches it on; arms_live_restore.txt makes it put the game's joint values back after every draw instead of
+ * leaving them; arm_bend.txt makes it bend one shoulder instead of following the body. */
+static bool arms_live, arms_restore, arms_bend;
+static char arms_refusal[200]; /* why the render hook may not go in, as last logged: one line per reason */
 static bool engine_hooked, pose_hook_told[TFP_WIN_POSE_HOOKS];
 static char settings_text[TFP_SETTINGS_MAX];
 /* Two places hold settings.json. The one beside this DLL is made at build time (tools/convert_settings.py)
@@ -277,6 +284,71 @@ static void entry_note(void) {
 }
 #endif
 
+#ifdef TFP_FEEL
+/* ---- the arm drive (src/arm_drive.c, src/render_slot.c) ----------------------------------------------
+ * Start-up: the switches, and whether the render hook's contract holds (reads only). */
+static void arms_start(void) {
+  tfp_render_slot_setup(hf);
+  tfp_arm_drive_set_bend(arms_bend);
+  if (arms_bend) say("Test: arm_bend.txt: while the native first-person view is shown, the first-person rig's l_shoulder (node 10) is turned "
+                     "70 degrees about its own Z at the primary draw; the body is ignored");
+  else if (arms_live) say("Test: arms_live.txt: the body's arm animation is written onto the first-person arm rig at the primary draw while the "
+                          "native first-person view is shown (42 joints)");
+  if ((arms_live || arms_bend) && arms_restore) say("Test: arms_live_restore.txt: the rig's own joint values are put back after every primary draw");
+  else if (arms_live || arms_bend) say("Arms: written joint values stay until the next frame, where the game's own are recovered (a file "
+                                       "arms_live_restore.txt beside the DLL puts them back after every draw instead)");
+  const char *why = tfp_render_slot_contract();
+  if (why) {
+    snprintf(arms_refusal, sizeof arms_refusal, "%s", why);
+    say("Arms: render hook contract refused: %s. The arm drive stays off while that holds.", why);
+  }
+  else say("Arms: render hook contract passed: the primary draw (game+0xab7ac7) calls the world renderer (exe+0x318150) through the "
+           "application table's slot +0x28, which holds it; %s", arms_live || arms_bend ? "the hook goes in when the view is switched on"
+           : "the hook is not put in (no arms_live.txt or arm_bend.txt beside the DLL)");
+}
+/* Every tick while running. The hook is in only while the drive is switched on (a switch file and the view on);
+ * when it goes off the game's joint values are put back first, here on the game thread, then the hook comes out. */
+static void arms_tick(void) {
+  static uint64_t next_try, next_note;
+  static bool hook_fired_told;
+  static TfpArmDriveStats before;
+  const uint64_t now = GetTickCount64();
+  const bool wanted = (arms_live || arms_bend) && wire.controller.enabled;
+  tfp_render_slot_tick();
+  tfp_arm_drive_set(wanted, arms_restore, 1.0f);
+  if (wanted) {
+    if (!tfp_render_slot_installed() && now >= next_try) {
+      next_try = now + 500;
+      const char *why = tfp_render_slot_install();
+      if (!why) say("Arms: render hook in (application table +0x28, was the world renderer exe+0x318150)");
+      else if (strcmp(why, arms_refusal)) { /* one line per reason, not one per try */
+        snprintf(arms_refusal, sizeof arms_refusal, "%s", why);
+        say("Refused: arms: the render hook was not put in: %s", why);
+      }
+    }
+  } else if (tfp_render_slot_installed() && tfp_arm_drive_release()) {
+    tfp_render_slot_remove();
+    say("Arms: render hook out; the first-person rig holds the game's own joint values");
+  }
+  const TfpWinHook *hook = tfp_render_slot_hook();
+  if (hook->first_thread && !hook_fired_told) {
+    hook_fired_told = true;
+    say("Hook: primary draw first passed on thread %lu, called from game+%#llx (the tick is thread %lu)", (unsigned long)hook->first_thread,
+        (unsigned long long)(hook->first_return - tfp_win_game()), (unsigned long)GetCurrentThreadId());
+  }
+  if (now < next_note) return;
+  next_note = now + 1000;
+  TfpArmDriveStats s;
+  tfp_arm_drive_stats(&s);
+  if (s.frames == before.frames && s.refused == before.refused && s.idle == before.idle && s.restores == before.restores) return;
+  say("Arms: +%llu frames driven, %llu joints, %llu pieces refreshed, binds %llu, refused %llu (%s); +%llu frames in another camera, %u joints held",
+      (unsigned long long)(s.frames - before.frames), (unsigned long long)(s.joints - before.joints), (unsigned long long)(s.pieces - before.pieces),
+      (unsigned long long)s.binds, (unsigned long long)(s.refused - before.refused),
+      s.refused != before.refused ? tfp_arm_drive_reason_name(s.reason) : "none", (unsigned long long)(s.idle - before.idle), (unsigned)s.owned);
+  before = s;
+}
+#endif
+
 static void start(void) {
   TfpOpsHost memory;
   TfpWirePlatform platform;
@@ -314,6 +386,16 @@ static void start(void) {
         if (mcm_file) fclose(mcm_file);
         mcm_wanted = mcm_file != NULL;
         if (mcm_wanted) say("Test: mcm_on.txt: the settings menu is registered with DBF-MCM (goose.mcm) instead of the mod's own panel");
+#ifdef TFP_FEEL
+        static const char *const arm_files[] = {"arms_live.txt", "arms_live_restore.txt", "arm_bend.txt"};
+        bool *const arm_switches[] = {&arms_live, &arms_restore, &arms_bend};
+        for (int i = 0; i < 3; i++) {
+          strcpy(slash + 1, arm_files[i]);
+          FILE *arm_file = fopen(parts_path, "r");
+          if (arm_file) fclose(arm_file);
+          *arm_switches[i] = arm_file != NULL;
+        }
+#endif
         if (digit >= '1' && digit <= '7') {
           tfp_head_set_parts((unsigned)(digit - '0'));
           say("Test: head_parts.txt: hiding parts mask %d (1 head, 2 torso, 4 shoulders)", digit - '0');
@@ -337,6 +419,7 @@ static void start(void) {
 #endif
   measure_reads();
 #ifdef TFP_FEEL
+  arms_start();
   {
     char where[MAX_PATH + 16], text[360];
     TfpWireFeelParts parts;
@@ -390,6 +473,11 @@ static volatile LONG release_state; /* 0 not answered, 1 released, 2 refused (re
 static const char *volatile release_why;
 static void release_on_game_thread(void) {
   const char *why = stage == RUNNING ? tfp_wire_feel_held(&wire) : NULL;
+  if (!why) { /* the arm drive: its joint values go back here, on the game thread, then its hook comes out */
+    tfp_arm_drive_set(false, false, 1.0f);
+    if (tfp_arm_drive_release()) tfp_render_slot_remove();
+    else why = tfp_arm_drive_held();
+  }
   if (!why && !tfp_mod_menu_release(hf, owner, &wire)) why = "DBF-MCM did not release the settings menu";
   release_why = why;
   InterlockedExchange(&release_state, why ? 2 : 1);
@@ -524,6 +612,7 @@ static void tick_body(void) {
   tfp_wire_menu_frame(&wire);          /* the menu's queued buttons and toggles, and the two status rows */
   tfp_wire_settings_save_frame(&wire); /* writes only when the store changed since the last write */
   eng_temp_end();
+  arms_tick();
   for (int i = 0; i < TFP_WIN_POSE_HOOKS; i++) {
     const TfpWinHook *hook = tfp_win_pose_hook(i);
     if (hook->refused) {
@@ -577,6 +666,7 @@ static void session_end(HfMod *mod, HfEvent event, void *unused) {
   unsigned restored = tfp_win_restore_slots();
 #ifdef TFP_FEEL
   restored += tfp_win_pose_restore_slots();
+  restored += tfp_render_slot_restore();
 #endif
   hf->log(mod, "Session end: %u dispatch slot(s) put back", restored);
 }
@@ -606,6 +696,17 @@ __declspec(dllexport) int hellforge_mod_unload(const HfApi *api, HfMod *mod, uin
     if (!why && tfp_mod_menu_registered())
       why = "the game thread did not run during the change, and the settings menu can only be taken out of DBF-MCM from it";
     if (!why && stage == RUNNING) why = tfp_wire_feel_held(&wire);
+    if (!why) why = tfp_arm_drive_held(); /* joint values can only be put back from the game thread */
+  }
+  unsigned render_restored = 0;
+  if (!why) {
+    /* The render hook comes out first; a world render that is inside it now (it stays inside for a whole draw)
+     * must have returned before this build may be taken out of memory. */
+    render_restored = tfp_render_slot_restore();
+    for (int waited = 0; !tfp_render_slot_idle(); waited++) {
+      if (waited >= 2000) { why = "a world render did not leave this mod's render hook within 2 seconds"; break; }
+      Sleep(1);
+    }
   }
   if (why) {
     InterlockedExchange(&release_state, 0);
@@ -616,7 +717,7 @@ __declspec(dllexport) int hellforge_mod_unload(const HfApi *api, HfMod *mod, uin
   eng_set_script_probe(NULL);
   tfp_mod_editor_retire();   /* its panel stays registered with the overlay host: closed, and drawing nothing */
   tfp_mod_panel_retire();    /* the settings panel likewise */
-  unsigned restored = tfp_win_restore_slots() + tfp_win_pose_restore_slots();
+  unsigned restored = tfp_win_restore_slots() + tfp_win_pose_restore_slots() + render_restored;
   hf->log(mod, "Live %s: the mod held nothing in the game; %u dispatch slot(s) put back; this build does nothing from here on.",
           reason == HF_UNLOAD_REPLACE ? "replace" : "removal", restored);
   return 0;
