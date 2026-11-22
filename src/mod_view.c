@@ -172,6 +172,27 @@ static TfpSettingsCopy copy_user_file(void *user, TfpSettingsFile which, const c
   snprintf(why, why_size, "Windows error %lu", (unsigned long)code);
   return TFP_COPY_FAILED;
 }
+/* TfpSettingsDisk.same: <name><suffix> is there and holds the file's bytes as they are now. Anything that cannot be
+ * opened or read answers false, and a further copy is then made as before. Game thread only, at a save. */
+static bool same_user_file(void *user, TfpSettingsFile which, const char *suffix) {
+  static char one[4096], other[4096];
+  char path[MAX_PATH + 32], copy[MAX_PATH + 64];
+  (void)user;
+  if (!user_file_path(path, sizeof path, which, false)) return false;
+  snprintf(copy, sizeof copy, "%s%s", path, suffix);
+  HANDLE a = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  HANDLE b = a == INVALID_HANDLE_VALUE ? a : CreateFileA(copy, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  LARGE_INTEGER size_a, size_b;
+  bool same = b != INVALID_HANDLE_VALUE && GetFileSizeEx(a, &size_a) && GetFileSizeEx(b, &size_b) && size_a.QuadPart == size_b.QuadPart;
+  for (LONGLONG left = same ? size_a.QuadPart : 0; same && left > 0;) {
+    DWORD got_a = 0, got_b = 0;
+    same = ReadFile(a, one, sizeof one, &got_a, NULL) && ReadFile(b, other, sizeof other, &got_b, NULL) && got_a && got_a == got_b && !memcmp(one, other, got_a);
+    left -= got_a;
+  }
+  if (b != INVALID_HANDLE_VALUE) CloseHandle(b);
+  if (a != INVALID_HANDLE_VALUE) CloseHandle(a);
+  return same;
+}
 #endif
 
 static void say(const char *format, ...) {
@@ -726,7 +747,7 @@ static void start(void) {
     parts.editor = tfp_mod_editor_platform(&fx_platform);
     tfp_wire_feel_bind(&wire, &feel, &parts);
     /* Where the two files are saved. A settings.json of 0.6.0-feel.20 to feel.24 is converted here, at once. */
-    static const TfpSettingsDisk user_disk = {NULL, write_user_file, copy_user_file};
+    static const TfpSettingsDisk user_disk = {NULL, write_user_file, copy_user_file, same_user_file};
     tfp_wire_settings_disk(&wire, &user_disk, user_file);
     /* The three live features, now that the settings are read: each setter once, and a line each that says whether the
      * feature is on and whether the option or a file decided. Then what each one's start-up has to say. */

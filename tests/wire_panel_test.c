@@ -104,7 +104,7 @@ static TfpSettingsCopy test_copy(void *user, TfpSettingsFile file, const char *s
   copies++, snprintf(copy_suffix, sizeof copy_suffix, "%s", suffix);
   return TFP_COPY_DONE;
 }
-static const TfpSettingsDisk test_disk = {NULL, test_save, test_copy};
+static const TfpSettingsDisk test_disk = {NULL, test_save, test_copy, NULL};
 #define STORE_PART
 static int store_part(void) {
   TfpSettings s;

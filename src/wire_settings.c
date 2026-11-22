@@ -463,19 +463,33 @@ static const char *const file_names[2] = {"settings.json", "locked_view.json"};
 static uint64_t revision(const Settings *st, TfpSettingsFile file) {
   return file == TFP_LOCKED_FILE ? st->store.locked_writes : st->store.writes + st->store.menu_writes;
 }
+/* Is one of <name><stem>, <name><stem>-2 .. -9 a copy that holds the file's bytes as they are now? true: `suffix` is
+ * that one, and no further copy is needed. So a start whose write fails after the copy does not take another name at
+ * the next start for the same file. */
+static bool held_already(const Settings *st, TfpSettingsFile file, const char *stem, char *suffix, size_t suffix_size) {
+  if (!st->disk.same) return false;
+  snprintf(suffix, suffix_size, "%s", stem);
+  for (int n = 2;; n++) {
+    if (st->disk.same(st->disk.user, file, suffix)) return true;
+    if (n > 9) return false;
+    snprintf(suffix, suffix_size, "%s-%d", stem, n);
+  }
+}
 /* Before the session's first write of a file: the file as it is on disk is copied aside when the store does not hold
  * what it says. Two cases: it was refused at load (<name>.refused), or no byte of it was bound (<name>.unread: it
  * could not be opened at the start, and what is loaded came from the file beside the DLL or is the defaults). In the
- * second case there is usually no file at all (the first run), which the copy answers. false: `why`; no write. */
+ * second case there is usually no file at all (the first run), which the copy answers. A copy that already holds the
+ * file's bytes counts as the copy. false: `why`; no write. */
 static bool keep_aside(Settings *st, TfpSettingsFile file, char *why, size_t why_size) {
   const bool unread = st->unread[file];
   const char *const stem = unread ? ".unread" : ".refused", *const what = unread ? "could not be opened at the start" : "could not be read";
   char suffix[24], line[300];
   if (!unread && !st->refused[file]) return true;
   if (!st->disk.copy) { snprintf(why, why_size, "a %s that %s cannot be copied aside first", file_names[file], what); return false; }
-  snprintf(suffix, sizeof suffix, "%s", stem);
+  const bool held = held_already(st, file, stem, suffix, sizeof suffix);
+  if (!held) snprintf(suffix, sizeof suffix, "%s", stem);
   for (int n = 2;; n++) {
-    TfpSettingsCopy answer = st->disk.copy(st->disk.user, file, suffix, why, why_size);
+    TfpSettingsCopy answer = held ? TFP_COPY_DONE : st->disk.copy(st->disk.user, file, suffix, why, why_size);
     if (answer == TFP_COPY_DONE) {
       snprintf(line, sizeof line, "Kept: the %s that %s is now %s%s; nothing of it was changed", file_names[file], what, file_names[file], suffix);
       tfp_wire_say(st->w, line);
@@ -492,11 +506,13 @@ static bool keep_aside(Settings *st, TfpSettingsFile file, char *why, size_t why
   }
 }
 /* The file as it is on disk to <name><stem>, or to <name><stem>-2 .. -9 when that name is taken: the first free one,
- * and a taken name is never written over. DONE: `suffix` is the one used. NONE: there is no such file. FAILED: `why`
- * (also when all nine names are taken, or the disk has no copy). Never EXISTS. */
+ * and a taken name is never written over. When one of the nine already holds the file's bytes, that one is the copy
+ * and nothing is made. DONE: `suffix` is the one used. NONE: there is no such file. FAILED: `why` (also when all
+ * nine names are taken by other files, or the disk has no copy). Never EXISTS. */
 static TfpSettingsCopy copy_free_name(Settings *st, TfpSettingsFile file, const char *stem, char *suffix, size_t suffix_size, char *why, size_t why_size) {
   char reason[160] = "";
   if (!st->disk.copy) { snprintf(why, why_size, "%s cannot be copied on this disk", file_names[file]); return TFP_COPY_FAILED; }
+  if (held_already(st, file, stem, suffix, suffix_size)) return TFP_COPY_DONE;
   snprintf(suffix, suffix_size, "%s", stem);
   for (int n = 2;; n++) {
     TfpSettingsCopy answer = st->disk.copy(st->disk.user, file, suffix, reason, sizeof reason);
@@ -513,7 +529,8 @@ static bool write_file(Settings *st, TfpSettingsFile file, size_t *written, char
 /* Before a settings.json that holds "locked_view" (0.6.0-feel.20 to feel.24) is replaced by one without it: the
  * options are in locked_view.json, and the file as it is has a copy of its own (.before-feel25, or the next free of
  * .before-feel25-2 .. -9 when an earlier conversion took that name: an older build wrote the member again since, and
- * the file as found now is not the one the earlier copy holds). Whatever replaces that settings.json goes through
+ * the file as found now is not the one the earlier copy holds; a copy that does hold it, from a start whose write
+ * failed, is the copy and no further name is taken). Whatever replaces that settings.json goes through
  * here, at the start or later, so neither can be skipped. false: `why`, and settings.json is not written. */
 static bool convert_first(Settings *st, char *why, size_t why_size) {
   char reason[240] = "";

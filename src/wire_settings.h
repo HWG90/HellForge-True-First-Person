@@ -64,7 +64,7 @@ void tfp_wire_settings_bind_locked(TfpWire *w, const char *json, size_t length, 
  * calls mod.set.) A failed write leaves that file unsaved until its next change, so a failing disk is tried
  * once per change and not once a frame.
  *
- * No file the user had is ever written over without a copy, in two cases:
+ * No file the user had is ever written over without a copy, in these cases:
  *   - a file that was REFUSED at load (the store runs on defaults, so a save would replace the user's values):
  *     before the session's first write of it, it is copied to <name>.refused (or .refused-2 .. .refused-9 when
  *     that name is taken; a taken name is never written over). The copy failing fails that save.
@@ -74,7 +74,9 @@ void tfp_wire_settings_bind_locked(TfpWire *w, const char *json, size_t length, 
  *     to <name>.unread (.unread-2 .. .unread-9) by the same rule; `copy` answering TFP_COPY_NONE is the usual case
  *     and the write goes on. A disk with no `copy` cannot tell, and no file is written to it.
  *   - a settings.json that still holds "locked_view" (written by 0.6.0-feel.20 to feel.24, which 0.6.0-feel.19
- *     and older refuse whole): see tfp_wire_settings_disk. */
+ *     and older refuse whole): see tfp_wire_settings_disk.
+ * In every case a copy that already holds the file's bytes (`same`) is the copy: a start whose write fails after the
+ * copy does not take another name at the next start, and the nine names are only used up by nine different files. */
 typedef enum TfpSettingsFile { TFP_SETTINGS_FILE, TFP_LOCKED_FILE } TfpSettingsFile;
 typedef enum TfpSettingsCopy {
   TFP_COPY_DONE,    /* the copy was made */
@@ -88,6 +90,9 @@ typedef struct TfpSettingsDisk {
   bool (*write)(void *user, TfpSettingsFile file, const char *text, size_t length, char *why, size_t why_size);
   /* Copies the file as it is on disk to <its name><suffix>, never over an existing file. */
   TfpSettingsCopy (*copy)(void *user, TfpSettingsFile file, const char *suffix, char *why, size_t why_size);
+  /* Does <its name><suffix> hold the file's bytes as they are on disk now? false: it does not, there is no such copy,
+   * or either could not be read. NULL: no copy is ever taken for the same file. */
+  bool (*same)(void *user, TfpSettingsFile file, const char *suffix);
 } TfpSettingsDisk;
 #define TFP_SETTINGS_BEFORE_SPLIT ".before-feel25"
 #define TFP_LOCKED_REPLACED ".replaced"
@@ -96,8 +101,8 @@ typedef struct TfpSettingsDisk {
  * or none). What is loaded counts as what the files hold, with one exception that is done here, at once: when the
  * user's settings.json held "locked_view", (1) locked_view.json is written from the loaded options unless that file
  * was there and read, (2) settings.json is copied to settings.json.before-feel25, or to the first free of
- * .before-feel25-2 .. -9 when that name is taken (a taken name is never written over; all nine taken refuses the
- * conversion), (3) settings.json is written again without the member, everything else as loaded.
+ * .before-feel25-2 .. -9 when that name is taken (a taken name is never written over, and a copy that already holds the file is the copy; all nine taken by
+ * other files refuses the conversion), (3) settings.json is written again without the member, everything else as loaded.
  * When locked_view.json was there and read too, an older build wrote the member after this one made that file: the
  * member is the newer one, so the options it names take its values (what it does not name stays as locked_view.json
  * has it), and where that changes a value locked_view.json is copied to locked_view.json.replaced (.replaced-2 ..
