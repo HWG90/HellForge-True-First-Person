@@ -1,4 +1,4 @@
-# True First Person for HellForge: test build 0.6.0-feel.34
+# True First Person for HellForge: test build 0.6.0-feel.36
 
 For HellForge on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
@@ -24,6 +24,27 @@ DBF-MCM is no longer needed. The mod has its own panel.
 - **F10** opens the settings panel "True First Person" (also in NEST's list, Page Down). Three tabs:
   First person, Bob and sway, Locked view.
 - **Page Up** opens the weapon placement editor.
+
+## New and fixed in 0.6.0-feel.36
+
+From playing 0.6.0-feel.34 by hand:
+
+- **Arms when looking up or down.** The gun arm stretched away and the weapon ended up to half a metre from its
+  place. It now stays where it is at a level view. Tested in the game: within 1 cm level, 4 cm at 35 degrees
+  down, 8 cm at 70 degrees down.
+- **Dark rim at every weapon swap.** The game's first-person vignette, and its depth of field, came back for a third
+  of a second at each swap. Both stay off through a swap now and come back when first person is switched off.
+  Tested in the game.
+- **Camera damping (new slider, Locked view tab, default 60 %).** Steadies the view against your body's movement:
+  the view kicks build up over time, and during a grenade, stim, melee or emote the eye follows the head more calmly.
+  0 % is the old behaviour. Full aim is never damped.
+- **Kicks from walking.** Your head turning sideways as the body twists (strafing, walking backwards) counts for a
+  fifth of what it did. Kicks from walking, backing and strafing went from 5 to 7 degrees to 1.5 to 3.3.
+- **Walking out of an emote** stepped the camera 10 to 12 cm; now 5 cm.
+- **Field-of-view lock** eases out when switched off, as it eases in.
+
+If the view still moves too much for you: lower "View kick strength" and "View kick limit" on the same tab, and
+raise "Camera damping".
 
 ## Fixed in 0.6.0-feel.34
 

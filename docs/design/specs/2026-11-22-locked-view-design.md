@@ -517,3 +517,37 @@ session, all passing (ragdoll 0.045 m, death 0.036 m). The first run's two failu
 losing one of four presses 30 ms apart (the key is polled once a frame), which left the view off; the phase now
 leaves 0.11 s between presses.
 
+### feel.35 and feel.36 (2026-11-22): the first session played by hand
+
+The user played feel.34 and reported three things; all are fixed and seen in the game.
+
+1. **"Some of these transforms are a little messy. Notice my arms."** Looking down with the revolver the gun arm was
+   stretched to the lower right; the log said the socket was 0.26 to 0.47 m and up to 59 degrees off the rig's own
+   while "looking up or down" (0.06 to 0.08 m level). Cause: the frame the body's arms were expressed in was the
+   body root's axes at the head (`tfp_graft_anchor`), which does not pitch, while the rig hangs on the view, which
+   does: the arms' pitch (and any twist of the body under the view) was counted twice. The root's matrix now gets
+   the axes of the rig's root before anything is bound, aligned or posed (`tfp_graft_view`). In the game: 0.002 to
+   0.006 m level, 0.044 m at 35 degrees down, 0.076 m at 70 down, 0.036 m at 35 up.
+2. **"Switching weapons causes a momentary vignette."** The game's first-person vignette, which the mod switches off
+   behind the depth-of-field lease: every swap ended the view for 0.3 s, the vignette (and `dof_enabled`) was given
+   back and taken again. Both are now held for 1.5 s after the view goes away while first person is on
+   (`tfp_wire_effects_vignette_view`), given back at once when first person is switched off. In the game: 0 restores
+   over four swaps, one of each at F11 off.
+3. **"Configurable dampening for the camera moves... they're very intense right now."**
+   - `camera_damping` (0 to 100 %, default 60; 100 % is 300 ms): the kick is low-passed in time (`tfp_kick_step`
+     over `tfp_kick_raw`), and in head-camera frames on foot the eye follows the head through the same low-pass with
+     the lag held under 0.10 m (`src/camera_damp.h`). Not in full aim, not for a body that is down or off foot.
+   - The kick's sideways part (about the view's up axis) counts for a fifth (`TFP_KICK_YAW_SHARE`): it is the body
+     twisting under the head, and it turned the aim. In the game at the saved 35 % / 8 degrees: walk 1.8, back 1.5,
+     strafe 3.3, sprint 2.7, crouch 1.4 degrees (5 to 8 before); prone 4.6, dive 5.5, grenade 5.7, stim 6.2.
+   - Defaults of kick strength and limit were left as they are; the user's saved values are theirs.
+
+Also in feel.36: the field-of-view lock's arithmetic in `src/fov_lock.h` with tests, gliding out as it glides in;
+jump detection after an event during 600 ms (300 before: walking out of an emote the rig re-seated 0.10 m in one
+frame half a second after the view came back; 0.10 to 0.12 m then, 0.045 to 0.052 m now, four runs).
+
+In the game on feel.36: matrix 35 of 35, twice. A death from real damage (three injuries through the HD2 runtime)
+stayed at the head and came back after the respawn; a hit of 30 gave a 1.6 degree flinch. Open: a dive begun
+0.9 s after a swap measured 0.122 m in one frame; a dive alone leaves no trace to compare with, so whether that is
+the dive's own start or the wider watch softening it is not known.
+
