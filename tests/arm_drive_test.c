@@ -918,6 +918,15 @@ static void test_rest_after_a_draw(void) {
   CHECK(stats().align.count == 4 && stats().binds == 2);
 }
 
+/* The body's weapon socket in body_now, stretched by one part in a hundred: not rigid. */
+static void bend_socket(void) {
+  TfpGraft map;
+  CHECK(tfp_graft_bind(&map, bn, bl, fn, fl, body_now, rig_world));
+  const unsigned socket = map.body[TFP_GRAFT_JOINTS - 1];
+  TfpGraftMatrix bent = body_now[socket];
+  for (unsigned i = 0; i < 3; i++) bent.values[i] *= 1.01f;
+  put(worlds_of(BODY) + 64 * socket, &bent, sizeof bent);
+}
 /* A binding that begins while the player aims (the copy is hidden: weight 0, src/arm_weight.h) with nothing kept for
  * the weapon. Its provisional alignment is of the aim pose, where body and rig differ most; it shows nothing until
  * the aim is released. On the first driven frame the copy is fully shown again the provisional alignment is taken
@@ -1038,6 +1047,50 @@ static void test_binding_while_aiming(void) {
   shown = socket_shown();
   CHECK(stats().align.count == 2 && apart_m(&shown, rest) < .0001f);
   tfp_arm_drive_set_hold_ready(false);
+
+  /* a binding that begins while the copy is fading (weight between 0 and 1): the body is still near the aim pose, and
+   * its alignment is taken again at full weight like one taken hidden */
+  rest_start();
+  stance = TFP_ARM_REST_NONE;
+  tfp_arm_drive_set(true, false, .5f);
+  body_is(body_draw);
+  CHECK(!frame());
+  CHECK(stats().align.count == 1 && stats().align.how == TFP_ARM_ALIGN_PROVISIONAL && stats().binds == 1);
+  body_is(body_now);
+  tfp_arm_drive_set(true, false, .8f); CHECK(!frame());
+  CHECK(stats().align.count == 1);
+  tfp_arm_drive_set(true, false, 1);
+  CHECK(!frame());
+  s = stats();
+  CHECK(s.align.count == 2 && s.align.how == TFP_ARM_ALIGN_PROVISIONAL && s.align.eased && s.align.moved_m > .05f && s.binds == 1);
+  CHECK(strstr(tfp_arm_drive_align_line(&s.align), "taken again now that the arms show"));
+  for (unsigned n = 0; n < 60; n++) CHECK(!frame());
+  shown = socket_shown();
+  CHECK(stats().align.count == 2 && stats().binds == 1 && apart_m(&shown, rest) < .0001f);
+
+  /* the first fully shown frame cannot give an alignment (the body's socket is not rigid there): nothing is taken
+   * from it. No pose can be made of that frame either, so it is refused and the binding ends; the next frame's new
+   * binding takes its alignment fully shown, and nothing more is owed. */
+  rest_start();
+  stance = TFP_ARM_REST_NONE;
+  tfp_arm_drive_set(true, false, 0);
+  body_is(body_draw);
+  for (unsigned n = 0; n < 10; n++) CHECK(!frame());
+  CHECK(stats().align.count == 1 && stats().binds == 1);
+  body_is(body_now);
+  bend_socket();
+  tfp_arm_drive_set(true, false, 1);
+  CHECK(!frame());
+  CHECK(stats().align.count == 1 && stats().binds == 1 && stats().refused == 1 && stats().reason == TFP_ARM_POSE);
+  body_is(body_now);
+  CHECK(!frame());
+  s = stats();
+  shown = socket_shown();
+  CHECK(s.align.count == 2 && s.align.how == TFP_ARM_ALIGN_PROVISIONAL && !s.align.eased && s.binds == 2 && apart_m(&shown, rest) < .0001f);
+  CHECK(!strstr(tfp_arm_drive_align_line(&s.align), "taken again"));
+  for (unsigned n = 0; n < 60; n++) CHECK(!frame());
+  shown = socket_shown();
+  CHECK(stats().align.count == 2 && stats().binds == 2 && apart_m(&shown, rest) < .0001f);
 }
 
 /* What is not a rest: an action (the tick says so), a hold, a gun that is away, a body that keeps moving, layer states
