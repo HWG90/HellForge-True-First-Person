@@ -171,6 +171,8 @@ TfpFx *tfp_wire_effects_of(TfpWire *w);
 /* What the vignette takes for "the view is there": `active` (the runtime's answer), and for 1.5 s after it went away
  * while first person is still on (a weapon swap), so the vignette is not given back for a swap. */
 bool tfp_wire_effects_vignette_view(TfpFx *fx, bool active);
+/* The same for the depth of field, which is held with the vignette: `active`, or the vignette being held. */
+bool tfp_wire_effects_dof_view(TfpFx *fx, bool active);
 
 /* src/memory.lua writer:copy(address, one byte) on its shipped path (native_ads_option.lua:54), over
  * the platform's VirtualQuery / WriteProcessMemory and the backend's read. Exported for the test. */

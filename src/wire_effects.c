@@ -256,9 +256,10 @@ static bool dof_executable(void *u, uint64_t *exe, const char **error) {
 static bool vignette_held(TfpFx *fx);
 /* The depth of field goes with the vignette through a weapon swap: the setting is not given back for the third of a
  * second the view is away (tfp_wire_effects_vignette_view below has the rule). */
+bool tfp_wire_effects_dof_view(TfpFx *fx, bool active) { return active || vignette_held(fx); }
 static bool dof_active_view(void *u, bool *is_true, const char **error) {
   if (!entry_true(u, TFP_RT_E_active_view, is_true, error)) return false;
-  if (!*is_true && vignette_held(u)) *is_true = true;
+  *is_true = tfp_wire_effects_dof_view(u, *is_true);
   return true;
 }
 static bool dof_fallback_ready(void *u, bool *is_true, const char **error) { return entry_true(u, TFP_RT_E_dof_fallback_ready, is_true, error); }
@@ -279,10 +280,12 @@ static TfpDofAnswer dv_update(void *u, const TfpDofCompat *compat, const char **
 /* The view going away is not always its end: a weapon swap takes it away for a third of a second, and giving the
  * vignette back for that showed a dark rim at every swap (seen in the game 2026-11-22). For VIGNETTE_AWAY_S after
  * the view went away the vignette stays off, and a row the game switches on meanwhile is taken again; after that,
- * or at once when first person is switched off (the controller is neither running nor waiting), it is given back.
- * A shutdown gives it back at once. Not clean meanwhile, so the runtime keeps asking. */
+ * or at once when first person is switched off, it is given back. Switched on is the controller's enabled flag: it
+ * stays true while the controller waits for the camera or is still releasing the old lease, and a stop or a
+ * shutdown clears it. A stop or a shutdown of the depth of field gives it back at once. Not clean meanwhile, so
+ * the runtime keeps asking. */
 #define VIGNETTE_AWAY_S 1.5
-static bool first_person_wanted(const TfpFx *fx) { return fx->w->controller.phase == TFP_PHASE_RUNNING || fx->w->controller.phase == TFP_PHASE_WAITING; }
+static bool first_person_wanted(const TfpFx *fx) { return fx->w->controller.enabled; }
 /* True while the vignette is to stay off although the view is away (see above). */
 static bool vignette_held(TfpFx *fx) {
   double now = 0; const char *error = NULL;
@@ -294,10 +297,13 @@ static bool vignette_held(TfpFx *fx) {
   if (now - fx->vignette_away_since < VIGNETTE_AWAY_S) return true;
   return false; /* the time is up: given back, and the mark stays until the view is back or it is clean */
 }
+/* A stop that is asked for stops at once: the hold is only in what the two take for "the view is there"
+ * (tfp_wire_effects_vignette_view, tfp_wire_effects_dof_view). A swap never comes here: the runtime updates the
+ * depth of field through it and stops it only for a manual stop and for the new-body recovery. */
 static TfpDofAnswer dv_stop(void *u, const char **why) {
   TfpFx *fx = u;
   *why = NULL;
-  if (vignette_held(fx)) { tfp_vignette_update(&fx->vignette, why); *why = NULL; return TFP_DOF_FALSE; }
+  fx->vignette_away_since = 0;
   return glue(tfp_vignette_stop(&fx->vignette, why));
 }
 static TfpDofAnswer dv_shutdown(void *u, const char **why) { *why = NULL; ((TfpFx *)u)->vignette_away_since = 0; return glue(tfp_vignette_shutdown(&((TfpFx *)u)->vignette, why)); }
