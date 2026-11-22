@@ -43,5 +43,47 @@ class SameFrame(unittest.TestCase):
         self.assertGreater(matrix.judge(lines)["largest_jump_m"], 0.25)
 
 
+def row(t, kind, x, step=0.0):
+    return f"19:00:00.000 Trace: t={t:.1f} kind={kind} eye_world=({x:.4f} 1.0000 2.0000) step={step:.4f} wanted=({x:.4f} 1.0000 2.0000) correction=0.0000"
+
+
+class FastFrames(unittest.TestCase):
+    """Above 200 frames a second every frame is under 5 ms after the one before. They are still frames."""
+
+    def test_frames_4_ms_apart_with_a_moving_eye_are_all_kept(self):
+        lines = ["19:00:00.000 State: swap"] + [row(4.0 * i, 4, 0.02 * i, 0.02) for i in range(50)]
+        (_, rows), = trace.windows(lines)
+        self.assertEqual(len(rows), 50)
+        self.assertEqual([r[0] for r in rows], [4.0 * i for i in range(50)])
+
+    def test_a_pop_at_250_frames_a_second_is_seen(self):
+        lines = ["19:00:00.000 State: swap"] + [row(4.0 * i, 4, 0.02 * i + (0.3 if i >= 25 else 0)) for i in range(50)]
+        self.assertGreater(matrix.judge(lines)["largest_jump_m"], 0.25)
+
+    def test_a_frame_set_twice_at_250_frames_a_second_is_one_frame(self):
+        # the view leaves the native view on frame 25: that frame is set twice, 0.7 ms apart, kind 6 and then kind 4
+        # with the same eye, as in the recorded log
+        lines = ["19:00:00.000 State: swap"]
+        for i in range(50):
+            if i == 25:
+                lines.append(row(4.0 * i - 0.7, 6, 0.02 * i))
+            lines.append(row(4.0 * i, 6 if i < 25 else 4, 0.02 * i))
+        (_, rows), = trace.windows(lines)
+        self.assertEqual(len(rows), 50)
+        self.assertEqual([r[1] for r in rows], [6] * 25 + [4] * 25)  # the later row is the one kept
+        self.assertLess(matrix.judge(lines)["largest_jump_m"], 0.03)
+
+    def test_a_third_row_is_measured_from_the_frames_first_row(self):
+        # 0, 3 (the same frame again, same eye), 6 ms (the next frame: 6 ms after the first row, though 3 after the second)
+        lines = ["19:00:00.000 State: swap", row(0.0, 6, 0.0), row(3.0, 4, 0.0), row(6.0, 4, 0.02), row(12.0, 4, 0.04)]
+        (_, rows), = trace.windows(lines)
+        self.assertEqual([r[0] for r in rows], [3.0, 6.0, 12.0])
+
+    def test_the_same_kind_with_a_moved_eye_is_another_frame(self):
+        lines = ["19:00:00.000 State: swap", row(0.0, 4, 0.0), row(2.0, 4, 0.05), row(4.0, 4, 0.10)]
+        (_, rows), = trace.windows(lines)
+        self.assertEqual(len(rows), 3)
+
+
 if __name__ == "__main__":
     unittest.main()

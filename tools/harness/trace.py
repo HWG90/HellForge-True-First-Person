@@ -10,6 +10,9 @@ A window is called a pop when the step changes by more than POP_M between two fr
 The game can set the camera twice in one frame (seen on the frame the view leaves the native view: kind 6, then
 kind 4, 0.7 ms apart). Those are two Trace rows of one frame; the later one is what is drawn and is the one kept.
 Read as two frames, the second "stands still" and the body's own travel on the next frame reads as a pop.
+A row is the same frame again only when it comes under SAME_FRAME_MS after that frame's FIRST row and either its
+kind differs or its eye is where the kept row's is. The time alone does not say it: above 200 frames a second every
+frame is under 5 ms after the one before, and measured against the row just kept a whole window became one row.
 """
 import re
 import sys
@@ -17,7 +20,8 @@ from pathlib import Path
 
 HF = Path.home() / ".local/share/hellforge-prefix/pfx/drive_c/users/steamuser/Documents/HellForge"
 POP_M = 0.03
-SAME_FRAME_MS = 5.0   # two rows closer than this are one frame set twice
+SAME_FRAME_MS = 5.0   # a row this soon after a frame's first row can be that frame set again
+SAME_EYE_M = 0.002    # "the same eye": the rows of one frame differed by 0.0001 m in the game
 TRACE = re.compile(r"Trace: t=(-?[\d.]+) kind=(\d+) eye_world=\(([-\d. ]+)\) step=([-\d.]+)(?:.*?correction=([-\d.]+))?")
 
 
@@ -27,21 +31,23 @@ def newest():
 
 
 def windows(lines):
-    edge, rows = None, []
+    edge, rows, first = None, [], None   # first: the time of the first row of the frame rows[-1] belongs to
     for line in lines:
         if " State: " in line:
             if rows:
                 yield edge, rows
-            edge, rows = line.split(" State: ", 1)[1].strip()[:70], []
+            edge, rows, first = line.split(" State: ", 1)[1].strip()[:70], [], None
             continue
         m = TRACE.search(line)
         if m and edge is not None:
             eye = [float(x) for x in m[3].split()]
             row = (float(m[1]), int(m[2]), eye, float(m[4]), float(m[5] or 0))
-            if rows and 0 <= row[0] - rows[-1][0] < SAME_FRAME_MS:
+            again = bool(rows) and 0 <= row[0] - first < SAME_FRAME_MS and (
+                row[1] != rows[-1][1] or sum((x - y) ** 2 for x, y in zip(row[2], rows[-1][2])) ** 0.5 < SAME_EYE_M)
+            if again:
                 rows[-1] = row
             else:
-                rows.append(row)
+                rows.append(row); first = row[0]
     if rows:
         yield edge, rows
 
