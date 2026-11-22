@@ -13,7 +13,14 @@ static char panel_id[96];
 
 static void p_lock(void *u) { (void)u; AcquireSRWLockExclusive(&lock); }
 static void p_unlock(void *u) { (void)u; ReleaseSRWLockExclusive(&lock); }
-static const OvApi *p_connect(void *u) { (void)u; return ov_connect(); }
+/* As ov_connect(), but asking for the API the panel draws with: ov_connect() asks for the header's newest, and
+ * the host answers NULL to a request above its own API, so hosts 0.4.0 and 0.5.0 would give no panel at all. */
+static const OvApi *p_connect(void *u, uint32_t version) {
+  (void)u;
+  HMODULE host = GetModuleHandleA(OV_HOST_DLL);
+  OvApiFn get = host ? (OvApiFn)(void *)GetProcAddress(host, "ov_api") : NULL;
+  return get ? get(version) : NULL;
+}
 static void p_mcm(void *u, TfpWire *w, unsigned unavailable, TfpMenuEditFn edit) { (void)u; tfp_mod_menu_tick(hf_api, hf_mod, w, unavailable, edit); }
 
 void tfp_mod_panel_tick(const HfApi *hf, HfMod *mod, TfpWire *w, bool mcm_wanted, unsigned unavailable, TfpMenuEditFn edit) {

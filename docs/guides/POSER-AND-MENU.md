@@ -24,7 +24,7 @@ Three things retail has that the first HellForge builds lacked. All three are bu
 
 ## The mod's own settings panel (own-menu branch)
 
-Built, not yet run in the game. `src/wire_panel.c` (the panel), `src/mod_panel.c` (lock, clock, `ov_connect`), `tests/run-wire-panel.sh`.
+Built, not yet run in the game. `src/wire_panel.c` (the panel), `src/mod_panel.c` (lock, clock, the host's `ov_api` asked for API 6), `tests/run-wire-panel.sh`.
 
 - **What:** one NEST (Goose Overlay Host) window, "True First Person", with three tabs: **First person** and **Bob and sway** (every control of the menu below: same labels, ranges, steps, descriptions) and **Locked view** (the eleven options of `locked_view` in `settings.json`).
 - **Opening:** F10 (the panel's own hotkey; the host's config can override it), or the host's panel list (Page Down).

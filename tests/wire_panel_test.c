@@ -265,6 +265,7 @@ static struct {
   bool hover, active;
   char last[200];
   int disabled, disabled_depth, tab_bars, tab_items, bad_colours, locks, lock_depth, connects;
+  uint32_t asked;             /* the API version the panel last asked the host's export for */
   bool no_host;
 } ov;
 static OvPanel *const HANDLE = (OvPanel *)&ov;
@@ -360,10 +361,18 @@ static void new_host(uint32_t version) {
   api.begin_disabled = o_begin_disabled, api.end_disabled = o_end_disabled, api.theme = o_theme;
   if (version < 6) { api.size = offsetof(OvApi, button_primary); return; }
   api.button_primary = o_primary, api.key_cap = o_key_cap, api.heading = o_heading;
+  /* a host's table ends where its own API version does */
+  if (version == 6) api.size = offsetof(OvApi, passive_wheel_total);
+  if (version == 7) api.size = offsetof(OvApi, input_captured);
 }
 static void p_lock(void *u) { (void)u; ov.locks++; ov.lock_depth++; }
 static void p_unlock(void *u) { (void)u; ov.lock_depth--; }
-static const OvApi *p_connect(void *u) { (void)u; ov.connects++; return ov.no_host ? NULL : &api; }
+/* As the host's export (overlay-host src/host.cpp ov_api): its table, or NULL when asked for a newer API than its own. */
+static const OvApi *p_connect(void *u, uint32_t version) {
+  (void)u;
+  ov.connects++, ov.asked = version;
+  return ov.no_host || version > api.version ? NULL : &api;
+}
 static unsigned mcm_ticks, edits;
 static void p_mcm(void *u, TfpWire *w, unsigned unavailable, TfpMenuEditFn edit) { (void)u; (void)w; (void)unavailable; (void)edit; mcm_ticks++; }
 static const char *test_edit(TfpWire *w) { (void)w; edits++; return NULL; }
@@ -416,7 +425,8 @@ static int panel_part(void) {
   for (uint64_t ms = 1000; ms < 16000; ms += 100) tfp_wire_panel_tick(&wire, &platform, ms, 0, test_edit);
   CHECK(ov.connects == 15 && !log_count("Settings panel:") && !tfp_wire_panel_bound(&wire));
   for (uint64_t ms = 16000; ms < 30000; ms += 100) tfp_wire_panel_tick(&wire, &platform, ms, 0, test_edit);
-  CHECK(ov.connects == 16 && log_count("Settings panel:") == 1 && logged("is not loaded") && !tfp_wire_panel_bound(&wire));
+  CHECK(ov.connects == 16 && log_count("Settings panel:") == 1 && logged("is not loaded") && logged("older than API 6") && !tfp_wire_panel_bound(&wire));
+  CHECK(ov.asked == TFP_PANEL_API && TFP_PANEL_API == 6);        /* the API the panel draws with, not the header's newest */
   CHECK(!ov.registered && !mcm_ticks && !tfp_wire_menu_bound(&wire) && ov.lock_depth == 0);
   tfp_wire_panel_frame(&wire);                                   /* nothing bound: nothing happens */
   CHECK(!tfp_wire_panel_is_open(&wire));
@@ -426,13 +436,33 @@ static int panel_part(void) {
 
   /* ---- a host older than the panel needs: refused in one line, no panel, the mod carries on ---- */
   CHECK(start_wire());
-  new_host(5);
-  for (uint64_t ms = 0; ms < 5000; ms += 100) tfp_wire_panel_tick(&wire, &platform, ms, 0, test_edit);
-  CHECK(ov.connects == 1 && log_count("Refused: settings panel") == 1 && logged("API 5") && !ov.registered && !tfp_wire_panel_bound(&wire));
+  new_host(5);                                                   /* the host's export answers NULL to a request for API 6: as no host */
+  for (uint64_t ms = 0; ms < 20000; ms += 100) tfp_wire_panel_tick(&wire, &platform, ms, 0, test_edit);
+  CHECK(ov.connects == 16 && ov.asked == 6 && log_count("Settings panel:") == 1 && logged("older than API 6") && !ov.registered && !tfp_wire_panel_bound(&wire));
   CHECK(!tfp_wire_menu_bound(&wire) && !mcm_ticks);
   tfp_wire_panel_free(&wire);
+  CHECK(!tfp_wire_panel_bind(&wire, &api, &platform, 0, test_edit));   /* handed such a host all the same: refused by name */
+  CHECK(log_count("Refused: settings panel") == 1 && logged("API 5") && logged("it needs API 6 or newer") && !ov.registered && !tfp_wire_panel_bound(&wire));
+  tfp_wire_panel_free(&wire);
+  tfp_wire_settings_free(&wire);
+  /* ---- hosts 0.4.0 (API 6) and 0.5.0 (API 7), older than the header (API 8): the panel is there, and it is drawn
+   * with nothing past the end of such a host's table ---- */
+  for (uint32_t version = 6; version <= 7; version++) {
+    CHECK(start_wire());
+    new_host(version);
+    CHECK(api.size < sizeof api && OV_API_VERSION > version);
+    for (uint64_t ms = 0; ms < 3000; ms += 100) tfp_wire_panel_tick(&wire, &platform, ms, 0, test_edit);
+    CHECK(ov.connects == 1 && ov.asked == 6 && ov.registered == 1 && tfp_wire_panel_bound(&wire) && !logged("Refused") && !log_count("Settings panel:"));
+    ov.hover = true;
+    draw_frame(); game_update();
+    CHECK(drawn("tab:Locked view") && drawn("primary:Enable True First Person") && drawn_part("cap:") && ov.lock_depth == 0);
+    tfp_wire_menu_unbind(&wire);
+    tfp_wire_panel_free(&wire);
+    tfp_wire_settings_free(&wire);
+  }
+  CHECK(start_wire());
   new_host(8); api.key_cap = NULL;                               /* the right version with a function missing */
-  CHECK(!tfp_wire_panel_bind(&wire, &api, &platform, 0, test_edit) && log_count("Refused: settings panel") == 2 && !ov.registered);
+  CHECK(!tfp_wire_panel_bind(&wire, &api, &platform, 0, test_edit) && log_count("Refused: settings panel") == 1 && !ov.registered);
   new_host(8); ov.refuse_panel = true;                           /* the host does not take the panel */
   CHECK(!tfp_wire_panel_bind(&wire, &api, &platform, 0, test_edit) && ov.registered == 1 && logged("did not take the panel"));
   CHECK(!tfp_wire_panel_bound(&wire) && !tfp_wire_menu_bound(&wire));

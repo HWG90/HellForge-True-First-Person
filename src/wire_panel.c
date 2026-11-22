@@ -291,12 +291,12 @@ void tfp_wire_panel_tick(TfpWire *w, const TfpPanelPlatform *platform, uint64_t 
   if (!p || p->handle || p->gave_up || !platform->connect || (p->started && now_ms < p->next_try)) return;
   if (!p->started) p->started = true, p->first_try = now_ms;
   p->next_try = now_ms + 1000;
-  const OvApi *ov = platform->connect(platform->user);
+  const OvApi *ov = platform->connect(platform->user, TFP_PANEL_API);
   if (!ov) {
     if (now_ms - p->first_try < 15000) return;   /* the host may load after this mod */
     p->gave_up = true;
     say(w, "Settings panel: NEST (Goose Overlay Host) is not loaded, or is older than API %u, so there is no settings panel; the settings in "
-           "settings.json apply", (unsigned)OV_API_VERSION);
+           "settings.json apply", (unsigned)TFP_PANEL_API);
     return;
   }
   if (!tfp_wire_panel_bind(w, ov, platform, unavailable, edit)) p->gave_up = true;
