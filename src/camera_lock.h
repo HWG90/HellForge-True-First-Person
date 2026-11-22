@@ -1,20 +1,24 @@
 /* Camera lock (beyond retail): the arithmetic of the kick the view takes from the body's own movement.
  * The head's rotation is taken relative to the view, so turning the view with the mouse (the head follows)
  * gives nothing; what the head does on its own (a dive, a landing, being thrown) reaches the view by `gain`,
- * limited to `max_degrees`, and settles with the time constant `settle_ms`. No engine reads here. */
+ * limited to `max_degrees`, and settles with the time constant `settle_ms`. With `damp_ms` above 0 the kick is
+ * low-passed in time with that time constant before it is returned (the camera damping option, src/camera_damp.h):
+ * the view then takes up a movement of the body over several frames, not in one. No engine reads here. */
 #ifndef TFP_CAMERA_LOCK_H
 #define TFP_CAMERA_LOCK_H
 #include "camera_math.h"
 
-typedef struct TfpKickTuning { float gain, max_degrees, settle_ms; } TfpKickTuning;
-/* rest: the slowly following head rotation, in the view's frame; view: last frame's view, for its own turning speed */
-typedef struct TfpKick { TfpQ rest, view; bool known; } TfpKick;
+typedef struct TfpKickTuning { float gain, max_degrees, settle_ms, damp_ms; } TfpKickTuning;
+/* rest: the slowly following head rotation, in the view's frame; view: last frame's view, for its own turning speed;
+ * shown: the kick last returned (what the damping goes on from) */
+typedef struct TfpKick { TfpQ rest, view, shown; bool known; } TfpKick;
 #define TFP_KICK_VIEW_STILL 60.0f /* degrees a second of the view's own turning at which nothing is added any more */
 
-static inline void tfp_kick_reset(TfpKick *k) { k->rest = k->view = tfp_q_identity(); k->known = false; }
-/* One frame. `view` is the game's own view rotation in the world (without any kick), `head` the head's.
- * Returns the kick as a rotation in the view's own frame; identity when there is nothing to add. */
-static inline TfpQ tfp_kick_step(TfpKick *k, TfpQ view, TfpQ head, float dt, const TfpKickTuning *t) {
+static inline void tfp_kick_reset(TfpKick *k) { k->rest = k->view = k->shown = tfp_q_identity(); k->known = false; }
+/* One frame of the kick as the head gives it, before any damping. `view` is the game's own view rotation in the
+ * world (without any kick), `head` the head's. Returns the kick as a rotation in the view's own frame; identity when
+ * there is nothing to add. */
+static inline TfpQ tfp_kick_raw(TfpKick *k, TfpQ view, TfpQ head, float dt, const TfpKickTuning *t) {
   if (!tfp_q_valid(view) || !tfp_q_valid(head) || !(dt > 0) || dt > .25f) { k->known = false; return tfp_q_identity(); }
   const TfpQ relative = tfp_q_normalised(tfp_q_mul(tfp_q_inv(tfp_q_normalised(view)), tfp_q_normalised(head)));
   if (!k->known) { k->rest = relative; k->view = view; k->known = true; return tfp_q_identity(); }
@@ -40,6 +44,18 @@ static inline TfpQ tfp_kick_step(TfpKick *k, TfpQ view, TfpQ head, float dt, con
   if (degrees*share > t->max_degrees) share = t->max_degrees/degrees;
   const TfpQ kick = tfp_slerp(tfp_q_identity(), moved, share);
   return tfp_q_valid(kick) ? kick : tfp_q_identity();
+}
+/* One frame: tfp_kick_raw, then the damping. The rotation returned is the one to apply, and the one the caller takes
+ * out of the rendered view again to find the game's own (it goes on from what it returned, not from the raw kick).
+ * damp_ms 0: the raw kick itself. A frame that cannot be used (tfp_kick_raw's first line) and a reset give identity
+ * and start the damping again from there. Always a unit rotation. */
+static inline TfpQ tfp_kick_step(TfpKick *k, TfpQ view, TfpQ head, float dt, const TfpKickTuning *t) {
+  const TfpQ raw = tfp_kick_raw(k, view, head, dt, t);
+  if (!k->known || !(t->damp_ms > 0) || !isfinite(t->damp_ms)) { k->shown = k->known ? raw : tfp_q_identity(); return raw; }
+  /* Frame-rate independent: the share of the way taken in dt. dt is above 0 here (tfp_kick_raw). */
+  const TfpQ next = tfp_slerp(k->shown, raw, 1-expf(-dt*1000/t->damp_ms));
+  k->shown = tfp_q_valid(next) ? tfp_q_normalised(next) : tfp_q_identity();
+  return k->shown;
 }
 static inline TfpQ tfp_kick_apply(TfpQ view, TfpQ kick) { return tfp_q_normalised(tfp_q_mul(view, kick)); }
 #endif

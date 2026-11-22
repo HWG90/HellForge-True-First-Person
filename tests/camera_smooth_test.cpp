@@ -143,7 +143,7 @@ static void fresh(bool lock, bool smooth, bool trace = false) {
   host.writable_slot = host_true_slot; host.executable = host_executable; host.cas = host_cas; host.write = host_write; host.pin = host_pin;
   host.lock_exclusive = host_lock; host.unlock_exclusive = host_lock; host.lock_shared = host_lock; host.unlock_shared = host_lock; host.forward = host_forward;
   tfp_camera_set_host(&host);
-  tfp_camera_set_lock(lock, 0, 0, 300, 0, 0); // no kick: the rotation is not the subject
+  tfp_camera_set_lock(lock, 0, 0, 300, 0, 0, 0); // no kick: the rotation is not the subject
   tfp_camera_set_continuity(smooth, trace);
   clock_ms += 5000;
 }

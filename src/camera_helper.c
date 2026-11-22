@@ -185,6 +185,7 @@ static _Atomic uint32_t lock_on, lock_last_kind;
 static _Atomic uint64_t lock_frames, view_frames, lock_foreign_frames, lock_missed; static _Atomic uint32_t lock_missed_kind, lock_missed_error;
 static volatile float lock_entry_ms = 140; /* the eased entry into the native view while the lock is on (retail: none) */
 static volatile float lock_gain, lock_max, lock_settle = 300, lock_thrown_gain, lock_thrown_max, lock_peak;
+static volatile float lock_damp_ms; /* the camera damping option as a time constant (src/camera_damp.h); 0: none */
 static TfpKick lock_kick; static TfpQ lock_view = {0, 0, 0, 1}, lock_last_kick = {0, 0, 0, 1}; static bool lock_view_known; static double lock_tick;
 /* Beyond retail: the body down under the lock (camera_helper.h TfpCameraDownStats). lock_carry: what is left of the
  * held direction after the body is up again, in the game's view frame, eased out (LOCK_CARRY_MS). Policy lock. */
@@ -922,8 +923,8 @@ static void lock_rotation(Policy *p, const float *native, uint32_t kind, double 
   TfpQ kick = tfp_q_identity();
   if (pointer(p->body_object + L_UNIT_WORLDS, &matrices) && read(matrices + (uint64_t)p->head_node*L_MATRIX, matrix, 64) && tfp_matrix_q(matrix, &head)) {
     const bool thrown = held || (kind != 6 && p->lock_off_foot); /* a death camera, a body that is down, a dive: not an action on foot */
-    const TfpKickTuning tuning = {thrown ? lock_thrown_gain : lock_gain, thrown ? lock_thrown_max : lock_max, lock_settle};
-    kick = tfp_kick_step(&lock_kick, view, head, dt, &tuning);
+    const TfpKickTuning tuning = {thrown ? lock_thrown_gain : lock_gain, thrown ? lock_thrown_max : lock_max, lock_settle, lock_damp_ms};
+    kick = tfp_kick_step(&lock_kick, view, head, dt, &tuning); /* damped already: this is what is applied, and taken out again next frame */
   } else tfp_kick_reset(&lock_kick);
   const float size = tfp_degrees_between(kick, tfp_q_identity()); if (size > lock_peak) lock_peak = size;
   const TfpQ out = tfp_kick_apply(kind == 6 ? given : view, kick);
@@ -1628,8 +1629,9 @@ void tfp_camera_set_action_tuning(uint32_t extra_head_mask, uint32_t eye_idle_ms
   atomic_store(&tuning_extra_mask, extra_head_mask); atomic_store(&tuning_eye_idle_ms, eye_idle_ms ? eye_idle_ms : 300u);
   atomic_store(&tuning_eye_return, eye_return ? 1u : 0u);
 }
-void tfp_camera_set_lock(bool on, float gain, float max_degrees, float settle_ms, float thrown_gain, float thrown_max_degrees) {
+void tfp_camera_set_lock(bool on, float gain, float max_degrees, float settle_ms, float thrown_gain, float thrown_max_degrees, float damping_ms) {
   lock_gain = gain; lock_max = max_degrees; lock_settle = settle_ms > 1 ? settle_ms : 300; lock_thrown_gain = thrown_gain; lock_thrown_max = thrown_max_degrees;
+  lock_damp_ms = damping_ms > 0 ? damping_ms : 0;
   atomic_store(&lock_on, on ? 1u : 0u);
 }
 uint64_t tfp_camera_lock_frames(void) { return atomic_load(&lock_frames); }
