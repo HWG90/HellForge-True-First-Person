@@ -514,8 +514,9 @@ static bool align(const Units *u, const TfpGraftMatrix *body, const TfpGraftLoca
   const TfpGraftLocal *own = &base[TFP_GRAFT_JOINTS - 1];
   const uint32_t weapon = u->gun_away ? 0 : u->weapon_ref;
   float m = 0, degrees = 0;
-  if (d.aligned && d.retake && d.weight >= 1) {
-    /* The first driven frame the copy is fully shown again. The provisional alignment was taken in the aim pose, where
+  if (d.aligned && d.retake && d.weight >= 1 && !d.hold && !u->gun_away) {
+    /* The first driven frame the copy is fully shown again and no action holds it (in a hold, or with the gun away,
+     * the frame is mid-action and no better than the aim pose: the retake stays armed for the frame after). The provisional alignment was taken in the aim pose, where
      * body and rig differ most (src/arm_weight.h), and shown it leaves the rifle displaced at rest until a rest is
      * measured, which a player who keeps moving never gives. Unless a kept or a measured one replaced it meanwhile,
      * it is taken again from this frame (as good as any other provisional one) and eased in from what is shown. */

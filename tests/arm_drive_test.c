@@ -991,6 +991,53 @@ static void test_binding_while_aiming(void) {
   for (unsigned n = 0; n < 10; n++) CHECK(!frame());
   shown = socket_shown();
   CHECK(stats().align.count == count + 1 && apart_m(&shown, rest) < .0001f);
+
+  /* aim, an action while still aiming (a grenade, a stim), release: the controller holds, the tick answers "not
+   * aiming" and the weight reaches 1 inside the action. That frame is no better than the aim pose: nothing is taken
+   * there, and the one retake waits for the first fully shown frame after the hold. */
+  rest_start();
+  stance = TFP_ARM_REST_NONE;
+  tfp_arm_drive_set(true, false, 0);
+  body_is(body_draw);
+  for (unsigned n = 0; n < 10; n++) CHECK(!frame());
+  CHECK(stats().align.count == 1 && stats().binds == 1);
+  tfp_arm_drive_set_hold(true);
+  body_is(body_crouch); /* the action's pose */
+  tfp_arm_drive_set(true, false, .5f);
+  CHECK(frame()); tfp_arm_drive_after_render();
+  tfp_arm_drive_set(true, false, 1);
+  for (unsigned n = 0; n < 10; n++) { CHECK(frame()); tfp_arm_drive_after_render(); }
+  CHECK(stats().align.count == 1); /* not in the hold */
+  tfp_arm_drive_set_hold(false);
+  body_is(body_now);
+  CHECK(!frame());
+  s = stats();
+  CHECK(s.align.count == 2 && s.align.how == TFP_ARM_ALIGN_PROVISIONAL && s.binds == 1);
+  CHECK(strstr(tfp_arm_drive_align_line(&s.align), "taken again now that the arms show"));
+  for (unsigned n = 0; n < 60; n++) CHECK(!frame());
+  shown = socket_shown();
+  CHECK(stats().align.count == 2 && stats().binds == 1 && apart_m(&shown, rest) < .0001f);
+
+  /* the same with the gun away at full weight (a hold that is ready, the gun on the body): not taken there either */
+  rest_start();
+  stance = TFP_ARM_REST_NONE;
+  tfp_arm_drive_set_hold_ready(true);
+  tfp_arm_drive_set(true, false, 0);
+  body_is(body_draw);
+  for (unsigned n = 0; n < 10; n++) CHECK(!frame());
+  break_gun_parent();
+  body_is(body_crouch);
+  tfp_arm_drive_set(true, false, 1);
+  for (unsigned n = 0; n < 10; n++) { CHECK(frame()); tfp_arm_drive_after_render(); }
+  CHECK(stats().align.count == 1 && stats().binds == 1);
+  mend_gun_parent();
+  body_is(body_now);
+  CHECK(!frame());
+  CHECK(stats().align.count == 2 && stats().binds == 1);
+  for (unsigned n = 0; n < 60; n++) CHECK(!frame());
+  shown = socket_shown();
+  CHECK(stats().align.count == 2 && apart_m(&shown, rest) < .0001f);
+  tfp_arm_drive_set_hold_ready(false);
 }
 
 /* What is not a rest: an action (the tick says so), a hold, a gun that is away, a body that keeps moving, layer states
