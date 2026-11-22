@@ -92,7 +92,9 @@ enum { TREE_UNITS = 32, ARM_UNITS = 6, BEND_DEGREES = 70 };
  * apart, the first two 7.6 mm and 1.8 degrees: kept at 1.9 s; no later pair is both in agreement and FAR from it. */
 enum { REST_MS = 350, LONG_MS = 2000, EASE_MS = 150, KEPT = 8 };
 static const float STILL_M = .015f, STILL_DEGREES = 2, FAR_M = .030f, FAR_DEGREES = 4;
-static const double REST_SPEED = .05, REST_PITCH = .349066; /* m/s; 20 degrees */
+/* 8 degrees: in the view's frame a pitch leaves the body's socket turned as at level and only shifted (some 20 mm at
+ * 15 to 20 degrees), which is within FAR_*: a rest measured there was kept and never replaced at level. */
+static const double REST_SPEED = .05, REST_PITCH = .139626; /* m/s; 8 degrees */
 typedef struct Kept { /* one weapon's resting alignment in one stance, for this body in this world */
   bool has;
   uintptr_t world, body;

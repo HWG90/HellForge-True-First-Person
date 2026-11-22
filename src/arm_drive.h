@@ -152,7 +152,7 @@ void tfp_arm_drive_set_hold_ready(bool on);
 void tfp_arm_drive_set_rest(uint64_t now_ms, unsigned rest, uint32_t pose_key);
 /* What the tick knows of a frame, and whether that is a rest. stance: the action (TFP_ARM_REST_*; 0: an action, a
  * hold, no lease, the motion not active). Not a rest either: the fire button down, a speed over the ground that is
- * not known or above 0.05 m/s (a walk is "idle" to the action), a look pitch that is not known or more than 20
+ * not known or above 0.05 m/s (a walk is "idle" to the action), a look pitch that is not known or more than 8
  * degrees from level (the body aims with its spine: its arms are elsewhere against the head). *why: TFP_ARM_WHY_*.
  * *pose_key: the three layer states as one number, 0 when not all are known. Both may be NULL. */
 typedef struct TfpArmRestSample {

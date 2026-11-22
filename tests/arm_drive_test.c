@@ -1604,8 +1604,15 @@ static void test_rest_of(void) {
   CHECK(!tfp_arm_drive_rest_of(&s, NULL, &why) && why == TFP_ARM_WHY_PITCH);
   s.pitch = .5;
   CHECK(!tfp_arm_drive_rest_of(&s, NULL, &why) && why == TFP_ARM_WHY_PITCH);
-  s.pitch = -.3;
-  CHECK(tfp_arm_drive_rest_of(&s, NULL, &why));
+  s.pitch = -.2618; /* 15 degrees: seen from there the body's socket is some 20 mm from where it is at level, which is
+                     * inside the sway of a rest, so a rest kept there would never be replaced at level */
+  CHECK(!tfp_arm_drive_rest_of(&s, NULL, &why) && why == TFP_ARM_WHY_PITCH);
+  s.pitch = .2618;
+  CHECK(!tfp_arm_drive_rest_of(&s, NULL, &why) && why == TFP_ARM_WHY_PITCH);
+  s.pitch = -.1222; /* 7 degrees: within the 8 a rest is measured in */
+  CHECK(tfp_arm_drive_rest_of(&s, NULL, &why) && why == TFP_ARM_WHY_REST);
+  s.pitch = .1222;
+  CHECK(tfp_arm_drive_rest_of(&s, NULL, &why) && why == TFP_ARM_WHY_REST);
   s.pitch = NAN;
   CHECK(!tfp_arm_drive_rest_of(&s, NULL, &why) && why == TFP_ARM_WHY_PITCH);
   s = still, s.has_pitch = false;
