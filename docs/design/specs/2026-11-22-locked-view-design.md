@@ -680,3 +680,8 @@ Seed 2 on feel.38: 309 actions, 21,705 frames, 2 missed, largest step 0.099 m. S
 
 Left: the same sprint swap inside a soak once measured 0.174 m; a stim and the stratagem list while walking 0.11 m.
 
+The matrix on feel.39: 33 of 35, nothing missed; swap-primary 0.092 m and grenade-held 0.069 m over the 0.06 m limit.
+Measured alone afterwards: twenty swaps 0.039 to 0.047 m, two held grenades 0.043 and 0.044 m. So the two were what
+the phases before them left behind, not a change in the swap itself; the soak is the test for that. A stim and the
+stratagem list while walking, three each: 0.034 to 0.052 m.
+
