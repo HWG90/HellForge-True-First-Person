@@ -170,3 +170,24 @@ Three sessions. In the last, 32 phases:
   helper on the fake game memory: the rig steps of the feel.22 session, a stim's mask, the one-frame request, a
   teleport, full aim, the trace, and no difference without the lock), `tests/run-vectors-backend-ops.sh` (the exit at
   once; retail's four polls with the switch off).
+
+## Smooth return in the game, 2026-11-23 early (0.6.0-feel.23, hold on, arms on)
+
+Matrix phases with the put-away hold on (`tools/harness/matrix.py`), by the mod's own Cut measure:
+
+| Phase | feel.22 | feel.23 |
+|---|---|---|
+| swap to secondary | 0.31 m | 0.033 m |
+| swap to primary | 0.15 m | 0.039 m, 0.000 m |
+| quick swaps | 0.043 m | 0.040 m |
+| grenade | 0.04 m | 0.037 m |
+| stim | 0.21 to 0.28 m | 0.059 m |
+| vault | 0.057 m | 0.000 m |
+
+Frame by frame (`tools/harness/trace.py` over the `Trace:` lines, 30 frames a second in the harness): the eye's step
+never changed by more than 0.040 m from one frame to the next in any of 19 edge windows; corrections of up to 0.49 m
+were carried and eased out. The first run of this build still showed 0.15 m in one frame inside a swap (the held eye
+letting go in the head camera); jumps are now looked for in head-camera frames too.
+
+A death happened in that first run (enemies, by chance): the head camera refused with error 16 (the body's graph no
+longer matched) and the game's death camera was shown for about five seconds. Session `b08c8327`. Being worked on.
