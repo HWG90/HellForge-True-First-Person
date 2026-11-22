@@ -102,3 +102,24 @@ The return still logs a camera cut of 0.08 to 0.40 m.
   default place: tabs at client y 151 (First person 430, Bob and sway 513, Locked view 595); on the Locked view tab
   the checkboxes are at x 402: Camera lock 209, Field of view lock 234, Zoom when aiming 284, Animated arms 384,
   Weapon put-away 452, Smooth eye 477.
+
+## Lua in the game, and walking to a place (2026-11-22)
+
+The Bingus harness runs Lua inside the game (`python harness.py lua "..."`, `HD2H_TARGET=hellforge`). What that gives
+on build 25480438, and what it does not:
+
+- `stingray.World.units(stingray.Application.main_world())` lists about 6000 units in a mission. Their names are
+  hashes (`#ID[...]`); there is no dictionary for them here.
+- **Guard every transform read**: `Unit.alive(u) and Unit.num_scene_graph_items(u) > 0`. An unguarded
+  `Unit.world_position` over all units crashed the game (access violation at helldivers2.exe+0x9e27e; the dump of
+  12:00 on 2026-11-22 is that probe, not the mod).
+- The player's body is the unit with 107 scene-graph nodes (`#ID[4d1c334d294dfa97]` with the armour worn in the
+  tests); its node 1 is the root. There is no `Mover` and `Unit.mover` in this build's Lua.
+- `Unit.teleport_local_position` on the body does nothing lasting: the game's own character code owns the position.
+- `tools/harness/walk.py`: `where` prints the body's position and the rare units within 60 m; `to X Y` walks there by
+  closed loop (read the position, turn, walk). Each read is one Lua command through the file mailbox, so a walk of
+  20 m takes minutes. It was used once, to a building's wall (the rifle lowers against a wall, as it should), and
+  not yet to a terminal or a pick-up: nothing says which hashed unit is one.
+- Input is refused when the game window does not have focus (`drive.py`), which is what happens when someone uses
+  the desktop meanwhile. That is the wanted behaviour; do not work around it.
+
