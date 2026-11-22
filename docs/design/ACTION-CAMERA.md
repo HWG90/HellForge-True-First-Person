@@ -162,15 +162,19 @@ Built offline; nothing of this section has run in the game.
 - the top camera request is kind 6 and is the lease's own record;
 - the avatar is not a ragdoll, not seated, not in full aim, and no other camera (Photo Mode) owns the view;
 - it is not the case that the player-level snapshot is safe again while another weapon than the lease's is in the hands;
+- it is not the case that the player-level snapshot is safe (no action flag, no guard byte) while this update's full snapshot is there and unsafe. That is the character off the verified on-foot lifecycle (a dive, prone) with the gun in the hands: not an action's flag, so today's immediate exit stays (`not held: the full snapshot is unsafe with no action flag …`);
+- the player-level snapshot has not been safe with empty hands for 1000 ms on end. A stim's middle has no flag and empty hands for about 0.65 s and is held; a dropped weapon leaves the native view after 1 s instead of the whole cap. The count starts again whenever a flag returns;
 - the hold is younger than 4000 ms.
 
-No action mask is named: whatever takes `safe` away is held, as long as the request is still ours.
+No action mask is named: whatever flag takes `safe` away is held, as long as the request is still ours. A guard byte or an unknown flag that stays set with the request still ours is held up to the 4000 ms cap; that is the probe's width, and the first run's `Hold:` lines show the mask.
 
 **When it ends.** Resumed, with no exit and no entry: the first update whose full snapshot is safe, has the lease's weapon identity, kind 6 and the lease's record. Today's exit (`manual_wait`, then a new entry when the view is safe again): any of the conditions above fails; the cap; F11; a recovery suspension from the runtime (a camera or field-of-view policy fault). While a hold lasts the controller does not poll the pose helper (the backend's poll retires a lease whose snapshot is unsafe).
 
+**The exit after a hold** (`src/backend_ops.c` `release_held`, only with the switch). Retail's release takes a top request whose weapon field is not the lease's for a replaced request and is done without an exit. That is right when the mod exits on an action's first tick; after a hold the game may have put the new weapon into the same record, and the request would stay on top with no owner (a new entry needs kind 4). With the switch on, a top request that is still the lease's record, kind 6, for the lease's avatar is ended with the game's own exit, proven by the player's snapshot (as retail's path for a destroyed weapon); a request the player's aim took is left alone. A record that really is another one still ends the lease without an exit, and says `Hold: lease ended without a native exit: …`.
+
 **The pose helper** (`tfp_pose_set_hold`). In hold mode the ownership test of an armed lease tolerates any controller byte other than the aim byte, a weapon unit that is no longer live, a changed weapon descriptor and a request that no longer names the weapon, for the same owned record (top request still the lease's, kind 6, same avatar, body and rig, not seated). The binder switches it on from the moment a lease runs, not only during a hold: HellForge's tick comes before the game's update, so the game's first rig write of an action reaches the helper before the tick that sees the action. Off is retail (`tests/run-diff-pose.sh`).
 
-**The arm drive** (`tfp_arm_drive_set_hold`, on only while the controller holds). A gun that is absent or off the rig's socket is not a refusal; a failed full snapshot falls back to the player's; the binding and its entry alignment stay while only the gun differs; the gun's units are refreshed only while the gun is on the rig; the game's joint values are put back after every draw (the retired mod's path for draws and holsters; the reason is in the comment at `tfp_arm_drive_render`).
+**The arm drive** (`tfp_arm_drive_set_hold_ready`, on while a lease runs; `tfp_arm_drive_set_hold`, on while the controller holds). While ready: a gun that is absent or off the rig's socket is not a refusal; a failed full snapshot falls back to the player's; the binding and its entry alignment stay while only the gun differs; the gun's units are refreshed only while the gun is on the rig. Ready and not only holding, for the pose helper's reason: the action's first frame is drawn before the tick that sees the action, and a refusal in that frame would drop the binding and take a new entry alignment from the middle of the action. The game's joint values are put back after every draw of a hold and after any draw whose gun is away (the retired mod's path for draws and holsters; the reason is in the comment at `tfp_arm_drive_render`). With the gun on the rig and no hold, a ready frame is the frame it was before.
 
 **Not changed:** `src/camera_helper.c`. In the native view it forwards the game's camera; nothing in the hold needs it to do otherwise. Whether its camera lock and the field-of-view lock behave during a hold is for the first run.
 
@@ -186,6 +190,8 @@ Hold: mask=00000002 active=0 byte5=0 kind=6 record_ours=1 request_weapon=912 wie
 
 One `Hold:` line per tick while holding, on the tick of every change of the action flags or of the hold and the ten ticks after it, otherwise one a second while the view is on. `gun_parent` is the lease's gun unit: `rig`, `body`, `other`, `none`. `node5_calls` counts the game's position writes to the rig's node 5 since the line before. `why`: while holding, the exit that is held back; otherwise why the last hold ended, `not held: <reason>` for an exit that was not held, or `resumed: …`.
 
+The backend adds, once each: `Hold: owned native camera exit acknowledged; the game had put another weapon into the request` and `Hold: lease ended without a native exit: …`.
+
 **What the first run must look at.**
 
 1. Does the game keep kind 6 with the same record through a swap and a grenade once the mod no longer exits (`kind`, `record_ours`), and for how long after the action? If it keeps it forever after a swap, the hold ends with "another weapon is in the hands" and the exit and entry of today follow, later than today.
@@ -196,3 +202,7 @@ One `Hold:` line per tick while holding, on the tick of every change of the acti
 6. `Fov:`, `Lock:`, `Refused:` and `Cut:` lines around a hold: the field of view and camera policies were not followed through a hold offline. A `State: hold ended: Recovering …` names a policy that ended one.
 7. The stim: is its 0.21 to 0.25 m jump gone, and what do the hands show with nothing in them?
 8. Does anything hang on: after an action, `holding=0` and the `View:` line's `phase=running` with the placement in place.
+9. After a swap that ended a hold: which of the two backend lines above follows, and does `kind` go back to 4 before the new entry? `Hold: lease ended without a native exit` with `kind=6` staying would be a request left without an owner.
+10. The `Arms:` line's `binds=` across an action: it should not go up on the first frame of a swap or a throw.
+11. `not held:` reasons on a grenade and a stim. `the full snapshot is unsafe with no action flag` there would mean the action leaves the on-foot lifecycle while its flag is clear, and that rule cuts the hold short.
+12. A dropped weapon: `State: hold ended: empty hands with no action flag for 1000 ms`, one second after the drop.
