@@ -90,12 +90,18 @@ typedef struct TfpSettingsDisk {
   TfpSettingsCopy (*copy)(void *user, TfpSettingsFile file, const char *suffix, char *why, size_t why_size);
 } TfpSettingsDisk;
 #define TFP_SETTINGS_BEFORE_SPLIT ".before-feel25"
+#define TFP_LOCKED_REPLACED ".replaced"
 /* Where the two files are kept; NULL: nothing is ever written. Not kept: the struct is copied. user_file: the text
  * bound as settings.json was the user's own file, the one `write` replaces (false: the one shipped beside the DLL,
  * or none). What is loaded counts as what the files hold, with one exception that is done here, at once: when the
  * user's settings.json held "locked_view", (1) locked_view.json is written from the loaded options unless that file
- * was there and read, (2) settings.json is copied to settings.json.before-feel25 (an existing copy of that name is
- * kept: it is the older one), (3) settings.json is written again without the member, everything else as loaded.
+ * was there and read, (2) settings.json is copied to settings.json.before-feel25, or to the first free of
+ * .before-feel25-2 .. -9 when that name is taken (a taken name is never written over; all nine taken refuses the
+ * conversion), (3) settings.json is written again without the member, everything else as loaded.
+ * When locked_view.json was there and read too, an older build wrote the member after this one made that file: the
+ * member is the newer one, so the options it names take its values (what it does not name stays as locked_view.json
+ * has it), and where that changes a value locked_view.json is copied to locked_view.json.replaced (.replaced-2 ..
+ * -9) and written again in step 1. Nothing either file said is then in no file.
  * A step that fails logs one `Refused:` line and ends the conversion; the session runs on the loaded values either
  * way. Until it has been done, no save of settings.json skips steps 1 and 2: a later save does them first and fails
  * with them, and the next start tries again. */

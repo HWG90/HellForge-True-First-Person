@@ -25,6 +25,10 @@ typedef struct Settings {
                               * and it has not been looked for since: what is there is copied aside before the first write */
   bool loaded, locked_loaded; /* settings.json / locked_view.json was read and taken */
   bool convert;              /* the user's settings.json still holds "locked_view": see convert_first */
+  TfpSettingsMenuValue member[TFP_LOCKED_COUNT]; /* the locked options as settings.json's own member left them, before locked_view.json was read */
+  bool locked_stale;         /* that member's values replaced what locked_view.json says: the file is copied aside, then written */
+  char split_kept[24];       /* this session's copy of the settings.json that held the member: its suffix; "": not made yet */
+  char stale_kept[24];       /* the suffix of the copy of the locked_view.json whose values were replaced; "": none made */
   TfpWire *w;
   TfpSettings store;
   TfpActionCatalogue catalogue;
@@ -442,6 +446,7 @@ void tfp_wire_settings_bind_locked(TfpWire *w, const char *json, size_t length, 
   }
   if (!json || !length) return;
   st->unread[TFP_LOCKED_FILE] = false;
+  memcpy(st->member, st->store.locked, sizeof st->member); /* tfp_wire_settings_disk decides between the two */
   st->locked_loaded = tfp_settings_load_locked(&st->store, json, length, why, sizeof why);
   st->refused[TFP_LOCKED_FILE] = !st->locked_loaded;
   if (!st->locked_loaded)
@@ -485,21 +490,44 @@ static bool keep_aside(Settings *st, TfpSettingsFile file, char *why, size_t why
     snprintf(suffix, sizeof suffix, "%s-%d", stem, n);
   }
 }
+/* The file as it is on disk to <name><stem>, or to <name><stem>-2 .. -9 when that name is taken: the first free one,
+ * and a taken name is never written over. DONE: `suffix` is the one used. NONE: there is no such file. FAILED: `why`
+ * (also when all nine names are taken, or the disk has no copy). Never EXISTS. */
+static TfpSettingsCopy copy_free_name(Settings *st, TfpSettingsFile file, const char *stem, char *suffix, size_t suffix_size, char *why, size_t why_size) {
+  char reason[160] = "";
+  if (!st->disk.copy) { snprintf(why, why_size, "%s cannot be copied on this disk", file_names[file]); return TFP_COPY_FAILED; }
+  snprintf(suffix, suffix_size, "%s", stem);
+  for (int n = 2;; n++) {
+    TfpSettingsCopy answer = st->disk.copy(st->disk.user, file, suffix, reason, sizeof reason);
+    if (answer == TFP_COPY_DONE || answer == TFP_COPY_NONE) return answer;
+    if (answer == TFP_COPY_FAILED) {
+      snprintf(why, why_size, "%s could not be copied to %s%s: %s", file_names[file], file_names[file], suffix, reason[0] ? reason : "no reason given");
+      return TFP_COPY_FAILED;
+    }
+    if (n > 9) { snprintf(why, why_size, "%s%s to %s-9 are all taken; move them away", file_names[file], stem, stem); return TFP_COPY_FAILED; }
+    snprintf(suffix, suffix_size, "%s-%d", stem, n);
+  }
+}
 static bool write_file(Settings *st, TfpSettingsFile file, size_t *written, char *why, size_t why_size);
 /* Before a settings.json that holds "locked_view" (0.6.0-feel.20 to feel.24) is replaced by one without it: the
- * options are in locked_view.json, and the file as it is has a copy. Whatever replaces that settings.json goes
- * through here, at the start or later, so neither can be skipped. false: `why`, and settings.json is not written. */
+ * options are in locked_view.json, and the file as it is has a copy of its own (.before-feel25, or the next free of
+ * .before-feel25-2 .. -9 when an earlier conversion took that name: an older build wrote the member again since, and
+ * the file as found now is not the one the earlier copy holds). Whatever replaces that settings.json goes through
+ * here, at the start or later, so neither can be skipped. false: `why`, and settings.json is not written. */
 static bool convert_first(Settings *st, char *why, size_t why_size) {
-  char reason[200] = "";
+  char reason[240] = "";
   size_t length = 0;
-  if (!st->locked_loaded) { /* not there, not opened or refused (the last two: copied aside first, as before any write of it) */
+  /* locked_view.json is written when it was not there, not opened or refused (the last two: copied aside first, as
+   * before any write of it), and when the member's newer values replaced its own (write_file copies it aside first). */
+  if (!st->locked_loaded || st->locked_stale) {
     if (!write_file(st, TFP_LOCKED_FILE, &length, reason, sizeof reason)) { snprintf(why, why_size, "locked_view.json could not be written: %s", reason); return false; }
     st->locked_loaded = true;
   }
-  TfpSettingsCopy copy = st->disk.copy ? st->disk.copy(st->disk.user, TFP_SETTINGS_FILE, TFP_SETTINGS_BEFORE_SPLIT, reason, sizeof reason) : TFP_COPY_FAILED;
-  if (copy == TFP_COPY_DONE || copy == TFP_COPY_EXISTS) return true; /* an existing copy is the older one: kept */
-  snprintf(why, why_size, "settings.json could not be copied to settings.json" TFP_SETTINGS_BEFORE_SPLIT ": %s",
-           copy == TFP_COPY_NONE ? "the file is not there" : reason[0] ? reason : "no reason given");
+  if (st->split_kept[0]) return true; /* this session's copy is made: a save that failed after it does not make another */
+  char suffix[sizeof st->split_kept];
+  TfpSettingsCopy copy = copy_free_name(st, TFP_SETTINGS_FILE, TFP_SETTINGS_BEFORE_SPLIT, suffix, sizeof suffix, why, why_size);
+  if (copy == TFP_COPY_DONE) { memcpy(st->split_kept, suffix, sizeof suffix); return true; }
+  if (copy == TFP_COPY_NONE) snprintf(why, why_size, "settings.json could not be copied to settings.json" TFP_SETTINGS_BEFORE_SPLIT ": the file is not there");
   return false;
 }
 /* One file from the store. true: written (and counted as saved). false: `why`. */
@@ -510,6 +538,17 @@ static bool write_file(Settings *st, TfpSettingsFile file, size_t *written, char
   if (!st->disk.write) { snprintf(why, why_size, "there is nowhere to write to"); return false; }
   if (!keep_aside(st, file, why, why_size)) return false;
   if (file == TFP_SETTINGS_FILE && st->convert && !convert_first(st, why, why_size)) return false;
+  if (file == TFP_LOCKED_FILE && st->locked_stale && !st->stale_kept[0]) {
+    /* The file still says what settings.json's newer member replaced: it is not written over without a copy. */
+    char suffix[sizeof st->stale_kept], line[300];
+    TfpSettingsCopy copy = copy_free_name(st, file, TFP_LOCKED_REPLACED, suffix, sizeof suffix, why, why_size);
+    if (copy == TFP_COPY_FAILED) return false;
+    if (copy == TFP_COPY_DONE) {
+      memcpy(st->stale_kept, suffix, sizeof suffix);
+      snprintf(line, sizeof line, "Kept: the locked_view.json whose values settings.json's newer \"locked_view\" member replaced is now locked_view.json%s; nothing of it was changed", suffix);
+      tfp_wire_say(st->w, line);
+    }
+  }
   size_t length = text_of_store(&st->store, NULL, 0);
   char *text = length < TFP_SETTINGS_MAX ? malloc(length + 1) : NULL;
   bool ok = false;
@@ -520,6 +559,7 @@ static bool write_file(Settings *st, TfpSettingsFile file, size_t *written, char
   if (ok) {
     st->saved_revision[file] = now, *written = length;
     if (file == TFP_SETTINGS_FILE) st->convert = false;
+    else st->locked_stale = false;
   } else if (!why[0]) snprintf(why, why_size, "no reason given");
   return ok;
 }
@@ -535,12 +575,27 @@ void tfp_wire_settings_disk(TfpWire *w, const TfpSettingsDisk *disk, bool user_f
   if (!user_file) st->refused[TFP_SETTINGS_FILE] = false;
   st->convert = disk && disk->write && user_file && st->loaded && st->store.locked_in_settings;
   if (!st->convert) return;
-  /* The user's settings.json is one that 0.6.0-feel.20 to feel.24 wrote. Converted now, not at the next change. */
+  /* The user's settings.json is one that 0.6.0-feel.20 to feel.24 wrote. Converted now, not at the next change.
+   * When locked_view.json was there and read as well, an older build has run since this one made it (that build
+   * does not read locked_view.json and writes the member on every save): the member is the newer of the two, and
+   * the options it names are taken from it. What it does not name stays as locked_view.json has it. */
   const bool had_locked = st->locked_loaded;
-  if (write_file(st, TFP_SETTINGS_FILE, &length, why, sizeof why))
+  for (int id = 0; had_locked && id < TFP_LOCKED_COUNT; id++) {
+    if (!(st->store.locked_named >> id & 1)) continue;
+    if (st->store.locked[id].boolean != st->member[id].boolean || st->store.locked[id].number != st->member[id].number) st->locked_stale = true;
+    st->store.locked[id] = st->member[id];
+  }
+  const bool replaced = st->locked_stale;
+  char note[200] = "";
+  if (write_file(st, TFP_SETTINGS_FILE, &length, why, sizeof why)) {
+    if (replaced)
+      snprintf(note, sizeof note, " (that file was already there with other values; settings.json's are the newer ones and are used, and the file as it was is "
+               "kept as locked_view.json%s)", st->stale_kept[0] ? st->stale_kept : TFP_LOCKED_REPLACED);
+    else if (had_locked) snprintf(note, sizeof note, " (that file was already there and says the same)");
     snprintf(line, sizeof line, "Converted: settings.json was written by 0.6.0-feel.20 to feel.24 and held the locked view's options; they are in "
              "locked_view.json now%s, settings.json is as it was without them (0.6.0-feel.19 and older read it again), and the file as it was is "
-             "kept as settings.json" TFP_SETTINGS_BEFORE_SPLIT, had_locked ? " (that file was already there and its values are the ones used)" : "");
+             "kept as settings.json%s", note, st->split_kept);
+  }
   else
     snprintf(line, sizeof line, "Refused: settings.json still holds the locked view's options, which 0.6.0-feel.19 and older cannot read: %.300s; "
              "this session uses the values as loaded, and the conversion is tried again at the next save or the next start", why);

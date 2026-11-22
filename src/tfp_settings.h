@@ -112,6 +112,7 @@ typedef struct TfpSettings {
   TfpSettingsMenuValue locked[TFP_LOCKED_COUNT];
   uint64_t locked_writes;                       /* tfp_settings_set_locked calls that changed an option */
   bool locked_in_settings;                      /* the settings.json last loaded had a "locked_view" member (feel.20 to feel.24) */
+  uint32_t locked_named;                        /* bit per TfpSettingsLockedId: the option that member named and gave a value this build took */
   char locked_skipped[160];                     /* what the last load of either file skipped in the locked view's options; "": nothing */
 } TfpSettings;
 

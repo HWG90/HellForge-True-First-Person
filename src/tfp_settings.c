@@ -715,7 +715,8 @@ static void note_skipped(TfpSettings *s, const char *name) {
   size_t used = strlen(s->locked_skipped);
   snprintf(s->locked_skipped + used, sizeof s->locked_skipped - used, "%s%.40s", used ? ", " : "", name);
 }
-static bool load_locked_options(const JDoc *d, const JNode *object, TfpSettings *s, bool strict, char *why, size_t why_size) {
+static bool load_locked_options(const JDoc *d, const JNode *object, TfpSettings *s, bool strict, uint32_t *named, char *why, size_t why_size) {
+  uint32_t taken = 0;
   TfpSettingsMenuValue staged[TFP_LOCKED_COUNT];
   char skipped[sizeof s->locked_skipped];
   memcpy(staged, s->locked, sizeof staged);
@@ -738,8 +739,10 @@ static bool load_locked_options(const JDoc *d, const JNode *object, TfpSettings 
     double number = is_bool ? 0 : leaf->number;
     if (!is_bool) number = number < locked_info[id].min ? locked_info[id].min : number > locked_info[id].max ? locked_info[id].max : number;
     staged[id] = (TfpSettingsMenuValue){is_bool, leaf->type == J_TRUE, number};
+    taken |= UINT32_C(1) << id;
   }
   memcpy(s->locked, staged, sizeof staged);
+  if (named) *named = taken;
   return true;
 }
 static bool load_document(Loader *l) {
@@ -780,7 +783,7 @@ static bool load_document(Loader *l) {
   const JNode *locked = jmember(d, root, "locked_view");
   if (locked) {
     l->s->locked_in_settings = true;
-    if (locked->type == J_OBJECT) load_locked_options(d, locked, l->s, false, NULL, 0);
+    if (locked->type == J_OBJECT) load_locked_options(d, locked, l->s, false, &l->s->locked_named, NULL, 0);
     else note_skipped(l->s, "locked_view (not an object)");
   }
   return true;
@@ -820,7 +823,7 @@ bool tfp_settings_load_locked(TfpSettings *s, const char *json, size_t n, char *
   else {
     const JNode *options = jmember(&d, &d.nodes[0], "locked_view");
     if (!options || options->type != J_OBJECT) snprintf(problem, sizeof problem, "locked_view: expected an object");
-    else ok = load_locked_options(&d, options, s, true, problem, sizeof problem);
+    else ok = load_locked_options(&d, options, s, true, NULL, problem, sizeof problem);
     /* Any other member (a later build's) is left alone: "format" is written for such a build to tell by. */
   }
   jfree(&d);
