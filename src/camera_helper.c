@@ -200,6 +200,7 @@ static TfpQ lock_carry = {0, 0, 0, 1}; static bool lock_was_held; static double 
  * not yet known to be down (a death that does not set the ragdoll flag, until the head is 3 m away). Policy lock. */
 static TfpQ lock_first = {0, 0, 0, 1}; static bool lock_first_known;
 static _Atomic uint64_t lock_down_frames, lock_down_refused, lock_off_foot_at;
+static _Atomic uint32_t lock_missed_apart; /* a float's bits: space_why */
 static _Atomic uint32_t lock_missed_why, lock_down_kind, lock_down_error, lock_down_why, lock_body_ragdoll, lock_body_off_foot, lock_off_foot_body;
 static _Atomic uint32_t lock_body_distance, lock_down_distance, lock_down_head[3]; /* floats as their bits */
 /* Beyond retail, and only in a frame the lock holds (policy.lock_now): the presented eye is kept continuous across
@@ -582,6 +583,18 @@ static bool unparented(const Policy *p) {
       || !read(locals + (uint64_t)index*L_MATRIX + L_LOCAL_POSITION, a, 12)
       || !read(worlds + (uint64_t)index*L_MATRIX + L_MATRIX_POSITION, b, 12) || !finite3(a) || !finite3(b)) return false;
   return distance(a, b) <= .01f;
+}
+/* Beyond retail: which half of unparented() refused, for the lock's Missed line (error 15 is both). The same reads
+ * again, nothing else. `apart`: metres between the camera node's local and world position where both were read. */
+static uint32_t space_why(const Policy *p, float *apart) {
+  uint64_t parent = 0, g = 0, locals = 0, worlds = 0; uint32_t index = 0, count = 0; float a[3] = {0}, b[3] = {0};
+  *apart = 0;
+  if (value(p->camera_object + L_UNIT_PARENT, parent) && parent != 0) return TFP_CAMERA_WHY_LINKED;
+  if (pointer(p->c.camera + L_CAMERA_GRAPH, &g) && value(p->c.camera + L_CAMERA_NODE, index) && value(g + L_GRAPH_COUNT, count) && index < count
+      && pointer(g + L_GRAPH_LOCALS, &locals) && pointer(g + L_GRAPH_WORLDS, &worlds)
+      && read(locals + (uint64_t)index*L_MATRIX + L_LOCAL_POSITION, a, 12) && read(worlds + (uint64_t)index*L_MATRIX + L_MATRIX_POSITION, b, 12)
+      && finite3(a) && finite3(b)) *apart = distance(a, b);
+  return TFP_CAMERA_WHY_SPACE;
 }
 /* cpp:416-419 */
 static bool held_axes(TfpQ q, float *forward, float *up) {
@@ -1246,6 +1259,9 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
             if (policy.lock_now) smooth_native(&policy, NULL, adjusted, kind, SMOOTH_REPEAT, tick, adjusted); /* the rig may stand still while the body moves on */
           }
           reset(&policy, true); error(SPACE_INVALID);
+          /* Not repeated: the frame is the game's own. Which of the two it was goes to the Missed line. */
+          if (policy.lock_now && !lock_shown) { float apart = 0; policy.why = space_why(&policy, &apart);
+            atomic_store_explicit(&lock_missed_apart, float_bits(apart), memory_order_relaxed); }
         }
         else if (!read((uint64_t)(uintptr_t)native, adjusted, 16) || !finite3(adjusted)
             || (held_view ? !held_axes(policy.seated_q, forward, up)
@@ -1723,6 +1739,7 @@ void tfp_camera_lock_stats(TfpCameraLockStats *out) {
   out->frames = atomic_load(&lock_frames); out->foreign_frames = atomic_load(&lock_foreign_frames); out->last_kind = atomic_load(&lock_last_kind);
   out->peak_kick_degrees = lock_peak; lock_peak = 0;
   out->missed = atomic_load(&lock_missed); out->missed_kind = atomic_load(&lock_missed_kind); out->missed_error = atomic_load(&lock_missed_error);
+  out->missed_apart = bits_float(atomic_load(&lock_missed_apart));
   out->missed_why = atomic_load(&lock_missed_why); out->off_foot = atomic_load(&lock_body_off_foot); out->ragdoll = atomic_load(&lock_body_ragdoll);
   out->head_distance = bits_float(atomic_load(&lock_body_distance));
 }
@@ -1747,13 +1764,16 @@ const char *tfp_camera_why_text(uint32_t why) {
     "the head is not 0.05 to 3 m from the unit root", "the head is beyond 3 m from the unit root and not at its neck",
     "the animation state changed during the frame", "the avatar, body or camera unit is no longer the armed one",
     "the camera request or the dispatch slot changed during the frame", "the body's node tables changed during the frame",
-    "the head or neck name changed during the frame", "the camera got a parent during the frame"};
+    "the head or neck name changed during the frame", "the camera got a parent during the frame",
+    "the ordinary camera's request with the camera linked to a parent, and no native view of the last frames to repeat",
+    "the camera has no parent but its local and world position are not the same point"};
   return why < sizeof text/sizeof *text ? text[why] : "unknown";
 }
 void tfp_camera_reset_for_tests(void) {
   atomic_store(&lock_on, 0); atomic_store(&smooth_on, 0); atomic_store(&trace_on, 0);
   atomic_store(&orphan_on, 0); atomic_store(&orphan_behind, 0); atomic_store(&orphan_frames, 0); atomic_store(&orphan_refused, 0);
   atomic_store(&lock_frames, 0); atomic_store(&view_frames, 0); atomic_store(&lock_foreign_frames, 0); atomic_store(&lock_missed, 0); atomic_store(&lock_missed_kind, 0); atomic_store(&lock_missed_error, 0);
+  atomic_store(&lock_missed_apart, 0);
   atomic_store(&lock_missed_why, 0); atomic_store(&lock_down_frames, 0); atomic_store(&lock_down_refused, 0); atomic_store(&lock_down_kind, 0);
   atomic_store(&lock_down_error, 0); atomic_store(&lock_down_why, 0); atomic_store(&lock_body_ragdoll, 0); atomic_store(&lock_body_off_foot, 0);
   atomic_store(&lock_off_foot_body, 0); atomic_store(&lock_off_foot_at, 0); atomic_store(&lock_body_distance, 0); atomic_store(&lock_down_distance, 0);

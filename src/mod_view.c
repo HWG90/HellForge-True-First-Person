@@ -880,6 +880,7 @@ static void lock_note(void) { /* once a second while the view is on: frames by c
       (unsigned long long)(s.missed - told_missed), missed ? s.missed_kind : 0, missed ? s.missed_error : 0, (double)s.peak_kick_degrees);
   if (s.last_kind != 6 && (s.off_foot || s.ragdoll) && s.frames != told_frames)
     say("Body: off foot %u, ragdoll flag %u, head %.2f m from its root (the last head-camera frame the lock held)", s.off_foot, s.ragdoll, (double)s.head_distance);
+  if (missed && s.missed_why == TFP_CAMERA_WHY_SPACE) say("Missed: the camera's local and world position were %.3f m apart (0: not read)", (double)s.missed_apart);
   if (missed) say("Missed: kind %u, helper error %u (%s); the body on the last frame held: off foot %u, ragdoll flag %u, head %.2f m from its root",
                   s.missed_kind, s.missed_error, tfp_camera_why_text(s.missed_why), s.off_foot, s.ragdoll, (double)s.head_distance);
   told_frames = s.frames; told_foreign = s.foreign_frames; told_missed = s.missed;

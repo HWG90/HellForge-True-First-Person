@@ -799,6 +799,34 @@ int main() {
     }
     g.end();
   }
+  // ---- 19. A frame the lock could not hold for the camera's space (helper error 15; seen in the soak of
+  // 2026-11-22, 19:54:43, one frame, logged as "no proof named"). The reason names which of the two it was: the
+  // ordinary camera's request with the camera linked to a parent and no native view of the last frames to repeat, or
+  // a camera without a parent whose local and world position are not the same point (and how far apart). ----
+  for (int apart = 0; apart < 2; ++apart) {
+    fresh(true, true);
+    Game g; g.pose(0, 0, 0, 0); g.look(0, 0); g.hip(); g.begin();
+    standing(g, 12, 33.3, false);
+    TfpCameraLockStats before{}; tfp_camera_lock_stats(&before);
+    CHECK(before.missed == 0);
+    if (apart) {
+      g.hip(); g.s.camera_split = true;
+      for (int i = 0; i < 3; ++i) { g.s.camera_local[i] = g.shown[i]; g.s.camera_world[i] = g.shown[i]; }
+      g.s.camera_world[2] += .3f;
+    } else g.gap();
+    g.frame(33.3);
+    g.s.camera_split = false;
+    TfpCameraLockStats after{}; tfp_camera_lock_stats(&after);
+    CHECK(after.missed == 1 && after.missed_kind == 4 && after.missed_error == TFP_CAMERA_SPACE_INVALID);
+    CHECK(after.missed_why == (apart ? TFP_CAMERA_WHY_SPACE : TFP_CAMERA_WHY_LINKED));
+    CHECK(apart ? std::fabs(after.missed_apart - .3f) < 1e-4f : after.missed_apart == 0);
+    const char *text = tfp_camera_why_text(after.missed_why);
+    CHECK(std::strstr(text, apart ? "local and world" : "linked to a parent") != nullptr);
+    standing(g, 3, 33.3, false); // the next frame is the head camera's again
+    tfp_camera_lock_stats(&after);
+    CHECK(after.missed == 1);
+    g.end();
+  }
   std::printf("camera smooth: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

@@ -146,9 +146,10 @@ void tfp_camera_set_lock(bool on, float gain, float max_degrees, float settle_ms
 /* missed: frames of the presented view that were neither the native view nor the head camera (0xffff: the
  * camera record was not ours), with the kind, the helper's error and the proof that failed (TFP_CAMERA_WHY_*) of
  * the last one. off_foot, ragdoll, head_distance: the body on the last head-camera frame the lock held (not in the
- * on-foot animation state; the avatar's ragdoll flag; metres from the unit root to the head). */
+ * on-foot animation state; the avatar's ragdoll flag; metres from the unit root to the head). missed_apart: for
+ * TFP_CAMERA_WHY_SPACE, metres between the camera node's local and world position (0: not read). */
 typedef struct TfpCameraLockStats { uint64_t frames, foreign_frames, missed; uint32_t last_kind, missed_kind, missed_error; float peak_kick_degrees;
-  uint32_t missed_why, off_foot, ragdoll; float head_distance; } TfpCameraLockStats;
+  uint32_t missed_why, off_foot, ragdoll; float head_distance, missed_apart; } TfpCameraLockStats;
 /* Counts since the start; the peak is the largest kick since the last call. */
 void tfp_camera_lock_stats(TfpCameraLockStats *out);
 /* Which proof of the head camera refused a frame (beside the error number, which retail shares between several). */
@@ -163,7 +164,9 @@ enum {
   TFP_CAMERA_WHY_REQUEST,    /* 7: the gate, the dispatch slot or the top camera request changed during the frame */
   TFP_CAMERA_WHY_HEADER,     /* 7: the body's node count or tables changed during the frame */
   TFP_CAMERA_WHY_NAMES,      /* 7: the head or neck name changed during the frame */
-  TFP_CAMERA_WHY_PARENT      /* 7: the camera got a parent during the frame */
+  TFP_CAMERA_WHY_PARENT,     /* 7: the camera got a parent during the frame */
+  TFP_CAMERA_WHY_LINKED,     /* 15: the ordinary camera's request, the camera linked to a parent, no native view to repeat */
+  TFP_CAMERA_WHY_SPACE       /* 15: no parent, but the camera's local and world position are over 0.01 m apart or unread */
 };
 const char *tfp_camera_why_text(uint32_t why);
 /* Beyond retail, lock frames only: the body is "down" when physics has it: the head is beyond walking range of the
