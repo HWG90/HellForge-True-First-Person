@@ -432,6 +432,9 @@ static void lock_note(void) { /* once a second while the view is on: frames by c
   const uint64_t now = GetTickCount64();
   if (now < next) return;
   next = now + 1000;
+  /* The Locked view tab's options (src/wire_settings.h); lock_off.txt beside the DLL overrides the toggle. */
+  tfp_camera_set_lock(lock_wanted && tfp_locked_view_camera_lock(&wire), (float)(tfp_locked_view_kick_strength(&wire)/100),
+                      (float)tfp_locked_view_kick_max_degrees(&wire), 300.0f, (float)(tfp_locked_view_thrown_kick_strength(&wire)/100), 35.0f);
   TfpCameraLockStats s; tfp_camera_lock_stats(&s);
   if (s.frames == told_frames && s.missed == told_missed) return;
   say("Lock: +%llu frames held (+%llu in another camera, kind now %u), +%llu missed (kind %u, helper error %u), largest kick %.1f degrees",
