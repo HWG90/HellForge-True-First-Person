@@ -517,9 +517,22 @@ static void arms_tick(void) {
   tfp_render_slot_tick();
   { /* While aiming the game's own aim pose shows (src/arm_weight.h): the copy fades out and back in 120 ms. */
     static float weight = 1; static uint64_t weighed;
+    static bool aiming; /* the last tick's answer: kept when no witness can be asked (tfp_arm_aiming) */
     const TfpMotionRuntime *aim_motion = tfp_wire_motion_runtime(&wire);
-    const bool aiming = aim_motion && aim_motion->state.phase == TFP_MOTION_PHASE_ACTIVE
-        && (aim_motion->state.action == TFP_ACT_AIM || aim_motion->state.action == TFP_ACT_ADS);
+    const bool active = aim_motion && aim_motion->state.phase == TFP_MOTION_PHASE_ACTIVE;
+    const bool holding = wire.controller.holding;
+    bool flags_read = false, flags_aim = false;
+    if (wanted && !active && !holding) { /* no running lease, or a refused sample: the player's own flags, read here on the game thread */
+      TfpOpsSnapshot player;
+      TfpOpsText why;
+      if (tfp_ops_player_snapshot(&wire.ops, &player, &why) == TFP_OPS_TRUE)
+        flags_read = true, flags_aim = player.controller_active || player.shoulder_aim || player.aiming;
+    }
+    aiming = tfp_arm_aiming(active, active && (aim_motion->state.action == TFP_ACT_AIM || aim_motion->state.action == TFP_ACT_ADS), holding,
+                            flags_read, flags_aim, wanted && aiming);
+    static bool was_wanted;
+    if (wanted && !was_wanted) weight = aiming ? 0 : 1; /* the drive starts: nothing of it was shown, so there is nothing to fade from */
+    was_wanted = wanted;
     weight = tfp_arm_weight_step(weight, aiming, weighed ? (float)(now - weighed) : 0); weighed = now;
     tfp_arm_drive_set(wanted, arms_restore, weight);
   }

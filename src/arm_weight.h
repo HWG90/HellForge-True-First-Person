@@ -18,4 +18,17 @@ static inline float tfp_arm_weight_step(float weight, bool aiming, float dt_ms) 
   else if (weight > target) { weight -= step; if (weight < target) weight = target; }
   return weight;
 }
+/* Whether the player is aiming, for the weight, each tick. The witnesses in order:
+ *   - a motion runtime in phase ACTIVE (a pose lease runs and this tick's sample was taken): its action is AIM or ADS;
+ *   - else the controller is holding the lease through an action: not aiming (the body's arms show through it);
+ *   - else (no running lease while the game shows its own first-person aim: a hold ended by full aim or by its cap,
+ *     the view switched on in the game's aim view; or a tick whose sample was refused) the player's own aim flags,
+ *     the ones src/aim_markers.c uses, when they could be read this tick;
+ *   - else what the previous tick answered. Never plain "not aiming": that showed the body's arms over the game's
+ *     aim pose (the rifle sunk), for the whole aim or as a twitch. */
+static inline bool tfp_arm_aiming(bool active, bool runtime_aim, bool holding, bool flags_read, bool flags_aim, bool previous) {
+  if (active) return runtime_aim;
+  if (holding) return false;
+  return flags_read ? flags_aim : previous;
+}
 #endif
