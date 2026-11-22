@@ -45,6 +45,37 @@ static void walk(Walk *w, const float *eye, const float *root, float yaw, uint32
   }
   w->first = false; memcpy(w->shown, world, sizeof world);
 }
+/* `thrown` false: a rig re-seat of 0.15 m (the eye in the root's frame, so in the world too; `way`: to the right, the
+ * left, forwards, backwards, up, down) while the body runs at `v` m/s along its
+ * own forward and turns at `w` rad/s, the eye `ahead` m in front of the root: the largest change of the presented
+ * eye's step in the world from one frame to the next (as a vector), and the most carried. `placed`: the filter is
+ * given the world; without it the root is taken to move evenly, which is the filter as it was before it looked at
+ * the root at all. `thrown`: no re-seat; in that frame the body is thrown instead (6 m/s backwards and 5 m/s up, then
+ * falling, still turning) and its eye swings 0.2 m back and forth against the root, 20 rad/s. */
+static void turning(bool thrown, int way, float ahead, float v, float w, float dt, bool placed, float *change, float *carried) {
+  TfpContinuity c; memset(&c, 0, sizeof c);
+  float root[3] = {0, 0, 0}, relative[3] = {.1f, ahead, 1.6f}, yaw = 0, one[3] = {0}, two[3] = {0}; double tick = 1000;
+  const int event = (int)(600/dt)+2, frames = event+(int)(900/dt); float flying[3] = {0, 0, 0};
+  *change = *carried = 0;
+  for (int i = 0; i < frames; ++i) {
+    const float h = dt/1000;
+    yaw += w*h;
+    if (thrown && i == event) { flying[0] = sinf(yaw)*6; flying[1] = -cosf(yaw)*6; flying[2] = 5; }
+    if (thrown && i >= event) { flying[2] -= 9.8f*h; for (int k = 0; k < 3; ++k) root[k] += flying[k]*h; relative[1] = ahead+.2f*sinf((i-event)*h*20); }
+    else { root[0] += -sinf(yaw)*v*h; root[1] += cosf(yaw)*v*h; }
+    if (!thrown && i == event) relative[way/2] += way%2 ? -.15f : .15f;
+    const float cy = cosf(yaw), sy = sinf(yaw), basis[9] = {cy, sy, 0, -sy, cy, 0, 0, 0, 1};
+    float eye[3], out[3], shown[3];
+    for (int k = 0; k < 3; ++k) { eye[k] = root[k]; for (int a = 0; a < 3; ++a) eye[k] += relative[a]*basis[a*3+k]; }
+    const float correction = tfp_continuity_step_in(&c, relative, placed ? eye : NULL, placed ? basis : NULL, NATIVE, true, false, tick, 250, &T, out);
+    for (int k = 0; k < 3; ++k) { shown[k] = root[k]; for (int a = 0; a < 3; ++a) shown[k] += out[a]*basis[a*3+k]; }
+    tick += dt;
+    if (i > 3) { const float d[3] = {shown[0]-2*one[0]+two[0], shown[1]-2*one[1]+two[1], shown[2]-2*one[2]+two[2]};
+      const float size = sqrtf(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]); if (size > *change) *change = size; }
+    if (correction > *carried) *carried = correction;
+    memcpy(two, one, sizeof two); memcpy(one, shown, sizeof one);
+  }
+}
 int main(void) {
   Run r;
   /* A still eye and an eye moving evenly: nothing is added, at 30 and at 144 frames a second. */
@@ -377,6 +408,57 @@ int main(void) {
     CHECK(w.correction == 0 && w.c.jumps == 1 && w.c.reseats == 0 && w.c.restarts == 0 && fabsf(w.shown[0]-eye[0]) < 1e-5f);
     eye[1] -= .1f; root[1] -= .1f; walk(&w, eye, root, 0, NATIVE, true, 33.3f);
     CHECK(w.correction == 0 && w.c.jumps == 1);
+  }
+  /* Looking at the root must not cost a genuine rig re-seat anything (the check of the soak fixes, 2026-11-22). The
+   * root branch compared the step with the eye's speed in the world, a 50 ms average; in a fast turn that speed
+   * turns with the body, the average lags behind it, and the lag was read as "the root's part": part of the re-seat
+   * was shown at once (the four rows below: 0.258, 0.115, 0.056 and 0.074 m of step change where the filter without
+   * the root gave 0.168, 0.078, 0.020 and 0.036 m). The comparison is now with the root's own even course
+   * (camera_continuity.h), and a root that turns and runs evenly has no part in a jump: with the world given the
+   * re-seat is taken up as without, no worse than before plus 0.01 m, and as much is carried. */
+  {
+    static const struct { float ahead, v, w, dt; } rows[] = {{.8f, 0, 12, 33.3f}, {.8f, 6, 6, 33.3f}, {.8f, 6, 6, 16.7f}, {.25f, 6, 12, 16.7f}};
+    for (unsigned i = 0; i < sizeof rows/sizeof *rows; ++i) {
+      float change, carried, before, before_carried;
+      turning(false, 2, rows[i].ahead, rows[i].v, rows[i].w, rows[i].dt, true, &change, &carried);
+      turning(false, 2, rows[i].ahead, rows[i].v, rows[i].w, rows[i].dt, false, &before, &before_carried);
+      printf("  re-seat of 0.15 m, eye %.2f m ahead, %g m/s, %g rad/s, %g ms a frame: step change %.3f m (without the root %.3f m), carried %.3f m (%.3f m)\n",
+             (double)rows[i].ahead, (double)rows[i].v, (double)rows[i].w, (double)rows[i].dt, (double)change, (double)before, (double)carried, (double)before_carried);
+      CHECK(change <= before+.01f);
+      CHECK(carried >= before_carried-.01f);
+    }
+    /* and everywhere around them: 4 to 100 ms a frame, 0 to 6 m/s, 0 to 12 rad/s, the eye 0.25 and 0.8 m ahead, the
+     * re-seat each way */
+    static const float times[] = {4, 8, 16.7f, 33.3f, 50, 100}, speeds[] = {0, 2, 6}, turns[] = {0, 3, 6, 12}, aheads[] = {.25f, .8f};
+    float worst = -1;
+    for (unsigned d = 0; d < 6; ++d) for (unsigned v = 0; v < 3; ++v) for (unsigned t = 0; t < 4; ++t) for (unsigned a = 0; a < 2; ++a) for (int way = 0; way < 6; ++way) {
+      float change, carried, before, before_carried;
+      turning(false, way, aheads[a], speeds[v], turns[t], times[d], true, &change, &carried);
+      turning(false, way, aheads[a], speeds[v], turns[t], times[d], false, &before, &before_carried);
+      if (change > before+.01f) printf("  worse: way %d, eye %.2f m ahead, %g m/s, %g rad/s, %g ms a frame: %.3f m, without the root %.3f m\n",
+                                       way, (double)aheads[a], (double)speeds[v], (double)turns[t], (double)times[d], (double)change, (double)before);
+      CHECK(change <= before+.01f);
+      if (change-before > worst) worst = change-before;
+    }
+    printf("re-seat in a turn, 864 cases: step change at most %.3f m over the filter without the root\n", (double)worst);
+    /* A body thrown while it turns is not a root re-seated frame after frame: it has a new speed, which it keeps in
+     * the world while its axes turn on. (With the course kept along the root's axes only, and kept as it was in
+     * every frame the root was off it, ten frames in a row were read as re-seats and 0.68 m was carried for 0.58 m.) */
+    float worst_change = -1, worst_carried = -1;
+    for (unsigned d = 0; d < 6; ++d) for (unsigned v = 0; v < 3; ++v) for (unsigned t = 0; t < 4; ++t) {
+      float change, carried, before, before_carried;
+      turning(true, 0, .25f, speeds[v], turns[t], times[d], true, &change, &carried);
+      turning(true, 0, .25f, speeds[v], turns[t], times[d], false, &before, &before_carried);
+      if (change > before+.01f || carried > before_carried+.01f)
+        printf("  worse, thrown: %g m/s, %g rad/s, %g ms a frame: step change %.3f m (%.3f m), carried %.3f m (%.3f m)\n",
+               (double)speeds[v], (double)turns[t], (double)times[d], (double)change, (double)before, (double)carried, (double)before_carried);
+      CHECK(change <= before+.01f);
+      CHECK(carried <= before_carried+.01f);
+      if (change-before > worst_change) worst_change = change-before;
+      if (carried-before_carried > worst_carried) worst_carried = carried-before_carried;
+    }
+    printf("thrown in a turn, 72 cases: step change at most %.3f m and carried at most %.3f m over the filter without the root\n",
+           (double)worst_change, (double)worst_carried);
   }
   /* Where jumps are not looked for the root's jump is not believed as a speed of the eye either: the frame after it,
    * with jumps looked for again, is an ordinary frame. */
