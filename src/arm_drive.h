@@ -35,7 +35,9 @@ enum {
 enum {
   TFP_ARM_ALIGN_NONE = 0,
   TFP_ARM_ALIGN_PROVISIONAL, /* no rest alignment is kept for this weapon yet: the first driven frame's (a new binding), or the one
-                              * already in use (another gun on a kept binding); replaced at the weapon's first rest */
+                              * already in use (another gun on a kept binding); replaced at the weapon's first rest. One
+                              * taken while the copy was hidden or fading (weight under 1: the player aiming) is taken once
+                              * more, eased, on the first driven frame at full weight, unless a better one replaced it */
   TFP_ARM_ALIGN_KEPT,        /* the rest alignment kept for this weapon and stance: on a new binding at once, otherwise eased */
   TFP_ARM_ALIGN_REST,        /* measured with the body at rest and confirmed by a second measurement; kept for this weapon and
                               * stance; eased */

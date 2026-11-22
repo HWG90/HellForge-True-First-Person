@@ -918,6 +918,81 @@ static void test_rest_after_a_draw(void) {
   CHECK(stats().align.count == 4 && stats().binds == 2);
 }
 
+/* A binding that begins while the player aims (the copy is hidden: weight 0, src/arm_weight.h) with nothing kept for
+ * the weapon. Its provisional alignment is of the aim pose, where body and rig differ most; it shows nothing until
+ * the aim is released. On the first driven frame the copy is fully shown again the provisional alignment is taken
+ * again, from that frame, and eased in: a player who keeps moving (never a rest) does not keep the rifle displaced.
+ * Not when something better replaced the provisional one meanwhile (kept, or measured at a rest). */
+static void test_binding_while_aiming(void) {
+  const TfpGraftLocal *rest = &game_locals[TFP_GRAFT_RIG_SOCKET];
+  TfpGraftLocal now[TFP_GRAFT_RIG_NODES];
+  rest_start();
+  stance = TFP_ARM_REST_NONE; /* aiming, then moving: never a rest */
+  tfp_arm_drive_set(true, false, 0);
+  body_is(body_draw); /* the body's aim pose: not where it rests */
+  for (unsigned n = 0; n < 10; n++) CHECK(!frame());
+  TfpArmDriveStats s = stats();
+  rig_locals(now);
+  CHECK(s.binds == 1 && s.align.count == 1 && s.align.how == TFP_ARM_ALIGN_PROVISIONAL && !memcmp(now, game_locals, sizeof now)); /* hidden */
+  /* released: the body goes to its carry pose, the copy fades in over a few frames */
+  body_is(body_now);
+  tfp_arm_drive_set(true, false, .4f); CHECK(!frame());
+  tfp_arm_drive_set(true, false, .8f); CHECK(!frame());
+  CHECK(stats().align.count == 1); /* not while it is still fading */
+  TfpGraftLocal before = socket_shown();
+  tfp_arm_drive_set(true, false, 1);
+  rig_locals(now);
+  CHECK(!frame());
+  s = stats();
+  TfpGraftLocal shown = socket_shown();
+  const float off = apart_m(&shown, rest);
+  CHECK(s.align.count == 2 && s.align.how == TFP_ARM_ALIGN_PROVISIONAL && s.align.eased && s.binds == 1);
+  CHECK(s.align.moved_m > .05f && strstr(tfp_arm_drive_align_line(&s.align), "taken again now that the arms show"));
+  CHECK(off > .05f && apart_m(&shown, &before) < off); /* this frame shows the aim alignment still (now at full weight): no step from the retake */
+  eases(off);
+  shown = socket_shown();
+  CHECK(apart_m(&shown, rest) < .0001f && apart_degrees(&shown, rest) < .2f);
+  /* once: moving on changes nothing more */
+  for (unsigned n = 0; n < 60; n++) CHECK(!frame());
+  CHECK(stats().align.count == 2 && stats().binds == 1);
+
+  /* a rest measurement arrives while the copy is still partly faded (the weight held under 1): it is the better one,
+   * and reaching full weight takes nothing again */
+  rest_start();
+  stance = TFP_ARM_REST_NONE;
+  tfp_arm_drive_set(true, false, 0);
+  body_is(body_draw);
+  CHECK(!frame());
+  body_is(body_now);
+  stance = TFP_ARM_REST_STAND;
+  tfp_arm_drive_set(true, false, .5f);
+  CHECK(settle(30) == 12 && stats().align.how == TFP_ARM_ALIGN_TENTATIVE && stats().align.count == 2);
+  tfp_arm_drive_set(true, false, 1);
+  for (unsigned n = 0; n < 10; n++) CHECK(!frame());
+  CHECK(stats().align.count == 2);
+  shown = socket_shown();
+  CHECK(apart_m(&shown, rest) < .0001f);
+
+  /* a weapon with a kept alignment, bound while aiming: the kept one from the start, nothing taken again */
+  rest_start();
+  CHECK(!frame());
+  kept_by_stillness();
+  const uint64_t count = stats().align.count;
+  request(4);
+  for (unsigned n = 0; n < 12; n++) CHECK(!frame());
+  request(6);
+  stance = TFP_ARM_REST_NONE;
+  tfp_arm_drive_set(true, false, 0);
+  body_is(body_draw);
+  CHECK(!frame());
+  CHECK(stats().align.count == count + 1 && stats().align.how == TFP_ARM_ALIGN_KEPT && stats().binds == 2);
+  body_is(body_now);
+  tfp_arm_drive_set(true, false, 1);
+  for (unsigned n = 0; n < 10; n++) CHECK(!frame());
+  shown = socket_shown();
+  CHECK(stats().align.count == count + 1 && apart_m(&shown, rest) < .0001f);
+}
+
 /* What is not a rest: an action (the tick says so), a hold, a gun that is away, a body that keeps moving, layer states
  * that keep changing, less than 350 ms. */
 static void test_rest_gates(void) {
@@ -1296,6 +1371,7 @@ int main(int argc, char **argv) {
   test_hold_edge();
   test_rest_grip();
   test_rest_after_a_draw();
+  test_binding_while_aiming();
   test_rest_gates();
   test_rest_first();
   test_rest_kept_stays();

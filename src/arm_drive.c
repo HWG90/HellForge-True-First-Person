@@ -115,6 +115,7 @@ static struct {
   bool has_host, on, restore_after, bend;
   bool hold, ready; /* tfp_arm_drive_set_hold, tfp_arm_drive_set_hold_ready */
   float weight;
+  bool retake; /* the binding's provisional alignment was taken while the copy was hidden or fading (the player aiming): align() */
   TfpArmDriveStats stats;
   /* the binding: only while `bound`, and only for exactly these units */
   bool bound, bound_bend, aligned;
@@ -513,6 +514,28 @@ static bool align(const Units *u, const TfpGraftMatrix *body, const TfpGraftLoca
   const TfpGraftLocal *own = &base[TFP_GRAFT_JOINTS - 1];
   const uint32_t weapon = u->gun_away ? 0 : u->weapon_ref;
   float m = 0, degrees = 0;
+  if (d.aligned && d.retake && d.weight >= 1) {
+    /* The first driven frame the copy is fully shown again. The provisional alignment was taken in the aim pose, where
+     * body and rig differ most (src/arm_weight.h), and shown it leaves the rifle displaced at rest until a rest is
+     * measured, which a player who keeps moving never gives. Unless a kept or a measured one replaced it meanwhile,
+     * it is taken again from this frame (as good as any other provisional one) and eased in from what is shown. */
+    d.retake = false;
+    if (!d.used && !d.tentative) {
+      TfpGraft fresh = d.map;
+      fresh.grip = d.to_grip;
+      if (tfp_graft_align(&fresh, body, own)) {
+        const TfpGraftMatrix anchor = tfp_graft_anchor(&d.map, body);
+        const TfpGraftMatrix source = tfp_graft_relative(&body[d.map.body[TFP_GRAFT_JOINTS - 1]], &anchor);
+        if (tfp_graft_rigid(&source)) {
+          const TfpGraftMatrix before = socket_of(&d.to_grip, &d.to_alignment, &source), after = socket_of(&fresh.grip, &fresh.alignment, &source);
+          apart(&after, &before, &m, &degrees);
+        }
+        use(&fresh.grip, &fresh.alignment, true);
+        aligned(TFP_ARM_ALIGN_PROVISIONAL, weapon, d.rest, 0, m, degrees);
+        m = degrees = 0;
+      } else d.retake = true; /* not rigid on this frame: the next one */
+    }
+  }
   if (!d.aligned) {
     /* A new binding. This frame may be in the middle of a draw or of any action: what was measured at rest for this
      * weapon is used from the start. With nothing kept, 0.3.37's entry alignment, until the weapon's first rest. */
@@ -522,6 +545,7 @@ static bool align(const Units *u, const TfpGraftMatrix *body, const TfpGraftLoca
     use(&d.map.grip, &d.map.alignment, false);
     d.aligned = true, d.still = false, d.tentative = false, d.used = k ? (unsigned)(k - d.kept) + 1 : 0, d.cur_weapon = weapon, d.cur_stance = d.rest;
     aligned(k ? TFP_ARM_ALIGN_KEPT : TFP_ARM_ALIGN_PROVISIONAL, weapon, d.rest, 0, 0, 0);
+    d.retake = !k && d.weight < 1; /* provisional, and taken while the copy is hidden or fading: once more when it is fully shown */
   }
   const TfpGraftMatrix anchor = tfp_graft_anchor(&d.map, body);
   const TfpGraftMatrix source = tfp_graft_relative(&body[d.map.body[TFP_GRAFT_JOINTS - 1]], &anchor), shown = tfp_graft_local_matrix(own);
@@ -737,6 +761,10 @@ const char *tfp_arm_drive_align_line(const TfpArmDriveAlign *a) {
              (unsigned)a->weapon, (double)a->moved_m, (double)a->moved_degrees, stance);
   else if (a->how == TFP_ARM_ALIGN_KEPT)
     snprintf(line, sizeof line, "aligned (weapon %u, the rest alignment kept for it, from the first frame of a new binding); %s", (unsigned)a->weapon, stance);
+  else if (a->how == TFP_ARM_ALIGN_PROVISIONAL && a->eased)
+    snprintf(line, sizeof line, "aligned (weapon %u, no rest alignment kept for it yet: the one taken while aiming is taken again now that the arms show, "
+             "moved %.3f m / %.1f degrees from the one in use, eased; provisional until its first rest); %s",
+             (unsigned)a->weapon, (double)a->moved_m, (double)a->moved_degrees, stance);
   else if (a->how == TFP_ARM_ALIGN_PROVISIONAL && a->weapon)
     snprintf(line, sizeof line, "aligned (weapon %u, no rest alignment kept for it yet: provisional until its first rest); %s", (unsigned)a->weapon, stance);
   else if (a->how == TFP_ARM_ALIGN_PROVISIONAL)
