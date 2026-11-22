@@ -147,11 +147,18 @@ typedef struct TfpCameraLockStats { uint64_t frames, foreign_frames, missed; uin
 void tfp_camera_lock_stats(TfpCameraLockStats *out);
 uint64_t tfp_camera_lock_frames(void); /* frames the lock has held so far: rising while the view is shown */
 /* Beyond retail, and only in frames the camera lock holds: the presented eye is kept continuous in the body's frame
- * across every change of camera (head camera, native view, the repeated native argument) and every one-frame move
- * of the first-person rig; the difference is carried as a correction and eased out (src/camera_continuity.h). In the
+ * across every change of camera (head camera, native view, the repeated native argument) and one-frame moves of the
+ * first-person rig around an action (tfp_camera_continuity_event); the difference is carried as a correction and
+ * eased out (src/camera_continuity.h). While it is on, the lock's eased entry into the native view does not run:
+ * the entry is one of those changes of camera. In the
  * native view the argument is parent-local and is converted through the rig eye's world transform. `trace_frames`:
  * every presented frame is kept in a ring for tfp_camera_trace_read. Both off: nothing is reached or read. */
 void tfp_camera_set_continuity(bool on, bool trace_frames);
+/* Something that can re-seat the first-person rig just happened (a lease or a hold begun or ended). For the next
+ * 300 ms of native frames a one-frame move of the rig eye is taken up; the helper opens the same window by itself
+ * when the control mask, the top request's kind or weapon, or the weapon key changes. Outside those windows the rig
+ * eye's motion is the game's own and is shown as it is; a change of camera is always taken up. */
+void tfp_camera_continuity_event(void);
 typedef struct TfpCameraContinuityStats { uint64_t jumps, edges, restarts; float largest_m; } TfpCameraContinuityStats;
 /* Counts since the start; the largest correction carried since the last call. */
 void tfp_camera_continuity_stats(TfpCameraContinuityStats *out);

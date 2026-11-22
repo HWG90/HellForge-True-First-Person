@@ -307,10 +307,11 @@ static void entry_note(void) {
  *   source       head (the head camera), native (the game's first-person camera), repeat (its last argument repeated) */
 static void trace_note(void) {
   static bool was_leased, was_holding;
-  if (!lock_wanted || !trace_wanted) return;
-  const bool leased = wire.log.has_lease, holding = wire.controller.holding;
-  if (leased != was_leased || holding != was_holding) tfp_camera_trace_edge();
+  const bool leased = wire.log.has_lease, holding = wire.controller.holding, edge = leased != was_leased || holding != was_holding;
   was_leased = leased, was_holding = holding;
+  if (edge && lock_wanted) tfp_camera_continuity_event(); /* a lease or a hold begun or ended: the rig may be re-seated */
+  if (!lock_wanted || !trace_wanted) return;
+  if (edge) tfp_camera_trace_edge();
   TfpCameraTraceRow rows[48];
   const uint32_t count = tfp_camera_trace_read(rows, 48);
   if (!count) return;

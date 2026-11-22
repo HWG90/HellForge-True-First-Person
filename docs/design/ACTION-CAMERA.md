@@ -248,9 +248,15 @@ Built offline; nothing of this section has run in the game.
 2. *Eye continuity* (`src/camera_continuity.h`, `src/camera_helper.c` `smooth_present` / `smooth_native`). In every
    frame the camera lock holds, the eye about to be presented is compared, in the body root's frame, with where the
    presented eye was going. A change of camera (head camera, native view, the repeated native argument) takes up any
-   difference; within the native view a one-frame step larger than max(0.06 m, 60 m/s² · dt²) beyond the eye's own
-   recent speed is taken up (three in a row at most; a step that is the motion slowing down is followed). What is
-   taken up is carried as a correction of at most 1 m and eased out on a cubic whose length follows from the distance
+   difference. Within the native view a one-frame step larger than max(0.04 m, 36 m/s² · dt²) beyond the eye's own
+   recent speed is taken up, but only in the 300 ms after something that can re-seat the rig: the control mask, the
+   top request's kind or weapon, or the weapon key changed, or a lease or a hold began or ended
+   (`tfp_camera_continuity_event`, from `trace_note`). Outside those windows the rig eye's motion is the game's own
+   (a crouch, a dive, a fast turn of the rig about the body) and is shown as it is. Steps in a row are taken up for
+   70 ms at most, whatever the frame rate; after that the new speed is believed and the difference of the two speeds
+   goes into the correction's curve, so the eye keeps its speed in that frame (review of 2026-11-22: three frames at
+   30 a second held a 3 m/s start back and then showed the same step change one frame later). A step that is the
+   motion slowing down is followed. What is taken up is carried as a correction of at most 1 m and eased out on a cubic whose length follows from the distance
    (largest acceleration 24 m/s², 100 to 400 ms). More than 1.5 m, a pause longer than the helper's frame gap, F11,
    and the lock going off start again with nothing carried. In full aim nothing is taken up and what is carried ends
    within 80 ms. In the native view the argument is parent-local: the corrected eye goes back through the rig eye's
@@ -288,8 +294,13 @@ start are taken up in the native view (the helper reads the rig under that mask 
 frame at its end continues from the presented eye, and the return to the weapon is one glide. Keeping the pose helper
 armed while the release waits was proposed by one reader and not built: the rig steps come with the helper armed too.
 
-**Not changed.** The eased entry (140 ms) and the eye hold and glide are as they were; the continuity sits after
-them. The swap glide still starts with 38 % of its distance in its first frame (retail's one-pole step); it is not a
+**The entry is one mechanism.** With continuity on, the 140 ms eased entry does not run under the lock: the change
+of camera is taken up whole by the continuity (a cubic that keeps the eye's speed, 100 to 400 ms by distance). The two
+together read each other's steps as jumps, and the fixed 140 ms is the rougher one beyond 0.2 m (0.3 m at 30 frames a
+second: largest step change 0.056 m eased, 0.020 m carried; 0.6 m: 0.11 m against 0.022 m). With `smooth_off.txt` the
+eased entry runs as in feel.22.
+
+**Not changed.** The eye hold and glide are as they were; the continuity sits after them. The swap glide still starts with 38 % of its distance in its first frame (retail's one-pole step); it is not a
 change of camera and is left as it is. The pose helper's draw animation restarts on every new lease, the one-frame
 request change included (the weapon dips 0.35 m and returns over 220 ms); no camera number sees it.
 
@@ -303,7 +314,10 @@ request change included (the weapon dips 0.35 m and returns over 220 ms); no cam
    `eye_world` jumping out and back, would mean the camera call does not see this frame's rig after all: then
    `smooth_off.txt` and say so.
 3. The `Smooth:` line while only looking around, sprinting, firing and aiming: rig moves taken up should be 0 or
-   rare there. Many would mean the limit (0.06 m in a frame) is inside ordinary motion.
+   rare there (they can only be counted in the 300 ms after an action's start or end, a lease or a hold edge). Many
+   would mean the limit (0.04 m in a frame) is inside ordinary motion during actions. The other way round: a pop in
+   the native view with no `Smooth:` count and no State edge within 300 ms before it is a rig move no event announced;
+   the `Hold:` and `State:` lines around it say which event to add.
 4. The view model during a correction in the native view: the camera is off the rig's eye by `correction` for up
    to 0.4 s, so without the arm drive the weapon is seen from that far off and glides into place. With the arm drive
    and a hold the arms are the body's and should stand still.

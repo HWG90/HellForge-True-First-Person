@@ -148,9 +148,11 @@ int main() {
   // ---- 1. The rig re-seated in one frame during a swap (mask 2): 0.218 m back, as in the game. ----
   for (int smooth = 1; smooth >= 0; --smooth) {
     fresh(true, smooth != 0);
-    Game g; g.pose(3, -2, .5f, .2f); g.look(.2f, 0); g.hip(); g.begin();
+    // The view looks down and across the body (the rig follows the view, the body root does not): the argument is
+    // local to the rig, not to the body, and a conversion through the wrong one of the two shows here.
+    Game g; g.pose(3, -2, .5f, .2f); g.look(.9f, -.5f); g.hip(); g.begin();
     standing(g, 12, 33.3, false); standing(g, 20, 33.3, true);
-    CHECK(g.from_rig_eye() < 1e-4f); // the eased entry is over: the drawn eye is the game's
+    CHECK(g.from_rig_eye() < 1e-4f); // the entry is over: the drawn eye is the game's
     g.measure_from_here();
     g.eye[1] -= .218f; g.native(2); g.frame(33.3);
     if (smooth) {
@@ -202,7 +204,7 @@ int main() {
   // that frame and comes back 0.3 m further on. Judged in the body's frame. ----
   for (int smooth = 1; smooth >= 0; --smooth) {
     fresh(true, smooth != 0);
-    Game g; float x = 0; g.pose(x, 0, 0, 0); g.look(0, 0); g.hip(); g.begin();
+    Game g; float x = 0; g.pose(x, 0, 0, 0); g.look(.7f, .4f); g.hip(); g.begin(); // looking up and to the side of the way
     for (int i = 0; i < 12; ++i) { x += .2f; g.pose(x, 0, 0, 0); g.hip(); g.frame(33.3); }
     for (int i = 0; i < 20; ++i) { x += .2f; g.pose(x, 0, 0, 0); g.native(); g.frame(33.3); }
     g.measure_from_here();
@@ -212,7 +214,7 @@ int main() {
     const float back_step = g.step;
     for (int i = 0; i < 16; ++i) { x += .2f; g.pose(x, 0, 0, 0); g.native(); g.frame(33.3); }
     if (smooth) CHECK(gap_step < .01f && back_step < .02f && g.change < .03f && g.from_rig_eye() < 1e-4f);
-    else CHECK(std::fabs(gap_step - .2f) < .001f && back_step > .3f); // the switch off: 0.2 m behind, then 0.36 m in one frame
+    else CHECK(std::fabs(gap_step - .2f) < .001f && back_step > .2f); // the switch off: 0.2 m behind, then 0.24 m in one frame
     g.end();
   }
   // ---- 6. A real teleport (5 m in a frame) and full aim: nothing is carried. ----
@@ -257,6 +259,99 @@ int main() {
     standing(h, 5, 33.3, false); tfp_camera_trace_edge(); standing(h, 5, 33.3, false);
     CHECK(tfp_camera_trace_read(rows, 64) == 0);
     h.end();
+  }
+  // ---- 9. Away from any event the rig eye's own motion is not a jump: a crouch (the eye 2.5 m/s down from one
+  // frame to the next), a fast turn of the rig about the body, a one-frame move. Shown as the game put it. After
+  // the binder's word (a lease or a hold begun or ended) a one-frame move is taken up, for 300 ms. ----
+  {
+    fresh(true, true);
+    Game g; g.pose(0, 0, 0, .3f); g.look(.3f, -.2f); g.hip(); g.begin();
+    standing(g, 12, 33.3, false); standing(g, 40, 33.3, true); // the entry and its 300 ms are over
+    for (int i = 0; i < 8; ++i) { g.eye[2] -= 2.5f * .0333f; g.native(); g.frame(33.3); CHECK(g.from_rig_eye() < 1e-4f && !g.forwarded_own); }
+    for (int i = 0; i < 8; ++i) { g.look(.3f + .5f * (i + 1), -.2f); g.native(); g.frame(33.3); CHECK(g.from_rig_eye() < 1e-4f && !g.forwarded_own); }
+    g.eye[1] -= .2f; g.native(); g.frame(33.3);
+    CHECK(g.from_rig_eye() < 1e-4f && std::fabs(g.step - .2f) < .03f);
+    TfpCameraContinuityStats stats{}; tfp_camera_continuity_stats(&stats);
+    CHECK(stats.jumps == 0);
+    standing(g, 15, 33.3, true);
+    tfp_camera_continuity_event();
+    standing(g, 5, 33.3, true);
+    g.eye[1] += .2f; g.native(); g.frame(33.3); // 200 ms after the word: taken up
+    CHECK(g.step < .01f && g.forwarded_own && std::fabs(g.from_rig_eye() - .2f) < .01f);
+    standing(g, 15, 33.3, true);
+    CHECK(g.from_rig_eye() < 1e-4f);
+    tfp_camera_continuity_event();
+    standing(g, 11, 33.3, true);
+    g.eye[1] -= .2f; g.native(); g.frame(33.3); // 400 ms after the word: the game's own again
+    CHECK(g.from_rig_eye() < 1e-4f && !g.forwarded_own);
+    tfp_camera_continuity_stats(&stats);
+    CHECK(stats.jumps == 1);
+    g.end();
+  }
+  // ---- 10. The entry under the lock is one mechanism. With continuity on the 140 ms eased entry does not run and
+  // the change of camera is carried whole: 0.3 m and 0.6 m at 30 frames a second change no step by 0.035 m, and no
+  // frame of it is read as a jump. With continuity off the eased entry runs as before (and is the rougher one). ----
+  for (int far = 0; far < 2; ++far) {
+    float change[2] = {0, 0};
+    for (int smooth = 1; smooth >= 0; --smooth) {
+      fresh(true, smooth != 0, true);
+      Game g; g.pose(2, 1, 0, .1f); g.look(.5f, -.3f); g.hip(); g.begin();
+      standing(g, 12, 33.3, false); standing(g, 20, 33.3, true); standing(g, 12, 33.3, false, 2);
+      g.measure_from_here();
+      g.eye[1] += far ? .6f : .3f; standing(g, 20, 33.3, true);
+      change[smooth] = g.change;
+      CHECK(g.from_rig_eye() < 1e-4f);
+      if (smooth) {
+        TfpCameraContinuityStats stats{}; tfp_camera_continuity_stats(&stats);
+        CHECK(stats.jumps == 0 && stats.edges == 2 && g.change < .035f); // (the way out is held by the eye hold: nothing to take up)
+        TfpCameraTraceRow rows[64]; tfp_camera_trace_edge();
+        const uint32_t count = tfp_camera_trace_read(rows, 64);
+        for (uint32_t i = 0; i < count; ++i) CHECK(rows[i].entry_ease == 1); // the eased entry never ran
+      }
+      g.end();
+    }
+    CHECK(change[1] < change[0]);
+  }
+  // The rig's own draw motion in the first frames of the native view (the logged rig eye after the entry of
+  // 08:56:33.459: 0.038, 0.112, 0.067 m back, then 0.007 and 0.043 m forward, the head camera already in place).
+  {
+    fresh(true, true);
+    Game g; g.pose(0, 0, 0, 0); g.look(0, 0); g.hip(); g.begin();
+    standing(g, 12, 33.3, false); standing(g, 20, 33.3, true); standing(g, 12, 33.3, false, 2);
+    g.measure_from_here();
+    const float moves[7] = {0, 0, -.038f, -.112f, -.067f, .007f, .043f};
+    for (float move : moves) { g.eye[1] += move; g.native(); g.frame(33.3); }
+    standing(g, 20, 33.3, true);
+    CHECK(g.from_rig_eye() < 1e-4f && g.change <= .05f);
+    g.end();
+  }
+  // ---- 11. The remembered eye. A native eye that moved 5 cm in a frame is being re-seated by the game; if the view
+  // leaves within 200 ms, that eye is not what is remembered for its weapon. Seen through the swap glide: with the
+  // other weapon in the hands and the first one coming up, the head camera glides to the first one's remembered eye.
+  // late = 0: the view leaves 100 ms after the move, the eye from before the move is the one remembered.
+  // late = 1: the eye stood still for 330 ms after the move: that is the weapon's eye now. Continuity off: the
+  // glide is judged raw. ----
+  for (int late = 0; late < 2; ++late) {
+    fresh(true, false);
+    Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+    const uint32_t first = 0x1111, second = 0x2222;
+    CHECK(tfp_camera_set_weapon_key(g.gen, first) == 1);
+    standing(g, 12, 33.3, false); standing(g, 20, 33.3, true);
+    float settled[3]; std::memcpy(settled, g.body, sizeof settled); // the first weapon's eye, in the body's frame
+    standing(g, 6, 33.3, false, 2); standing(g, 20, 33.3, true);      // out and back: remembered
+    g.eye[1] -= .3f; standing(g, late ? 10 : 3, 33.3, true, 2);      // the rig goes back 0.3 m in one frame
+    float moved[3]; std::memcpy(moved, g.body, sizeof moved);
+    CHECK(std::fabs(moved[1] - settled[1] + .3f) < .01f);
+    standing(g, 3, 33.3, false, 2);
+    CHECK(tfp_camera_set_weapon_key(g.gen, second) == 1);
+    g.eye[1] += .3f; g.eye[0] += .08f; standing(g, 20, 33.3, true);  // the second weapon in the hands
+    CHECK(tfp_camera_set_weapon_key(g.gen, first) == 1);
+    standing(g, 30, 33.3, false, 2);                                 // the first one coming up: the glide, 1 s
+    const float *wanted = late ? moved : settled, *other = late ? settled : moved;
+    float to_wanted = 0, to_other = 0;
+    for (int i = 0; i < 3; ++i) { to_wanted += (g.body[i] - wanted[i]) * (g.body[i] - wanted[i]); to_other += (g.body[i] - other[i]) * (g.body[i] - other[i]); }
+    CHECK(std::sqrt(to_wanted) < .01f && std::sqrt(to_other) > .25f);
+    g.end();
   }
   // ---- 8. Without the lock the switches change nothing: the same forwarded bytes and the same number of
   // memory reads, frame for frame, with continuity and trace on or off. ----

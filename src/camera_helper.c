@@ -186,6 +186,16 @@ static TfpKick lock_kick; static TfpQ lock_view = {0, 0, 0, 1}, lock_last_kick =
 enum { SMOOTH_HEAD = 1, SMOOTH_NATIVE = 2, SMOOTH_REPEAT = 3 };
 static _Atomic uint32_t smooth_on, trace_on;
 static TfpContinuity smooth; static const TfpContinuityTuning smooth_tuning = TFP_CONTINUITY_DEFAULT;
+/* Within the native view a jump is looked for only for SMOOTH_EVENT_MS after something that can re-seat the rig: the
+ * control mask, the top request's kind or weapon, or the binder's weapon key changed, or the binder said so (a lease
+ * or a hold begun or ended: tfp_camera_continuity_event). Anywhere else the rig eye's motion is the game's own (a
+ * crouch, a dive, a fast turn about the body) and is shown as it is.
+ * With continuity on, the eased entry (lock_entry_ms) does not run: the change of camera is taken up here, whole, on
+ * a curve that keeps the eye's speed and whose length follows from the distance. Two eases on top of each other
+ * read each other's steps as jumps. */
+#define SMOOTH_EVENT_MS 300.0
+static _Atomic uint32_t smooth_event;
+static struct { bool known; uint32_t mask, kind, weapon, key; double until; } smooth_watch;
 #define TRACE_RING 128u
 #define TRACE_BEFORE 6u   /* frames before the edge that are written with it */
 #define TRACE_MS 500.0
@@ -819,7 +829,16 @@ static void lock_rotation(Policy *p, const float *native, uint32_t kind, double 
 }
 
 /* ---- beyond retail: continuity of the presented eye, and the trace (lock frames only) ---- */
-static void smooth_forget(void) { tfp_continuity_reset(&smooth); trace.last_known = false; eye_watch_known = false; eye_unsettled_until = 0; }
+static void smooth_forget(void) { tfp_continuity_reset(&smooth); trace.last_known = false; eye_watch_known = false; eye_unsettled_until = 0;
+  memset(&smooth_watch, 0, sizeof smooth_watch); }
+/* True: jumps are looked for in this native frame. Called once for every frame presented under the lock. */
+static bool smooth_detect(const Policy *p, uint32_t kind, uint32_t source, double tick) {
+  const bool said = atomic_exchange_explicit(&smooth_event, 0, memory_order_relaxed) != 0;
+  if (said || (smooth_watch.known && (p->control_mask != smooth_watch.mask || kind != smooth_watch.kind || p->current_weapon != smooth_watch.weapon
+      || p->weapon_key != smooth_watch.key))) smooth_watch.until = tick+SMOOTH_EVENT_MS;
+  smooth_watch.known = true; smooth_watch.mask = p->control_mask; smooth_watch.kind = kind; smooth_watch.weapon = p->current_weapon; smooth_watch.key = p->weapon_key;
+  return source != SMOOTH_HEAD && tick < smooth_watch.until;
+}
 /* The eye about to be presented, in the world; `root`/`root_basis` are the body root's position and axis rows.
  * True: `shown` differs from `wanted` and is what to present. Always records the frame for the trace. */
 static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const float *root, const float *root_basis, const float *wanted, double tick, float *shown) {
@@ -829,7 +848,8 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
   memcpy(shown, wanted, 12);
   if (atomic_load_explicit(&smooth_on, memory_order_relaxed)) {
     /* Within the head camera only a change of camera is taken up: its eye turns about the head with the view. */
-    correction = tfp_continuity_step(&smooth, wanted_relative, source == SMOOTH_REPEAT ? SMOOTH_NATIVE : source, source != SMOOTH_HEAD, p->full_ads, tick, p->c.max_gap_ms, &smooth_tuning, relative);
+    const bool detect = smooth_detect(p, kind, source, tick);
+    correction = tfp_continuity_step(&smooth, wanted_relative, source == SMOOTH_REPEAT ? SMOOTH_NATIVE : source, detect, p->full_ads, tick, p->c.max_gap_ms, &smooth_tuning, relative);
     if (correction > 1e-6f && tfp_finite3(relative)) for (unsigned component = 0; component < 3; ++component) { shown[component] = root[component];
       for (unsigned axis = 0; axis < 3; ++axis) shown[component] += relative[axis]*root_basis[axis*3+component]; }
     else correction = 0;
@@ -959,7 +979,9 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
           else if (policy.entry_waiting) { policy.entry_waiting = false; policy.entry_last_delay = policy.entry_delay_frames;
             if (policy.entry_delay_frames > policy.entry_max_delay) policy.entry_max_delay = policy.entry_delay_frames; }
           if (policy.handoff_rotation_ms > 0) track_native_rotation(&policy, tick);
-          if (policy.handoff_entry_ms > 0 && ease_native_entry(&policy, &sample, native, tick, from_head, head_relative, adjusted)) output = adjusted;
+          const bool carried = policy.lock_now && atomic_load_explicit(&smooth_on, memory_order_relaxed); /* the entry is the continuity's */
+          if (carried) tfp_ease_reset(&policy.entry.ease);
+          else if (policy.handoff_entry_ms > 0 && ease_native_entry(&policy, &sample, native, tick, from_head, head_relative, adjusted)) output = adjusted;
         }
         if (policy.lock_now) {
           /* Beyond retail. A native eye that moved 5 cm in a frame is being re-seated by the game (its gun left the
@@ -1423,6 +1445,7 @@ void tfp_camera_set_lock(bool on, float gain, float max_degrees, float settle_ms
 }
 uint64_t tfp_camera_lock_frames(void) { return atomic_load(&lock_frames); }
 void tfp_camera_set_continuity(bool on, bool trace_frames) { atomic_store(&smooth_on, on ? 1u : 0u); atomic_store(&trace_on, trace_frames ? 1u : 0u); }
+void tfp_camera_continuity_event(void) { atomic_store(&smooth_event, 1u); }
 void tfp_camera_continuity_stats(TfpCameraContinuityStats *out) {
   if (!out) return;
   memset(out, 0, sizeof *out);
@@ -1465,6 +1488,7 @@ void tfp_camera_lock_stats(TfpCameraLockStats *out) {
 void tfp_camera_reset_for_tests(void) {
   atomic_store(&lock_on, 0); atomic_store(&smooth_on, 0); atomic_store(&trace_on, 0);
   memset(&smooth, 0, sizeof smooth); memset(&trace, 0, sizeof trace); eye_watch_known = false; eye_unsettled_until = 0;
+  memset(&smooth_watch, 0, sizeof smooth_watch); atomic_store(&smooth_event, 0);
   atomic_store(&original, 0);
   atomic_store(&installed, 0); atomic_store(&armed, 0); atomic_store(&reserved, 0); atomic_store(&last_error, 0);
   atomic_store(&callback_generation, 0);
