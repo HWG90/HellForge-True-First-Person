@@ -685,3 +685,40 @@ Measured alone afterwards: twenty swaps 0.039 to 0.047 m, two held grenades 0.04
 the phases before them left behind, not a change in the swap itself; the soak is the test for that. A stim and the
 stratagem list while walking, three each: 0.034 to 0.052 m.
 
+
+### After feel.39 (2026-11-22): the root's turning (not yet in a build)
+
+A soak of feel.39 (18,108 frames) left steps of 0.06 to 0.17 m that the continuity itself made. The Trace lines of
+feel.39 carry the root's place and not its axes, so the cases were replayed through the filter alone with the axes
+fitted (`tools/harness/replay.py`, `replay_filter.c`: in each frame the turn with which the filter of that build
+presents the eye the log shows). What the three largest have in common is the root's axes turning:
+
+1. 22:38:05.662, head-camera frames inside a swap. With the axes left as they were the filter of feel.39 shows
+   0.053 m in that frame; the log shows 0.176 m. With the axes turned by 0.26 rad in that one frame (and by under
+   0.02 rad in the frames after) it shows the log's eye to the millimetre in all ten frames. The root rule of
+   feel.38 did not fire (the step against the root on its course, 0.205 m, was larger than the step in the root's
+   frame, 0.08 m). The 0.149 m taken up a frame earlier was kept against the root, 0.87 m away, and went round with
+   its axes.
+2. 22:33:17.3 to .7, the native view after a hold ended on a landing. The fit gives a root turning on the spot by
+   0.2 to 0.6 rad a frame for nine frames while the rig eye stands in the world 0.6 m from it (not exact: up to
+   0.07 m off the log in four of those frames). In the root's frame that eye goes round; each frame was a jump, the
+   run ended, the speed was believed, the next frame was a jump again: 0.61 m carried and the presented eye going
+   0.06 m a frame while the wanted one stood, then 0.139 m in the frame the turning stopped.
+3. 22:28:33.416, head-camera frames after a change of camera: the same as 1 with less turn (0.09 to 0.17 rad a
+   frame, the eye 1.68 m from the root): 0.048 then 0.141 m, 0.047 m beyond the root's own change of step.
+
+The filter now reads every step a second way, with the root's turning left out (`camera_continuity.h`, THE
+TURNING), and uses that reading in a frame the axes leave their course while something is taken up, and for an eye
+that has not been going round with the root. The three cases as tests (`tests/reference/soak-6-steps.h`): 0.133,
+0.236 and 0.047 m beyond the root's own change of step before, 0.046, 0.027 and 0.019 m now. The Trace lines carry
+`axes=(...)`, the root's three axis rows, so the next soak needs no fit.
+
+Left, both in that soak and not changed by this:
+- 22:33:17.304, a landing: the root stops dead in one frame (0.250 to 0.001 m a frame), the rig eye in two (0.265,
+  0.200, 0.054 m). The first is taken up as a jump (speed kept), the second is "slowing" and followed: the presented
+  eye stops in one frame, 0.256 to 0.015 m, a frame after the root did.
+- 22:34:02.810, a change of camera while 0.6 m is being caught up at 0.18 m a frame: the curve starts again from
+  the present value and speed with a length that follows from the distance alone, so it brakes harder than
+  `ease_accel` (0.178, 0.134, 0.053 m). Giving every restarted curve a length that allows for its speed fails two
+  of the existing checks of a start at 3 m/s and was not kept.
+- 22:34:02.543: the wanted eye's own slowing (0.068 m) with 0.9 m carried; followed, as designed.
