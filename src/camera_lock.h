@@ -7,8 +7,17 @@
 #ifndef TFP_CAMERA_LOCK_H
 #define TFP_CAMERA_LOCK_H
 #include "camera_math.h"
+#include "camera_damp.h"
 
 typedef struct TfpKickTuning { float gain, max_degrees, settle_ms, damp_ms; } TfpKickTuning;
+/* The tuning of one frame under a camera style (src/camera_damp.h): the on-foot pair of the sliders, or the thrown
+ * pair for a body that is thrown, down or off foot, each strength times the style's share, with the style's
+ * low-pass. Bodycam gives the sliders back as they are. */
+static inline TfpKickTuning tfp_kick_style_tuning(const TfpCameraStyle *style, bool thrown, float gain, float max_degrees, float thrown_gain,
+                                                  float thrown_max_degrees, float settle_ms) {
+  return (TfpKickTuning){thrown ? thrown_gain*style->thrown_kick : gain*style->foot_kick, thrown ? thrown_max_degrees : max_degrees, settle_ms,
+                         style->kick_damp_ms};
+}
 /* rest: the slowly following head rotation, in the view's frame; view: last frame's view, for its own turning speed;
  * shown: the kick last returned (what the damping goes on from) */
 typedef struct TfpKick { TfpQ rest, view, shown; bool known; } TfpKick;

@@ -162,6 +162,61 @@ int main(void) {
     tfp_eye_damp_step(&d, a, 8000, 250, 300, out); tfp_eye_damp_step(&d, b, 8010, 250, 300, out);
     CHECK(tfp_eye_damp_release(&d, (double)NAN, 250, behind) == 0 && behind[1] == 0 && !d.known);
   }
+  /* The camera style (the Bodycam option). Bodycam is the camera damping option as it is, with the 0.10 m limit;
+   * Stable follows the head on 350 ms with up to 0.25 m of lag, whatever the option says. */
+  {
+    const TfpCameraStyle bodycam = tfp_camera_style(true, 180), stable = tfp_camera_style(false, 180), stable_raw = tfp_camera_style(false, 0);
+    CHECK(bodycam.eye_damp_ms == 180 && bodycam.eye_lag_m == TFP_EYE_DAMP_LAG_M && bodycam.kick_damp_ms == 180 && bodycam.foot_kick == 1 && bodycam.thrown_kick == 1);
+    CHECK(tfp_camera_style(true, 0).eye_damp_ms == 0 && tfp_camera_style(true, 0).kick_damp_ms == 0);
+    CHECK(stable.eye_damp_ms == 350 && stable.eye_lag_m == .25f && stable.kick_damp_ms == 250 && stable.foot_kick == 0 && stable.thrown_kick == .5f);
+    CHECK(stable_raw.eye_damp_ms == 350 && stable_raw.eye_lag_m == .25f && stable_raw.kick_damp_ms == 250);
+    /* The limit given is the limit used: tfp_eye_damp_step is tfp_eye_damp_follow at 0.10 m, bit for bit. */
+    TfpEyeDamp a, b; tfp_eye_damp_reset(&a); tfp_eye_damp_reset(&b);
+    for (int i = 0; i < 200; ++i) {
+      float eye[3], one[3], two[3]; script(i < 100 ? 1 : 2, i < 100 ? .5f : .05f, i*7.0, eye);
+      const float first = tfp_eye_damp_step(&a, eye, 5000+i*7.0, 250, 180, one), second = tfp_eye_damp_follow(&b, eye, 5000+i*7.0, 250, 180, TFP_EYE_DAMP_LAG_M, two);
+      CHECK(first == second && same(one, two));
+    }
+    static const double rates[] = {30, 60, 144};
+    for (int r = 0; r < 3; ++r) {
+      /* A head that jerks 0.05 m there and back within 100 ms: the eye moves a fifth of that at most (0.008 m; the
+       * same jerk moves it 0.014 m at Bodycam's default 180 ms and 0.05 m undamped), and is back within a second. */
+      TfpEyeDamp d; tfp_eye_damp_reset(&d);
+      float start[3], eye[3], out[3] = {0}, peak = 0, lag = 0; script(2, .05f, 0, start);
+      for (int i = 0; i*1000.0/rates[r] <= 1400; ++i) {
+        const double ms = i*1000.0/rates[r];
+        script(2, .05f, ms, eye);
+        const float behind = tfp_eye_damp_follow(&d, eye, 5000+ms, 250, stable.eye_damp_ms, stable.eye_lag_m, out);
+        CHECK(fabsf(behind-apart(out, eye)) < 1e-5f);
+        if (behind > lag) lag = behind;
+        if (apart(out, start) > peak) peak = apart(out, start);
+      }
+      const float body = play(2, .05f, 180, rates[r], 1400, NULL, NULL);
+      printf("Stable eye, %g frames a second: a 0.05 m jerk of the head moves it %.4f m (Bodycam at 60 %%: %.4f m), %.4f m left after 1.2 s\n",
+             rates[r], peak, body, apart(out, start));
+      CHECK(peak > .001f && peak < .010f && peak < body*.6f && lag <= .05f+1e-5f && apart(out, start) < .0005f);
+      /* A head that drops 0.5 m and stays (a crouch, going prone): followed to within 0.05 m inside 1.2 s, never
+       * more than 0.25 m behind, and never past it. */
+      tfp_eye_damp_reset(&d);
+      float truth[3], worst = 0, within = -1, at1200 = 9, before_left = 9; script(1, .5f, 5000, truth);
+      for (int i = 0; i*1000.0/rates[r] <= 2500; ++i) {
+        const double ms = i*1000.0/rates[r];
+        script(1, .5f, ms, eye);
+        const float behind = tfp_eye_damp_follow(&d, eye, 5000+ms, 250, stable.eye_damp_ms, stable.eye_lag_m, out);
+        if (behind > worst) worst = behind;
+        if (ms >= 100) {
+          const float left = apart(out, truth);
+          CHECK(left <= before_left+1e-6f); /* only ever nearer */
+          before_left = left;
+          if (within < 0 && left < .05f) within = (float)ms-100;
+          if (ms-100 <= 1200) at1200 = left;
+        }
+      }
+      printf("Stable eye, %g frames a second: a 0.5 m drop of the head is at most %.3f m ahead of the eye, within 0.05 m after %.0f ms, %.4f m left at 1.2 s\n",
+             rates[r], worst, within, at1200);
+      CHECK(fabsf(worst-.25f) < 1e-5f && within > 0 && within < 1200 && at1200 < .05f && apart(out, truth) < .001f);
+    }
+  }
   printf("camera damp: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

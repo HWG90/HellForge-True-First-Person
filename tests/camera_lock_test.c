@@ -185,6 +185,67 @@ int main(void) {
     const TfpQ want = tfp_q_mul(about(0, 0, 1, 2), about(1, 0, 0, 6));
     CHECK(tfp_degrees_between(out, want) < 1.0f);
   }
+  /* The camera style (src/camera_damp.h TfpCameraStyle; the Bodycam option). The sliders as the options' defaults:
+   * 35 % up to 8 degrees on foot, 70 % up to 35 thrown, settling on 300 ms, camera damping 60 % (180 ms). */
+  {
+    const float gain = .35f, max = 8.0f, thrown_gain = .7f, thrown_max = 35.0f, settle = 300.0f, damping = 180.0f;
+    /* Bodycam: the sliders as they are, on foot and thrown. */
+    const TfpCameraStyle bodycam = tfp_camera_style(true, damping);
+    const TfpKickTuning body_foot = tfp_kick_style_tuning(&bodycam, false, gain, max, thrown_gain, thrown_max, settle);
+    const TfpKickTuning body_thrown = tfp_kick_style_tuning(&bodycam, true, gain, max, thrown_gain, thrown_max, settle);
+    CHECK(body_foot.gain == gain && body_foot.max_degrees == max && body_foot.settle_ms == settle && body_foot.damp_ms == damping);
+    CHECK(body_thrown.gain == thrown_gain && body_thrown.max_degrees == thrown_max && body_thrown.settle_ms == settle && body_thrown.damp_ms == damping);
+    /* Stable: nothing on foot; thrown, half the thrown slider with the limit unchanged, low-passed on 250 ms whatever
+     * the camera damping option says. */
+    const TfpCameraStyle stable = tfp_camera_style(false, damping), stable_raw = tfp_camera_style(false, 0);
+    const TfpKickTuning foot = tfp_kick_style_tuning(&stable, false, gain, max, thrown_gain, thrown_max, settle);
+    const TfpKickTuning thrown = tfp_kick_style_tuning(&stable, true, gain, max, thrown_gain, thrown_max, settle);
+    CHECK(foot.gain == 0 && foot.max_degrees == max && foot.settle_ms == settle && foot.damp_ms == 250.0f);
+    CHECK(thrown.gain == .35f && thrown.max_degrees == thrown_max && thrown.settle_ms == settle && thrown.damp_ms == 250.0f);
+    CHECK(tfp_kick_style_tuning(&stable_raw, true, gain, max, thrown_gain, thrown_max, settle).damp_ms == 250.0f);
+    /* The head nods 20 degrees in one frame and stays (a landing, or the body thrown), 144 frames a second.
+     * [0] Bodycam on foot, [1] Bodycam thrown, [2] Stable on foot, [3] Stable thrown: the largest kick, the largest
+     * change of it in one frame, and whether every frame was exactly no rotation. */
+    const TfpKickTuning *const cases[4] = {&body_foot, &body_thrown, &foot, &thrown};
+    float peak[4] = {0}, change[4] = {0}, end[4] = {0}; bool none[4] = {true, true, true, true};
+    const TfpQ view = about(0, 0, 1, 37);
+    for (int c = 0; c < 4; ++c) {
+      TfpKick kick; tfp_kick_reset(&kick);
+      TfpQ before = tfp_q_identity();
+      for (int i = 0; i < 432; ++i) { /* 3 s */
+        const float nod = i >= 20 ? 20.0f : 3.0f*sinf(i*.9f); /* the head is never still before it either */
+        const TfpQ out = tfp_kick_step(&kick, view, tfp_q_mul(view, about(1, 0, 0, nod)), 1.0f/144, cases[c]);
+        if (out.x != 0 || out.y != 0 || out.z != 0 || out.w != 1) none[c] = false;
+        const float size = tfp_degrees_between(out, tfp_q_identity()), moved = tfp_degrees_between(out, before);
+        if (size > peak[c]) peak[c] = size;
+        if (moved > change[c]) change[c] = moved;
+        end[c] = size; before = out;
+      }
+    }
+    printf("a 20 degree nod in one frame: Bodycam on foot %.2f degrees (%.3f in one frame), Bodycam thrown %.2f (%.3f); "
+           "Stable on foot %.2f (%.3f), Stable thrown %.2f (%.3f)\n", peak[0], change[0], peak[1], change[1], peak[2], change[2], peak[3], change[3]);
+    CHECK(none[2] && peak[2] == 0);                 /* Stable on foot: exactly no kick, in every frame */
+    CHECK(!none[0] && peak[0] > 1.0f);              /* where Bodycam has one */
+    CHECK(peak[3] > 1.0f && peak[3] < peak[1]*.5f); /* Stable thrown: still a kick, under half of Bodycam's */
+    CHECK(change[3] < change[1]*.5f && change[3] < 20.0f*.35f*(1000.0f/144/250)*1.02f); /* a sway: no frame turns it more than 250 ms allows */
+    CHECK(end[3] < .05f && end[1] < .05f);          /* and it settles */
+    /* A thrown body that is on foot again: Stable's kick is eased out on the same 250 ms, not dropped in a frame. */
+    TfpKick kick; tfp_kick_reset(&kick);
+    TfpQ out = tfp_q_identity();
+    for (int i = 0; i < 40; ++i) out = tfp_kick_step(&kick, view, tfp_q_mul(view, about(1, 0, 0, i >= 10 ? 20.0f : 0)), 1.0f/144, &thrown);
+    const float carried = tfp_degrees_between(out, tfp_q_identity());
+    CHECK(carried > 1.0f);
+    float last = carried, most = 0;
+    for (int i = 0; i < 288; ++i) {
+      out = tfp_kick_step(&kick, view, tfp_q_mul(view, about(1, 0, 0, 20.0f + 4.0f*sinf(i*.7f))), 1.0f/144, &foot);
+      const float size = tfp_degrees_between(out, tfp_q_identity());
+      if (last-size > most) most = last-size;
+      CHECK(size <= last+1e-4f);
+      last = size;
+    }
+    CHECK(most < carried*(1000.0f/144/250)*1.05f && last < .01f);
+    printf("Stable, thrown and then on foot: %.2f degrees carried, let go by at most %.3f in one frame\n", carried, most);
+  }
   printf("camera lock: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }
