@@ -464,6 +464,15 @@ static void arms_tick(void) {
   const bool wanted = (arms_live || arms_bend) && wire.controller.enabled;
   tfp_render_slot_tick();
   tfp_arm_drive_set(wanted, arms_restore, 1.0f);
+  { /* The resting weapon pose (src/arm_drive.h): the clock, and whether this tick is a rest and in which stance. */
+    const TfpMotionRuntime *motion = tfp_wire_motion_runtime(&wire);
+    const TfpAct act = motion && motion->state.phase == TFP_MOTION_PHASE_ACTIVE && wire.log.has_lease && !wire.controller.holding ? motion->state.action : TFP_ACT_NONE;
+    static uint64_t told;
+    TfpArmDriveStats a;
+    tfp_arm_drive_set_rest(now, act == TFP_ACT_IDLE ? TFP_ARM_REST_STAND : act == TFP_ACT_CROUCH ? TFP_ARM_REST_CROUCH : act == TFP_ACT_PRONE ? TFP_ARM_REST_PRONE : TFP_ARM_REST_NONE);
+    tfp_arm_drive_stats(&a);
+    if (a.align.count != told) told = a.align.count, say("Arms: %s", tfp_arm_drive_align_line(&a.align));
+  }
   if (wanted) {
     if (!tfp_render_slot_installed() && now >= next_try) {
       next_try = now + 500;

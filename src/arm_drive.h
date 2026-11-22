@@ -144,6 +144,9 @@ bool tfp_arm_drive_release(void);
 const char *tfp_arm_drive_held(void);
 
 void tfp_arm_drive_stats(TfpArmDriveStats *out);
+/* The log's words for an alignment taken or replaced: "aligned (weapon 472, at rest for 363 ms, moved 0.213 m / 12.4
+ * degrees from the one in use, eased)". A static buffer: game thread only. */
+const char *tfp_arm_drive_align_line(const TfpArmDriveAlign *align);
 const char *tfp_arm_drive_reason_name(uint32_t reason);
 void tfp_arm_drive_reset_for_tests(void);
 #endif

@@ -48,6 +48,7 @@
 #include "profile.h"
 #include "snapshot.h"
 #include <float.h>
+#include <stdio.h>
 
 /* ---- build constants, all from the retired sources for this same build ---- */
 #define B_RIG_RESOURCE     UINT64_C(0xd0cf4d493ca08bed) /* view:256, :527: the first-person rig's unit resource */
@@ -633,6 +634,25 @@ const char *tfp_arm_drive_held(void) { return d.owned ? "the arm drive has not p
 void tfp_arm_drive_stats(TfpArmDriveStats *out) {
   *out = d.stats;
   out->owned = bits(d.owned);
+}
+const char *tfp_arm_drive_align_line(const TfpArmDriveAlign *a) {
+  static const char *const stances[TFP_ARM_REST_KINDS] = {"in an action", "standing", "crouched", "prone"};
+  static char line[240];
+  const char *stance = stances[a->stance < TFP_ARM_REST_KINDS ? a->stance : 0];
+  if (a->how == TFP_ARM_ALIGN_REST)
+    snprintf(line, sizeof line, "aligned (weapon %u, at rest for %u ms, moved %.3f m / %.1f degrees from the one in use, eased); %s",
+             (unsigned)a->weapon, (unsigned)a->rest_ms, (double)a->moved_m, (double)a->moved_degrees, stance);
+  else if (a->how == TFP_ARM_ALIGN_KEPT && a->eased)
+    snprintf(line, sizeof line, "aligned (weapon %u, the rest alignment kept for it, moved %.3f m / %.1f degrees from the one in use, eased); %s",
+             (unsigned)a->weapon, (double)a->moved_m, (double)a->moved_degrees, stance);
+  else if (a->how == TFP_ARM_ALIGN_KEPT)
+    snprintf(line, sizeof line, "aligned (weapon %u, the rest alignment kept for it, from the first frame of a new binding); %s", (unsigned)a->weapon, stance);
+  else if (a->how == TFP_ARM_ALIGN_PROVISIONAL && a->weapon)
+    snprintf(line, sizeof line, "aligned (weapon %u, no rest alignment kept for it yet: provisional until its first rest); %s", (unsigned)a->weapon, stance);
+  else if (a->how == TFP_ARM_ALIGN_PROVISIONAL)
+    snprintf(line, sizeof line, "aligned (no gun on the rig: the first driven frame's alignment, provisional); %s", stance);
+  else snprintf(line, sizeof line, "no alignment yet");
+  return line;
 }
 const char *tfp_arm_drive_reason_name(uint32_t reason) {
   static const char *const names[TFP_ARM_REASONS] = {

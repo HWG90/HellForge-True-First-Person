@@ -837,6 +837,12 @@ static void test_rest_after_a_draw(void) {
   const unsigned frames = settle(30);
   s = stats();
   CHECK(frames == 11 && s.align.count == 2 && s.align.how == TFP_ARM_ALIGN_REST && s.align.weapon == GUN && s.align.stance == TFP_ARM_REST_STAND);
+  {
+    char want_line[200];
+    snprintf(want_line, sizeof want_line, "aligned (weapon %u, at rest for 363 ms, moved %.3f m / %.1f degrees from the one in use, eased); standing",
+             (unsigned)GUN, (double)s.align.moved_m, (double)s.align.moved_degrees);
+    CHECK(!strcmp(tfp_arm_drive_align_line(&s.align), want_line));
+  }
   CHECK(s.align.rest_ms >= 350 && s.align.rest_ms < 400 && s.align.eased && fabsf(s.align.moved_m - off) < .001f && fabsf(s.align.moved_degrees - turned) < .1f);
   eases(off);
   /* at rest: the rig's own socket, and the whole pose is the rest alignment's, bit for bit */
