@@ -83,8 +83,9 @@ jumped more than 5 cm.
   been seen working yet. The view comes back by itself after the respawn.
 - **Holding aim raises the weapon to the shoulder.** Looking through the sight is a separate option
   ("true native ADS") and was not part of these checks.
-- **The settings panel** was opened and closed in the game, and the options were seen to apply. Nobody has
-  clicked through every row yet.
+- **The settings panel:** all three tabs were opened in the game, and Camera lock, Animated arms, Weapon
+  put-away and Smooth eye were switched off and on there and seen to take effect at once. The sliders and the
+  key rows have not been tried.
 - **The crash while the game closes is guarded** (an engine fault of build 25480438, with or without first
   person). Tell me if you see a crash on quit.
 

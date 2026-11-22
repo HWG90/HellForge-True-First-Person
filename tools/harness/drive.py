@@ -131,6 +131,9 @@ def events(script):
         elif word == "point":   # point X Y: the pointer to a pixel of the game's client area (menus)
             add(f"p {int(rest[0])} {int(rest[1])}")
             at += 0.1
+        elif word == "press":   # press X Y: a click message at a client pixel, for the NEST panel (stays inside the game)
+            add(f"c {int(rest[0])} {int(rest[1])}")
+            at += 0.25
         elif word == "look":
             for _ in range(10):
                 add(f"m {int(rest[0]) // 10} {int(rest[1]) // 10}")

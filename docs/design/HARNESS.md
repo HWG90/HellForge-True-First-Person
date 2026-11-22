@@ -95,3 +95,10 @@ The return still logs a camera cut of 0.08 to 0.40 m.
   harness has no reliable way to know where the game window is on a multi-monitor desktop: a first try clicked in
   another application's window. Not kept. The NEST panel's rows, and stratagem codes, stay checks for a person; do not
   drive the desktop pointer blind.
+- 2026-11-23: the NEST panel CAN be driven from inside the game's process: the host takes the pointer position from
+  the click message itself (overlay-host `src/host.cpp`), so `press X Y` in a `drive.py` script posts
+  WM_MOUSEMOVE / WM_LBUTTONDOWN / WM_LBUTTONUP at a client pixel. A window capture is 1430x871 for a 1280x720 client:
+  the client's corner is at (75, 71) of the capture (shadow margin, border and title bar). With the panel at its
+  default place: tabs at client y 151 (First person 430, Bob and sway 513, Locked view 595); on the Locked view tab
+  the checkboxes are at x 402: Camera lock 209, Field of view lock 234, Zoom when aiming 284, Animated arms 384,
+  Weapon put-away 452, Smooth eye 477.

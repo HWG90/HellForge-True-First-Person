@@ -363,3 +363,15 @@ second): 0.6.0-feel.27, 31 of 31 phases, no frame out of first person.
 
 Still not seen: a death under the relaxed head rule; stratagem input and the panel's rows (the harness cannot enter
 either); the empty-handed part of a stim shows no hands (they work below the view).
+
+## The panel in the game, 2026-11-23 (0.6.0-feel.27)
+
+Driven by click messages from inside the game's process (HARNESS.md). All three tabs draw
+(`work/captures/feel27-panel-locked-view-2026-11-23.jpg`, `feel27-panel-bob-sway-2026-11-23.jpg`). On the Locked view
+tab: Animated arms off took the render hook out and on put it back; Weapon put-away and Smooth eye switched off and
+on; Camera lock off stopped every `Lock:`, `Fov:` and `Smooth:` line within the second and on brought them back. Each
+change wrote `locked_view.json` once (7 ms). Sliders and the key-capture rows were not exercised.
+
+Found on the way: `settings.json` is rewritten on every weapon swap, because the menu's per-weapon value
+`menu/weapon_near_hip_cm` (10 for one weapon, 5 for the other) is stored as it is shown. One small file write per
+swap; not fixed yet.

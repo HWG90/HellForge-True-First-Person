@@ -8,6 +8,8 @@
  *   <ms> d L|R|M    mouse button down                   <ms> u L|R|M    mouse button up
  *   <ms> m <dx> <dy>  move the mouse by this many counts
  *   <ms> p <x> <y>    put the pointer at this pixel of the game window's client area
+ *   <ms> c <x> <y>    a left click posted to the game window at this client pixel (the NEST overlay takes the
+ *                     position from the click message itself; nothing leaves the game's process)
  * Everything still held is released at the end, also after an interrupt. */
 #include <windows.h>
 #include <stdint.h>
@@ -60,6 +62,12 @@ static int place(int x, int y) {
   if (!ClientToScreen(target, &at) || !SetCursorPos(at.x, at.y)) return 0;
   return move(0, 0) | 1; /* a move event so the window hears of it */
 }
+static int post_click(int x, int y) {
+  const LPARAM at = MAKELPARAM(x, y);
+  PostMessageW(target, WM_MOUSEMOVE, 0, at); Sleep(40);
+  PostMessageW(target, WM_LBUTTONDOWN, MK_LBUTTON, at); Sleep(60);
+  return PostMessageW(target, WM_LBUTTONUP, 0, at) != 0;
+}
 static void release_all(void) {
   if (!target) return;
   for (unsigned vk = 1; vk < 256; vk++) if (key_down[vk]) key(vk, 0);
@@ -95,12 +103,14 @@ int main(void) {
     int dx, dy, ok = 0;
     if (sscanf(line, "%lu m %d %d", &at, &dx, &dy) == 3) kind = 'm';
     else if (sscanf(line, "%lu p %d %d", &at, &dx, &dy) == 3) kind = 'p';
+    else if (sscanf(line, "%lu c %d %d", &at, &dx, &dy) == 3) kind = 'c';
     else if (sscanf(line, "%lu %c %15s", &at, &kind, code) != 3 || (kind != 'd' && kind != 'u')) continue;
     ULONGLONG now = GetTickCount64() - start;
     if (at > now) Sleep((DWORD)(at - now));
     if (!IsWindow(target)) break;
     if (kind == 'm') ok = move(dx, dy);
     else if (kind == 'p') ok = place(dx, dy);
+    else if (kind == 'c') ok = post_click(dx, dy);
     else if (code[0] == 'L' || code[0] == 'R' || code[0] == 'M') ok = button(code[0], kind == 'd');
     else ok = key((unsigned)strtoul(code, NULL, 10), kind == 'd');
     played++, failed += !ok;
