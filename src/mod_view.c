@@ -34,7 +34,7 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "arm_drive.h"
 #include "wire_options.h"
 #include "arm_weight.h"
-#define TFP_VIEW_VERSION "0.6.0-feel.33"
+#define TFP_VIEW_VERSION "0.6.0-feel.34"
 #else
 #include "wire_win.h"
 #include "wire_action.h"
@@ -892,13 +892,19 @@ static void lock_note(void) { /* once a second while the view is on: frames by c
           (unsigned long long)(c.edges - told_edges), (unsigned long long)(c.jumps - told_jumps), (double)c.largest_m, (unsigned long long)c.restarts);
     told_jumps = c.jumps; told_edges = c.edges;
   }
-  static uint64_t told_fov; TfpFovLockStats f; tfp_fov_lock_stats(&f);
+}
+static void fov_note(void) { /* once a second, on its own: the field-of-view lock also runs with the camera lock off, when lock_note has nothing to say */
+  static uint64_t next, told_fov;
+  const uint64_t now = GetTickCount64();
+  if (now < next) return;
+  next = now + 1000;
+  TfpFovLockStats f; tfp_fov_lock_stats(&f);
   if (f.applied != told_fov) say("Fov: +%llu frames locked; the game asked for %.1f degrees, shown %.1f", (unsigned long long)(f.applied - told_fov),
                                 (double)f.game_radians*57.29578, (double)f.shown_radians*57.29578);
   told_fov = f.applied;
 }
 static void tick_body(void) {
-  if (stage == RUNNING) { quit_guard(); fov_lock_tick(); lock_note(); }   /* not earlier: the game module and the guarded reader are set up in WAIT_MODULES */
+  if (stage == RUNNING) { quit_guard(); fov_lock_tick(); lock_note(); fov_note(); }   /* not earlier: the game module and the guarded reader are set up in WAIT_MODULES */
   if (stage == REFUSED) return;
   tick_thread = GetCurrentThreadId();
   if (!told_tick_thread) {
