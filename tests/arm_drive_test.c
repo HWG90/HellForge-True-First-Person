@@ -661,6 +661,56 @@ static void test_hold(void) {
   CHECK(!probe.proven && !probe.gun_parent && !probe.has_camera && !probe.has_eye);
 }
 
+/* The edge of an action. The tick runs before the game's update, so the first frame of an action is drawn before
+ * the tick that sees it: the controller is not holding yet. "Ready" (a lease runs and the switch is on) is what the
+ * arm drive has then; the gun leaving the rig in that frame must not cost the binding or its entry alignment. */
+static void test_hold_edge(void) {
+  TfpGraftLocal now[TFP_GRAFT_RIG_NODES], want[TFP_GRAFT_RIG_NODES];
+  fresh();
+  tfp_arm_drive_set(true, false, 1);
+  const TfpGraft map = bound_map();
+  CHECK(!tfp_arm_drive_render(WORLD, true) && stats().frames == 1 && stats().binds == 1);
+  /* ready, the gun on the rig: nothing differs, the values stay written */
+  tfp_arm_drive_set_hold_ready(true);
+  move_body();
+  wanted(&map, body_later, game_locals, 1, want);
+  CHECK(!tfp_arm_drive_render(WORLD, true) && stats().frames == 2 && stats().binds == 1 && stats().owned > 30);
+  rig_locals(now);
+  CHECK(!memcmp(now, want, sizeof now));
+  /* the gun leaves, the controller has not seen it: driven on the same binding, and the values go back after this draw */
+  break_gun_parent();
+  forget_calls();
+  CHECK(tfp_arm_drive_render(WORLD, true));
+  rig_locals(now);
+  CHECK(!memcmp(now, want, sizeof now) && stats().frames == 3 && stats().binds == 1 && !stats().refused);
+  tfp_arm_drive_after_render();
+  rig_locals(now);
+  CHECK(!memcmp(now, game_locals, sizeof now) && stats().owned == 0);
+  for (unsigned i = 0; i < call_count; i++) CHECK(calls[i].unit != GUN && calls[i].unit != OPTIC);
+  /* the next tick holds: the same binding, the entry's alignment */
+  tfp_arm_drive_set_hold(true);
+  CHECK(tfp_arm_drive_render(WORLD, true));
+  rig_locals(now);
+  CHECK(!memcmp(now, want, sizeof now) && stats().frames == 4 && stats().binds == 1 && !stats().refused);
+  tfp_arm_drive_after_render();
+  /* the full snapshot failing on the edge frame is served by the player's as well */
+  tfp_arm_drive_set_hold(false);
+  break_snapshot();
+  CHECK(tfp_arm_drive_render(WORLD, true) && stats().frames == 5 && stats().binds == 1 && !stats().refused);
+  tfp_arm_drive_after_render();
+  mend_snapshot();
+  /* the gun is back and the controller resumed: the accepted path, the same binding */
+  mend_gun_parent();
+  CHECK(!tfp_arm_drive_render(WORLD, true) && stats().frames == 6 && stats().binds == 1 && stats().owned > 30 && !stats().refused);
+  rig_locals(now);
+  CHECK(!memcmp(now, want, sizeof now));
+  /* no lease any more: a gun off the rig is the refusal it always was */
+  tfp_arm_drive_set_hold_ready(false);
+  break_gun_parent();
+  CHECK(!tfp_arm_drive_render(WORLD, true) && stats().refused == 1 && stats().reason == TFP_ARM_WEAPON && stats().owned == 0);
+  mend_gun_parent();
+}
+
 int main(int argc, char **argv) {
   if (argc != 2) { fprintf(stderr, "usage: arm_drive_test FIXTURE\n"); return 2; }
   load(argv[1]);
@@ -676,6 +726,7 @@ int main(int argc, char **argv) {
   test_refusals();
   test_rebind_on_new_units();
   test_hold();
+  test_hold_edge();
   printf("arm drive: %u checks passed\n", checks);
   return 0;
 }

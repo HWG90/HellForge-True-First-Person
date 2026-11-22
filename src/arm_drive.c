@@ -82,7 +82,7 @@ typedef struct Api { uint64_t set_local, update_unit; } Api;
 static struct {
   TfpArmDriveHost host;
   bool has_host, on, restore_after, bend;
-  bool hold; /* tfp_arm_drive_set_hold */
+  bool hold, ready; /* tfp_arm_drive_set_hold, tfp_arm_drive_set_hold_ready */
   float weight;
   TfpArmDriveStats stats;
   /* the binding: only while `bound`, and only for exactly these units */
@@ -304,11 +304,14 @@ static uint32_t prove(uintptr_t world, const TfpSnapshot *s, bool hold, Units *o
   *out = u;
   return TFP_ARM_NONE;
 }
+/* The gun's own conditions are not asked: in a hold, and while ready for one (arm_drive.h). */
+static bool lenient(void) { return d.hold || d.ready; }
 static bool same_units(const Units *a, const Units *b) {
   /* In a hold the gun is not part of what a binding is for: the map joins the body and the rig, and the entry
    * alignment is the rig's own socket. So the gun leaving, returning or being another does not unbind. */
-  return a->world == b->world && a->body == b->body && a->rig == b->rig && (d.hold || a->weapon == b->weapon) && a->body_ref == b->body_ref &&
-         a->rig_ref == b->rig_ref && (d.hold || a->weapon_ref == b->weapon_ref) && a->avatar_owner == b->avatar_owner &&
+  const bool any_gun = lenient();
+  return a->world == b->world && a->body == b->body && a->rig == b->rig && (any_gun || a->weapon == b->weapon) && a->body_ref == b->body_ref &&
+         a->rig_ref == b->rig_ref && (any_gun || a->weapon_ref == b->weapon_ref) && a->avatar_owner == b->avatar_owner &&
          a->avatar_index == b->avatar_index;
 }
 static bool body_matrices(uintptr_t body, TfpGraftMatrix *out) { /* graft:92-96 */
@@ -417,6 +420,7 @@ void tfp_arm_drive_set(bool on, bool restore_after_draw, float weight) {
 }
 void tfp_arm_drive_set_bend(bool on) { d.bend = on; }
 void tfp_arm_drive_set_hold(bool on) { d.hold = on; }
+void tfp_arm_drive_set_hold_ready(bool on) { d.ready = on; }
 static void refused(uint32_t reason) { d.stats.refused++, d.stats.reason = reason; }
 
 bool tfp_arm_drive_render(uint64_t world, bool game_thread) {
@@ -432,14 +436,14 @@ bool tfp_arm_drive_render(uint64_t world, bool game_thread) {
     Units u;
     if (tfp_snapshot(mem(), TFP_SNAPSHOT_FULL, &s, NULL, 0)) {
       native_view = s.camera_kind == 6;
-      if (native_view) reason = prove((uintptr_t)world, &s, d.hold, &u);
+      if (native_view) reason = prove((uintptr_t)world, &s, lenient(), &u);
     } else {
       /* Not provable in full (no weapon, a request for another weapon): a refusal only in the native view of the local avatar. */
       native_view = tfp_snapshot(mem(), TFP_SNAPSHOT_PLAYER, &s, NULL, 0) && s.camera_kind == 6;
       reason = TFP_ARM_SNAPSHOT;
       /* In a hold that is the expected state (a stow, a throw, an injection): the player's snapshot has the body,
        * the rig and the camera request; it names no weapon unit, so the gun counts as away. */
-      if (native_view && d.hold) reason = prove((uintptr_t)world, &s, true, &u);
+      if (native_view && lenient()) reason = prove((uintptr_t)world, &s, true, &u);
     }
     if (native_view && reason == TFP_ARM_NONE) reason = drive(&u);
     if (native_view && reason == TFP_ARM_NONE) {
@@ -452,8 +456,10 @@ bool tfp_arm_drive_render(uint64_t world, bool game_thread) {
        * a value of this mod left in the rig would then be taken for the game's, and the gun's units would be
        * evaluated against it by the game's own update. Put back at once, the rig holds only the game's values
        * whenever the game looks at it. (That path's acceptance in the game was still pending when the mod it
-       * comes from was retired: this is a probe.) */
-      return (d.restore_after || d.hold) && d.owned != 0;
+       * comes from was retired: this is a probe.)
+       * The same in a frame whose gun is away while only ready: that is an action's first drawn frame, before the
+       * tick that makes the controller hold. */
+      return (d.restore_after || d.hold || u.gun_away) && d.owned != 0;
     }
     if (native_view) refused(reason);
     else d.stats.idle++;

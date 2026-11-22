@@ -291,10 +291,13 @@ static void entry_note(void) {
 /* ---- the action hold (hold_lease.txt): the binder's two hooks (src/wire.h TfpWireHold) ----------------
  * Each tick, after the controller decided. The pose helper tolerates an action from the moment a lease runs
  * (armed), not only once the controller holds: HellForge runs this tick before the game's update, so the game's
- * first rig write of an action comes before the tick that sees the action. The arm drive follows the hold itself. */
+ * first rig write of an action comes before the tick that sees the action. The arm drive is told both: "ready"
+ * for the same reason (the action's first drawn frame must not cost its binding and entry alignment when the gun
+ * has already left the rig), and the hold itself, during which the game's joint values go back after every draw. */
 static void hold_apply(TfpWire *w, bool armed, bool holding) {
   (void)w;
   tfp_pose_set_hold(armed || holding);
+  tfp_arm_drive_set_hold_ready(armed || holding);
   tfp_arm_drive_set_hold(holding);
 }
 static void hold_probe(TfpWire *w, const TfpOpsHold *view, uint32_t weapon_unit, TfpWireHoldProbe *out) {
@@ -317,7 +320,8 @@ static void hold_start(void) { /* after tfp_wire_init, before on_enable */
       "first-person camera request as long as that request is still the lease's own (kind 6, same record, same player, not a ragdoll, "
       "not seated, not full aim, no other camera owner); at most 4000 ms, then today's exit");
   say("Test: hold_lease.txt: the pose helper keeps its placement through an action; \"Hold:\" lines say what the rig and the camera do; %s",
-      arms_live ? "arms_live.txt is there: the arm drive keeps its binding and puts the game's joint values back after every draw during a hold"
+      arms_live ? "arms_live.txt is there: while a lease runs the arm drive keeps its binding when the gun leaves the rig, and puts the game's joint "
+                  "values back after every draw during a hold and in any frame whose gun is away"
                 : "arms_live.txt is not there: the arm drive is off, so the rig's arms are the game's own during a hold");
 }
 

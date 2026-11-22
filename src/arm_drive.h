@@ -77,6 +77,15 @@ void tfp_arm_drive_set_bend(bool on);
  *   - the game's joint values are put back after every primary render (tfp_arm_drive_render answers true),
  *     whatever restore_after_draw says. */
 void tfp_arm_drive_set_hold(bool on);
+/* "Ready": a lease runs and the hold's switch is on, whether or not the controller holds yet. The binder sets it
+ * every tick beside tfp_arm_drive_set_hold. Why it exists: the tick comes before the game's update, so the first
+ * frame of an action is drawn before the tick that sees the action; with only the controller's state the drive
+ * would still be strict in that frame, refuse a gun that already left the rig, drop the binding, and bind anew a
+ * frame later with an entry alignment taken from a pose in the middle of the action. While ready, everything in
+ * the list above applies except the last point: the game's values go back after a draw only in a frame whose gun
+ * is away (and, as before, in every frame of a hold). With the gun on the rig a ready frame is the frame it
+ * always was. Off at the start and for good unless this is called with true. */
+void tfp_arm_drive_set_hold_ready(bool on);
 /* For the hold's log line; reads only, game thread. gun: the unit the lease was entered with (0: none).
  * proven false: the local player's snapshot failed and nothing else is filled. */
 typedef struct TfpArmDriveProbe {
