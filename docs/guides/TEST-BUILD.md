@@ -1,4 +1,4 @@
-# True First Person for HellForge: test build 0.6.0-feel.38
+# True First Person for HellForge: test build 0.6.0-feel.39
 
 For HellForge on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
@@ -24,6 +24,20 @@ DBF-MCM is no longer needed. The mod has its own panel.
 - **F10** opens the settings panel "True First Person" (also in NEST's list, Page Down). Three tabs:
   First person, Bob and sway, Locked view.
 - **Page Up** opens the weapon placement editor.
+
+## Fixed in 0.6.0-feel.39
+
+From two more soak runs (random actions back to back, 557 actions on 0.6.0-feel.38 and feel.39):
+
+- **Two frames in third person** during a grenade thrown while walking. The game's camera had no parent but its
+  own position was a frame or two behind, and the mod refused to place it. It is held now; no frame was lost in
+  39,810 frames afterwards.
+- **Swapping weapons while sprinting** made the camera stand still for a frame and then leap 24 cm. The game puts
+  its first-person rig 1.2 m behind where the head camera is in a sprint, and only 1 m of that change was eased.
+  All of it is now: 5 to 9 cm between two moments in four tries.
+
+Still there: when the game itself throws your body about (a fall, a jump lunge), the view moves with it; those
+are the game's own movements and are not smoothed.
 
 ## Fixed in 0.6.0-feel.38
 

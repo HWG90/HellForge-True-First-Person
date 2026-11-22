@@ -661,3 +661,22 @@ presented eye 0.299 m (taken=jump+root). What is left is about 0.11 m over the r
 dive at 6 m/s; left as it is. The arm drive's refusals during swaps ("player or weapon not proven", up to 19 frames)
 are as before: those frames show the rig's own pose.
 
+### feel.39 (2026-11-22): two more soaks
+
+Seed 2 on feel.38: 309 actions, 21,705 frames, 2 missed, largest step 0.099 m. Seed 2 again and seed 3 on feel.39:
+557 actions, 39,810 frames, 0 missed.
+
+1. The two missed frames (helper error 15, now named): `Missed: the camera's local and world position were 0.423 m
+   apart`, a grenade thrown while walking. The ordinary camera had no parent and its world matrix was behind its
+   local position. Under the lock such a frame is held when the two are within 1.0 m (`unparented_behind`): what is
+   written is the eye in the world. Without the lock it is refused as retail refuses it.
+2. A swap in a sprint: at the change of camera the wanted eye went from 0.87 m ahead of the root (the head camera)
+   to 0.29 m behind it (the rig), 1.17 m; `max_m` 1.0 cut the correction and the 0.17 m over it was shown at once,
+   against the body's 0.15 m a frame: the eye stood still in the world for a frame (0.162, 0.009, 0.247 m). `max_m`
+   is 1.6 and `teleport_m` 2.5. In the game: four swaps in a sprint 0.051 to 0.093 m, 0.41 to 0.50 m carried.
+3. Not faults of the mod, read from the trace: a jump begun while walking (the root itself goes 0.03, 0.18, 0.36,
+   0.40 m a frame: 0.19 m step change), and a fall or knock in an aim-walk (root 0.29 m a frame, then 0.97 m in one
+   frame, the eye 1.40 m; no correction carried, frames before the edge).
+
+Left: the same sprint swap inside a soak once measured 0.174 m; a stim and the stratagem list while walking 0.11 m.
+
