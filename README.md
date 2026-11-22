@@ -17,12 +17,22 @@ This is a C rewrite of the True First Person mode of Goose Gadget Kit (a Lua mod
 | Hiding your own head, torso and shoulders | In game; a fix for backpacks is in 0.6.0-feel.4, not yet confirmed |
 | Hip sensitivity that does not change with zoom level | In game since 0.6.0-feel.2 |
 | Depth of field and vignette handling, aim markers | In game |
-| Sleeves and hand grips | Held back since 0.6.0-feel.19 (they pass their checks, but are unproven in play); a file `arms_on.txt` beside the DLL switches them on |
+| Locked view: first person through every action (swap, grenade, stim, emote, vault, dive, prone) | In game since 0.6.0-feel.20; 30 of 32 scripted actions pass with no frame out of first person |
+| Animated arms: the first-person arms follow the character's own animation; pistol in one hand at the hip, two when aiming | In game since 0.6.0-feel.21 |
+| Weapon put-away shown before a swap, grenade or stim | In game since 0.6.0-feel.22 |
+| Smooth eye: no camera pops when the game changes its camera | In game since 0.6.0-feel.23 |
+| Field-of-view lock (one configurable field of view), view kicks from body movement | In game since 0.6.0-feel.20 |
+| Dying in first person (the view stays at the head of the body) | Built in 0.6.0-feel.24; held for a third of a second in its one death so far, the fix after that not yet seen in play |
+| Own settings panel (F10, through NEST; DBF-MCM no longer needed) | In game since 0.6.0-feel.20; options switch live since feel.24; not every row clicked yet |
+| Saving settings (`settings.json` for placements and menu, `locked_view.json` for the locked view) | In game; files written by feel.20 to feel.24 are converted on first start (0.6.0-feel.25) |
+| Sleeves and hand grips (retail's bone offsets) | Held back since 0.6.0-feel.19; superseded by Animated arms |
 | Replacing the mod in a running game | Built in 0.6.0-feel.5, never run |
-| Settings menu (DBF-MCM: toggles, sliders, keys, per-weapon clipping) | Built in 0.6.0-feel.6, never run |
-| Saving settings (your own file, written when something changes) | Built in 0.6.0-feel.6, never run |
-| Placement editor ("poser") | Built in 0.6.0-feel.7, never run: Page Up, or the menu button; needs Goose Overlay Host. The eye-camera editor is not built |
+| Placement editor ("poser") | Built in 0.6.0-feel.7: Page Up, or the panel's button; needs NEST. The eye-camera editor is not built |
 | Sharing the camera with Photo Mode | Not built: do not open Photo Mode with the view on |
+
+Tester notes for the current build: [docs/guides/TEST-BUILD.md](docs/guides/TEST-BUILD.md). How it was tested in the
+game: [docs/design/HARNESS.md](docs/design/HARNESS.md) and the results sections of
+[docs/design/specs/2026-11-22-locked-view-design.md](docs/design/specs/2026-11-22-locked-view-design.md).
 
 ## Install
 
