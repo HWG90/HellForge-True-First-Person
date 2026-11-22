@@ -91,7 +91,7 @@ def shot(path):
     return path
 
 
-VK = {"shift": 0x10, "ctrl": 0x11, "alt": 0x12, "space": 0x20, "tab": 0x09, "esc": 0x1B, "f9": 0x78, "f10": 0x79,
+VK = {"shift": 0x10, "ctrl": 0x11, "lctrl": 0xA2, "alt": 0x12, "space": 0x20, "tab": 0x09, "esc": 0x1B, "f9": 0x78, "f10": 0x79,
       "f11": 0x7A, "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27, "e": 0x45}
 BUTTONS = {"left": "L", "right": "R", "middle": "M"}
 PREFIX = Path.home() / ".local/share/hellforge-prefix/pfx"

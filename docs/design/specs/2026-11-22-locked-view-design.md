@@ -400,3 +400,12 @@ of the face: the dropped rifle after the aiming death, the character's arm after
 0.6.0-feel.29: the menu's per-weapon drafts following the weapon are no longer saved as a change (four swaps in the
 game: no write of `settings.json`). The panel's sliders were exercised by click: field of view to 69 (the screen
 showed 69.0 by the `Fov:` line) and back to 80; view kick strength to 30 and back to 35 (5 % steps).
+
+Key row (0.6.0-feel.29): "Change" beside the toggle key, then F9: `menu/toggle_key` went 122 to 120 in `settings.json`,
+F9 switched the view, and the same steps with F11 put it back. The log still calls the request "(F11)" whatever the
+key is: a name in the log, left as it is.
+
+Stratagems: the game binds the menu to left Ctrl and the directions to the arrow keys
+(`userdata/profiles/<name>/cloud/input_settings.config`). The harness now sends the arrows as extended keys and has a
+left-Ctrl name, but the stratagem menu does not open from its input, with the view on or off (plain third person):
+a limit of the test input, not of the mod. Stratagem throws remain a check for a person.

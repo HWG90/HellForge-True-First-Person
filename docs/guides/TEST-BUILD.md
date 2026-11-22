@@ -85,7 +85,8 @@ jumped more than 5 cm.
   ("true native ADS") and was not part of these checks.
 - **The settings panel:** all three tabs were opened in the game, and Camera lock, Animated arms, Weapon
   put-away and Smooth eye were switched off and on there and seen to take effect at once. The field-of-view and kick
-  sliders were set there too. The key rows (changing F11 or Page Up) have not been tried.
+  sliders were set there too. The toggle key was changed to F9
+  and back there.
 - **The crash while the game closes is guarded** (an engine fault of build 25480438, with or without first
   person). Tell me if you see a crash on quit.
 

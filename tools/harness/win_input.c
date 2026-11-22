@@ -37,6 +37,9 @@ static int key(unsigned vk, int down) {
   INPUT in = {0};
   in.type = INPUT_KEYBOARD;
   in.ki.wVk = (WORD)vk, in.ki.wScan = (WORD)scan, in.ki.dwFlags = down ? 0 : KEYEVENTF_KEYUP;
+  /* The arrow block and its neighbours are extended keys; without the flag they arrive as the number pad's, and the
+   * game's stratagem directions (bound to the arrows) do not see them. */
+  if ((vk >= VK_PRIOR && vk <= VK_DOWN) || vk == VK_INSERT || vk == VK_DELETE) in.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
   key_down[vk] = (unsigned char)down;
   return SendInput(1, &in, sizeof in) == 1;
 }
