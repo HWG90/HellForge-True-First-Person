@@ -146,6 +146,7 @@ typedef struct TfpFx {
   unsigned text_next;
   char status[2 * (TFP_DOF_TEXT + TFP_DOF_KEY) + TFP_DOF_TEXT + TFP_VIGNETTE_TEXT];
   char vignette_status[TFP_VIGNETTE_TEXT + 128];
+  double vignette_away_since; /* seconds on the runtime clock: the view went away with the vignette still off; 0 otherwise */
   /* the session log: what was last reported */
   struct {
     uint32_t dof_writes, dof_restores, vignette_rows, vignette_writes, vignette_restores, move_writes, move_restores, aim_writes, aim_restores;
@@ -167,6 +168,9 @@ void tfp_wire_effects_frame(TfpWire *w);
  * Returns the characters written (0: not bound). */
 size_t tfp_wire_effects_second(TfpWire *w, char *out, size_t size);
 TfpFx *tfp_wire_effects_of(TfpWire *w);
+/* What the vignette takes for "the view is there": `active` (the runtime's answer), and for 1.5 s after it went away
+ * while first person is still on (a weapon swap), so the vignette is not given back for a swap. */
+bool tfp_wire_effects_vignette_view(TfpFx *fx, bool active);
 
 /* src/memory.lua writer:copy(address, one byte) on its shipped path (native_ads_option.lua:54), over
  * the platform's VirtualQuery / WriteProcessMemory and the backend's read. Exported for the test. */

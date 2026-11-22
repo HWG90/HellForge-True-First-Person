@@ -269,8 +269,31 @@ static TfpDofAnswer dv_update(void *u, const TfpDofCompat *compat, const char **
   if (vignette_on(fx)) return glue(tfp_vignette_update(&fx->vignette, why));
   return tfp_vignette_is_clean(&fx->vignette) ? TFP_DOF_TRUE : glue(tfp_vignette_stop(&fx->vignette, why));
 }
-static TfpDofAnswer dv_stop(void *u, const char **why) { *why = NULL; return glue(tfp_vignette_stop(&((TfpFx *)u)->vignette, why)); }
-static TfpDofAnswer dv_shutdown(void *u, const char **why) { *why = NULL; return glue(tfp_vignette_shutdown(&((TfpFx *)u)->vignette, why)); }
+/* The view going away is not always its end: a weapon swap takes it away for a third of a second, and giving the
+ * vignette back for that showed a dark rim at every swap (seen in the game 2026-11-22). For VIGNETTE_AWAY_S after
+ * the view went away the vignette stays off, and a row the game switches on meanwhile is taken again; after that,
+ * or at once when first person is switched off (the controller is neither running nor waiting), it is given back.
+ * A shutdown gives it back at once. Not clean meanwhile, so the runtime keeps asking. */
+#define VIGNETTE_AWAY_S 1.5
+static bool first_person_wanted(const TfpFx *fx) { return fx->w->controller.phase == TFP_PHASE_RUNNING || fx->w->controller.phase == TFP_PHASE_WAITING; }
+/* True while the vignette is to stay off although the view is away (see above). */
+static bool vignette_held(TfpFx *fx) {
+  double now = 0; const char *error = NULL;
+  if (!vignette_on(fx) || tfp_vignette_is_clean(&fx->vignette) || !first_person_wanted(fx) || !unit_clock(fx, &now, &error) || now != now) {
+    fx->vignette_away_since = 0;
+    return false;
+  }
+  if (!(fx->vignette_away_since > 0) || now < fx->vignette_away_since) fx->vignette_away_since = now > 0 ? now : 1e-9;
+  if (now - fx->vignette_away_since < VIGNETTE_AWAY_S) return true;
+  return false; /* the time is up: given back, and the mark stays until the view is back or it is clean */
+}
+static TfpDofAnswer dv_stop(void *u, const char **why) {
+  TfpFx *fx = u;
+  *why = NULL;
+  if (vignette_held(fx)) { tfp_vignette_update(&fx->vignette, why); *why = NULL; return TFP_DOF_FALSE; }
+  return glue(tfp_vignette_stop(&fx->vignette, why));
+}
+static TfpDofAnswer dv_shutdown(void *u, const char **why) { *why = NULL; ((TfpFx *)u)->vignette_away_since = 0; return glue(tfp_vignette_shutdown(&((TfpFx *)u)->vignette, why)); }
 static bool dv_is_clean(void *u) { return tfp_vignette_is_clean(&((TfpFx *)u)->vignette); }
 static void dv_result(void *u, TfpDofVignetteResult *out) {
   TfpVignetteResult r;
@@ -288,9 +311,13 @@ static bool v_compat_foreign(void *u) {
   V v;
   return !compat_value(u, &v, NULL) || v.kind != TFP_RT_FALSE;
 }
+bool tfp_wire_effects_vignette_view(TfpFx *fx, bool active) {
+  if (active) { fx->vignette_away_since = 0; return true; }
+  return vignette_held(fx); /* a swap: the vignette's own update sees the view as still there */
+}
 static bool v_active_view(void *u) {
   bool is_true = false;
-  return entry_true(u, TFP_RT_E_active_view, &is_true, NULL) && is_true;
+  return tfp_wire_effects_vignette_view(u, entry_true(u, TFP_RT_E_active_view, &is_true, NULL) && is_true);
 }
 static bool v_player_snapshot(void *u, TfpVignetteSnapshot *out, const char **error) {
   TfpFx *fx = u;

@@ -374,7 +374,7 @@ static TfpRtValue t_encode(TfpWire *w, const char *const *keys, size_t count) {
 static bool view_active;
 static bool t_active_view(void *u, bool *is_true, const char **error) { (void)u; (void)error; *is_true = view_active; return true; }
 static bool vignette_view;
-static bool t_vignette_view(void *u) { (void)u; return view_active && vignette_view; }
+static bool t_vignette_view(void *u) { return tfp_wire_effects_vignette_view(u, view_active && vignette_view); } /* the product's own rule over the test's answer */
 static bool t_executable(void *u, uint64_t *exe, const char **error) { (void)u; (void)error; *exe = EXE; return true; }
 static const TfpDofBuild *image_build;   /* whose bytes the "executable" holds at this build's two addresses */
 static bool t_thunks(void *u, uint64_t address, uint32_t size, uint8_t *out, const char **error) {
@@ -882,6 +882,49 @@ int main(int argc, char **argv) {
   G.row_enabled = true;
   now_seconds += .6;
   CHECK(h->dof_update(h, &o1, &o2) && !G.row_enabled && fx.vignette.reassertions == 1);
+  /* a weapon swap: the view is away for a third of a second. The vignette is not given back for it (the game showed
+   * it for those frames: a dark rim at every swap, seen in the game 2026-11-22). */
+  view_active = false;
+  line_count = 0;
+  const TfpPhase phase_before = wire.controller.phase;
+  wire.controller.phase = TFP_PHASE_WAITING; /* first person is on and waits for the camera, as in a swap */
+  for (int i = 0; i < 4; i++) {
+    now_seconds += .1;
+    CHECK(h->dof_update(h, &o1, &o2));
+    tfp_wire_effects_frame(&wire);
+    CHECK(!G.row_enabled);
+  }
+  CHECK(!logged("Effect: vignette: restored (1)") && !fx.dof_host.vignette_is_clean(&fx));
+  view_active = true;
+  now_seconds += .1;
+  CHECK(h->dof_update(h, &o1, &o2) && !G.row_enabled);
+  tfp_wire_effects_frame(&wire);
+  CHECK(!logged("Effect: vignette: restored (1)"));
+  /* first person switched off while the view is away: given back at once, not after the time */
+  view_active = false;
+  wire.controller.phase = TFP_PHASE_IDLE;
+  now_seconds += .1;
+  CHECK(h->dof_update(h, &o1, &o2));
+  tfp_wire_effects_frame(&wire);
+  CHECK(G.row_enabled && logged("Effect: vignette: restored (1)"));
+  /* and taken again when the view is back; then away for longer than the time with first person on: given back */
+  view_active = true, wire.controller.phase = TFP_PHASE_RUNNING;
+  now_seconds += .6;
+  CHECK(h->dof_update(h, &o1, &o2) && !G.row_enabled);
+  view_active = false, wire.controller.phase = TFP_PHASE_WAITING;
+  int given_back_at = -1;
+  for (int i = 0; i < 60; i++) {
+    now_seconds += .1;
+    CHECK(h->dof_update(h, &o1, &o2));
+    tfp_wire_effects_frame(&wire);
+    if (G.row_enabled && given_back_at < 0) given_back_at = i;
+  }
+  CHECK(given_back_at >= 14 && given_back_at <= 30); /* not before the 1.5 s, and soon after */
+  view_active = true, wire.controller.phase = TFP_PHASE_RUNNING;
+  now_seconds += .6;
+  CHECK(h->dof_update(h, &o1, &o2) && !G.row_enabled);
+  tfp_wire_effects_frame(&wire);
+  wire.controller.phase = phase_before;
   /* the view ends: both are given back */
   view_active = false;
   line_count = 0;
@@ -892,7 +935,7 @@ int main(int argc, char **argv) {
   }
   CHECK(G.dof && G.row_enabled && G.script_errors == 0 && fx.vignette.row_count == 0);
   CHECK(h->dof_result(h, &table) && table.f[TFP_RT_DOF_OWNED].kind == TFP_RT_FALSE && h->dof_is_clean(h, &o1) && o1.kind == TFP_RT_TRUE);
-  CHECK(logged("Effect: dof: dof_enabled restored (1)") && logged("Effect: vignette: restored (1)") && logged("Effect: vignette: 0 row(s) found"));
+  CHECK(logged_count("Effect: dof: dof_enabled restored (") == 1 && logged_count("Effect: vignette: restored (") == 1 && logged("Effect: vignette: 0 row(s) found")); /* once each for this end; the counts in the lines go on from the swaps above */
   fx.dof_host.vignette_result(&fx, &glued);
   CHECK(glued.owned == TFP_DOF_FALSE && fx.dof_host.vignette_is_clean(&fx));
   CHECK(tfp_wire_effects_second(&wire, second, sizeof second) && !strcmp(second, "dof=idle vignette=idle markers=shown move=idle aimopt=off"));
