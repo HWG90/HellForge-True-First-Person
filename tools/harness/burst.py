@@ -32,6 +32,12 @@ ACTIONS = {
     "sprint": ("down shift; hold w 2.0; up shift; wait 0.8", 8),
     "look-down": ("look 0 900; wait 1.0; look 0 -900; wait 0.6", 6),
     "look-up": ("look 0 -900; wait 1.0; look 0 900; wait 0.6", 6),
+    "crouch-aim": ("key c; wait 1.0; down right; wait 1.4; up right; wait 0.8; key c; wait 0.8", 9),
+    "prone-aim": ("key z; wait 1.6; down right; wait 1.4; up right; wait 0.8; key z; wait 1.6", 10),
+    "aim-fire": ("down right; wait 0.7; click left 0.6; wait 0.4; up right; wait 1.0", 7),
+    "sprint-aim": ("down shift; hold w 1.2; up shift; down right; wait 1.4; up right; wait 1.0", 9),
+    "aim-reload": ("click left 0.3; down right; wait 0.5; key r; wait 2.8; up right; wait 1.0", 10),
+    "hip-fire": ("click left 0.9; wait 0.8", 5),
 }
 
 
