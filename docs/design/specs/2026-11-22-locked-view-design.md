@@ -421,3 +421,22 @@ a limit of the test input, not of the mod. Stratagem throws remain a check for a
 
 The older `--view` build variant (the milestone before the feel build) has not compiled since 0.6.0-feel.20: the
 lock's code in `src/mod_view.c` sits in the feel build's part. Nothing ships from it.
+
+## Second review, 2026-11-23 (0.6.0-feel.31)
+
+Four reviewers over the changes made by hand since feel.24, each finding verified by a second: five confirmed, all
+fixed with a test that failed first, then two reviewers over the fixes.
+
+1. The arm copy's aim fade followed only an active motion runtime: with no running lease, or on a refused sample, it
+   stayed on while aiming. Now the player's own aim flags decide there, and the last answer stands when unread.
+2. A binding begun while aiming took its provisional alignment from the aim pose. It is taken again on the first
+   frame the arms are fully shown.
+3. Jump detection in head-camera frames took a thrown body's first frames for a re-seated rig (the eye left behind
+   the head for 0.1 to 0.5 s). No detection in head-camera frames of a body that is off foot.
+4. A refused `settings.json` was replaced by defaults in the first tick: the bind's own rewrite of the editor key
+   counted as a change. Binding a menu is no change to save.
+5. A second conversion after a session on feel.20 to feel.24 dropped the options set there. The member in
+   `settings.json` is the newer one and wins; the file as found goes to a numbered copy.
+
+In the game on feel.31: matrix 30 of 31 (vault 0.063 m against the 0.06 m limit), a forced death held at the head,
+aim, sprint into aim and swap back filmed and right, placements identical to the backup of 2026-11-23.
