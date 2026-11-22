@@ -650,3 +650,14 @@ An independent check found three gaps; each has tests now (`tests/camera_continu
    became one row. A row is the same frame again only under 5 ms after that frame's first row and with another kind
    or the same eye (0.002 m). Left: a change of kind with a moved eye under 5 ms after a frame's first row still
    reads as that frame set twice.
+
+### feel.38 in the game: the soak replayed (2026-11-22)
+
+`tools/harness/soak.py 12 1` on feel.37: 301 actions, 21,512 frames, 1 missed, 6 flagged, largest step 0.584 m. The
+same seed on feel.38: 302 actions, 21,784 frames, 0 missed, 5 flagged, largest step 0.215 m (the same backwards
+dive, action 6), the others 0.062 to 0.091 m. With the root in the trace the dive reads: the root's own step grows
+0.095, 0.138, 0.185 m a frame as the dive starts, the wanted eye moves 0.431 m in the frame the rig follows, and the
+presented eye 0.299 m (taken=jump+root). What is left is about 0.11 m over the root's own step in one frame of a
+dive at 6 m/s; left as it is. The arm drive's refusals during swaps ("player or weapon not proven", up to 19 frames)
+are as before: those frames show the rig's own pose.
+

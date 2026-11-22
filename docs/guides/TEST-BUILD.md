@@ -1,4 +1,4 @@
-# True First Person for HellForge: test build 0.6.0-feel.37
+# True First Person for HellForge: test build 0.6.0-feel.38
 
 For HellForge on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
@@ -24,6 +24,22 @@ DBF-MCM is no longer needed. The mod has its own panel.
 - **F10** opens the settings panel "True First Person" (also in NEST's list, Page Down). Three tabs:
   First person, Bob and sway, Locked view.
 - **Page Up** opens the weapon placement editor.
+
+## Fixed in 0.6.0-feel.38
+
+Found by a soak test: 300 random actions back to back for twelve minutes, many of them overlapping the way a player
+does (a grenade while sprinting, a swap during a dive).
+
+- **A dive backwards right after a weapon swap** threw the camera 58 cm in one frame. The game moves your body a
+  frame before the arms follow, and the camera smoothing took that for the eye jumping. Now 21 cm in that frame,
+  at a dive that itself moves 19 cm a frame; the same sequence replayed in the game.
+- **Camera drifting off after the arms flicker.** Right after first person came back, the arm rig sometimes flickered
+  between two places for a few frames, and the smoothing then sent the camera off at several metres a second for a
+  moment (13 cm steps with nothing behind them). Fixed, at any frame rate. Tested outside the game.
+- **One frame in third person** during a crouch and walk, once in 21,512 frames. Not found again in the replay
+  (0 in 21,784). The log now says which check failed if it happens.
+
+In the replay the largest steps were that dive (21 cm) and four others between 6 and 9 cm.
 
 ## Fixed in 0.6.0-feel.37
 
