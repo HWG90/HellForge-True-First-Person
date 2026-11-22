@@ -596,6 +596,16 @@ static uint32_t space_why(const Policy *p, float *apart) {
       && finite3(a) && finite3(b)) *apart = distance(a, b);
   return TFP_CAMERA_WHY_SPACE;
 }
+/* Beyond retail, under the lock only: the camera has no parent and its world matrix is a little behind its local
+ * position (seen in the game 2026-11-22: 0.423 m for two frames of a grenade thrown while walking; the game had not
+ * worked the camera's world out again). What is written for the ordinary camera is the eye in the world, and a camera
+ * without a parent takes it as that whatever its own world matrix still says, so the frame is held. Further apart
+ * than LOCK_SPACE_M the two are not one camera a frame or two apart, and the frame is refused as before. */
+#define LOCK_SPACE_M 1.0f
+static bool unparented_behind(const Policy *p) {
+  float apart = 0;
+  return space_why(p, &apart) == TFP_CAMERA_WHY_SPACE && apart > 0 && apart <= LOCK_SPACE_M;
+}
 /* cpp:416-419 */
 static bool held_axes(TfpQ q, float *forward, float *up) {
   const float y[3] = {0, 1, 0}, z[3] = {0, 0, 1}; tfp_q_rotate(q, y, forward); tfp_q_rotate(q, z, up);
@@ -1247,7 +1257,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
         /* Beyond retail: physics has the body (camera_helper.h TfpCameraDownStats). */
         policy.lock_down = pointed && policy.lock_now && (policy.head_far || (policy.lock_off_foot && policy.lock_ragdoll));
         if (!pointed) { reset(&policy, false); error(GRAPH_MISMATCH); }
-        else if (!unparented(&policy)) {
+        else if (!unparented(&policy) && !(policy.lock_now && unparented_behind(&policy))) {
           /* The request is already normal4 but the camera is still linked to the first-person rig.
            * While that link is the proven one, repeat the last native6 argument. */
           TfpQ parent = tfp_q_identity();

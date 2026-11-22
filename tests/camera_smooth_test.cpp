@@ -812,19 +812,38 @@ int main() {
     if (apart) {
       g.hip(); g.s.camera_split = true;
       for (int i = 0; i < 3; ++i) { g.s.camera_local[i] = g.shown[i]; g.s.camera_world[i] = g.shown[i]; }
-      g.s.camera_world[2] += .3f;
+      g.s.camera_world[2] += 2.0f; /* further than a camera's world matrix can be behind its local in a frame or two */
     } else g.gap();
     g.frame(33.3);
     g.s.camera_split = false;
     TfpCameraLockStats after{}; tfp_camera_lock_stats(&after);
     CHECK(after.missed == 1 && after.missed_kind == 4 && after.missed_error == TFP_CAMERA_SPACE_INVALID);
     CHECK(after.missed_why == (apart ? TFP_CAMERA_WHY_SPACE : TFP_CAMERA_WHY_LINKED));
-    CHECK(apart ? std::fabs(after.missed_apart - .3f) < 1e-4f : after.missed_apart == 0);
+    CHECK(apart ? std::fabs(after.missed_apart - 2.0f) < 1e-4f : after.missed_apart == 0);
     const char *text = tfp_camera_why_text(after.missed_why);
     CHECK(std::strstr(text, apart ? "local and world" : "linked to a parent") != nullptr);
     standing(g, 3, 33.3, false); // the next frame is the head camera's again
     tfp_camera_lock_stats(&after);
     CHECK(after.missed == 1);
+    g.end();
+  }
+  // ---- 20. A camera without a parent whose world matrix is a little behind its local position (seen in the second
+  // soak of 2026-11-22: 0.423 m apart for two frames of a grenade thrown while walking; the game had not worked the
+  // camera's world out again yet). Under the lock the frame is held: what the mod writes is the eye in the world,
+  // and a camera without a parent takes it as that whatever its own world matrix still says. Without the lock the
+  // frame is refused as retail refuses it. ----
+  for (int lock = 1; lock >= 0; --lock) {
+    fresh(lock != 0, true);
+    Game g; g.pose(0, 0, 0, 0); g.look(0, 0); g.hip(); g.begin();
+    standing(g, 12, 33.3, false);
+    g.hip(); g.s.camera_split = true;
+    for (int i = 0; i < 3; ++i) { g.s.camera_local[i] = g.shown[i]; g.s.camera_world[i] = g.shown[i]; }
+    g.s.camera_world[1] += .42f;
+    g.frame(33.3);
+    g.s.camera_split = false;
+    TfpCameraLockStats after{}; tfp_camera_lock_stats(&after);
+    if (lock) CHECK(after.missed == 0 && g.forwarded_own && g.step < .02f);
+    else CHECK(!g.forwarded_own);
     g.end();
   }
   std::printf("camera smooth: %d checks, %d failed\n", checks, failed);
