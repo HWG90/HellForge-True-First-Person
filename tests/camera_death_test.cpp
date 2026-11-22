@@ -138,14 +138,15 @@ struct Game {
   void die() { s.state = 50; ragdoll = true; }
 };
 
-static void fresh(bool lock, bool smooth = false, float thrown_gain = 0, float thrown_max = 0, float damping_ms = 0) {
+// `bodycam`: the camera style (src/camera_damp.h); `gain`, `max`: the kick on foot. Every scenario but 6c is Bodycam with no kick on foot.
+static void fresh(bool lock, bool smooth = false, float thrown_gain = 0, float thrown_max = 0, float damping_ms = 0, bool bodycam = true, float gain = 0, float max = 0) {
   tfp_camera_reset_for_tests();
   TfpCameraHost host{};
   host.hook = reinterpret_cast<uint64_t>(&hook_marker); host.read = host_read; host.readable_span = host_readable_span; host.now = host_now;
   host.writable_slot = host_true_slot; host.executable = host_executable; host.cas = host_cas; host.write = host_write; host.pin = host_pin;
   host.lock_exclusive = host_lock; host.unlock_exclusive = host_lock; host.lock_shared = host_lock; host.unlock_shared = host_lock; host.forward = host_forward;
   tfp_camera_set_host(&host);
-  tfp_camera_set_lock(lock, 0, 0, 300, thrown_gain, thrown_max, damping_ms);
+  tfp_camera_set_lock(lock, gain, max, 300, thrown_gain, thrown_max, damping_ms, bodycam);
   tfp_camera_set_continuity(smooth, false);
   clock_ms += 5000;
 }
@@ -286,6 +287,51 @@ int main() {
     CHECK(g.own && peak > 4 && peak < 12 && most < 21 * 33.3f / 180 * 1.05f);
     CHECK(degrees(g.out, yaw_q(first)) < .5f);
     g.end();
+  }
+  // ---- 6c. The camera style, at the options' defaults (35 % up to 8 degrees on foot, 70 % up to 35 thrown, camera
+  // damping 60 %). The same thrown head as 6b: Stable still kicks, at half the thrown strength and on 250 ms, so
+  // clearly less than Bodycam and never by more in one frame than 250 ms allows. And on foot, in the ordinary camera
+  // and in the native view, a head that nods 28.6 degrees turns Bodycam's view and leaves Stable's exactly the game's. ----
+  {
+    float peak[2] = {}, most[2] = {};
+    for (int stable = 0; stable < 2; ++stable) {
+      fresh(true, false, .7f, 35, 180, !stable, .35f, 8);
+      Game g; g.stand(0, 0, 0); g.alive(first);
+      g.die();
+      for (int i = 0; i < 10; ++i) { g.head(.03f + .1f * i, .06f, 1.5f); g.look(corpse_camera); g.hip(); g.frame(); }
+      CHECK(degrees(g.out, yaw_q(first)) < .5f);
+      g.head_pitch = .5f;
+      Q last = g.out;
+      for (int i = 0; i < 120; ++i) {
+        g.head(1.03f, .06f, 1.5f); g.look(corpse_camera); g.hip(); g.frame();
+        peak[stable] = std::fmax(peak[stable], degrees(g.out, yaw_q(first))); most[stable] = std::fmax(most[stable], degrees(g.out, last)); last = g.out;
+      }
+      CHECK(g.own && degrees(g.out, yaw_q(first)) < .5f);
+      g.end();
+    }
+    std::printf("a thrown head, 28.6 degrees in one frame: Bodycam kicks %.2f degrees (%.2f in one frame), Stable %.2f (%.2f)\n", peak[0], most[0], peak[1], most[1]);
+    CHECK(peak[0] > 4 && peak[1] > 1 && peak[1] < peak[0] * .6f && most[1] < most[0] * .6f && most[1] < 28.7f * .35f * 33.3f / 250 * 1.05f);
+    for (int view = 0; view < 2; ++view) { // the ordinary camera, the native view
+      float turned[2] = {};
+      for (int stable = 0; stable < 2; ++stable) {
+        fresh(true, false, .7f, 35, 180, !stable, .35f, 8);
+        Game g; g.stand(0, 0, 0); g.alive(first);
+        for (int i = 0; i < 10; ++i) { if (view) g.native(); else g.hip(); g.frame(); }
+        const Q before = g.out;
+        g.head_pitch = .5f;
+        bool exact = true;
+        for (int i = 0; i < 30; ++i) {
+          if (view) g.native(); else g.hip();
+          g.frame();
+          turned[stable] = std::fmax(turned[stable], degrees(g.out, before));
+          if (std::memcmp(&g.out, &before, 16)) exact = false;
+        }
+        CHECK((view || g.own) && exact == (stable != 0)); // (the native view is the game's own buffer)
+        g.end();
+      }
+      std::printf("on foot, the head nods 28.6 degrees, %s: Bodycam turns the view %.2f degrees, Stable %.2f\n", view ? "the native view" : "the ordinary camera", turned[0], turned[1]);
+      CHECK(turned[0] > 1 && turned[0] < 8.01f && turned[1] == 0);
+    }
   }
   // ---- 7. Arming on a thrown body (the helper was ended and is begun again while the body is down): with the
   // lock the begin proof takes the head by its neck; without it the 3 m bound stands. ----

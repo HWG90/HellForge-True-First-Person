@@ -187,6 +187,7 @@ static _Atomic uint64_t lock_frames, view_frames, lock_foreign_frames, lock_miss
 static volatile float lock_entry_ms = 140; /* the eased entry into the native view while the lock is on (retail: none) */
 static volatile float lock_gain, lock_max, lock_settle = 300, lock_thrown_gain, lock_thrown_max, lock_peak;
 static volatile float lock_damp_ms; /* the camera damping option as a time constant (src/camera_damp.h); 0: none */
+static _Atomic uint32_t lock_bodycam = 1; /* the camera style (src/camera_damp.h TfpCameraStyle): 1 Bodycam, the sliders as they are; 0 Stable */
 static TfpEyeDamp lock_eye_damp;    /* the head camera's eye under that option (lock_damp_eye). Policy lock. */
 static TfpKick lock_kick; static TfpQ lock_view = {0, 0, 0, 1}, lock_last_kick = {0, 0, 0, 1}; static bool lock_view_known; static double lock_tick;
 /* Beyond retail: the body down under the lock (camera_helper.h TfpCameraDownStats). lock_carry: what is left of the
@@ -948,7 +949,9 @@ static void lock_rotation(Policy *p, const float *native, uint32_t kind, double 
   TfpQ kick = tfp_q_identity();
   if (pointer(p->body_object + L_UNIT_WORLDS, &matrices) && read(matrices + (uint64_t)p->head_node*L_MATRIX, matrix, 64) && tfp_matrix_q(matrix, &head)) {
     const bool thrown = held || (kind != 6 && p->lock_off_foot); /* a death camera, a body that is down, a dive: not an action on foot */
-    const TfpKickTuning tuning = {thrown ? lock_thrown_gain : lock_gain, thrown ? lock_thrown_max : lock_max, lock_settle, lock_damp_ms};
+    const TfpCameraStyle style = tfp_camera_style(atomic_load_explicit(&lock_bodycam, memory_order_relaxed) != 0, lock_damp_ms);
+    /* (Stable: no kick on foot, and one that is carried when a thrown body is up again is eased out by the same low-pass) */
+    const TfpKickTuning tuning = tfp_kick_style_tuning(&style, thrown, lock_gain, lock_max, lock_thrown_gain, lock_thrown_max, lock_settle);
     kick = tfp_kick_step(&lock_kick, view, head, dt, &tuning); /* damped already: this is what is applied, and taken out again next frame */
   } else tfp_kick_reset(&lock_kick);
   const float size = tfp_degrees_between(kick, tfp_q_identity()); if (size > lock_peak) lock_peak = size;
@@ -1028,8 +1031,9 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
   memcpy(trace.last, shown, 12); trace.last_tick = tick; trace.last_known = true;
   return correction > 0;
 }
-/* Beyond retail (the camera damping option): in a head-camera frame the eye is at the head, so every movement of the
- * head moves the view. Here the head's place against the body root (`head`: as the retail smoothing left it, the
+/* Beyond retail (the camera damping option, and the camera style: Bodycam damps with that option's time constant
+ * and 0.10 m of lag at most, Stable with its own 350 ms and 0.25 m, src/camera_damp.h): in a head-camera frame the
+ * eye is at the head, so every movement of the head moves the view. Here the head's place against the body root (`head`: as the retail smoothing left it, the
  * point the eye is built on) goes through a low-pass (src/camera_damp.h), in the root's frame, so the body's own
  * travel is not held back, and the eye is moved by that lag. As with the retail smoothing, the eye's place in front
  * of and above the head is not filtered: it comes from this frame's view, so turning the view (or the body under
@@ -1040,14 +1044,15 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
  * the continuity sees it. True: the state is kept for the next frame; the caller forgets it in every frame that
  * returns false or does not come here, so it starts from the true eye after those. */
 static bool lock_damp_eye(Policy *p, uint32_t kind, const float *root, const float *root_basis, const float *head, double tick, float *eye) {
-  const float damp_ms = lock_damp_ms;
+  const TfpCameraStyle style = tfp_camera_style(atomic_load_explicit(&lock_bodycam, memory_order_relaxed) != 0, lock_damp_ms);
+  const float damp_ms = style.eye_damp_ms;
   const bool damp = kind == 4 && !p->lock_down && !p->lock_off_foot && !p->full_ads && !p->ads_gap_active && damp_ms > 0;
   float relative[3] = {0}, damped[3] = {0}, behind[3] = {0}, lag = 0;
   for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
     relative[axis] += (head[component]-root[component])*root_basis[axis*3+component];
   if (damp) {
     if (!tfp_finite3(relative)) return false;
-    lag = tfp_eye_damp_step(&lock_eye_damp, relative, tick, p->c.max_gap_ms, damp_ms, damped);
+    lag = tfp_eye_damp_follow(&lock_eye_damp, relative, tick, p->c.max_gap_ms, damp_ms, style.eye_lag_m, damped);
     for (unsigned axis = 0; axis < 3; ++axis) behind[axis] = damped[axis]-relative[axis];
   } else if (!((lag = tfp_eye_damp_release(&lock_eye_damp, tick, p->c.max_gap_ms, behind)) > 0)) return false;
   if (lag > 0 && tfp_finite3(behind)) {
@@ -1695,7 +1700,8 @@ void tfp_camera_set_action_tuning(uint32_t extra_head_mask, uint32_t eye_idle_ms
   atomic_store(&tuning_extra_mask, extra_head_mask); atomic_store(&tuning_eye_idle_ms, eye_idle_ms ? eye_idle_ms : 300u);
   atomic_store(&tuning_eye_return, eye_return ? 1u : 0u);
 }
-void tfp_camera_set_lock(bool on, float gain, float max_degrees, float settle_ms, float thrown_gain, float thrown_max_degrees, float damping_ms) {
+void tfp_camera_set_lock(bool on, float gain, float max_degrees, float settle_ms, float thrown_gain, float thrown_max_degrees, float damping_ms, bool bodycam) {
+  atomic_store(&lock_bodycam, bodycam ? 1u : 0u);
   lock_gain = gain; lock_max = max_degrees; lock_settle = settle_ms > 1 ? settle_ms : 300; lock_thrown_gain = thrown_gain; lock_thrown_max = thrown_max_degrees;
   lock_damp_ms = damping_ms > 0 ? damping_ms : 0;
   atomic_store(&lock_on, on ? 1u : 0u);
@@ -1788,7 +1794,7 @@ void tfp_camera_reset_for_tests(void) {
   atomic_store(&lock_down_error, 0); atomic_store(&lock_down_why, 0); atomic_store(&lock_body_ragdoll, 0); atomic_store(&lock_body_off_foot, 0);
   atomic_store(&lock_off_foot_body, 0); atomic_store(&lock_off_foot_at, 0); atomic_store(&lock_body_distance, 0); atomic_store(&lock_down_distance, 0);
   lock_carry = tfp_q_identity(); lock_was_held = false; lock_down_until = 0; lock_view_known = false; lock_first_known = false; lock_tick = 0; tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity();
-  lock_damp_ms = 0; tfp_eye_damp_reset(&lock_eye_damp);
+  lock_damp_ms = 0; atomic_store(&lock_bodycam, 1); tfp_eye_damp_reset(&lock_eye_damp);
   memset(&smooth, 0, sizeof smooth); memset(&trace, 0, sizeof trace); eye_watch_known = false; eye_unsettled_until = 0;
   memset(&smooth_watch, 0, sizeof smooth_watch); atomic_store(&smooth_event, 0);
   atomic_store(&original, 0);

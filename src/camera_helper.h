@@ -141,8 +141,12 @@ void tfp_camera_set_action_tuning(uint32_t extra_head_mask, uint32_t eye_idle_ms
  * (src/camera_lock.h): `gain`/`max_degrees` on foot, the `thrown_` pair in any other state. `damping_ms` is the
  * camera damping option as a time constant (src/camera_damp.h tfp_camera_damping_ms; 0: none): the kick is low-passed
  * with it, and so is the head camera's eye in the ordinary camera's frames of a body on foot (not in the native view,
- * not in full aim, not on a body that is down or off foot). Off: retail's behaviour. */
-void tfp_camera_set_lock(bool on, float gain, float max_degrees, float settle_ms, float thrown_gain, float thrown_max_degrees, float damping_ms);
+ * not in full aim, not on a body that is down or off foot). `bodycam` is the camera style (src/camera_damp.h
+ * TfpCameraStyle). True: all of the above as given. False, the Stable camera: no kick on foot, half of `thrown_gain`
+ * low-passed on 250 ms in any other state, and the head camera's eye follows the head on 350 ms with up to 0.25 m of
+ * lag; `gain`, `max_degrees` and `damping_ms` are then not used. Before the first call, and after a reset: true.
+ * Off: retail's behaviour. */
+void tfp_camera_set_lock(bool on, float gain, float max_degrees, float settle_ms, float thrown_gain, float thrown_max_degrees, float damping_ms, bool bodycam);
 /* missed: frames of the presented view that were neither the native view nor the head camera (0xffff: the
  * camera record was not ours), with the kind, the helper's error and the proof that failed (TFP_CAMERA_WHY_*) of
  * the last one. off_foot, ragdoll, head_distance: the body on the last head-camera frame the lock held (not in the

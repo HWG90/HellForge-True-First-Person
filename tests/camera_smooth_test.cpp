@@ -143,14 +143,15 @@ struct Game {
   }
 };
 
-static void fresh(bool lock, bool smooth, bool trace = false, float damping_ms = 0) {
+// `bodycam`: the camera style (src/camera_damp.h). Every scenario before 19 is Bodycam, which is the camera before the style existed.
+static void fresh(bool lock, bool smooth, bool trace = false, float damping_ms = 0, bool bodycam = true) {
   tfp_camera_reset_for_tests();
   TfpCameraHost host{};
   host.hook = reinterpret_cast<uint64_t>(&hook_marker); host.read = host_read; host.readable_span = host_readable_span; host.now = host_now;
   host.writable_slot = host_true_slot; host.executable = host_executable; host.cas = host_cas; host.write = host_write; host.pin = host_pin;
   host.lock_exclusive = host_lock; host.unlock_exclusive = host_lock; host.lock_shared = host_lock; host.unlock_shared = host_lock; host.forward = host_forward;
   tfp_camera_set_host(&host);
-  tfp_camera_set_lock(lock, 0, 0, 300, 0, 0, damping_ms); // no kick: the rotation is not the subject
+  tfp_camera_set_lock(lock, 0, 0, 300, 0, 0, damping_ms, bodycam); // no kick: the rotation is not the subject
   tfp_camera_set_continuity(smooth, trace);
   clock_ms += 5000;
 }
@@ -848,6 +849,114 @@ int main() {
     if (lock) CHECK(after.missed == 0 && g.forwarded_own && g.step < .02f);
     else CHECK(!g.forwarded_own);
     g.end();
+  }
+  // ---- 19. The camera style (the Bodycam option). Bodycam is every scenario above. Stable (the option off) follows
+  // the head in head-camera frames on foot on 350 ms with up to 0.25 m of lag, whatever the camera damping option
+  // says; everything else about the damping is as in 14 to 17. ----
+  {
+    const double dt = 1000.0 / 144;
+    // An action on foot in the head camera: the head jerks 0.05 m down and back within 100 ms, then bobs 0.02 m up
+    // and down four times a second for a second. [0] Bodycam at the default sliders (camera damping 60 %, 180 ms),
+    // [1] Stable, [2] Stable with the camera damping option at 0: the option is not Stable's.
+    auto action = [&](Game &g, int i) {
+      const float ms = i * static_cast<float>(dt);
+      const float down = ms < 100 ? .05f * std::sin(ms / 100 * 3.14159265f) : ms > 300 && ms < 1300 ? .02f * std::sin((ms - 300) / 250 * 2 * 3.14159265f) : 0;
+      g.pose(1, 2, 0, .2f, 1.5f - down);
+    };
+    static float record[3][400][4];
+    for (int smooth = 0; smooth < 2; ++smooth) {
+      float peak[3] = {}, path[3] = {}, most[3] = {}; int frames[3] = {};
+      for (int style = 0; style < 3; ++style) {
+        fresh(true, smooth != 0, false, style == 2 ? 0.0f : 180.0f, style == 0);
+        clock_ms = 600000; // the same instants in every run
+        Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+        standing(g, 12, dt, false); standing(g, 40, dt, true); standing(g, 300, dt, false);
+        CHECK(g.from_head_eye() < 1e-3f);
+        float start[3], before[3]; std::memcpy(start, g.body, 12); std::memcpy(before, g.body, 12);
+        g.measure_from_here();
+        for (int i = 1; i <= 330; ++i) { // 2.3 s
+          action(g, i); g.hip(); g.frame(dt);
+          std::memcpy(record[style][frames[style]++], sent.position, 16);
+          const float moved = std::sqrt((g.body[0] - start[0]) * (g.body[0] - start[0]) + (g.body[1] - start[1]) * (g.body[1] - start[1]) + (g.body[2] - start[2]) * (g.body[2] - start[2]));
+          const float stepped = std::sqrt((g.body[0] - before[0]) * (g.body[0] - before[0]) + (g.body[1] - before[1]) * (g.body[1] - before[1]) + (g.body[2] - before[2]) * (g.body[2] - before[2]));
+          peak[style] = std::fmax(peak[style], moved); path[style] += stepped; most[style] = std::fmax(most[style], stepped);
+          std::memcpy(before, g.body, 12);
+        }
+        CHECK(g.forwarded_own && tfp_camera_error() == 0 && g.from_head_eye() < 3e-3f); // back at the head's eye a second after the action
+        g.end();
+      }
+      std::printf("an action in the head camera, smooth eye %s: Bodycam (60 %%) moves the eye %.4f m at most, %.4f m in all, %.5f m in one frame; "
+                  "Stable %.4f m, %.4f m, %.5f m\n", smooth ? "on" : "off", peak[0], path[0], most[0], peak[1], path[1], most[1]);
+      // Clearly less: under three quarters at the farthest (the head camera's own 100 ms smoothing has widened the
+      // jerk before either style sees it), and under six tenths of the way in all and in any one frame.
+      CHECK(peak[0] > .005f && peak[1] > .001f && peak[1] < peak[0] * .75f);
+      CHECK(path[1] < path[0] * .6f && most[1] < most[0] * .6f);
+      CHECK(frames[1] == 330 && frames[2] == 330 && !std::memcmp(record[1], record[2], sizeof(float) * 4 * 330)); // the camera damping option changes nothing in Stable
+    }
+    // A crouch or going prone: the head drops 0.5 m in 150 ms and stays. Stable follows it: never more than 0.25 m
+    // behind (and the 0.06 m of the head camera's own smoothing), within 0.05 m inside 1.2 s.
+    for (int smooth = 0; smooth < 2; ++smooth) {
+      fresh(true, smooth != 0, false, 180, false);
+      Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+      standing(g, 12, dt, false); standing(g, 40, dt, true); standing(g, 300, dt, false);
+      float worst = 0, at = 9; int within = -1;
+      for (int i = 1; i <= 260; ++i) {
+        const float ms = i * static_cast<float>(dt);
+        g.pose(1, 2, 0, .2f, 1.5f - .5f * (ms < 150 ? ms / 150 : 1)); g.hip(); g.frame(dt);
+        worst = std::fmax(worst, g.from_head_eye());
+        if (within < 0 && ms > 150 && g.from_head_eye() < .05f) within = static_cast<int>(ms);
+        if (ms <= 1200) at = g.from_head_eye();
+      }
+      std::printf("Stable, the head drops 0.5 m in 150 ms, smooth eye %s: the eye at most %.3f m behind, within 0.05 m after %d ms, %.4f m at 1.2 s\n", smooth ? "on" : "off", worst, within, at);
+      CHECK(worst > .15f && worst < .25f + .06f + .005f && within > 0 && within < 1200 && at < .05f);
+      g.end();
+    }
+    // Where Stable stands back, as the damping does: the native view, a body off foot, full aim and no lock give the
+    // bytes of a camera without any damping (Bodycam with the option at 0) while the head jerks.
+    for (int scene = 0; scene < 4; ++scene) {
+      static float plain[2][160][4]; int frames[2] = {0, 0};
+      for (int stable = 0; stable < 2; ++stable) {
+        fresh(scene != 3, true, false, stable ? 180.0f : 0.0f, !stable);
+        clock_ms = 700000;
+        Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+        auto keep = [&]() { std::memcpy(plain[stable][frames[stable]++], sent.position, 16); };
+        for (int i = 0; i < 12; ++i) { g.hip(); g.frame(dt); keep(); }
+        for (int i = 0; i < 20; ++i) { if (scene == 0) g.native(); else g.hip(); g.frame(dt); keep(); }
+        if (scene == 1) g.s.state = 50;
+        for (int i = 1; i <= 60; ++i) {
+          action(g, i);
+          if (scene == 0) g.native(); else g.hip();
+          if (scene == 2) g.s.aim = 1;
+          g.frame(dt); keep();
+        }
+        g.end();
+      }
+      CHECK(frames[0] == 92 && frames[1] == 92 && !std::memcmp(plain[0], plain[1], sizeof(float) * 4 * 92));
+    }
+    // And the way out: 0.25 m carried (the head dropped 0.5 m in a frame) when the body leaves 'on foot' is let go on
+    // the same 40 ms, not in one frame.
+    {
+      static float out[2][160][4]; int frames[2] = {0, 0};
+      for (int stable = 0; stable < 2; ++stable) {
+        fresh(true, false, false, stable ? 180.0f : 0.0f, !stable);
+        clock_ms = 900000;
+        Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+        auto keep = [&]() { std::memcpy(out[stable][frames[stable]++], sent.position, 16); };
+        for (int i = 0; i < 40; ++i) { g.hip(); g.frame(dt); keep(); }
+        g.pose(1, 2, 0, .2f, 1.0f);
+        for (int i = 0; i < 3; ++i) { g.hip(); g.frame(dt); keep(); }
+        g.s.state = 50;
+        for (int i = 1; i <= 80; ++i) { g.hip(); g.frame(dt); keep(); }
+        g.end();
+      }
+      auto apart = [&](int i) { float d = 0; for (int k = 0; k < 3; ++k) d += (out[1][i][k] - out[0][i][k]) * (out[1][i][k] - out[0][i][k]); return std::sqrt(d); };
+      CHECK(frames[0] == 123 && frames[1] == 123 && !std::memcmp(out[0], out[1], sizeof(float) * 4 * 40));
+      CHECK(std::fabs(apart(40) - .25f) < 1e-3f && apart(42) > .24f);  // carried, at Stable's limit
+      CHECK(apart(43) > .18f && apart(43) < apart(42));                // the first frame out: eased, not dropped
+      CHECK(apart(42 + 29) < .01f);                                    // 200 ms
+      CHECK(!std::memcmp(out[0][42 + 50], out[1][42 + 50], sizeof(float) * 4 * 31)); // gone
+      std::printf("Stable let go off foot: %.3f m carried, %.3f m in the first frame out, %.4f m after 200 ms\n", apart(42), apart(43), apart(71));
+    }
   }
   std::printf("camera smooth: %d checks, %d failed\n", checks, failed);
   return failed != 0;

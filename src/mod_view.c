@@ -727,13 +727,15 @@ static void start(void) {
   /* What build 25480438 does differently during actions (src/wire_action.h). */
   tfp_camera_set_action_tuning(TFP_ACTION_PICKUP_MASK, TFP_ACTION_EYE_IDLE_MS, TFP_ACTION_EYE_RETURN);
   /* The camera lock (docs/design/specs/2026-11-22-locked-view-design.md): first person through every action and camera. */
-  tfp_camera_set_lock(lock_wanted, .35f, 8.0f, 300.0f, .7f, 35.0f, tfp_camera_damping_ms(60)); /* the options' defaults; lock_note sets the saved ones */
+  tfp_camera_set_lock(lock_wanted, .35f, 8.0f, 300.0f, .7f, 35.0f, tfp_camera_damping_ms(60), false); /* the options' defaults (the Stable camera); lock_note sets the saved ones */
 #ifdef TFP_FEEL
   tfp_wire_engine_set_held_body(tfp_camera_lock_off_foot_body); /* head hiding stays on while the lock holds a body that is off foot */
   tfp_wire_engine_set_lock_view(lock_view_now);                 /* and while the game presents the lease's own first-person request (a stim) */
 #endif
   say(lock_wanted ? "Ready: camera lock: the view stays first person through every action and camera of your own character, death included; "
-                    "body movement kicks the view (35 %% up to 8 degrees on foot, 70 %% up to 35 when thrown; a file lock_off.txt beside the DLL switches it off)"
+                    "the camera style is Stable unless Bodycam is switched on in the panel: in Bodycam body movement kicks the view (35 %% up to 8 degrees "
+                    "on foot, 70 %% up to 35 when thrown), in Stable only a thrown body does, at half that strength (a file lock_off.txt beside the DLL "
+                    "switches the lock off)"
                   : "Test: lock_off.txt: the camera lock is off");
   tfp_camera_set_continuity(false, lock_wanted && trace_wanted); /* the continuity itself: option_smooth, once the settings are read */
   if (lock_wanted && !trace_wanted) say("Test: trace_off.txt: no \"Trace:\" lines after State edges");
@@ -872,9 +874,16 @@ static void lock_note(void) { /* once a second while the view is on: frames by c
   if (now < next) return;
   next = now + 1000;
   /* The Locked view tab's options (src/wire_settings.h); lock_off.txt beside the DLL overrides the toggle. */
+  const bool bodycam = tfp_locked_view_bodycam(&wire); /* the camera style (src/camera_damp.h): live, like the sliders */
   tfp_camera_set_lock(lock_wanted && tfp_locked_view_camera_lock(&wire), (float)(tfp_locked_view_kick_strength(&wire)/100),
                       (float)tfp_locked_view_kick_max_degrees(&wire), 300.0f, (float)(tfp_locked_view_thrown_kick_strength(&wire)/100), 35.0f,
-                      tfp_camera_damping_ms(tfp_locked_view_camera_damping(&wire)));
+                      tfp_camera_damping_ms(tfp_locked_view_camera_damping(&wire)), bodycam);
+  static int told_style = -1;
+  if (lock_wanted && told_style != (int)bodycam) {
+    told_style = bodycam;
+    say(bodycam ? "Camera style: Bodycam (the view moves with the head: the kick sliders and camera damping apply)"
+                : "Camera style: Stable (no view kick on foot; a thrown body sways the view at half the thrown strength; the head camera follows the head slowly)");
+  }
   TfpCameraLockStats s; tfp_camera_lock_stats(&s);
   if (s.frames == told_frames && s.missed == told_missed) return;
   /* The kind and error are the last missed frame's: 0 in a second without one. tools/harness/matrix.py reads this line. */
