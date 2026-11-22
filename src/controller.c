@@ -90,6 +90,7 @@ static const char *hold_refusal(TfpController *c, double timestamp, const TfpVie
   if (v.seated) return "seated";
   if (v.full_aim) return "full aim";
   if (v.foreign_camera) return "another camera owns the view";
+  if (v.gun_off_rig) return "the gun has left the hands";
   /* The action's own flags are gone and another weapon is in the hands: this lease's view is not coming back. */
   if (v.safe && v.weapon == TFP_HOLD_WEAPON_OTHER) return "another weapon is in the hands";
   /* No action flag at the player's level, yet the full snapshot, which is there, is not safe: what took `safe` away

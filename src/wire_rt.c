@@ -346,6 +346,7 @@ static void api_hold_view(void *u, const TfpLease *lease, TfpHoldView *out) {
   out->camera_kind = h.player.camera_kind, out->record = h.player.record;
   out->safe = h.player.safe, out->seated = h.player.seated, out->ragdoll = h.ragdoll;
   out->full_aim = h.player.controller_active, out->foreign_camera = h.foreign_camera;
+  out->gun_off_rig = w->hold.gun_off_rig;
   out->weapon = !h.wielded ? TFP_HOLD_WEAPON_NONE : l && h.wielded == l->ops.origin.weapon ? TFP_HOLD_WEAPON_SAME : TFP_HOLD_WEAPON_OTHER;
 }
 static void api_presentation_transition(void *u, TfpPhasePacket *out) {
@@ -1264,6 +1265,8 @@ void tfp_wire_hold_frame(TfpWire *w) {
   memset(&probe, 0, sizeof probe);
   const TfpWireLease *lease = held(w);
   if (hold->probe) hold->probe(w, proven ? &view : NULL, lease ? lease->ops.origin.weapon_unit : 0, &probe);
+  /* What the controller's next hold view sees: the gun is on the rig, or it is not (one tick behind). */
+  hold->gun_off_rig = holding && probe.gun_parent && strcmp(probe.gun_parent, "rig") != 0;
   char line[640];
   tfp_wire_hold_line(w, proven ? &view : NULL, why.present ? why.text : NULL, &probe, probe.node5_calls - hold->node5_calls, line, sizeof line);
   hold->node5_calls = probe.node5_calls;

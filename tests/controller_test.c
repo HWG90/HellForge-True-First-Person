@@ -352,7 +352,7 @@ static bool hold_tests(unsigned *count) {
 
   static const struct { const char *name; int field; } refusals[] = {
     {"ragdoll is not held", 0}, {"seated is not held", 1}, {"full aim is not held", 2}, {"another camera owner is not held", 3},
-    {"another player is not held", 4}, {"an unproven player is not held", 5}};
+    {"another player is not held", 4}, {"an unproven player is not held", 5}, {"a gun that has left the hands is not held", 6}};
   for (unsigned i = 0; i < sizeof refusals / sizeof *refusals; i++) {
     name = refusals[i].name;
     H_CHECK(h_begin(&c, true));
@@ -363,6 +363,7 @@ static bool hold_tests(unsigned *count) {
     case 2: hw.hold.full_aim = true; break;
     case 3: hw.hold.foreign_camera = true; break;
     case 4: hw.hold.player_identity = H_PLAYER + 1; break;
+    case 6: hw.hold.gun_off_rig = true; break;
     default: hw.hold.available = false; break;
     }
     H_CHECK(h_step(&c) && h_left(&c) && c.holds == 0 && c.hold_why[0]);

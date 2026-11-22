@@ -72,7 +72,7 @@ struct TfpWire;
 /* The action hold (a probe; a file hold_lease.txt beside the DLL). Everything false, 0 and NULL without it:
  * then nothing here is called and nothing is written. */
 typedef struct TfpWireHold {
-  bool on, was_holding, has_mask;
+  bool on, was_holding, has_mask, gun_off_rig;
   uint32_t mask;                          /* the action flags of the line before */
   unsigned after;                         /* ticks still to be written after a change of the flags */
   double next_line;

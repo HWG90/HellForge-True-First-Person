@@ -59,6 +59,10 @@ typedef struct TfpHoldView {
   bool safe;                      /* the player-level snapshot's own `safe` */
   bool seated, ragdoll, full_aim, foreign_camera;
   TfpHoldWeapon weapon;           /* what is in the hands, against the lease's weapon */
+  /* The lease's gun is no longer on the first-person rig (seen in the game 2026-11-22: a stim moves it to the body
+   * 30 ms in, and the native view held with empty hands then shows the helmet from behind). The hold is for the
+   * put-away only. */
+  bool gun_off_rig;
 } TfpHoldView;
 typedef struct TfpPhasePacket { bool available; uint64_t identity, player_identity, epoch; double progress; } TfpPhasePacket;
 
