@@ -409,3 +409,15 @@ Stratagems: the game binds the menu to left Ctrl and the directions to the arrow
 (`userdata/profiles/<name>/cloud/input_settings.config`). The harness now sends the arrows as extended keys and has a
 left-Ctrl name, but the stratagem menu does not open from its input, with the view on or off (plain third person):
 a limit of the test input, not of the mod. Stratagem throws remain a check for a person.
+
+## What the mod costs, 2026-11-23 (0.6.0-feel.30 `Cost:` line, 54 seconds of play at 30 frames a second in the harness)
+
+- The arm drive inside the primary draw (42 joints, the rig, about ten sleeve, glove and weapon units): 62 us a frame
+  on average, 72 us in the worst second, 111 us for the slowest single frame.
+- The mod's tick on the game thread: 331 us on average, 406 us in the worst second. Single ticks of 1.3 to 1.8 ms
+  when the native view is entered (a new lease: the helpers' proofs), and 8.1 ms once, in the first second after the
+  first F11 of the session (the one-time checks and the first alignment).
+- The log grew by 189 KB and 1027 lines in a session of about four minutes.
+
+The older `--view` build variant (the milestone before the feel build) has not compiled since 0.6.0-feel.20: the
+lock's code in `src/mod_view.c` sits in the feel build's part. Nothing ships from it.

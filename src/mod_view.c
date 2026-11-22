@@ -34,7 +34,7 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "arm_drive.h"
 #include "wire_options.h"
 #include "arm_weight.h"
-#define TFP_VIEW_VERSION "0.6.0-feel.29"
+#define TFP_VIEW_VERSION "0.6.0-feel.30"
 #else
 #include "wire_win.h"
 #include "wire_action.h"
@@ -61,6 +61,7 @@ static DWORD tick_thread; /* the game thread, as the tick last saw it */
 static TfpWireFeel feel;
 static TfpFxPlatform fx_platform;
 static bool lock_wanted = true;
+static LONG64 tick_cost_total, tick_cost_max, tick_cost_count; /* game thread: the tick's own time, for the Cost line */
 /* Three features are switched by options of the settings panel's "Locked view" tab, live (src/wire_options.h): the
  * arm drive (Animated arms), the action hold (Weapon put-away) and the eye's continuity (Smooth eye). Test files
  * beside the DLL, read once at the start, override the option: arms_live.txt / hold_lease.txt force the feature on,
@@ -585,6 +586,16 @@ static void arms_tick(void) {
       (unsigned long long)s.binds, (unsigned long long)(s.refused - before.refused),
       s.refused != before.refused ? tfp_arm_drive_reason_name(s.reason) : "none", (unsigned long long)(s.idle - before.idle), (unsigned)s.owned);
   before = s;
+  { /* what the mod costs: its tick and the arm drive's part of the draw, per frame, in the second just past */
+    uint64_t drawn = 0; double mean = 0, most = 0;
+    tfp_render_slot_cost(&drawn, &mean, &most);
+    LARGE_INTEGER rate; QueryPerformanceFrequency(&rate);
+    const double us = rate.QuadPart ? 1e6 / (double)rate.QuadPart : 0;
+    say("Cost: tick %.0f us mean, %.0f us largest over %ld ticks; arms in the draw %.0f us mean, %.0f us largest over %llu frames",
+        tick_cost_count ? (double)tick_cost_total * us / (double)tick_cost_count : 0, (double)tick_cost_max * us, (long)tick_cost_count, mean, most,
+        (unsigned long long)drawn);
+    tick_cost_total = tick_cost_max = 0, tick_cost_count = 0;
+  }
 }
 #endif
 
@@ -960,7 +971,15 @@ static void tick_body(void) {
 static void tick(HfMod *mod, float dt, void *unused) {
   (void)mod; (void)dt; (void)unused;
   InterlockedExchange(&in_tick, 1);
-  if (!InterlockedCompareExchange(&closing, 0, 0)) tick_body();
+  if (!InterlockedCompareExchange(&closing, 0, 0)) {
+    LARGE_INTEGER t0, t1;
+    QueryPerformanceCounter(&t0);
+    tick_body();
+    QueryPerformanceCounter(&t1);
+    const LONG64 spent = t1.QuadPart - t0.QuadPart;
+    tick_cost_total += spent, tick_cost_count++;
+    if (spent > tick_cost_max) tick_cost_max = spent;
+  }
 #ifdef TFP_FEEL
   else if (!InterlockedCompareExchange(&release_state, 0, 0)) release_on_game_thread();
 #endif

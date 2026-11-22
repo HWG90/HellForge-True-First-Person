@@ -25,6 +25,8 @@ unsigned tfp_render_slot_restore(void);
 void tfp_render_slot_tick(void);
 /* No call is inside the hook now (a call stays inside for a whole world render). */
 bool tfp_render_slot_idle(void);
+/* The arm drive's time inside the primary draw since the last call (game thread). */
+void tfp_render_slot_cost(uint64_t *frames, double *mean_us, double *max_us);
 /* calls: every call through the slot; first_thread / first_return: of the first primary draw seen. */
 const TfpWinHook *tfp_render_slot_hook(void);
 #endif

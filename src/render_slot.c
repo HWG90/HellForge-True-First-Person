@@ -51,6 +51,7 @@
 enum { TICK_MAX_AGE_MS = 500 };                   /* host:392 */
 
 typedef void (*RenderWorld)(void *, void *, void *, const float *, void *, const void *, uint32_t, uint32_t); /* host:14 */
+static LONG64 cost_total, cost_max, cost_count; /* game thread only: the wrapper's measured branch and the tick */
 static const HfApi *hf;
 static TfpWinHook hook;                  /* slot, original: where the hook is in now */
 static volatile LONG armed, inflight, calls;
@@ -183,7 +184,13 @@ static __declspec(noinline) void render_thunk(void *world, void *camera, void *v
     if (!game_thread) tfp_arm_drive_render((uint64_t)(uintptr_t)world, false); /* counted as a refusal; nothing read or written */
     else if (!depth && slot_owned()) {
       depth = 1, acted = true;
+      LARGE_INTEGER t0, t1;
+      QueryPerformanceCounter(&t0);
       after = tfp_arm_drive_render((uint64_t)(uintptr_t)world, true);
+      QueryPerformanceCounter(&t1);
+      const LONG64 spent = t1.QuadPart - t0.QuadPart; /* what the arm drive costs this frame, for the Arms line */
+      cost_total += spent, cost_count++;
+      if (spent > cost_max) cost_max = spent;
     }
   }
   /* An exception of the engine's own passes through; the game's values still go back and the count still comes down. */
@@ -194,6 +201,16 @@ static __declspec(noinline) void render_thunk(void *world, void *camera, void *v
     if (acted) depth = 0;
     InterlockedDecrement(&inflight);
   }
+}
+
+/* The arm drive's own time inside the primary draw since the last call: frames measured, mean and largest in
+ * microseconds. Read and reset by the tick (the game thread, the same thread the wrapper measures on). */
+void tfp_render_slot_cost(uint64_t *frames, double *mean_us, double *max_us) {
+  LARGE_INTEGER rate;
+  QueryPerformanceFrequency(&rate);
+  const double us = rate.QuadPart ? 1e6 / (double)rate.QuadPart : 0;
+  *frames = (uint64_t)cost_count, *mean_us = cost_count ? (double)cost_total * us / (double)cost_count : 0, *max_us = (double)cost_max * us;
+  cost_total = cost_max = 0, cost_count = 0;
 }
 
 /* ---- the arm drive's host ---- */
