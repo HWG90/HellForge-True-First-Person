@@ -490,3 +490,30 @@ is 0.117 m a frame; no correction was carried in either. Frame strips of nine ac
 sprint into aim, aim and reload, emote, look down, prone and aim) show nothing out of place; they were filmed with the
 view pitched down, because the death phase left it there (now put back).
 
+### feel.34 (2026-11-22)
+
+A fourth review: everything added since feel.19, for crash and thread safety (render hooks and arm drive, state
+shared between threads, the camera and field-of-view lock, the panel), each finding checked twice. No crash and no
+data race was confirmed. Six behaviour defects were, all fixed:
+
+1. The field-of-view lock followed "the camera lock held a frame", so with Camera lock off it did nothing. It follows
+   a count of frames the view is shown (`tfp_camera_view_frames`). The `Fov:` line is written on its own.
+2. A key bound in the panel fired its action with the binding press. A key that has just become the bound one counts
+   as held until seen up once (`tfp_wire_menu_key_edge`).
+3. The kick's "the view is still" test measured the view's turn through acos, whose smallest non-zero answer is 0.04
+   degrees: a still view that carries rounding turned 20 degrees a second at 2 ms a frame, and the kick was weaker
+   and shorter the higher the frame rate. Measured from the vector part now.
+4. The panel connected asking the host for API 8 though it uses API 6 calls: no panel on hosts 0.4.0 and 0.5.0.
+5. The placement editor row took F8 (a stored 119 means the default key), showing F8 while Page Up stayed the key.
+6. The panel id was new at every start, so the host forgot the window's place; stable now, per-load only when the
+   host still holds the first (a build replaced while the game runs).
+
+Disputed and left: no glide out of the field-of-view lock when it is switched off (one frame).
+
+In the game on feel.34: the panel opens and registers (host API 11); binding F9 to the toggle did not switch the
+view, the next press did, and back to F11 the same; field of view 80 with Camera lock off, through a swap, off with
+its own toggle, both back. Matrix: 33 of 35, then the four phases toggle-fast, dive, ragdoll and death in a fresh
+session, all passing (ragdoll 0.045 m, death 0.036 m). The first run's two failures were the quick-toggle phase
+losing one of four presses 30 ms apart (the key is polled once a frame), which left the view off; the phase now
+leaves 0.11 s between presses.
+

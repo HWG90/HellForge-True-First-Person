@@ -54,7 +54,7 @@ PHASES = {
     "emote": ("key b", 4.0),
     "jump-vault": ("hold w 0.4; key space; wait 0.2; hold w 0.6", 2.5),
     "toggle-off-on": ("key f11; wait 1.0; key f11", 1.5),
-    "toggle-fast": ("key f11; key f11; key f11; key f11", 2.0),
+    "toggle-fast": ("key f11; wait 0.08; key f11; wait 0.08; key f11; wait 0.08; key f11", 2.0),   # the key is polled once a frame: 0.11 s up, so no press falls between two polls at 30 frames a second
     "ragdoll": ("look 0 900; wait 0.2; key g; wait 0.4; look 0 -900; hold s 0.4", 6.0),
     "death": ("look 0 900; wait 0.2; key g; wait 0.6; key g; wait 0.4; look 0 -900", 9.0),   # the view is put back level for what runs after
 }

@@ -1,4 +1,4 @@
-# True First Person for HellForge: test build 0.6.0-feel.33
+# True First Person for HellForge: test build 0.6.0-feel.34
 
 For HellForge on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
@@ -24,6 +24,20 @@ DBF-MCM is no longer needed. The mod has its own panel.
 - **F10** opens the settings panel "True First Person" (also in NEST's list, Page Down). Three tabs:
   First person, Bob and sway, Locked view.
 - **Page Up** opens the weapon placement editor.
+
+## Fixed in 0.6.0-feel.34
+
+From a review of everything added since 0.6.0-feel.19 for crashes and thread faults (none found) and behaviour:
+
+- **Field of view lock with Camera lock off.** It did nothing. The two are separate toggles now. Tested in the game.
+- **Changing a key in the panel** no longer fires that key's action with the press that bound it. Tested in the game
+  for the toggle key.
+- **Kicks at high frame rates** were weaker and shorter the higher the frame rate. They are the same at any rate now.
+  Tested outside the game.
+- **Older NEST (0.4.0 and 0.5.0):** the settings panel now appears there. The placement editor still needs the NEST
+  in the complete ZIP. Not tested on an older NEST.
+- **The panel window keeps its place and size** between game starts.
+- **The placement editor key row does not take F8**, which is HellForge's own editor key, and says so.
 
 ## Fixed in 0.6.0-feel.33
 
