@@ -6,6 +6,10 @@
 For each edge window: frames, the largest step of the rendered eye between two frames (m), the largest change of
 that step from one frame to the next (a pop shows here; an ease does not), and the largest correction applied.
 A window is called a pop when the step changes by more than POP_M between two frames.
+
+The game can set the camera twice in one frame (seen on the frame the view leaves the native view: kind 6, then
+kind 4, 0.7 ms apart). Those are two Trace rows of one frame; the later one is what is drawn and is the one kept.
+Read as two frames, the second "stands still" and the body's own travel on the next frame reads as a pop.
 """
 import re
 import sys
@@ -13,6 +17,7 @@ from pathlib import Path
 
 HF = Path.home() / ".local/share/hellforge-prefix/pfx/drive_c/users/steamuser/Documents/HellForge"
 POP_M = 0.03
+SAME_FRAME_MS = 5.0   # two rows closer than this are one frame set twice
 TRACE = re.compile(r"Trace: t=(-?[\d.]+) kind=(\d+) eye_world=\(([-\d. ]+)\) step=([-\d.]+)(?:.*?correction=([-\d.]+))?")
 
 
@@ -32,7 +37,11 @@ def windows(lines):
         m = TRACE.search(line)
         if m and edge is not None:
             eye = [float(x) for x in m[3].split()]
-            rows.append((float(m[1]), int(m[2]), eye, float(m[4]), float(m[5] or 0)))
+            row = (float(m[1]), int(m[2]), eye, float(m[4]), float(m[5] or 0))
+            if rows and 0 <= row[0] - rows[-1][0] < SAME_FRAME_MS:
+                rows[-1] = row
+            else:
+                rows.append(row)
     if rows:
         yield edge, rows
 
