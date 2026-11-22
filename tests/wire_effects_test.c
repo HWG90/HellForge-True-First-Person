@@ -954,6 +954,25 @@ int main(int argc, char **argv) {
     tfp_wire_effects_frame(&wire);
   }
   CHECK(!G.row_enabled && !G.dof);
+  /* an explicit stop does not wait for the time: with the view away and both held, the stop gives both back in that
+   * call (the new-body recovery stops every tick until all is clean, and first person is on there) */
+  view_active = false, wire.controller.phase = TFP_PHASE_WAITING;
+  now_seconds += .1;
+  CHECK(h->dof_update(h, &o1, &o2) && !G.row_enabled && !G.dof);
+  tfp_wire_effects_frame(&wire);
+  now_seconds += .1;
+  CHECK(h->dof_stop(h, &o1, &o2) && G.row_enabled && fx.dof_host.vignette_is_clean(&fx));
+  tfp_wire_effects_frame(&wire);
+  now_seconds += .1;
+  CHECK(h->dof_stop(h, &o1, &o2) && o1.kind == TFP_RT_TRUE && G.dof && h->dof_is_clean(h, &o1) && o1.kind == TFP_RT_TRUE);
+  tfp_wire_effects_frame(&wire);
+  view_active = true, wire.controller.phase = TFP_PHASE_RUNNING;
+  for (int i = 0; i < 4; i++) {
+    now_seconds += .6;
+    CHECK(h->dof_update(h, &o1, &o2));
+    tfp_wire_effects_frame(&wire);
+  }
+  CHECK(!G.row_enabled && !G.dof);
   wire.controller.phase = phase_before, wire.controller.enabled = enabled_before;
   /* the view ends: both are given back */
   view_active = false;
