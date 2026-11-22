@@ -141,10 +141,41 @@ void tfp_camera_set_action_tuning(uint32_t extra_head_mask, uint32_t eye_idle_ms
  * (src/camera_lock.h): `gain`/`max_degrees` on foot, the `thrown_` pair in any other state. Off: retail's behaviour. */
 void tfp_camera_set_lock(bool on, float gain, float max_degrees, float settle_ms, float thrown_gain, float thrown_max_degrees);
 /* missed: frames of the presented view that were neither the native view nor the head camera (0xffff: the
- * camera record was not ours), with the kind and the helper's error of the last one. */
-typedef struct TfpCameraLockStats { uint64_t frames, foreign_frames, missed; uint32_t last_kind, missed_kind, missed_error; float peak_kick_degrees; } TfpCameraLockStats;
+ * camera record was not ours), with the kind, the helper's error and the proof that failed (TFP_CAMERA_WHY_*) of
+ * the last one. off_foot, ragdoll, head_distance: the body on the last head-camera frame the lock held (not in the
+ * on-foot animation state; the avatar's ragdoll flag; metres from the unit root to the head). */
+typedef struct TfpCameraLockStats { uint64_t frames, foreign_frames, missed; uint32_t last_kind, missed_kind, missed_error; float peak_kick_degrees;
+  uint32_t missed_why, off_foot, ragdoll; float head_distance; } TfpCameraLockStats;
 /* Counts since the start; the peak is the largest kick since the last call. */
 void tfp_camera_lock_stats(TfpCameraLockStats *out);
+/* Which proof of the head camera refused a frame (beside the error number, which retail shares between several). */
+enum {
+  TFP_CAMERA_WHY_NONE = 0,
+  TFP_CAMERA_WHY_GRAPH,      /* 16: the body's node graph is not the captured one (count, tables, head or neck name) */
+  TFP_CAMERA_WHY_WORLDS,     /* 16: the body's world matrices could not be read, or the root or head is not finite */
+  TFP_CAMERA_WHY_RANGE,      /* 16: the head is not 0.05 to 3 m from the unit root (and the lock is not holding) */
+  TFP_CAMERA_WHY_NECK,       /* 16: the head is beyond 3 m from the root and not 0.005 to 0.5 m from its neck */
+  TFP_CAMERA_WHY_ANIMATION,  /* 7: the animation instance, graph, layer array or layer 14 state changed since sampled */
+  TFP_CAMERA_WHY_OWNER,      /* 7 or 3: the avatar, body, registry or camera unit is no longer the armed one */
+  TFP_CAMERA_WHY_REQUEST,    /* 7: the gate, the dispatch slot or the top camera request changed during the frame */
+  TFP_CAMERA_WHY_HEADER,     /* 7: the body's node count or tables changed during the frame */
+  TFP_CAMERA_WHY_NAMES,      /* 7: the head or neck name changed during the frame */
+  TFP_CAMERA_WHY_PARENT      /* 7: the camera got a parent during the frame */
+};
+const char *tfp_camera_why_text(uint32_t why);
+/* Beyond retail, lock frames only: the body is "down" when physics has it: the head is beyond walking range of the
+ * unit root (the root stays where the character fell or died) or the body is off foot with the avatar's ragdoll
+ * flag set. The head camera then stays at the head (a head beyond 3 m from the root is taken when it is 0.005 to
+ * 0.5 m from its neck, the parent node the graph proof names), the direction is the last first-person one with
+ * the thrown kick on it, and eases back to the game's when the body is up again. Nothing is kept between frames
+ * but that direction: the body is proven again in every frame.
+ * frames: head-camera frames shown while down; refused: frames of the game's own camera while down (or within a
+ * second after), with the kind, error and proof of the last; head: the head node in the world on the last frame. */
+typedef struct TfpCameraDownStats { uint64_t frames, refused; uint32_t kind, error, why, ragdoll, off_foot; float head[3], head_distance; } TfpCameraDownStats;
+void tfp_camera_down_stats(TfpCameraDownStats *out);
+/* The body reference whose head the lock held the camera at, off foot, within the last 250 ms; 0 otherwise. What
+ * head hiding asks in place of the on-foot answer (src/head_visibility.h held_off_foot). */
+uint32_t tfp_camera_lock_off_foot_body(void);
 uint64_t tfp_camera_lock_frames(void); /* frames the lock has held so far: rising while the view is shown */
 /* Beyond retail, and only in frames the camera lock holds: the presented eye is kept continuous in the body's frame
  * across every change of camera (head camera, native view, the repeated native argument) and one-frame moves of the
