@@ -38,6 +38,7 @@ ACTIONS = {
     "sprint-aim": ("down shift; hold w 1.2; up shift; down right; wait 1.4; up right; wait 1.0", 9),
     "aim-reload": ("click left 0.3; down right; wait 0.5; key r; wait 2.8; up right; wait 1.0", 10),
     "hip-fire": ("click left 0.9; wait 0.8", 5),
+    "death": ("wait 9", 18),            # hurt.py kill is run as the capture starts (see main)
 }
 
 
@@ -67,6 +68,9 @@ def main(argv):
         for name in names:
             script, count = ACTIONS[name]
             player = threading.Thread(target=device.run, args=(script,)); player.start()
+            if name == "death":
+                import subprocess
+                print("  " + subprocess.run([sys.executable, "hurt.py", "kill"], capture_output=True, text=True).stdout.strip())
             files = []
             for i in range(count):
                 path = out / f"{name}-{i:02d}.png"

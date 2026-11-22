@@ -375,3 +375,18 @@ change wrote `locked_view.json` once (7 ms). Sliders and the key-capture rows we
 Found on the way: `settings.json` is rewritten on every weapon swap, because the menu's per-weapon value
 `menu/weapon_near_hip_cm` (10 for one weapon, 5 for the other) is stored as it is shown. One small file write per
 swap; not fixed yet.
+
+## Death in first person, seen: 2026-11-23 (0.6.0-feel.27)
+
+A death can be produced on demand: `tools/harness/hurt.py kill` writes health 0 and life 1 (downed) on the local
+player's own record in the game's health table (the avatar id comes from the mod's `Ids:` line, new in feel.28); the
+game then runs its own death. Enemies never do it here: the installed No-Aggro mod keeps them off, and own grenades
+did no damage in any attempt. Writing life 2 directly also kills, but without the fall.
+
+What the strip shows (`work/captures/feel27-death-first-person-2026-11-23.jpg`, 0.35 s apart): ELIMINATED comes up,
+the view tilts and falls with the body, then lies at the head for about five seconds with the body's own leg and
+pack in view and the head hidden, until the game's replacement sequence (a camera that is not the avatar's) takes
+over. The log: `Body: off foot 1, ragdoll flag 0, head 1.62 m from its root`, then 1.57, 1.11, 0.86, 0.86; one frame
+missed, at the handover (kind 65535). The view came back by itself on the new character.
+
+Not seen: a death that tears the body (the relaxed head rule of feel.24), and a death while aiming or in a hold.

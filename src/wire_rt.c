@@ -1391,5 +1391,11 @@ void tfp_wire_frame(TfpWire *w, const char *extra) {
   }
   s.gate = gate, s.action = action, s.camera = camera_note;
   s.aim_source = w->mouse_source ? w->mouse_source() : NULL;
+  const bool had_lease = w->log.has_lease;
   tfp_view_log_frame(&w->log, &s);
+  if (w->log.has_lease && !had_lease) { /* once per lease: the ids a test tool outside the game can match (tools/harness/hurt.py) */
+    const TfpWireLease *l = held(w);
+    if (l) tfp_view_log_event(&w->log, "Ids: avatar=0x%x body=0x%x weapon_unit=0x%x", (unsigned)l->ops.origin.avatar, (unsigned)l->ops.origin.body,
+                              (unsigned)l->ops.origin.weapon_unit);
+  }
 }

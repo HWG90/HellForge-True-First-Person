@@ -3,6 +3,9 @@
 
   hurt.py list                 every record: index, entity, unit, health / maximum, life
   hurt.py set ENTITY HEALTH    write the health (i32) of that entity's record
+  hurt.py kill                 the local player dies: health 0 and life 1 (downed) on its own record; the game then
+                               runs its death (ELIMINATED, the body falls, a replacement pod). The player is the
+                               avatar of the mod's last "Ids:" log line (written once per lease: F11 must be on)
 
 Layout from HellForge's SDK (hellforge_globals.h, HfHealthManager): game.dll+0x3326688 points to the manager;
 +0x1020 count, +0x1048 descriptor pointers, +0x1058 records (0x1B8 each: health i32 at +0x14, life u32 at +0x19C),
@@ -41,17 +44,30 @@ def table(mem, base):
 
 
 def main(argv):
-    if len(argv) < 2 or argv[1] not in ("list", "set"):
+    if len(argv) < 2 or argv[1] not in ("list", "set", "kill"):
         print(__doc__); return 2
     pid = peek.game_pid()
     base, _ = peek.regions(pid, "game.dll")
-    with open(f"/proc/{pid}/mem", "r+b" if argv[1] == "set" else "rb", buffering=0) as mem:
+    with open(f"/proc/{pid}/mem", "rb" if argv[1] == "list" else "r+b", buffering=0) as mem:
         rows = table(mem, base)
         if argv[1] == "list":
             for i, entity, unit, health, most, life, flags, _ in rows:
                 print(f"{i:4} entity {entity:#010x} unit {unit:#010x} health {health:6} / {most:6} life {life} flags {flags:#x}")
             print(len(rows), "records")
             return 0
+        if argv[1] == "kill":
+            import re
+            import matrix
+            ids = re.findall(r"Ids: avatar=(0x[0-9a-f]+)", matrix.log_path().read_text(errors="replace"))
+            if not ids:
+                print("no Ids line in the mod's log: switch the view on first"); return 1
+            entity = int(ids[-1], 16)
+            for row in rows:
+                if row[1] == entity and row[5] == 0:
+                    mem.seek(row[7]); mem.write(struct.pack("<i", 0))
+                    mem.seek(row[7] + 0x19C - 0x14); mem.write(struct.pack("<I", 1))
+                    print(f"entity {entity:#x}: health {row[3]} -> 0, life 0 -> 1"); return 0
+            print(f"entity {entity:#x} has no live record"); return 1
         entity, health = int(argv[2], 0), int(argv[3])
         for row in rows:
             if row[1] == entity:

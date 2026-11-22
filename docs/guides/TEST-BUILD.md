@@ -1,4 +1,4 @@
-# True First Person for HellForge: test build 0.6.0-feel.27
+# True First Person for HellForge: test build 0.6.0-feel.28
 
 For HellForge on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
@@ -77,10 +77,8 @@ jumped more than 5 cm.
 
 - **Grenade and stim with empty hands.** After the put-away the view is from your character's head and
   the arms are the character's own, so you see them when they pass in front of the eyes.
-- **Dying.** Twice a death was caught in a test run. In 0.6.0-feel.23 the game's own death camera showed
-  for about five seconds. In 0.6.0-feel.24 the view held for the first third of a second and then let go,
-  because the explosion had taken the head off the neck; that rule is relaxed in this build and has not
-  been seen working yet. The view comes back by itself after the respawn.
+- **Dying.** Seen once, produced on purpose: the view falls with the body and stays at the head until the game
+  sends the replacement. A death by explosion, and one while aiming, have not been seen.
 - **Holding aim raises the weapon to the shoulder.** Looking through the sight is a separate option
   ("true native ADS") and was not part of these checks.
 - **The settings panel:** all three tabs were opened in the game, and Camera lock, Animated arms, Weapon
