@@ -68,12 +68,13 @@ void tfp_controller_init(TfpController *c, const TfpBackendApi *backend) {
 void tfp_controller_set_hold(TfpController *c, bool enabled) { c->hold_enabled = enabled; }
 static void hold_over(TfpController *c, const char *why) {
   if (!c->holding) return;
-  c->holding = false;
+  c->holding = c->hold_empty = false;
   c->hold_exits++;
   snprintf(c->hold_why, sizeof c->hold_why, "%s", why);
 }
-/* NULL: the exit is held back. Otherwise why not (the switch being off answers "", and writes nothing). */
-static const char *hold_refusal(TfpController *c, double timestamp) {
+/* NULL: the exit is held back. Otherwise why not (the switch being off answers "", and writes nothing).
+ * full: this update's full snapshot when it is available, else NULL. */
+static const char *hold_refusal(TfpController *c, double timestamp, const TfpView *full) {
   const TfpBackendApi *b = c->backend;
   TfpHoldView v;
   if (!c->hold_enabled) return "";
@@ -91,6 +92,15 @@ static const char *hold_refusal(TfpController *c, double timestamp) {
   if (v.foreign_camera) return "another camera owns the view";
   /* The action's own flags are gone and another weapon is in the hands: this lease's view is not coming back. */
   if (v.safe && v.weapon == TFP_HOLD_WEAPON_OTHER) return "another weapon is in the hands";
+  /* No action flag at the player's level, yet the full snapshot, which is there, is not safe: what took `safe` away
+   * is not an action's flags (the character is off the verified on-foot lifecycle: a dive, prone). Today's exit. */
+  if (v.safe && full && !full->safe) return "the full snapshot is unsafe with no action flag (not the on-foot lifecycle)";
+  /* No action flag and nothing in the hands: the middle of a stim (about 0.65 s), or a weapon that was dropped.
+   * Held for TFP_HOLD_EMPTY_CAP on end, so that a dropped weapon does not keep the native view for the whole cap. */
+  if (v.safe && v.weapon == TFP_HOLD_WEAPON_NONE) {
+    if (!c->hold_empty) c->hold_empty = true, c->hold_empty_since = timestamp;
+    else if (timestamp - c->hold_empty_since >= TFP_HOLD_EMPTY_CAP) return "empty hands with no action flag for 1000 ms";
+  } else c->hold_empty = false;
   if (c->holding && timestamp - c->hold_started >= TFP_HOLD_CAP) return "the cap was reached (4000 ms)";
   return NULL;
 }
@@ -230,11 +240,12 @@ static bool manual_wait(TfpController *c, const char *reason) {
 }
 
 /* An exit of manual_update that an action alone can cause: held back when the hold allows it, taken as before otherwise. */
-static bool hold_or_wait(TfpController *c, double timestamp, const char *reason) {
-  const char *refusal = hold_refusal(c, timestamp);
+static bool hold_or_wait(TfpController *c, double timestamp, const TfpView *full, const char *reason) {
+  const char *refusal = hold_refusal(c, timestamp, full);
   if (refusal) {
     if (c->holding) hold_over(c, refusal);
     else if (*refusal) snprintf(c->hold_why, sizeof c->hold_why, "not held: %s", refusal);
+    c->hold_empty = false;
     return manual_wait(c, reason);
   }
   if (!c->holding) {
@@ -294,7 +305,7 @@ static bool manual_update(TfpController *c, double timestamp) { /* :364 */
     return manual_wait(c, "Local player or camera context changed");
   if (player->guard) c->guard_until = timestamp + TFP_GUARD_HOLD;
   if (!player->safe || (player->camera_kind != 4 && player->camera_kind != 6))
-    return hold_or_wait(c, timestamp, first(player->reason, "Gameplay action or camera owns the view"));
+    return hold_or_wait(c, timestamp, current.available ? &current : NULL, first(player->reason, "Gameplay action or camera owns the view"));
   if (current.available) {
     observe(c, &current);
     if (!publish_transition(c, &current, why, sizeof why)) return manual_wait(c, why);
@@ -311,7 +322,7 @@ static bool manual_update(TfpController *c, double timestamp) { /* :364 */
       current.camera_kind == 6 && (!current.record || !c->lease->request || current.record == c->lease->request)) {
     if (c->lease->cleanup_only) return tfp_controller_stop(c, "Pose helper entry requires cleanup");
     if (c->holding) { /* the same weapon, the same request, safe again: the lease simply goes on */
-      c->holding = false;
+      c->holding = c->hold_empty = false;
       c->hold_resumes++;
       snprintf(c->hold_why, sizeof c->hold_why, "resumed: safe again with the same weapon and request");
       report(c, "First person enabled; native view kept through an action");
@@ -343,7 +354,7 @@ static bool manual_update(TfpController *c, double timestamp) { /* :364 */
     if (!current.controller_active && stats.target_weight == 1 && stats.blend == 1) c->has_ads_return = false;
     return true;
   }
-  if (c->lease) return hold_or_wait(c, timestamp, "Native camera request or firearm changed");
+  if (c->lease) return hold_or_wait(c, timestamp, current.available ? &current : NULL, "Native camera request or firearm changed");
   c->phase = TFP_PHASE_WAITING;
   if (!current.available || !current.safe || current.camera_kind != 4 || current.aiming || current.controller_active ||
       timestamp < c->next_manual_entry || timestamp < c->guard_until) return true;

@@ -117,6 +117,7 @@ typedef struct TfpController {
   /* The action hold. Not in retail; all false / 0 unless tfp_controller_set_hold switched it on. */
   bool hold_enabled, holding;
   double hold_started;
+  bool hold_empty; double hold_empty_since; /* a hold with no action flag and nothing in the hands, and since when */
   unsigned holds, hold_resumes, hold_exits;
   char hold_why[160];                /* holding: the exit that is held back; else why the last hold ended or was not taken */
 } TfpController;
@@ -125,6 +126,7 @@ typedef struct TfpController {
 #define TFP_FIRST_ENTRY_DELAY 0.1    /* controller.lua:210 */
 #define TFP_ENTRY_SPACING 0.25       /* controller.lua:456 */
 #define TFP_HOLD_CAP 4.0             /* seconds a hold may last; not in retail */
+#define TFP_HOLD_EMPTY_CAP 1.0       /* seconds on end a hold may last with no action flag and empty hands; not in retail */
 
 void tfp_controller_init(TfpController *c, const TfpBackendApi *backend);
 bool tfp_controller_start(TfpController *c);                       /* F11 on */
@@ -149,6 +151,10 @@ int tfp_controller_status(const TfpController *c, char *out, size_t size);
  *   - the top camera request is kind 6 and is the lease's own record,
  *   - the avatar is not a ragdoll, not seated, not in full aim, and no other camera owns the view,
  *   - it is not the case that the player-level view is safe again with another weapon in the hands,
+ *   - it is not the case that the player-level view is safe (no action flag) while this update's full snapshot is
+ *     there and unsafe (the character is off the verified on-foot lifecycle: that is not an action's flag),
+ *   - the player-level view has not been safe with empty hands for TFP_HOLD_EMPTY_CAP on end (a dropped weapon;
+ *     a stim's middle is shorter),
  *   - the hold is younger than TFP_HOLD_CAP.
  * The lease resumes, with no exit and no entry, on the first update whose full snapshot is safe with the
  * lease's weapon identity, kind 6 and the lease's record. Anything else takes the exit of today. */

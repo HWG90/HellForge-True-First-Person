@@ -252,6 +252,44 @@ static bool hold_tests(unsigned *count) {
   H_CHECK(h_step(&c) && h_held(&c));
   ++*count;
 
+  name = "empty hands without an action flag: held for 1000 ms on end, then today's exit";
+  H_CHECK(h_begin(&c, true));
+  h_action();
+  hw.current = (TfpView){.available = false, .error = "Equip a firearm before starting the camera test"};
+  hw.hold.weapon = TFP_HOLD_WEAPON_NONE;
+  H_CHECK(h_step(&c) && h_held(&c));
+  h_safe(); /* a stim: the flags go for about 0.65 s with nothing in the hands */
+  H_CHECK(h_step(&c) && h_held(&c));
+  double emptied = hw.now;
+  hw.now = emptied + 0.65;
+  H_CHECK(tfp_controller_update(&c) && h_held(&c));
+  h_action(); /* the flags are back (the draw): the count starts again */
+  H_CHECK(h_step(&c) && h_held(&c));
+  h_safe();
+  H_CHECK(h_step(&c) && h_held(&c));
+  emptied = hw.now;
+  hw.now = emptied + 0.98;
+  H_CHECK(tfp_controller_update(&c) && h_held(&c));
+  hw.now = emptied + 1.0; /* a dropped weapon: nothing is coming */
+  H_CHECK(tfp_controller_update(&c) && h_left(&c) && c.hold_exits == 1 && strstr(c.hold_why, "empty hands"));
+  ++*count;
+
+  name = "the full snapshot is unsafe with no action flag (not the on-foot lifecycle): not held";
+  H_CHECK(h_begin(&c, true));
+  hw.current.safe = false, hw.current.reason = "Character is not in the verified on-foot lifecycle"; /* the player level stays safe */
+  H_CHECK(h_step(&c) && h_left(&c) && c.holds == 0 && strstr(c.hold_why, "not held") && strstr(c.hold_why, "no action flag"));
+  H_CHECK(!strcmp(c.label, "First person enabled; waiting: Character is not in the verified on-foot lifecycle"));
+  ++*count;
+
+  name = "a hold whose action flags end off the on-foot lifecycle ends there";
+  H_CHECK(h_begin(&c, true));
+  h_action();
+  H_CHECK(h_step(&c) && h_held(&c));
+  hw.player.safe = hw.hold.safe = true; /* the full snapshot stays unsafe */
+  hw.current.reason = "Character is not in the verified on-foot lifecycle";
+  H_CHECK(h_step(&c) && h_left(&c) && c.hold_exits == 1 && strstr(c.hold_why, "no action flag"));
+  ++*count;
+
   name = "resume: safe again with the same weapon and record, no exit and no entry";
   H_CHECK(h_begin(&c, true));
   h_action();
@@ -447,7 +485,7 @@ int main(int argc, char **argv) {
          per_call[CV_GET_PLACEMENT], per_call[CV_PLACEMENT_TARGET]);
   unsigned held = 0;
   if (!hold_tests(&held)) return 1;
-  printf("Controller, action hold (not in retail): %u scenarios: off as before, enter, empty hands, resume without exit, different weapon, "
-         "replaced record, kind, cap, six refusals, stop and suspension\n", held);
+  printf("Controller, action hold (not in retail): %u scenarios: off as before, enter, empty hands and their 1000 ms, not on foot, resume without exit, "
+         "different weapon, replaced record, kind, cap, six refusals, stop and suspension\n", held);
   return 0;
 }
