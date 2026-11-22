@@ -96,7 +96,11 @@ static bool test_save(void *user, TfpSettingsFile file, const char *text, size_t
   memcpy(saved_text, text, length); saved_text[length] = 0; saved_length = length;
   return true;
 }
-static const TfpSettingsDisk test_disk = {NULL, test_save, NULL};
+static TfpSettingsCopy test_copy(void *user, TfpSettingsFile file, const char *suffix, char *why, size_t why_size) { /* an empty folder */
+  (void)user; (void)file; (void)suffix; (void)why; (void)why_size;
+  return TFP_COPY_NONE;
+}
+static const TfpSettingsDisk test_disk = {NULL, test_save, test_copy};
 /* ---- a stand-in for MCM: the saved values, and what the binder asked of it ---- */
 static struct { const char *id; TfpMenuValue v; } mcm_values[40];
 static unsigned mcm_count, mcm_sets, mcm_labels, mcm_disables;
@@ -326,6 +330,8 @@ static struct DiskFile { char name[64]; char *text; size_t length; } disk_files[
 static unsigned disk_writes[2], disk_copies;
 static int disk_fail_write = -1, disk_fail_copy; /* the file whose write fails; copies fail */
 static const char *const disk_names[2] = {"settings.json", "locked_view.json"};
+static bool disk_unreadable[2];
+static const char *disk_beside;
 static struct DiskFile *disk_find(const char *name) {
   for (size_t i = 0; i < COUNT(disk_files); i++) if (disk_files[i].text && !strcmp(disk_files[i].name, name)) return &disk_files[i];
   return NULL;
@@ -341,6 +347,7 @@ static void disk_put(const char *name, const char *text, size_t length) {
 static void disk_clear(void) {
   for (size_t i = 0; i < COUNT(disk_files); i++) free(disk_files[i].text), disk_files[i].text = NULL;
   disk_writes[0] = disk_writes[1] = disk_copies = 0, disk_fail_write = -1, disk_fail_copy = 0;
+  disk_unreadable[0] = disk_unreadable[1] = false, disk_beside = NULL;
 }
 static const char *disk_text(const char *name) { struct DiskFile *f = disk_find(name); return f ? f->text : NULL; }
 static unsigned disk_count(void) { unsigned n = 0; for (size_t i = 0; i < COUNT(disk_files); i++) n += disk_files[i].text != NULL; return n; }
@@ -364,11 +371,14 @@ static TfpSettingsCopy disk_copy(void *user, TfpSettingsFile file, const char *s
   return TFP_COPY_DONE;
 }
 static const TfpSettingsDisk disk = {NULL, disk_write, disk_copy};
-/* A start of the mod on the test disk: settings.json and locked_view.json are read as src/mod_view.c reads them. */
+/* A start of the mod on the test disk: settings.json and locked_view.json are read as src/mod_view.c reads them.
+ * disk_unreadable: the file is there and gives no bytes at the start (it cannot be opened); for settings.json the
+ * file beside the DLL (disk_beside) is then the one bound, as read_settings falls through to it. */
 static bool start_on_disk(void) {
-  struct DiskFile *settings = disk_find("settings.json"), *locked = disk_find("locked_view.json");
+  struct DiskFile *settings = disk_unreadable[0] ? NULL : disk_find("settings.json"), *locked = disk_unreadable[1] ? NULL : disk_find("locked_view.json");
+  const char *text = settings ? settings->text : disk_beside;
   new_wire();
-  if (!tfp_wire_settings_bind(&wire, settings ? settings->text : NULL, settings ? settings->length : 0, "settings.json")) return false;
+  if (!tfp_wire_settings_bind(&wire, text, settings ? settings->length : text ? strlen(text) : 0, "settings.json")) return false;
   tfp_wire_settings_bind_locked(&wire, locked ? locked->text : NULL, locked ? locked->length : 0, "locked_view.json");
   tfp_wire_settings_disk(&wire, &disk, settings != NULL);
   return true;
@@ -624,6 +634,89 @@ static int compat_part(void) {
     CHECK(start_on_disk() && logged("no settings file") && tfp_wire_settings_menu_set(&wire, TFP_MENU_motion_strength, false, false, 135));
     tfp_wire_settings_save_frame(&wire);
     CHECK(disk_writes[0] == 1 && !disk_copies && disk_count() == 1 && !logged("Kept:"));
+    tfp_wire_settings_free(&wire);
+  }
+  { /* ---- a file that is there but gave no bytes at the start (it could not be opened) was never read: the first
+     * write of it first copies it to <name>.unread, so it is not replaced by what was loaded from elsewhere ---- */
+    static const char beside[] = "{\"format\":1,\"first_person\":{\"motion_scale\":0.5},\"menu\":{}}";
+    static const char locked_file[] = "{\"fov_degrees\": 77}";
+    disk_clear();
+    disk_put("settings.json", feel19_text, strlen(feel19_text));
+    disk_unreadable[0] = true, disk_beside = beside;
+    CHECK(start_on_disk() && !logged("Refused") && !logged("Converted"));
+    for (int k = 0; k < 3; k++) tfp_wire_settings_save_frame(&wire);
+    CHECK(!disk_writes[0] && !disk_writes[1] && !disk_copies && disk_count() == 1);                         /* no change: nothing touched */
+    CHECK(tfp_wire_settings_menu_set(&wire, TFP_MENU_motion_strength, false, false, 135));
+    tfp_wire_settings_save_frame(&wire);
+    CHECK(disk_writes[0] == 1 && disk_copies == 1 && disk_text("settings.json.unread") && !strcmp(disk_text("settings.json.unread"), feel19_text));
+    CHECK(strstr(disk_text("settings.json"), "\"motion_strength\": 135") && logged("Saved: settings"));
+    CHECK(logged("Kept: the settings.json that could not be opened at the start is now settings.json.unread"));
+    CHECK(tfp_wire_settings_menu_set(&wire, TFP_MENU_motion_strength, false, false, 140));
+    tfp_wire_settings_save_frame(&wire);
+    CHECK(disk_writes[0] == 2 && disk_copies == 1 && !strcmp(disk_text("settings.json.unread"), feel19_text)); /* once a session */
+    tfp_wire_settings_free(&wire);
+    /* the name is taken: never written over, the next free one is used */
+    disk_put("settings.json", "second", 6);
+    disk_writes[0] = disk_copies = 0;
+    CHECK(start_on_disk() && tfp_wire_settings_menu_set(&wire, TFP_MENU_motion_strength, false, false, 150));
+    tfp_wire_settings_save_frame(&wire);
+    CHECK(disk_writes[0] == 1 && !strcmp(disk_text("settings.json.unread"), feel19_text) && !strcmp(disk_text("settings.json.unread-2"), "second"));
+    tfp_wire_settings_free(&wire);
+    /* the copy cannot be made: the save fails and the file stays; the next change tries again */
+    disk_clear();
+    disk_put("settings.json", feel19_text, strlen(feel19_text));
+    disk_unreadable[0] = true, disk_beside = beside, disk_fail_copy = 1;
+    CHECK(start_on_disk() && tfp_wire_settings_menu_set(&wire, TFP_MENU_motion_strength, false, false, 135));
+    for (int k = 0; k < 3; k++) tfp_wire_settings_save_frame(&wire);
+    CHECK(!disk_writes[0] && disk_count() == 1 && !strcmp(disk_text("settings.json"), feel19_text) && tfp_wire_settings_unsaved(&wire));
+    CHECK(logged("Refused: settings were not saved: the settings.json that could not be opened at the start could not be copied to settings.json.unread first (access denied)"));
+    disk_fail_copy = 0;
+    CHECK(tfp_wire_settings_menu_set(&wire, TFP_MENU_motion_strength, false, false, 140));
+    tfp_wire_settings_save_frame(&wire);
+    CHECK(disk_writes[0] == 1 && !strcmp(disk_text("settings.json.unread"), feel19_text) && !tfp_wire_settings_unsaved(&wire));
+    tfp_wire_settings_free(&wire);
+    /* an unopened settings.json and no file beside the DLL either: the defaults, and still .unread before the save */
+    disk_clear();
+    disk_put("settings.json", feel19_text, strlen(feel19_text));
+    disk_unreadable[0] = true;
+    CHECK(start_on_disk() && tfp_wire_settings_menu_set(&wire, TFP_MENU_motion_strength, false, false, 135));
+    tfp_wire_settings_save_frame(&wire);
+    CHECK(disk_writes[0] == 1 && disk_copies == 1 && !strcmp(disk_text("settings.json.unread"), feel19_text) && !disk_text("settings.json.refused"));
+    tfp_wire_settings_free(&wire);
+    /* locked_view.json is there and could not be opened: a changed option does not replace it without a copy */
+    disk_clear();
+    disk_put("settings.json", feel19_text, strlen(feel19_text));
+    disk_put("locked_view.json", locked_file, sizeof locked_file - 1);
+    disk_unreadable[1] = true;
+    CHECK(start_on_disk() && !logged("Refused") && tfp_wire_settings_locked_set(&wire, TFP_LOCKED_fov_degrees, false, false, 90));
+    tfp_wire_settings_save_frame(&wire);
+    CHECK(disk_writes[1] == 1 && !disk_writes[0] && disk_copies == 1 && !strcmp(disk_text("locked_view.json.unread"), locked_file));
+    CHECK(strstr(disk_text("locked_view.json"), "\"fov_degrees\": 90") && logged("Kept: the locked_view.json that could not be opened at the start is now locked_view.json.unread"));
+    tfp_wire_settings_free(&wire);
+    /* the same while settings.json is converted at the start: the conversion's own write of locked_view.json copies it first */
+    disk_clear();
+    disk_put("settings.json", feel24_text, strlen(feel24_text));
+    disk_put("locked_view.json", locked_file, sizeof locked_file - 1);
+    disk_unreadable[1] = true;
+    CHECK(start_on_disk() && logged("Converted") && locked_as_feel24());
+    CHECK(!strcmp(disk_text("locked_view.json.unread"), locked_file) && strstr(disk_text("locked_view.json"), "\"fov_degrees\": 104"));
+    CHECK(!strcmp(disk_text("settings.json" TFP_SETTINGS_BEFORE_SPLIT), feel24_text) && !strstr(disk_text("settings.json"), "locked_view"));
+    tfp_wire_settings_free(&wire);
+    /* and when that copy cannot be made the conversion is refused with every file as it was */
+    disk_clear();
+    disk_put("settings.json", feel24_text, strlen(feel24_text));
+    disk_put("locked_view.json", locked_file, sizeof locked_file - 1);
+    disk_unreadable[1] = true, disk_fail_copy = 1;
+    CHECK(start_on_disk() && !logged("Converted") && logged("Refused: settings.json still holds the locked view's options"));
+    CHECK(disk_count() == 2 && !strcmp(disk_text("locked_view.json"), locked_file) && !strcmp(disk_text("settings.json"), feel24_text));
+    tfp_wire_settings_free(&wire);
+    /* no file there at all: nothing to copy, no line */
+    disk_clear();
+    disk_beside = beside;
+    CHECK(start_on_disk() && tfp_wire_settings_menu_set(&wire, TFP_MENU_motion_strength, false, false, 135) &&
+          tfp_wire_settings_locked_set(&wire, TFP_LOCKED_fov_degrees, false, false, 90));
+    tfp_wire_settings_save_frame(&wire);
+    CHECK(disk_writes[0] == 1 && disk_writes[1] == 1 && !disk_copies && disk_count() == 2 && !logged("Kept:"));
     tfp_wire_settings_free(&wire);
   }
   disk_clear();

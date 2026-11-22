@@ -95,7 +95,11 @@ static bool test_save(void *user, TfpSettingsFile file, const char *text, size_t
   memcpy(saved_text, text, length); saved_text[length] = 0; saved_length = length;
   return true;
 }
-static const TfpSettingsDisk test_disk = {NULL, test_save, NULL};
+static TfpSettingsCopy test_copy(void *user, TfpSettingsFile file, const char *suffix, char *why, size_t why_size) { /* an empty folder */
+  (void)user; (void)file; (void)suffix; (void)why; (void)why_size;
+  return TFP_COPY_NONE;
+}
+static const TfpSettingsDisk test_disk = {NULL, test_save, test_copy};
 #define STORE_PART
 static int store_part(void) {
   TfpSettings s;

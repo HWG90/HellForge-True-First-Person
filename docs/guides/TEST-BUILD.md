@@ -88,7 +88,8 @@ Your settings are in `%LOCALAPPDATA%\Goose\HellForge\TrueFirstPerson\`.
   options back into `settings.json`; this build converts it again on its next start.
 - **A file this build cannot read is never written over without a copy.** Before the first save it is
   copied to `settings.json.refused` (or `.refused-2` and so on; `locked_view.json.refused` for the other
-  file). The log says `Kept: ...` when that happens.
+  file). A file that is there but would not open at the start is copied to `settings.json.unread` in the
+  same way. The log says `Kept: ...` when either happens.
 
 ## Not checked yet
 

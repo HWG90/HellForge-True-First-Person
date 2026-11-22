@@ -107,7 +107,10 @@ static size_t read_file(const char *path, char *text, size_t size) {
   CloseHandle(file);
   return total;
 }
-/* 0: no file in either place. *user_file: the text is the user's own file (the one the saver replaces). */
+/* 0: no file in either place. *user_file: the text is the user's own file (the one the saver replaces). When it is
+ * false the user's file is either not there or gave no bytes (it did not open: another program holds it, or the read
+ * failed); the saver does not know which, so copy_user_file is asked before the first write (src/wire_settings.h:
+ * <name>.unread). The same holds for read_locked answering 0. */
 static size_t read_settings(char *where, size_t where_size, bool *user_file) {
   HMODULE self = NULL;
   char path[MAX_PATH + 32];

@@ -68,6 +68,11 @@ void tfp_wire_settings_bind_locked(TfpWire *w, const char *json, size_t length, 
  *   - a file that was REFUSED at load (the store runs on defaults, so a save would replace the user's values):
  *     before the session's first write of it, it is copied to <name>.refused (or .refused-2 .. .refused-9 when
  *     that name is taken; a taken name is never written over). The copy failing fails that save.
+ *   - a file of which NO BYTE was bound (tfp_wire_settings_disk's user_file is false, or tfp_wire_settings_bind_locked
+ *     got no bytes): usually it is not there, but it may be there and not have opened at the start (another program
+ *     holds it), and what is loaded is then not what it says. Before the session's first write of it, it is copied
+ *     to <name>.unread (.unread-2 .. .unread-9) by the same rule; `copy` answering TFP_COPY_NONE is the usual case
+ *     and the write goes on. A disk with no `copy` cannot tell, and no file is written to it.
  *   - a settings.json that still holds "locked_view" (written by 0.6.0-feel.20 to feel.24, which 0.6.0-feel.19
  *     and older refuse whole): see tfp_wire_settings_disk. */
 typedef enum TfpSettingsFile { TFP_SETTINGS_FILE, TFP_LOCKED_FILE } TfpSettingsFile;
