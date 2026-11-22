@@ -440,3 +440,22 @@ fixed with a test that failed first, then two reviewers over the fixes.
 
 In the game on feel.31: matrix 30 of 31 (vault 0.063 m against the 0.06 m limit), a forced death held at the head,
 aim, sprint into aim and swap back filmed and right, placements identical to the backup of 2026-11-23.
+
+### Stratagems on feel.31 (2026-11-22)
+
+The earlier "the menu does not open from test input" was the test's own fault, twice over: the menu opens on a
+tap of Ctrl (the binding triggers on press; holding does not open it), and the harness words `left` and `right`
+are the mouse buttons, so every code's "right" pressed aim and closed the list. The arrow keys now have their own
+names (`arrowup`, `arrowdown`, `arrowleft`, `arrowright`).
+
+Seen in the game, view on:
+
+- Opening the list: the put-away is shown (0.37 s in the native view), then the view is at the eyes with empty
+  hands. Closing it returns to the weapon. No frame left first person, largest camera step 0.012 to 0.037 m.
+- SOS Beacon entered (up, down, right, up) and thrown with the left button: the beacon lands ahead with its beam,
+  the weapon returns. 361 frames, 0 missed, largest step 0.037 m. Capture `work/captures/feel31-stratagem-throw.jpg`.
+- While the list is open and while the beacon is in hand, no hand and no beacon are in view: the same limit as a
+  grenade with empty hands. The left wrist display is seen only in the first frames of the put-away.
+
+Not seen: Resupply and Reinforce (both unavailable in this solo session), a support weapon or sentry call-in.
+

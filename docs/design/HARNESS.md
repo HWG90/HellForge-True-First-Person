@@ -93,7 +93,7 @@ With True First Person on, the view dropped to the head camera only for swaps, t
 The return still logs a camera cut of 0.08 to 0.40 m.
 - 2026-11-23: a real pointer through `/dev/uinput` (which works again after a reboot) reaches the compositor, but the
   harness has no reliable way to know where the game window is on a multi-monitor desktop: a first try clicked in
-  another application's window. Not kept. The NEST panel's rows, and stratagem codes, stay checks for a person; do not
+  another application's window. Not kept. The NEST panel's rows are driven with `press X Y`; stratagem codes with a tap of `ctrl` and `arrowup`/`arrowdown`/`arrowleft`/`arrowright` (plain `left`/`right` are the mouse buttons); do not
   drive the desktop pointer blind.
 - 2026-11-23: the NEST panel CAN be driven from inside the game's process: the host takes the pointer position from
   the click message itself (overlay-host `src/host.cpp`), so `press X Y` in a `drive.py` script posts

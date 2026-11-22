@@ -73,7 +73,13 @@ jumped more than 5 cm.
 - **Arms:** recorded moving with the body's arms in idle, walk, sprint, fire and aim; seen in captures on
   the rifle in sprint, reload and ammo check, and on the pistol.
 
+- **Stratagems (checked 2026-11-22):** opening and closing the list, entering a code and throwing an SOS Beacon
+  all stayed first person, 3.7 cm at most between two moments.
+
 ## Limits you will see
+
+- **Stratagem list and beacon in hand.** The view is from your character's head with nothing in your hands in
+  view; you do not see the beacon before you throw it.
 
 - **Grenade and stim with empty hands.** After the put-away the view is from your character's head and
   the arms are the character's own, so you see them when they pass in front of the eyes.
@@ -111,7 +117,8 @@ Your settings are in `%LOCALAPPDATA%\Goose\HellForge\TrueFirstPerson\`.
 
 ## Not checked yet
 
-Vehicles and emplacements, multiplayer, stratagem throws and call-ins, picking up items, terminals,
+Vehicles and emplacements, multiplayer, stratagems other than the SOS Beacon (Resupply, support weapons,
+sentries), picking up items, terminals,
 climbing ladders, the placement editor, weapons other than a rifle, a support weapon and a pistol.
 
 ## Reporting a problem
