@@ -202,18 +202,21 @@ int main() {
     CHECK(down.frames == 0 && down.refused == 0 && tfp_camera_lock_off_foot_body() == 0);
     g.end();
   }
-  // ---- 3. A head that is not where its neck is (more than 0.5 m apart, or on top of it) is not followed, lock or
+  // ---- 3. A head that is nowhere near its neck (more than 3 m apart) is not followed, lock or
   // not: refused with error 16 and the reason, and counted as a refused frame of a body that is down. ----
   {
     fresh(true);
     Game g; g.stand(0, 0, 0); g.alive(first);
     g.die();
     for (int i = 0; i < 4; ++i) { g.head(4.2f, 0, .3f); g.look(corpse_camera); g.hip(3.7f); g.frame(); CHECK(g.own && g.error == 0); }
-    for (int i = 0; i < 6; ++i) { g.head(4.2f, 0, .3f, i < 3 ? 2.0f : 0.0f); g.look(corpse_camera); g.hip(3.7f); g.frame(); CHECK(!g.own && g.error == 16); }
+    // Seen in the game 2026-11-23: a body torn by a grenade has its head off the neck (or exactly on it); it is this
+    // unit's own head and is followed. Only a head nowhere near the body (more than 3 m from its neck) is refused.
+    for (int i = 0; i < 6; ++i) { g.head(4.2f, 0, .3f, i < 3 ? 2.0f : 0.0f); g.look(corpse_camera); g.hip(3.7f); g.frame(); CHECK(g.own && g.error == 0); }
+    for (int i = 0; i < 6; ++i) { g.head(4.2f, 0, .3f, 5.0f); g.look(corpse_camera); g.hip(3.7f); g.frame(); CHECK(!g.own && g.error == 16); }
     TfpCameraLockStats lock{}; tfp_camera_lock_stats(&lock);
     CHECK(lock.missed == 6 && lock.missed_kind == 4 && lock.missed_error == 16 && lock.missed_why == TFP_CAMERA_WHY_NECK);
     TfpCameraDownStats down{}; tfp_camera_down_stats(&down);
-    CHECK(down.frames == 4 && down.refused == 6 && down.error == 16 && down.why == TFP_CAMERA_WHY_NECK);
+    CHECK(down.frames == 10 && down.refused == 6 && down.error == 16 && down.why == TFP_CAMERA_WHY_NECK);
     CHECK(std::strstr(tfp_camera_why_text(down.why), "neck") != nullptr);
     g.end();
   }

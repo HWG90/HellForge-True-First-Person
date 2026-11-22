@@ -169,6 +169,7 @@ typedef struct Policy {
   uint32_t weapon_key, native_weapon_key, stretch_key, stretch_key_frames, eye_glides;
   bool guard_only, guard_grace; double last_view_tick; uint32_t guard_grace_frames;
   bool hold_seated, seated_now, anchor_ads, native_full_ads, ads_gap_active; double ads_gap_started; uint32_t ads_gap_frames, ads_learned; double last_native_tick; uint32_t exit_holds;
+  float head_apart; /* beyond retail: head to neck on a body that is down, for the Dead line */
   bool lock_now, lock_off_foot; /* beyond retail: this frame is held by the camera lock; the body is not on foot */
   /* Beyond retail, lock frames: the avatar's ragdoll flag; the head is beyond walking range of the unit root; the
    * body is down (tfp_camera_down_stats); the animation chain was read this frame; which proof refused the frame. */
@@ -495,7 +496,11 @@ static bool points(Policy *p, float *root, float *head, float *root_basis, bool 
   if (!value(p->links + (uint64_t)p->head_node*4, link) || (link & 0xffff) != 1 || (link >> 16) >= p->count
       || !read(matrices + (uint64_t)(link >> 16)*L_MATRIX + L_MATRIX_POSITION, neck, 12) || !finite3(neck)) return false;
   const float apart = distance(head, neck);
-  if (!(apart >= .005f && apart <= .5f)) return false;
+  /* Seen in the game 2026-11-23 (a grenade in the hand): the head was refused here for the whole death, so the
+   * game's death camera showed. A body torn by an explosion has its head off the neck or on it exactly; both are
+   * still this unit's own head node in this unit's own world array. Refused only when it is nowhere near the body. */
+  p->head_apart = apart;
+  if (!(apart <= 3.0f) || !(p->head_distance <= 60.0f)) return false;
   p->why = TFP_CAMERA_WHY_NONE; return true;
 }
 /* Beyond retail, lock frames only. The avatar's ragdoll flag, and, for a body that is not on foot (on_foot() stored
