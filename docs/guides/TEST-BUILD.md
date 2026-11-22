@@ -25,6 +25,27 @@ DBF-MCM is no longer needed. The mod has its own panel.
   First person, Bob and sway, Locked view.
 - **Page Up** opens the weapon placement editor.
 
+## New: camera style (Stable or Bodycam)
+
+Not in a build yet. From playing 0.6.0-feel.39: the camera moved too much, and what was asked for was the bodycam
+look as a choice beside a steadier, traditional first-person camera.
+
+There is a new checkbox **Bodycam** on the Locked view tab, above the kick sliders. It changes at once, no restart.
+
+- **Off (Stable), the default now.** A steady first-person camera. Walking, strafing, crouching, reloading, a
+  grenade or a stim no longer turn the view at all. During a grenade, stim, melee or emote the camera follows your
+  head slowly, so the head's bobbing mostly stays out of the view; a crouch or going prone is still followed within
+  about a second. Being thrown or ragdolled still sways the view, at half the strength and slowly.
+- **On (Bodycam).** The camera as it was in 0.6.0-feel.39: the view moves with your head, takes kicks from your
+  body's movement and follows the head through actions.
+
+"View kick strength", "View kick limit" and "Camera damping" belong to Bodycam; they are greyed while it is off and
+keep their values. "View kick when thrown" works in both.
+
+To get the old behaviour back: tick **Bodycam**. Your slider values are still there.
+
+Tested outside the game only; I have not played it yet.
+
 ## Fixed in 0.6.0-feel.39
 
 From two more soak runs (random actions back to back, 557 actions on 0.6.0-feel.38 and feel.39):

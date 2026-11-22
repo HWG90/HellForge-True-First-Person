@@ -722,3 +722,59 @@ Left, both in that soak and not changed by this:
   `ease_accel` (0.178, 0.134, 0.053 m). Giving every restarted curve a length that allows for its speed fails two
   of the existing checks of a start at 3 m/s and was not kept.
 - 22:34:02.543: the wanted eye's own slowing (0.068 m) with 0.9 m carried; followed, as designed.
+
+### The camera style (2026-11-22): Stable or Bodycam (branch `style`, cut from `steps`; offline, not yet run in the game)
+
+The player, after playing feel.39: "Having the "bodycam" mode and a more stable traditional FPS camera would be
+optimal". Earlier the same day: "configurable dampening for the camera moves would be good too. They're very
+intense right now."
+
+So the lock gives one of two cameras, chosen by one option, `bodycam` (Locked view tab, a checkbox "Bodycam" directly
+above the kick sliders; live, read with the sliders once a second by `lock_note`).
+
+- **Bodycam** (on): what the code did until now, unchanged: the kick sliders and Camera damping as they are.
+- **Stable** (off, the default): the numbers below, which are all in `src/camera_damp.h` (`TFP_STABLE_*`,
+  `TfpCameraStyle`, `tfp_camera_style`); `tfp_kick_style_tuning` (`src/camera_lock.h`) and `lock_damp_eye` use them.
+
+| | Bodycam | Stable | why |
+|---|---|---|---|
+| kick on foot (and in the native view) | View kick strength, up to View kick limit | none (gain 0) | walking, strafing, crouching, a reload, a grenade or a stim are not something a traditional camera shows |
+| kick of a body thrown, down or off foot | View kick when thrown, up to 35 degrees | half of that slider, up to 35 degrees | being thrown should still be felt |
+| the kick's low-pass | Camera damping (60 %: 180 ms) | 250 ms | a sway, not a jolt |
+| head camera eye, low-pass | Camera damping (60 %: 180 ms) | 350 ms | the head's bobbing and jerks in an action mostly stay out of the view |
+| head camera eye, most lag | 0.10 m | 0.25 m | at 0.10 m the eye is pulled along by any larger movement; 0.25 m lets the slow filter work, and a crouch or going prone (0.5 m) is still followed |
+
+Everything else about the eye's damping is as it was: only the head's place against the root is filtered, the
+forward and up offset come from the fresh view, never in full aim, never on a body that is down or off foot, a
+carried lag is let go on 40 ms, the damped eye is handed to `last_relative`. The native view's eye is the game's in
+both styles. In Stable the three sliders that only Bodycam uses (kick strength, kick limit, camera damping) are
+drawn greyed with one line under the Bodycam row; "View kick when thrown" stays live. A `locked_view.json` without
+the member reads as off with no note and no `.newer` copy, like `camera_damping` before it. So an update from
+feel.39 changes the camera to Stable; ticking Bodycam gives the old one back with the saved slider values.
+
+Measured in the tests (not in the game):
+
+- A 20 degree nod of the head in one frame, 144 frames a second, sliders at their defaults
+  (`tests/camera_lock_test.c`): Bodycam on foot 3.21 degrees (0.256 in one frame), Bodycam thrown 6.42 (0.517);
+  Stable on foot exactly none, Stable thrown 2.78 (0.181). A thrown body that is on foot again: the 2.69 degrees
+  carried are let go by at most 0.074 a frame, on the same 250 ms.
+- Through the helper at 30 frames a second (`tests/camera_death_test.cpp` 6c): a thrown head, 28.6 degrees in one
+  frame: Bodycam 8.83 degrees (3.03 in one frame), Stable 3.81 (1.12). The same nod on foot: Bodycam turns the view
+  4.36 degrees in the ordinary camera and 1.53 in the native view, Stable 0.
+- The eye's filter alone (`tests/camera_damp_test.c`): a 0.05 m jerk of the head there and back within 100 ms moves
+  the eye 0.008 m in Stable (0.014 m in Bodycam at 60 %, 0.05 m undamped). A 0.5 m drop that stays: at most 0.25 m
+  behind, within 0.05 m after 570 ms, 0.008 m left at 1.2 s.
+- Through the helper (`tests/camera_smooth_test.cpp` 19), an action in the head camera (that jerk, then a second
+  of 0.02 m bobbing four times a second): Bodycam at 60 % moves the presented eye 0.0084 m at most, 0.039 m in all,
+  0.66 mm in one frame; Stable 0.0060 m, 0.022 m, 0.37 mm. The head camera's own 100 ms smoothing has already
+  widened the jerk before either style sees it, which is why the farthest point differs less than the filters
+  alone do. A 0.5 m drop in 150 ms: at most 0.31 m behind (0.25 m and that smoothing), within 0.05 m after 860 ms,
+  0.019 m at 1.2 s. 0.25 m carried when the body leaves 'on foot': 0.20 m in the first frame out, 0.002 m after
+  200 ms.
+
+Not as first asked: the 0.05 m jerk was to move the eye under 0.005 m. A first-order filter on 350 ms passes
+0.008 m of it; under 0.005 m needs about 650 ms, which follows a crouch to within 0.05 m only after about a second
+(0.039 m left at 1.2 s). The 350 ms were kept and the test holds what they give (under 0.010 m).
+
+Open: none of this has been seen in the game. Whether 350 ms reads as steady or as a camera on a string during a
+stim, and whether a Stable camera should take any kick from a landing, is for the next session played by hand.
