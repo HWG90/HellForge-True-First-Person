@@ -128,6 +128,9 @@ def events(script):
         elif word == "up":
             add(f"u {_code(rest[0])}")
             at += 0.03
+        elif word == "point":   # point X Y: the pointer to a pixel of the game's client area (menus)
+            add(f"p {int(rest[0])} {int(rest[1])}")
+            at += 0.1
         elif word == "look":
             for _ in range(10):
                 add(f"m {int(rest[0]) // 10} {int(rest[1]) // 10}")
