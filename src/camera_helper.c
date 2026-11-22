@@ -200,6 +200,7 @@ static TfpQ lock_carry = {0, 0, 0, 1}; static bool lock_was_held; static double 
  * not yet known to be down (a death that does not set the ragdoll flag, until the head is 3 m away). Policy lock. */
 static TfpQ lock_first = {0, 0, 0, 1}; static bool lock_first_known;
 static _Atomic uint64_t lock_down_frames, lock_down_refused, lock_off_foot_at;
+static _Atomic uint32_t lock_missed_apart; /* a float's bits: space_why */
 static _Atomic uint32_t lock_missed_why, lock_down_kind, lock_down_error, lock_down_why, lock_body_ragdoll, lock_body_off_foot, lock_off_foot_body;
 static _Atomic uint32_t lock_body_distance, lock_down_distance, lock_down_head[3]; /* floats as their bits */
 /* Beyond retail, and only in a frame the lock holds (policy.lock_now): the presented eye is kept continuous across
@@ -230,7 +231,7 @@ static struct { bool known; uint32_t mask, kind, weapon, key; double until; } sm
 #define TRACE_RING 128u
 #define TRACE_BEFORE 6u   /* frames before the edge that are written with it */
 #define TRACE_MS 500.0
-typedef struct TraceFrame { double tick; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; } TraceFrame;
+typedef struct TraceFrame { double tick; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease, root[3]; uint32_t what; } TraceFrame;
 static struct { TraceFrame frames[TRACE_RING]; uint64_t head, sent; double edge, until; float last[3]; double last_tick; bool last_known, open; } trace;
 /* The native eye is not remembered for its weapon while it is being moved about (set in the native view). */
 static float eye_watch[3]; static bool eye_watch_known; static double eye_unsettled_until;
@@ -582,6 +583,18 @@ static bool unparented(const Policy *p) {
       || !read(locals + (uint64_t)index*L_MATRIX + L_LOCAL_POSITION, a, 12)
       || !read(worlds + (uint64_t)index*L_MATRIX + L_MATRIX_POSITION, b, 12) || !finite3(a) || !finite3(b)) return false;
   return distance(a, b) <= .01f;
+}
+/* Beyond retail: which half of unparented() refused, for the lock's Missed line (error 15 is both). The same reads
+ * again, nothing else. `apart`: metres between the camera node's local and world position where both were read. */
+static uint32_t space_why(const Policy *p, float *apart) {
+  uint64_t parent = 0, g = 0, locals = 0, worlds = 0; uint32_t index = 0, count = 0; float a[3] = {0}, b[3] = {0};
+  *apart = 0;
+  if (value(p->camera_object + L_UNIT_PARENT, parent) && parent != 0) return TFP_CAMERA_WHY_LINKED;
+  if (pointer(p->c.camera + L_CAMERA_GRAPH, &g) && value(p->c.camera + L_CAMERA_NODE, index) && value(g + L_GRAPH_COUNT, count) && index < count
+      && pointer(g + L_GRAPH_LOCALS, &locals) && pointer(g + L_GRAPH_WORLDS, &worlds)
+      && read(locals + (uint64_t)index*L_MATRIX + L_LOCAL_POSITION, a, 12) && read(worlds + (uint64_t)index*L_MATRIX + L_MATRIX_POSITION, b, 12)
+      && finite3(a) && finite3(b)) *apart = distance(a, b);
+  return TFP_CAMERA_WHY_SPACE;
 }
 /* cpp:416-419 */
 static bool held_axes(TfpQ q, float *forward, float *up) {
@@ -972,7 +985,7 @@ static bool smooth_detect(const Policy *p, uint32_t kind, uint32_t source, doubl
 /* The eye about to be presented, in the world; `root`/`root_basis` are the body root's position and axis rows.
  * True: `shown` differs from `wanted` and is what to present. Always records the frame for the trace. */
 static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const float *root, const float *root_basis, const float *wanted, double tick, float *shown) {
-  float wanted_relative[3] = {0}, relative[3] = {0}, correction = 0;
+  float wanted_relative[3] = {0}, relative[3] = {0}, correction = 0; uint32_t what = 0;
   for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
     wanted_relative[axis] += (wanted[component]-root[component])*root_basis[axis*3+component];
   memcpy(shown, wanted, 12);
@@ -984,16 +997,21 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
      * left the eye behind the head for up to half a second. On foot the head-frame jump of a swap is still taken up,
      * and native frames are as before. smooth_detect is called first: it keeps the watch on every frame. */
     const bool detect = smooth_detect(p, kind, source, tick) && !p->lock_down && !(source == SMOOTH_HEAD && p->lock_off_foot);
-    correction = tfp_continuity_step(&smooth, wanted_relative, source == SMOOTH_REPEAT ? SMOOTH_NATIVE : source, detect, p->full_ads, tick, p->c.max_gap_ms, &smooth_tuning, relative);
+    const uint64_t jumps = smooth.jumps, edges = smooth.edges, reseats = smooth.reseats, restarts = smooth.restarts;
+    /* The eye in the world goes with it: the root re-seated by itself is not the eye jumping (camera_continuity.h). */
+    correction = tfp_continuity_step_in(&smooth, wanted_relative, wanted, root_basis, source == SMOOTH_REPEAT ? SMOOTH_NATIVE : source, detect, p->full_ads, tick,
+                                        p->c.max_gap_ms, &smooth_tuning, relative);
     if (correction > 1e-6f && tfp_finite3(relative)) for (unsigned component = 0; component < 3; ++component) { shown[component] = root[component];
       for (unsigned axis = 0; axis < 3; ++axis) shown[component] += relative[axis]*root_basis[axis*3+component]; }
     else correction = 0;
+    what = (detect ? TFP_CAMERA_TRACE_LOOKED : 0u) | (smooth.jumps != jumps ? TFP_CAMERA_TRACE_JUMP : 0u) | (smooth.edges != edges ? TFP_CAMERA_TRACE_EDGE : 0u)
+        | (smooth.reseats != reseats ? TFP_CAMERA_TRACE_ROOT : 0u) | (smooth.restarts != restarts ? TFP_CAMERA_TRACE_RESTART : 0u);
   }
   if (atomic_load_explicit(&trace_on, memory_order_relaxed)) {
     TraceFrame *row = &trace.frames[trace.head++ % TRACE_RING];
     row->tick = tick; row->kind = kind; row->source = source; memcpy(row->eye, shown, 12); memcpy(row->wanted, wanted, 12);
     row->step = trace.last_known && tick >= trace.last_tick && tick-trace.last_tick <= p->c.max_gap_ms ? distance(shown, trace.last) : 0;
-    row->correction = correction;
+    row->correction = correction; memcpy(row->root, root, 12); row->what = what;
     row->entry_ease = p->entry.ease.active && p->entry.ease.duration > 0 ? (float)fmin(1.0, fmax(0.0, (tick-p->entry.ease.started)/p->entry.ease.duration)) : 1;
     if (trace.head-trace.sent > TRACE_RING) trace.sent = trace.head-TRACE_RING;
   }
@@ -1241,6 +1259,9 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
             if (policy.lock_now) smooth_native(&policy, NULL, adjusted, kind, SMOOTH_REPEAT, tick, adjusted); /* the rig may stand still while the body moves on */
           }
           reset(&policy, true); error(SPACE_INVALID);
+          /* Not repeated: the frame is the game's own. Which of the two it was goes to the Missed line. */
+          if (policy.lock_now && !lock_shown) { float apart = 0; policy.why = space_why(&policy, &apart);
+            atomic_store_explicit(&lock_missed_apart, float_bits(apart), memory_order_relaxed); }
         }
         else if (!read((uint64_t)(uintptr_t)native, adjusted, 16) || !finite3(adjusted)
             || (held_view ? !held_axes(policy.seated_q, forward, up)
@@ -1684,6 +1705,7 @@ void tfp_camera_continuity_stats(TfpCameraContinuityStats *out) {
   if (!host.lock_exclusive) return; /* before the host is supplied there is nothing to report */
   policy_acquire();
   out->jumps = smooth.jumps; out->edges = smooth.edges; out->restarts = smooth.restarts; out->largest_m = smooth.largest; smooth.largest = 0;
+  out->reseats = smooth.reseats;
   policy_release();
 }
 void tfp_camera_trace_edge(void) {
@@ -1707,6 +1729,7 @@ uint32_t tfp_camera_trace_read(TfpCameraTraceRow *rows, uint32_t capacity) {
     row->ms = (float)(frame->tick-trace.edge); row->kind = frame->kind; row->source = frame->source;
     memcpy(row->eye, frame->eye, 12); memcpy(row->wanted, frame->wanted, 12);
     row->step = frame->step; row->correction = frame->correction; row->entry_ease = frame->entry_ease;
+    memcpy(row->root, frame->root, 12); row->what = frame->what;
   }
   policy_release();
   return count;
@@ -1716,6 +1739,7 @@ void tfp_camera_lock_stats(TfpCameraLockStats *out) {
   out->frames = atomic_load(&lock_frames); out->foreign_frames = atomic_load(&lock_foreign_frames); out->last_kind = atomic_load(&lock_last_kind);
   out->peak_kick_degrees = lock_peak; lock_peak = 0;
   out->missed = atomic_load(&lock_missed); out->missed_kind = atomic_load(&lock_missed_kind); out->missed_error = atomic_load(&lock_missed_error);
+  out->missed_apart = bits_float(atomic_load(&lock_missed_apart));
   out->missed_why = atomic_load(&lock_missed_why); out->off_foot = atomic_load(&lock_body_off_foot); out->ragdoll = atomic_load(&lock_body_ragdoll);
   out->head_distance = bits_float(atomic_load(&lock_body_distance));
 }
@@ -1740,13 +1764,16 @@ const char *tfp_camera_why_text(uint32_t why) {
     "the head is not 0.05 to 3 m from the unit root", "the head is beyond 3 m from the unit root and not at its neck",
     "the animation state changed during the frame", "the avatar, body or camera unit is no longer the armed one",
     "the camera request or the dispatch slot changed during the frame", "the body's node tables changed during the frame",
-    "the head or neck name changed during the frame", "the camera got a parent during the frame"};
+    "the head or neck name changed during the frame", "the camera got a parent during the frame",
+    "the ordinary camera's request with the camera linked to a parent, and no native view of the last frames to repeat",
+    "the camera has no parent but its local and world position are not the same point"};
   return why < sizeof text/sizeof *text ? text[why] : "unknown";
 }
 void tfp_camera_reset_for_tests(void) {
   atomic_store(&lock_on, 0); atomic_store(&smooth_on, 0); atomic_store(&trace_on, 0);
   atomic_store(&orphan_on, 0); atomic_store(&orphan_behind, 0); atomic_store(&orphan_frames, 0); atomic_store(&orphan_refused, 0);
   atomic_store(&lock_frames, 0); atomic_store(&view_frames, 0); atomic_store(&lock_foreign_frames, 0); atomic_store(&lock_missed, 0); atomic_store(&lock_missed_kind, 0); atomic_store(&lock_missed_error, 0);
+  atomic_store(&lock_missed_apart, 0);
   atomic_store(&lock_missed_why, 0); atomic_store(&lock_down_frames, 0); atomic_store(&lock_down_refused, 0); atomic_store(&lock_down_kind, 0);
   atomic_store(&lock_down_error, 0); atomic_store(&lock_down_why, 0); atomic_store(&lock_body_ragdoll, 0); atomic_store(&lock_body_off_foot, 0);
   atomic_store(&lock_off_foot_body, 0); atomic_store(&lock_off_foot_at, 0); atomic_store(&lock_body_distance, 0); atomic_store(&lock_down_distance, 0);

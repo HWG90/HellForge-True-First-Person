@@ -9,6 +9,22 @@
  *
  *  - Positions are in the body's frame (the body root's position and axes), so the body's own travel is not a
  *    jump and "the eye never moves faster than the body plus a bounded catch-up".
+ *  - The root itself can be re-seated in one frame with the eye going on as it went (seen in the game 2026-11-22: a
+ *    backwards dive's first frame, the root 0.6 m further on and the rig eye following a frame later). In the root's
+ *    frame alone that reads as the eye jumping, and "keeping the eye where it was against the root" threw it 0.7 m
+ *    in the world. So the caller also gives the eye's place in the world (tfp_continuity_step_in), which with the
+ *    eye in the root's frame gives the root itself. THE COMPARISON: the root's part of a step is how far the root is
+ *    off its own even course in this frame, seen at the eye: the eye in the root's frame as it is, less where the
+ *    same eye in the world would be in the frame of a root that had gone on as it went (its turning, last frame's,
+ *    and its speed averaged over 50 ms; the speed kept in the world, as a thrown body keeps it, or along the root's
+ *    own axes, as a body running in a turn keeps it, whichever fits the frame better). When a step is a jump in the root's frame, the
+ *    root's part of it is more than the measure, and the step without that part is smaller, only the step without
+ *    it is taken up; the rest is the root's. What is carried goes on as it was in the world (turned by as much as
+ *    the root is off its course). A root that runs and turns evenly has no part in anything, however fast: a jump
+ *    is then the eye re-seated, as without the world; a body moved with its camera (a respawn) is nothing, as before.
+ *    (Not the eye's speed in the world: that turns with the body, its average lags behind in a fast turn, and the
+ *    lag passed for the root's part, so that part of a genuine re-seat was shown at once: 0.26 m of step change for
+ *    0.17 m, the eye 0.8 m ahead of a root turning at 12 rad/s.)
  *  - A jump is a frame whose step differs from the wanted eye's own recent speed by more than
  *    max(pop_m, pop_accel * dt * dt). A change of source takes up any difference. Jumps within a source are looked
  *    for only where the caller says so (`detect`: the short time after something that can re-seat the rig); anywhere
@@ -16,7 +32,11 @@
  *    same direction, is the motion slowing down and is followed, not taken up. Jumps in a row are taken up for
  *    TFP_CONTINUITY_RUN_MS at most (a time, not a number of frames); then the new speed is believed, and the
  *    difference between the two speeds goes into the correction's curve, so the presented eye keeps its speed in
- *    that frame and gathers the new one along the curve.
+ *    that frame and gathers the new one along the curve. The new speed is what the run's last frames agree on
+ *    (TFP_CONTINUITY_SPEED_FRAMES at most, each axis by itself: tfp_continuity_believed), never one frame's step
+ *    alone: the frame the time runs out in can itself be a jump (seen in the game 2026-11-22: a rig eye going back
+ *    and forth by 0.19 m from frame to frame; the last flip, believed as 6 m/s, sent the presented eye off at that
+ *    speed while the rig stood). A flicker is no speed at any frame time; a motion that begins and goes on is.
  *  - The catch-up is a cubic with zero end speed whose length follows from the distance, so that its largest
  *    acceleration is ease_accel: sqrt(6 * distance / ease_accel), between min_ms and max_ms. A new jump during a
  *    catch-up starts the curve again from the correction's present value and speed.
@@ -31,6 +51,7 @@ typedef struct TfpContinuityTuning { float pop_m, pop_accel, ease_accel, min_ms,
 #define TFP_CONTINUITY_DEFAULT {.04f, 36.0f, 24.0f, 100.0f, 400.0f, 1.0f, 1.5f}
 #define TFP_CONTINUITY_RUN_MS 70.0   /* jumps in a row are taken up for this long without a change of source */
 #define TFP_CONTINUITY_QUIET_MS 80.0f
+#define TFP_CONTINUITY_SPEED_FRAMES 4u /* the frames looked at for the speed believed when a run's time is over */
 
 typedef struct TfpContinuity {
   bool known, active, moving; /* moving: the wanted eye's speed is known (a step has been seen since the start) */
@@ -38,15 +59,71 @@ typedef struct TfpContinuity {
   double tick, started, run_started; /* run_started: the first jump of the present run */
   float wanted[3], speed[3], shown[3];   /* last frame: the wanted eye, its smoothed speed (m/s), the presented eye */
   float from[3], from_speed[3], duration; /* the correction's curve: value and speed at `started`, length in ms */
+  float recent[TFP_CONTINUITY_SPEED_FRAMES][3]; uint32_t recent_at; /* the last frames' steps as speeds (m/s), a ring */
+  bool placed, coursed;                  /* last frame's root is known (tfp_continuity_step_in); so is its course */
+  float root[3], basis[9];               /* last frame: the root in the world and its axis rows */
+  float root_speed[3], root_along[3], spin[3]; /* the root's course: its speed in the world and along its own axes (m/s), its turning (rad/s, about its axes) */
+  bool tried;                            /* last frame the root was off its course: what it did then, should it prove a new course */
+  float tried_speed[3], tried_along[3], tried_spin[3];
   uint64_t jumps, edges, restarts;       /* taken up within a source; at a change of source; started again */
+  uint64_t reseats;                      /* frames in which the root alone was re-seated (nothing taken up) */
   float largest;                         /* the largest correction carried since the reader last cleared it */
 } TfpContinuity;
 
 static inline void tfp_continuity_reset(TfpContinuity *c) {
-  const uint64_t jumps = c->jumps, edges = c->edges, restarts = c->restarts; const float largest = c->largest;
-  memset(c, 0, sizeof *c); c->jumps = jumps; c->edges = edges; c->restarts = restarts; c->largest = largest;
+  const uint64_t jumps = c->jumps, edges = c->edges, restarts = c->restarts, reseats = c->reseats; const float largest = c->largest;
+  memset(c, 0, sizeof *c); c->jumps = jumps; c->edges = edges; c->restarts = restarts; c->reseats = reseats; c->largest = largest;
 }
 static inline float tfp_continuity_length(const float *v) { return sqrtf(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]); }
+/* `v` (along the root's old axes) along its new ones: `turn` is new axes times old axes transposed. */
+static inline void tfp_continuity_turn(const float *turn, float *v) {
+  const float old[3] = {v[0], v[1], v[2]};
+  for (unsigned a = 0; a < 3; ++a) v[a] = turn[a*3]*old[0]+turn[a*3+1]*old[1]+turn[a*3+2]*old[2];
+}
+/* The root from the eye in the world and in the root's frame (wanted = basis times (world - root)). */
+static inline void tfp_continuity_root(const float *wanted, const float *world, const float *basis, float *root) {
+  for (unsigned k = 0; k < 3; ++k) { root[k] = world[k]; for (unsigned a = 0; a < 3; ++a) root[k] -= wanted[a]*basis[a*3+k]; }
+}
+/* The root and its axis rows, kept for the next frame. NULL: not known. */
+static inline void tfp_continuity_place(TfpContinuity *c, const float *wanted, const float *world, const float *basis) {
+  c->placed = world != NULL;
+  if (!world) { c->coursed = false; return; }
+  tfp_continuity_root(wanted, world, basis, c->root);
+  for (unsigned i = 0; i < 9; ++i) c->basis[i] = basis[i];
+}
+/* A turn (new axes times old axes transposed) as the angle about each axis, and back. Half a circle has no axis
+ * here and counts as no turn; nothing turns that far in a frame on an even course. */
+static inline void tfp_continuity_angle(const float *turn, float *angle) {
+  const float s[3] = {(turn[7]-turn[5])/2, (turn[2]-turn[6])/2, (turn[3]-turn[1])/2};
+  const float sine = tfp_continuity_length(s), cosine = (turn[0]+turn[4]+turn[8]-1)/2;
+  const float scale = sine > 1e-6f ? atan2f(sine, cosine)/sine : 1;
+  for (unsigned i = 0; i < 3; ++i) angle[i] = isfinite(scale) ? s[i]*scale : 0;
+}
+static inline void tfp_continuity_turned(const float *angle, float *turn) {
+  const float size = tfp_continuity_length(angle);
+  for (unsigned i = 0; i < 9; ++i) turn[i] = i%4 ? 0.0f : 1.0f;
+  if (!(size > 1e-6f) || !isfinite(size)) return;
+  const float x = angle[0]/size, y = angle[1]/size, z = angle[2]/size, sine = sinf(size), rest = 1-cosf(size);
+  const float k[9] = {0, -z, y, z, 0, -x, -y, x, 0};
+  for (unsigned a = 0; a < 3; ++a) for (unsigned b = 0; b < 3; ++b) {
+    float squared = 0; for (unsigned m = 0; m < 3; ++m) squared += k[a*3+m]*k[m*3+b];
+    turn[a*3+b] += sine*k[a*3+b]+rest*squared;
+  }
+}
+/* The root's part of this frame's eye (in the root's frame) for one course: `spin`, and `speed` in the world or
+ * `along` the root's axes. `even`: the axis rows of the root on that course. Returns the part's length. */
+static inline float tfp_continuity_part(const TfpContinuity *c, const float *spin, const float *speed, bool along, const float *wanted,
+                                        const float *world, float dt, float *even, float *part) {
+  const float angle[3] = {spin[0]*dt, spin[1]*dt, spin[2]*dt};
+  float turn[9], root[3];
+  tfp_continuity_turned(angle, turn);
+  for (unsigned i = 0; i < 9; ++i) even[i] = 0;
+  for (unsigned a = 0; a < 3; ++a) for (unsigned b = 0; b < 3; ++b) for (unsigned k = 0; k < 3; ++k) even[a*3+k] += turn[a*3+b]*c->basis[b*3+k];
+  for (unsigned k = 0; k < 3; ++k) { root[k] = c->root[k];
+    if (along) for (unsigned a = 0; a < 3; ++a) root[k] += speed[a]*dt*even[a*3+k]; else root[k] += speed[k]*dt; }
+  for (unsigned a = 0; a < 3; ++a) { part[a] = wanted[a]; for (unsigned k = 0; k < 3; ++k) part[a] -= (world[k]-root[k])*even[a*3+k]; }
+  return tfp_continuity_length(part);
+}
 /* The correction and its speed at `tick`. */
 static inline void tfp_continuity_curve(const TfpContinuity *c, double tick, float *value, float *speed) {
   for (unsigned i = 0; i < 3; ++i) value[i] = speed[i] = 0;
@@ -64,19 +141,46 @@ static inline void tfp_continuity_begin(TfpContinuity *c, const float *value, co
   for (unsigned i = 0; i < 3; ++i) { c->from[i] = value[i]; c->from_speed[i] = speed[i]; }
   c->started = tick; c->duration = duration_ms; c->active = true;
 }
-/* One presented frame. `wanted`: the eye the helper would present, in the body's frame. `source`: which camera
+/* The speed believed along one axis when a run's time is over, from the last `count` frames' speeds (the run's and
+ * the present one).
+ *  - The frames that count are the newest and those before it for as long as none goes the other way from the one
+ *    after it. An eye that flickers between two places goes back in every frame: the newest stands alone, and one
+ *    frame's step is no speed (0). With two or three flips in the run the middle of all its frames was itself a flip
+ *    (35 to 70 ms a frame: 0.16 m in a frame while the wanted eye stood).
+ *  - Of two frames that agree, the slower; of three or four, the middle. A rig re-seated in the frame a motion
+ *    begins is one frame far off and the rest alike: the rest is the speed. (The run's way divided by its time
+ *    would take the re-seat for speed, and gives 2.7 m/s for an odd number of flips.)
+ *  Believing too little is the safe side: the next frame is then a jump again and the next run settles it. */
+static inline float tfp_continuity_believed(const TfpContinuity *c, unsigned axis, unsigned count) {
+  float sorted[TFP_CONTINUITY_SPEED_FRAMES] = {0}; unsigned agree = 0; float after = 0;
+  if (count > TFP_CONTINUITY_SPEED_FRAMES) count = TFP_CONTINUITY_SPEED_FRAMES;
+  for (unsigned i = 0; i < count; ++i) {
+    const float v = c->recent[(c->recent_at+TFP_CONTINUITY_SPEED_FRAMES-1-i)%TFP_CONTINUITY_SPEED_FRAMES][axis];
+    if (i && v*after < 0) break;
+    unsigned at = i; while (at > 0 && sorted[at-1] > v) { sorted[at] = sorted[at-1]; --at; }
+    sorted[at] = v; after = v; agree = i+1;
+  }
+  if (agree < 2) return 0;
+  if (agree == 2) return fabsf(sorted[0]) < fabsf(sorted[1]) ? sorted[0] : sorted[1];
+  return agree & 1 ? sorted[agree/2] : (sorted[agree/2-1]+sorted[agree/2])/2;
+}
+/* One presented frame. `wanted`: the eye the helper would present, in the body's frame. `world`, `basis`: the same
+ * eye in the world and the body root's axis rows (wanted = basis times (world - root)), or both NULL where the
+ * world is not known: the root is then taken to move evenly. `source`: which camera
  * gave it. `detect`: jumps within a source are looked for (the native view); false: only a change of source is
  * taken up (the head camera, whose eye turns about the head with the view). Returns the correction's length;
  * `out` is the eye to present. */
-static inline float tfp_continuity_step(TfpContinuity *c, const float *wanted, uint32_t source, bool detect, bool quiet, double tick,
-                                        uint32_t max_gap_ms, const TfpContinuityTuning *t, float *out) {
+static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted, const float *world, const float *basis, uint32_t source,
+                                           bool detect, bool quiet, double tick, uint32_t max_gap_ms, const TfpContinuityTuning *t, float *out) {
   for (unsigned i = 0; i < 3; ++i) out[i] = wanted[i];
+  if (!world || !basis || !tfp_finite3(world)) world = basis = NULL;
   if (!tfp_finite3(wanted) || !isfinite(tick)) { if (c->known) ++c->restarts; tfp_continuity_reset(c); return 0; }
   if (!c->known || tick < c->tick || tick-c->tick > max_gap_ms) {
     if (c->known) ++c->restarts;
     tfp_continuity_reset(c);
     c->known = true; c->tick = tick; c->source = source;
     for (unsigned i = 0; i < 3; ++i) c->wanted[i] = c->shown[i] = wanted[i];
+    tfp_continuity_place(c, wanted, world, basis);
     return 0;
   }
   float value[3], speed[3];
@@ -91,14 +195,50 @@ static inline float tfp_continuity_step(TfpContinuity *c, const float *wanted, u
   for (unsigned i = 0; i < 3; ++i) { step[i] = wanted[i]-c->wanted[i];
     /* The first step after a start gives the speed; it is not measured against a speed of nothing. */
     expected[i] = c->moving || edge ? c->speed[i]*dt : step[i]; difference[i] = step[i]-expected[i]; }
-  const float size = tfp_continuity_length(difference);
+  float size = tfp_continuity_length(difference);
+  const float measure = fmaxf(t->pop_m, t->pop_accel*dt*dt);
+  /* The root's part of the step (see THE COMPARISON above), in the root's present axes. */
+  float root[3] = {0}, moved[3] = {0}, turn[9] = {0}, part_size = 0; const bool placed = world && c->placed; bool reseated = false;
+  if (placed) {
+    tfp_continuity_root(wanted, world, basis, root);
+    for (unsigned a = 0; a < 3; ++a) for (unsigned b = 0; b < 3; ++b) for (unsigned k = 0; k < 3; ++k) turn[a*3+b] += basis[a*3+k]*c->basis[b*3+k];
+    for (unsigned a = 0; a < 3; ++a) for (unsigned k = 0; k < 3; ++k) moved[a] += (root[k]-c->root[k])*basis[a*3+k];
+  }
+  if (placed && c->coursed) {
+    /* The course that fits this frame best. One that the root took up only last frame, in a frame it was off its
+     * course, counts once it is kept: that was a new speed (a throw), not a re-seat, and it is the course from here. */
+    float even[9] = {0}, part[3] = {0}, rest[3], off[9] = {0}; unsigned best = 0;
+    for (unsigned course = 0; course < (c->tried ? 4u : 2u); ++course) {
+      float axes[9], its[3];
+      const float length = tfp_continuity_part(c, course < 2 ? c->spin : c->tried_spin, course == 0 ? c->root_speed : course == 1 ? c->root_along
+                                               : course == 2 ? c->tried_speed : c->tried_along, course & 1, wanted, world, dt, axes, its);
+      if (course && !(length < part_size)) continue;
+      part_size = length; best = course; memcpy(even, axes, sizeof even); memcpy(part, its, sizeof part);
+    }
+    if (best >= 2) for (unsigned i = 0; i < 3; ++i) { c->root_speed[i] = c->tried_speed[i]; c->root_along[i] = c->tried_along[i]; c->spin[i] = c->tried_spin[i]; }
+    for (unsigned i = 0; i < 3; ++i) rest[i] = difference[i]-part[i];
+    const float rest_size = tfp_continuity_length(rest);
+    if (!edge && c->moving && isfinite(rest_size) && size > measure && part_size > measure && rest_size < size) {
+      /* The root re-seated. What is carried, and the eye's speed, keep their direction in the world: they are
+       * turned by as much as the root's axes are off their even course. */
+      for (unsigned a = 0; a < 3; ++a) for (unsigned b = 0; b < 3; ++b) for (unsigned k = 0; k < 3; ++k) off[a*3+b] += basis[a*3+k]*even[b*3+k];
+      tfp_continuity_turn(off, c->from); tfp_continuity_turn(off, c->from_speed); tfp_continuity_turn(off, c->speed);
+      for (unsigned i = 0; i < TFP_CONTINUITY_SPEED_FRAMES; ++i) tfp_continuity_turn(off, c->recent[i]);
+      tfp_continuity_curve(c, tick, value, speed);
+      for (unsigned i = 0; i < 3; ++i) { expected[i] = c->speed[i]*dt; difference[i] = rest[i]; step[i] = expected[i]+rest[i]; }
+      size = rest_size; ++c->reseats; reseated = true;
+    }
+  }
   if (!isfinite(size) || size > t->teleport_m) { /* a real teleport: nothing is carried across it */
     ++c->restarts; tfp_continuity_reset(c);
     c->known = true; c->tick = tick; c->source = source;
     for (unsigned i = 0; i < 3; ++i) c->wanted[i] = c->shown[i] = wanted[i];
+    tfp_continuity_place(c, wanted, world, basis);
     return 0;
   }
-  const float limit = fmaxf(t->pop_m, t->pop_accel*dt*dt);
+  for (unsigned i = 0; i < 3; ++i) c->recent[c->recent_at%TFP_CONTINUITY_SPEED_FRAMES][i] = step[i]/dt;
+  c->recent_at = (c->recent_at+1)%TFP_CONTINUITY_SPEED_FRAMES;
+  const float limit = measure;
   const float along = step[0]*expected[0]+step[1]*expected[1]+step[2]*expected[2];
   const bool slowing = along >= 0 && tfp_continuity_length(step) < tfp_continuity_length(expected);
   const bool over = size > limit;
@@ -113,8 +253,10 @@ static inline float tfp_continuity_step(TfpContinuity *c, const float *wanted, u
     if (length > t->max_m) { for (unsigned i = 0; i < 3; ++i) next[i] *= t->max_m/length; length = t->max_m; }
     if (believe) {
       /* This frame is still taken up, so the presented eye goes on at the old speed; the wanted eye's speed is
-       * now the new one, and the difference of the two goes into the correction's curve. */
-      float fresh[3]; for (unsigned i = 0; i < 3; ++i) fresh[i] = step[i]/dt;
+       * now the new one, and the difference of the two goes into the correction's curve. The new one is what the
+       * run's frames and this one agree on (tfp_continuity_believed): a frame that is itself a jump does not pass
+       * for a speed. */
+      float fresh[3]; for (unsigned i = 0; i < 3; ++i) fresh[i] = tfp_continuity_believed(c, i, c->run+1);
       const float fast = tfp_continuity_length(fresh);
       if (fast > 8) for (unsigned i = 0; i < 3; ++i) fresh[i] *= 8/fast;
       for (unsigned i = 0; i < 3; ++i) { from_speed[i] += c->speed[i]-fresh[i]; c->speed[i] = fresh[i]; }
@@ -136,6 +278,20 @@ static inline float tfp_continuity_step(TfpContinuity *c, const float *wanted, u
     if (fast > 8) for (unsigned i = 0; i < 3; ++i) c->speed[i] *= 8/fast;
     if (quiet && c->active && c->started+c->duration-tick > TFP_CONTINUITY_QUIET_MS) tfp_continuity_begin(c, value, speed, tick, TFP_CONTINUITY_QUIET_MS);
   }
+  if (placed) {
+    /* The root's course. A root that is off it by more than the measure without the eye jumping against it has a
+     * new speed (the body thrown, a dive), believed at once. A root re-seated keeps the course it had; what it did
+     * in this frame is kept beside it, for the next frame to say whether it was a new course after all. */
+    float along[3], spin[3];
+    tfp_continuity_angle(turn, spin);
+    for (unsigned i = 0; i < 3; ++i) { along[i] = moved[i]/dt; spin[i] /= dt; }
+    float *const speed_to = reseated ? c->tried_speed : c->root_speed, *const along_to = reseated ? c->tried_along : c->root_along;
+    const float k = reseated || part_size > limit || !c->coursed ? 1 : 1-expf(-dt/.05f);
+    for (unsigned i = 0; i < 3; ++i) { speed_to[i] += ((root[i]-c->root[i])/dt-speed_to[i])*k; along_to[i] += (along[i]-along_to[i])*k;
+      (reseated ? c->tried_spin : c->spin)[i] = spin[i]; }
+    c->tried = reseated; c->coursed = true;
+  }
+  tfp_continuity_place(c, wanted, world, basis);
   c->moving = true;
   if (c->active && tick-c->started >= c->duration) c->active = false;
   const float carried = tfp_continuity_length(value);
@@ -143,5 +299,9 @@ static inline float tfp_continuity_step(TfpContinuity *c, const float *wanted, u
   for (unsigned i = 0; i < 3; ++i) { out[i] = wanted[i]+value[i]; c->wanted[i] = wanted[i]; c->shown[i] = out[i]; }
   c->tick = tick; c->source = source;
   return carried;
+}
+static inline float tfp_continuity_step(TfpContinuity *c, const float *wanted, uint32_t source, bool detect, bool quiet, double tick,
+                                        uint32_t max_gap_ms, const TfpContinuityTuning *t, float *out) {
+  return tfp_continuity_step_in(c, wanted, NULL, NULL, source, detect, quiet, tick, max_gap_ms, t, out);
 }
 #endif

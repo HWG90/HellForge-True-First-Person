@@ -388,9 +388,17 @@ static void trace_note(void) {
   static const char *const sources[] = {"-", "head", "native", "repeat"};
   for (uint32_t i = 0; i < count; i++) {
     const TfpCameraTraceRow *r = &rows[i];
-    say("Trace: t=%.1f kind=%u eye_world=(%.4f %.4f %.4f) step=%.4f wanted=(%.4f %.4f %.4f) correction=%.4f lease=0x%llx pose_armed=%d entry_ease=%.2f source=%s",
+    /* root: the body root the eye was measured against; looked: jumps within the camera were looked for; taken:
+     * what the continuity did with the frame (jump, edge: taken up; root: the root alone re-seated, nothing taken
+     * up; restart). Without the root a jump of the root cannot be told from a jump of the eye in these lines. */
+    char taken[40] = "";
+    snprintf(taken, sizeof taken, "%s%s%s%s", r->what & TFP_CAMERA_TRACE_JUMP ? "+jump" : "", r->what & TFP_CAMERA_TRACE_EDGE ? "+edge" : "",
+             r->what & TFP_CAMERA_TRACE_ROOT ? "+root" : "", r->what & TFP_CAMERA_TRACE_RESTART ? "+restart" : "");
+    say("Trace: t=%.1f kind=%u eye_world=(%.4f %.4f %.4f) step=%.4f wanted=(%.4f %.4f %.4f) correction=%.4f lease=0x%llx pose_armed=%d entry_ease=%.2f source=%s"
+        " root=(%.4f %.4f %.4f) looked=%d taken=%s",
         (double)r->ms, r->kind, (double)r->eye[0], (double)r->eye[1], (double)r->eye[2], (double)r->step, (double)r->wanted[0], (double)r->wanted[1],
-        (double)r->wanted[2], (double)r->correction, lease, (int)(pose.armed != 0), (double)r->entry_ease, sources[r->source < 4 ? r->source : 0]);
+        (double)r->wanted[2], (double)r->correction, lease, (int)(pose.armed != 0), (double)r->entry_ease, sources[r->source < 4 ? r->source : 0],
+        (double)r->root[0], (double)r->root[1], (double)r->root[2], (int)((r->what & TFP_CAMERA_TRACE_LOOKED) != 0), taken[0] ? taken + 1 : "-");
   }
 }
 #endif
@@ -872,6 +880,7 @@ static void lock_note(void) { /* once a second while the view is on: frames by c
       (unsigned long long)(s.missed - told_missed), missed ? s.missed_kind : 0, missed ? s.missed_error : 0, (double)s.peak_kick_degrees);
   if (s.last_kind != 6 && (s.off_foot || s.ragdoll) && s.frames != told_frames)
     say("Body: off foot %u, ragdoll flag %u, head %.2f m from its root (the last head-camera frame the lock held)", s.off_foot, s.ragdoll, (double)s.head_distance);
+  if (missed && s.missed_why == TFP_CAMERA_WHY_SPACE) say("Missed: the camera's local and world position were %.3f m apart (0: not read)", (double)s.missed_apart);
   if (missed) say("Missed: kind %u, helper error %u (%s); the body on the last frame held: off foot %u, ragdoll flag %u, head %.2f m from its root",
                   s.missed_kind, s.missed_error, tfp_camera_why_text(s.missed_why), s.off_foot, s.ragdoll, (double)s.head_distance);
   told_frames = s.frames; told_foreign = s.foreign_frames; told_missed = s.missed;
@@ -887,12 +896,13 @@ static void lock_note(void) { /* once a second while the view is on: frames by c
     told_down = d.frames; told_refused = d.refused;
   }
   if (smooth_wanted) {
-    static uint64_t told_jumps, told_edges;
+    static uint64_t told_jumps, told_edges, told_reseats;
     TfpCameraContinuityStats c; tfp_camera_continuity_stats(&c);
-    if (c.jumps != told_jumps || c.edges != told_edges)
-      say("Smooth: +%llu changes of camera and +%llu rig moves taken up, largest correction %.3f m (%llu restarts so far)",
-          (unsigned long long)(c.edges - told_edges), (unsigned long long)(c.jumps - told_jumps), (double)c.largest_m, (unsigned long long)c.restarts);
-    told_jumps = c.jumps; told_edges = c.edges;
+    if (c.jumps != told_jumps || c.edges != told_edges || c.reseats != told_reseats)
+      say("Smooth: +%llu changes of camera and +%llu rig moves taken up, +%llu moves of the body root alone set aside, largest correction %.3f m (%llu restarts so far)",
+          (unsigned long long)(c.edges - told_edges), (unsigned long long)(c.jumps - told_jumps), (unsigned long long)(c.reseats - told_reseats),
+          (double)c.largest_m, (unsigned long long)c.restarts);
+    told_jumps = c.jumps; told_edges = c.edges; told_reseats = c.reseats;
   }
 }
 static void fov_note(void) { /* once a second, on its own: the field-of-view lock also runs with the camera lock off, when lock_note has nothing to say */

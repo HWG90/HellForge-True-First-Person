@@ -146,9 +146,10 @@ void tfp_camera_set_lock(bool on, float gain, float max_degrees, float settle_ms
 /* missed: frames of the presented view that were neither the native view nor the head camera (0xffff: the
  * camera record was not ours), with the kind, the helper's error and the proof that failed (TFP_CAMERA_WHY_*) of
  * the last one. off_foot, ragdoll, head_distance: the body on the last head-camera frame the lock held (not in the
- * on-foot animation state; the avatar's ragdoll flag; metres from the unit root to the head). */
+ * on-foot animation state; the avatar's ragdoll flag; metres from the unit root to the head). missed_apart: for
+ * TFP_CAMERA_WHY_SPACE, metres between the camera node's local and world position (0: not read). */
 typedef struct TfpCameraLockStats { uint64_t frames, foreign_frames, missed; uint32_t last_kind, missed_kind, missed_error; float peak_kick_degrees;
-  uint32_t missed_why, off_foot, ragdoll; float head_distance; } TfpCameraLockStats;
+  uint32_t missed_why, off_foot, ragdoll; float head_distance, missed_apart; } TfpCameraLockStats;
 /* Counts since the start; the peak is the largest kick since the last call. */
 void tfp_camera_lock_stats(TfpCameraLockStats *out);
 /* Which proof of the head camera refused a frame (beside the error number, which retail shares between several). */
@@ -163,7 +164,9 @@ enum {
   TFP_CAMERA_WHY_REQUEST,    /* 7: the gate, the dispatch slot or the top camera request changed during the frame */
   TFP_CAMERA_WHY_HEADER,     /* 7: the body's node count or tables changed during the frame */
   TFP_CAMERA_WHY_NAMES,      /* 7: the head or neck name changed during the frame */
-  TFP_CAMERA_WHY_PARENT      /* 7: the camera got a parent during the frame */
+  TFP_CAMERA_WHY_PARENT,     /* 7: the camera got a parent during the frame */
+  TFP_CAMERA_WHY_LINKED,     /* 15: the ordinary camera's request, the camera linked to a parent, no native view to repeat */
+  TFP_CAMERA_WHY_SPACE       /* 15: no parent, but the camera's local and world position are over 0.01 m apart or unread */
 };
 const char *tfp_camera_why_text(uint32_t why);
 /* Beyond retail, lock frames only: the body is "down" when physics has it: the head is beyond walking range of the
@@ -208,13 +211,20 @@ void tfp_camera_set_orphan(bool on);
  * was, along the level view direction. */
 typedef struct TfpCameraOrphanStats { uint64_t frames, refused; float behind_m; } TfpCameraOrphanStats;
 void tfp_camera_orphan_stats(TfpCameraOrphanStats *out);
-typedef struct TfpCameraContinuityStats { uint64_t jumps, edges, restarts; float largest_m; } TfpCameraContinuityStats;
-/* Counts since the start; the largest correction carried since the last call. */
+typedef struct TfpCameraContinuityStats { uint64_t jumps, edges, restarts; float largest_m; uint64_t reseats; } TfpCameraContinuityStats;
+/* Counts since the start; the largest correction carried since the last call. reseats: frames in which the body
+ * root alone was re-seated (a jump in the root's frame with the eye going on evenly in the world; nothing taken up). */
 void tfp_camera_continuity_stats(TfpCameraContinuityStats *out);
 /* The trace: a State edge was just written. The presented frames of the next 500 ms, and the six before it that
  * were not yet handed out, are given to tfp_camera_trace_read (oldest first, each once). `ms` counts from the edge.
- * source: 1 head camera, 2 native view, 3 the last native argument repeated. */
-typedef struct TfpCameraTraceRow { float ms; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; } TfpCameraTraceRow;
+ * source: 1 head camera, 2 native view, 3 the last native argument repeated. root: the body root the eye was
+ * measured against. what: TFP_CAMERA_TRACE_* of the frame. */
+enum { TFP_CAMERA_TRACE_LOOKED = 1,  /* jumps within the camera were looked for */
+       TFP_CAMERA_TRACE_JUMP = 2,    /* a jump within the camera was taken up */
+       TFP_CAMERA_TRACE_EDGE = 4,    /* a change of camera was taken up */
+       TFP_CAMERA_TRACE_ROOT = 8,    /* the body root alone was re-seated: nothing taken up for it */
+       TFP_CAMERA_TRACE_RESTART = 16 /* the continuity started again (a teleport, a pause) */ };
+typedef struct TfpCameraTraceRow { float ms; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; float root[3]; uint32_t what; } TfpCameraTraceRow;
 void tfp_camera_trace_edge(void);
 uint32_t tfp_camera_trace_read(TfpCameraTraceRow *rows, uint32_t capacity);
 #endif
