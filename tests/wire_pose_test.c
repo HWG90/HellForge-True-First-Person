@@ -53,6 +53,16 @@ void pose_world_weapon(int present) {
   sync();
 }
 void pose_world_seated(int seated) { scene.flags[14] = seated ? 4 : 0; sync(); }
+/* Another first-person request of the same avatar, weapon and body pushed above the owned one (1), or taken off again (0).
+ * Nothing of the owned record changes: only the top of the ring is another record. */
+void pose_world_second_request(int pushed) {
+  const uint32_t header[4] = {6, AVATAR, WEAPON, BODY}, nothing[4] = {0, 0, 0, 0};
+  scene.ring[1] = static_cast<uint32_t>((scene.row + (pushed ? 2 : 1)) % 32);
+  sync();
+  World::put(W.request((scene.row + 1) % 32), pushed ? header : nothing);
+}
+/* One 32-bit field of the owned record's header, in place: 0 kind, 4 avatar, 8 weapon, 12 body. */
+void pose_world_request_field(unsigned at, uint32_t value) { std::memcpy(scene.request + at, &value, 4); sync(); }
 void pose_world_build(PoseWorld *out) {
   W.build(HERE);
   for (uint32_t i = 0; i < RIG_NODES; ++i) { scene.hashes[i] = 0x1000 + i; scene.links[i] = 0x10001; }
@@ -469,6 +479,8 @@ void pose_world_first_person(void);
 void pose_world_action(unsigned flags);
 void pose_world_weapon(int present);
 void pose_world_seated(int seated);
+void pose_world_second_request(int pushed);
+void pose_world_request_field(unsigned at, uint32_t value);
 static PoseWorld world;
 static int lock_depth[2], lock_faults;
 static unsigned forwarded_calls, getter_calls, cas_calls, input_only_calls;
@@ -718,6 +730,43 @@ static int real(void) {
   tfp_pose_position_from(world.rig_return, world.viewmodel, 5, (const float *)(uintptr_t)(world.request + 0x48), world.stack);
   CHECK(tfp_pose_hold_probe(&probe) && probe.armed == 0 && probe.error == TFP_POSE_OWNER_MISMATCH);
   H->finish(H->user, handle, &has_stats, &stats, &why);
+  /* The record's identity, one condition at a time while a lease is armed in hold mode and an action runs. In each
+   * scene exactly one thing differs from the owned record of the scenes above:
+   *   0: another kind-6 request of the same avatar, weapon and body is on top (only "top is the lease's record"),
+   *   1: the owned record's kind word says 4, in place,
+   *   2: the owned record's body field is another body. */
+  for (int scene_index = 0; scene_index < 3; scene_index++) {
+    pose_world_action(0);
+    pose_world_third_person();
+    CHECK(H->prepare(H->user, &c, &native, &why) == TFP_OPS_TRUE && H->begin(H->user, &c, native, &handle, &why) == TFP_OPS_TRUE);
+    pose_world_first_person();
+    game_frame(handle, &stats, 300);
+    pose_world_action(2);
+    game_frame(handle, &stats, 16);
+    CHECK(applied_is(.15, 0, -.12) && tfp_pose_hold_probe(&probe) && probe.hold == 1 && probe.armed == 1 && probe.error == 0);
+    if (scene_index == 0) pose_world_second_request(1);
+    else if (scene_index == 1) pose_world_request_field(0, 4);
+    else pose_world_request_field(12, world.body + 1);
+    game_frame(handle, &stats, 16);
+    CHECK(applied_is(0, 0, 0) && tfp_pose_hold_probe(&probe) && probe.armed == 0 && probe.error == TFP_POSE_OWNER_MISMATCH);
+    H->finish(H->user, handle, &has_stats, &stats, &why);
+    if (scene_index == 0) pose_world_second_request(0);
+  }
+  /* Hold mode is never the test of an entry: with it on, an entry during an action, or with the gun's unit gone, is
+   * refused exactly as with it off. */
+  for (int scene_index = 0; scene_index < 2; scene_index++) {
+    pose_world_action(0);
+    pose_world_third_person();
+    CHECK(tfp_pose_hold_probe(&probe) && probe.hold == 1);
+    CHECK(H->prepare(H->user, &c, &native, &why) == TFP_OPS_TRUE);
+    if (scene_index == 0) pose_world_action(2);
+    else pose_world_weapon(0);
+    handle = NULL;
+    CHECK(H->begin(H->user, &c, native, &handle, &why) != TFP_OPS_TRUE && !handle);
+    CHECK(tfp_pose_hold_probe(&probe) && probe.armed == 0 && probe.error == TFP_POSE_OWNER_MISMATCH);
+    for (int i = 0; i < 5; i++) CHECK(slot_now(i) == world.native[i]);
+    if (scene_index == 1) pose_world_weapon(1);
+  }
   /* and switched off again it is strict again */
   pose_world_action(0);
   pose_world_third_person();
