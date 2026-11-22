@@ -1042,6 +1042,18 @@ int main(int argc, char **argv) {
     CHECK(tfp_wire_settings_menu_set(&wire, TFP_MENU_show_torso, true, false, 0));
     tfp_wire_settings_save_frame(&wire);
     CHECK(saves == 4 && !tfp_wire_settings_unsaved(&wire));
+    { /* The menu's per-weapon drafts follow the weapon in the hands: that is the menu mirroring a profile, not a
+       * change of the user's (seen in the game 2026-11-23: settings.json was rewritten on every weapon swap). */
+      const double hip_before = tfp_settings_menu_number(tfp_wire_settings(&wire), TFP_MENU_weapon_near_hip_cm);
+      uint64_t mark = tfp_wire_settings_mirror_begin(&wire);
+      CHECK(tfp_wire_settings_menu_set(&wire, TFP_MENU_weapon_near_hip_cm, false, false, hip_before == 9 ? 8 : 9));
+      tfp_wire_settings_mirror_end(&wire, mark);
+      CHECK(!tfp_wire_settings_unsaved(&wire));
+      mark = tfp_wire_settings_mirror_begin(&wire);
+      CHECK(tfp_wire_settings_menu_set(&wire, TFP_MENU_weapon_near_hip_cm, false, false, hip_before));
+      tfp_wire_settings_mirror_end(&wire, mark);
+      CHECK(!tfp_wire_settings_unsaved(&wire) && saves == 4);
+    }
     tfp_wire_settings_free(&wire);
   }
   { /* ---- the menu on MCM (src/wire_menu.c) ---- */

@@ -410,7 +410,9 @@ void tfp_wire_menu_frame(TfpWire *w) {
   snprintf(m->drawn_key, sizeof m->drawn_key, "%s", key), snprintf(m->drawn_identity, sizeof m->drawn_identity, "%s", identity);
   snprintf(m->clip_key, sizeof m->clip_key, "%s", key), snprintf(m->clip_identity, sizeof m->clip_identity, "%s", identity);
   TfpMenuValue now, want = {TFP_MENU_VALUE_NUMBER, false, hip};
+  const uint64_t mark = tfp_wire_settings_mirror_begin(w); /* the drafts following the weapon are not a change to save */
   if (m->host.get(m->host.user, "weapon_near_hip_cm", &now) && now.number != hip) m->host.set(m->host.user, "weapon_near_hip_cm", &want);
   want.number = aim;
   if (m->host.get(m->host.user, "weapon_near_aim_cm", &now) && now.number != aim) m->host.set(m->host.user, "weapon_near_aim_cm", &want);
+  tfp_wire_settings_mirror_end(w, mark);
 }

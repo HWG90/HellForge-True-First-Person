@@ -102,6 +102,11 @@ typedef struct TfpSettingsDisk {
 void tfp_wire_settings_disk(TfpWire *w, const TfpSettingsDisk *disk, bool user_file);
 void tfp_wire_settings_save_frame(TfpWire *w);                                /* once per tick, after the runtime's update */
 bool tfp_wire_settings_unsaved(TfpWire *w);                                   /* a change a file does not hold */
+/* The menu mirroring a value into its own drafts (the per-weapon clipping following the weapon in the hands) is not
+ * a change to save. Around such writes: begin answers a mark, end takes the mark; what was written in between leaves
+ * nothing unsaved, unless something was already unsaved at the mark. */
+uint64_t tfp_wire_settings_mirror_begin(TfpWire *w);
+void tfp_wire_settings_mirror_end(TfpWire *w, uint64_t mark);
 /* A menu control's value (the MCM binder's changed callback). false: not bound, or the wrong kind. */
 bool tfp_wire_settings_menu_set(TfpWire *w, TfpSettingsMenuId id, bool is_bool, bool boolean, double number);
 

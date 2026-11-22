@@ -546,6 +546,18 @@ void tfp_wire_settings_disk(TfpWire *w, const TfpSettingsDisk *disk, bool user_f
              "this session uses the values as loaded, and the conversion is tried again at the next save or the next start", why);
   tfp_wire_say(w, line);
 }
+uint64_t tfp_wire_settings_mirror_begin(TfpWire *w) {
+  Settings *st = state(w);
+  return st ? revision(st, TFP_SETTINGS_FILE) : 0;
+}
+void tfp_wire_settings_mirror_end(TfpWire *w, uint64_t mark) {
+  Settings *st = state(w);
+  if (!st) return;
+  const uint64_t now = revision(st, TFP_SETTINGS_FILE);
+  /* Only when nothing was waiting at the mark: a user's change made before it is still written, mirror and all. */
+  if (now != mark && st->saved_revision[TFP_SETTINGS_FILE] == mark)
+    st->saved_revision[TFP_SETTINGS_FILE] = st->tried_revision[TFP_SETTINGS_FILE] = now;
+}
 bool tfp_wire_settings_unsaved(TfpWire *w) {
   Settings *st = state(w);
   return st && st->disk.write && (revision(st, TFP_SETTINGS_FILE) != st->saved_revision[TFP_SETTINGS_FILE] ||
