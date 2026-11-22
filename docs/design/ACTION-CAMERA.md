@@ -206,3 +206,111 @@ The backend adds, once each: `Hold: owned native camera exit acknowledged; the g
 10. The `Arms:` line's `binds N` across an action: it should not go up on the first frame of a swap or a throw.
 11. `not held:` reasons on a grenade and a stim. `the full snapshot is unsafe with no action flag` there would mean the action leaves the on-foot lifecycle while its flag is clear, and that rule cuts the hold short.
 12. A dropped weapon: `State: hold ended: empty hands with no action flag for 1000 ms`, one second after the drop.
+
+## 7. The smooth return (2026-11-22, branch `smooth-return`, 0.6.0-feel.23)
+
+Built offline; nothing of this section has run in the game.
+
+**What the feel.22 logs showed** (session `40649e3f`, `Hold:` lines per tick, three readers and a check of the code):
+
+- With the hold on, a swap from the primary to the secondary left the native view through a 100 ms "Cleanup pending"
+  that does not exist without the hold. The hold ended one tick after the gun left the rig; by then the wield row
+  held the other weapon, so neither the full nor the retiring snapshot could be had and retail's path for a destroyed
+  weapon waited four polls before it called the game's exit. In those frames the game's first-person camera, with no
+  gun, went back 0.39 m and then 0.216 m (the same retreat that showed the helmet from behind in the first hold
+  version). That is the 0.31 m "after leaving".
+- The retreated eye was recorded as the primary's remembered eye. On the next swap to the primary the head camera
+  glided 0.33 m the wrong way and the 140 ms eased entry had 0.66 m to cover (steps of 0.10 / 0.22 / 0.25 / 0.19 m at
+  30 frames a second). That is the 0.15 m "on entering". Where the exit was acknowledged at once, the hold cost
+  nothing (0.008 to 0.048 m).
+- The rig eye itself steps in one frame, with the pose helper armed: 0.07 m (pistol) or 0.22 to 0.36 m (rifle) two
+  frames after an action begins, and 0.10 m then 0.216 m when a stim's gun goes to the body. No `Cut:` line sees
+  these (there is no lease edge). They are the game's, not the pose helper's.
+- A one-frame change of the game's request: the frame in between repeats the last native argument on a rig that
+  stands still, no head-camera frame is made, so no eased entry begins and the new request's rig eye is shown raw.
+- A stim's end: the native eye is not recorded under mask 0x40, so the eye hold cannot start and one frame shows the
+  bare head eye (0.19 to 0.28 m), then the native view returns 0.42 to 0.50 m away.
+- The `Entry:` line subtracted a world point from the camera unit's world matrix on the second native frame, which
+  at that moment is the rig's transform applied to a world-valued local position: it printed the player's distance
+  from the world origin (9.8, 19.7, 36 m).
+- The camera call sees this frame's rig: on both slow exits the first head-camera frame stood exactly at the rig eye
+  of the last native frame, not at the one before it. So a correction computed in the hook from the rig eye's world
+  transform is applied to the frame it was computed for.
+
+**What changed.**
+
+1. *The exit at the hold's end* (`src/backend_ops.c` `tfp_ops_release`, `release_held`; `src/wire_rt.c`
+   `api_hold_view`). With the hold switch on, a lease whose own record is still the top request and for which no full
+   or retiring snapshot can be had gets the game's exit on the first poll, proven by the player's snapshot (the same
+   proof and the same call retail makes four polls later; mask 64 still waits). And the gun is probed on the
+   controller's own tick, so the hold ends on the tick the gun leaves the rig, not the next. Log:
+   `Hold: owned native camera exit acknowledged at once, on the player's snapshot (no full snapshot during the action)`.
+2. *Eye continuity* (`src/camera_continuity.h`, `src/camera_helper.c` `smooth_present` / `smooth_native`). In every
+   frame the camera lock holds, the eye about to be presented is compared, in the body root's frame, with where the
+   presented eye was going. A change of camera (head camera, native view, the repeated native argument) takes up any
+   difference; within the native view a one-frame step larger than max(0.06 m, 60 m/s² · dt²) beyond the eye's own
+   recent speed is taken up (three in a row at most; a step that is the motion slowing down is followed). What is
+   taken up is carried as a correction of at most 1 m and eased out on a cubic whose length follows from the distance
+   (largest acceleration 24 m/s², 100 to 400 ms). More than 1.5 m, a pause longer than the helper's frame gap, F11,
+   and the lock going off start again with nothing carried. In full aim nothing is taken up and what is carried ends
+   within 80 ms. In the native view the argument is parent-local: the corrected eye goes back through the rig eye's
+   world transform (the sample `ease_native_entry` uses; read here when the retail sample refuses the frame, as under
+   a stim's mask). Within the head camera only changes of camera are taken up: its eye turns about the head with the
+   view, and a fast look is not a jump.
+   Why a filter at the output and not only the causes: the rig steps and the request changes are the game's and
+   cannot be prevented from the mod, the same mechanism covers the stim and the one-frame request, and during a hold
+   the arm drive places the arms from the body's world matrices, so an eye that stays in the world keeps the arms
+   still too. The causes that were the mod's own (the slow exit, the wrong memory) are fixed as well, so the filter
+   has nothing large to hide after a swap.
+3. *The remembered eye* (`src/camera_helper.c`). Under the lock, a native eye that moved 5 cm in a frame is not
+   stored as its weapon's eye for 200 ms; the eye hold of that exit still starts from it.
+4. *The trace* (`tfp_camera_trace_edge` / `tfp_camera_trace_read`, `src/mod_view.c` `trace_note`). For the 0.5 s
+   after each State edge (native view entered or left, hold begun or ended) and the six frames before it:
+   `Trace: t=<ms from the edge> kind=<top request> eye_world=(x y z) step=<m> wanted=(x y z) correction=<m> lease=<record> pose_armed=<0/1> entry_ease=<0..1> source=<head|native|repeat>`
+   one line per camera call, from the helper's own record of what it presented. `tools/harness/trace.py` reads them.
+5. *Lines.* `Smooth: +N changes of camera and +M rig moves taken up, largest correction X m` once a second when
+   either count rose. `Entry: the native view's eye was X m (level, up) from the head camera's last eye on its first frame`:
+   the rig eye of the first native frame against the head camera's last eye, both in the world.
+
+**Switches.** Everything in 2 to 4 runs only in frames the camera lock holds (`lock_off.txt`, or the Locked view
+tab's toggle, switches it all off). `smooth_off.txt` beside the DLL: no continuity (the trace still records, with
+`correction=0`). `trace_off.txt`: no `Trace:` lines and no frame ring. 1 runs only with `hold_lease.txt`.
+
+**Why off is retail.** Without the lock `policy.lock_now` is false on every frame and none of the new code in the hook
+is reached: no memory read, no changed argument (`tests/run-camera-smooth.sh` compares forwarded bytes and read
+counts frame for frame with the switches on and off; `tests/run-native.sh` compares the helper with retail's source
+call for call). Without `hold_lease.txt` the release path and the hold view are not reached
+(`tests/run-vectors-backend-ops.sh`: retail still waits its four polls).
+
+**A stim.** Not treated on its own. The game keeps kind 6 for about 0.85 s and refuses the exit (mask 64), as in
+retail, and the mod still waits for it. What the three readers agreed on is covered by 2: the two rig steps at its
+start are taken up in the native view (the helper reads the rig under that mask now, for this only), the head-camera
+frame at its end continues from the presented eye, and the return to the weapon is one glide. Keeping the pose helper
+armed while the release waits was proposed by one reader and not built: the rig steps come with the helper armed too.
+
+**Not changed.** The eased entry (140 ms) and the eye hold and glide are as they were; the continuity sits after
+them. The swap glide still starts with 38 % of its distance in its first frame (retail's one-pole step); it is not a
+change of camera and is left as it is. The pose helper's draw animation restarts on every new lease, the one-frame
+request change included (the weapon dips 0.35 m and returns over 220 ms); no camera number sees it.
+
+**What the first run must check** (`hold_lease.txt` and `arms_live.txt` there; `tools/harness/matrix.py`, then
+`tools/harness/trace.py`):
+
+1. Swap to the secondary and back, three times each: no `Cleanup pending` status after `State: hold ended`; the new
+   `Hold: ... acknowledged at once` line; `Cut:` 0.05 m or less both ways; `trace.py` says no pop.
+2. `Trace:` rows across each edge: `step` continuous, `correction` rising at the edge and falling to 0 within 0.4 s,
+   `wanted` jumping where `eye_world` does not. A `correction` that rises one frame *after* `wanted` jumped, with
+   `eye_world` jumping out and back, would mean the camera call does not see this frame's rig after all: then
+   `smooth_off.txt` and say so.
+3. The `Smooth:` line while only looking around, sprinting, firing and aiming: rig moves taken up should be 0 or
+   rare there. Many would mean the limit (0.06 m in a frame) is inside ordinary motion.
+4. The view model during a correction in the native view: the camera is off the rig's eye by `correction` for up
+   to 0.4 s, so without the arm drive the weapon is seen from that far off and glides into place. With the arm drive
+   and a hold the arms are the body's and should stand still.
+5. Full aim right after a swap: the sights on the eye within 80 ms.
+6. The stim: `Cut:` both ways, and what the 0.3 m glide at its start and the glide back look like.
+7. A sprint start or a dive that changes the game's request for one frame: the `Cut:` after entering, and the trace
+   rows with `source=repeat`.
+8. `Entry:` distances of centimetres, not metres.
+9. The frame rate: the harness ran at 30 frames a second; every `Cut:` number of an ease scales with the frame
+   time squared, a pop does not.

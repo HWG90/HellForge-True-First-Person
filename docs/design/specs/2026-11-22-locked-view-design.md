@@ -155,3 +155,18 @@ Three sessions. In the last, 32 phases:
   entry covering more distance is not known: it has to be seen in motion.
 - **Not built:** the mirrored lowering term in the pose helper, arms through the empty-handed part of a grenade or
   stim on the rig (there the body's own arms are shown from the head), a menu option for the arm drive and the hold.
+
+## The smooth return, 2026-11-22 late (0.6.0-feel.23, branch `smooth-return`; offline, not yet run in the game)
+
+- **Why the hold cost 0.31 / 0.15 m:** its exit waited four polls after the gun had left (the game's camera went back
+  0.6 m in them), and that eye was remembered for the weapon, so the next return had 0.66 m to cover. With an exit
+  acknowledged at once the hold measured 0.008 to 0.048 m in the same session.
+- **Built:** the exit on the tick the gun leaves the rig; under the camera lock, continuity of the presented eye
+  across every change of camera and every one-frame move of the rig (a correction of at most 1 m, eased out over 100
+  to 400 ms, nothing in full aim, restart beyond 1.5 m); a per-frame `Trace:` for 0.5 s after each State edge; the
+  `Entry:` line in one space. Switches `smooth_off.txt`, `trace_off.txt`. [ACTION-CAMERA.md](../ACTION-CAMERA.md)
+  section 7 has the mechanism, the reasons and the list for the first run.
+- **Offline:** `tests/run-camera-continuity.sh` (the arithmetic), `tests/run-camera-smooth.sh` (through the camera
+  helper on the fake game memory: the rig steps of the feel.22 session, a stim's mask, the one-frame request, a
+  teleport, full aim, the trace, and no difference without the lock), `tests/run-vectors-backend-ops.sh` (the exit at
+  once; retail's four polls with the switch off).
