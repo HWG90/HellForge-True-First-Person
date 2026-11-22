@@ -183,14 +183,15 @@ int main(void) {
   for (int i = 0; i < 10; ++i) frame(&r, .18f, 0, 1.6f, HEAD, false, false, 33.3f);
   frame(&r, .18f*cosf(.6f), .18f*sinf(.6f), 1.6f, HEAD, false, false, 33.3f);
   CHECK(r.correction == 0 && r.c.jumps == 0);
-  /* Farther than 1.5 m is a real teleport: shown at once, nothing carried. More than 1 m is not carried in full. */
+  /* Farther than 2.5 m is a real teleport: shown at once, nothing carried. More than 1.6 m is not carried in full.
+   * (1.5 m and 1.0 m until 0.6.0-feel.39: a change of camera in a sprint is 1.2 m and was cut at 1.0.) */
   start(&r);
   for (int i = 0; i < 5; ++i) frame(&r, 0, 0, 0, NATIVE, true, false, 33.3f);
-  frame(&r, 2, 0, 0, NATIVE, true, false, 33.3f);
-  CHECK(r.correction == 0 && r.shown[0] == 2 && r.c.restarts == 1);
-  frame(&r, 2, 0, 0, HEAD, false, false, 33.3f);
-  frame(&r, 2, 1.3f, 0, NATIVE, true, false, 33.3f);
-  CHECK(fabsf(r.correction-1) < 1e-4f && fabsf(r.shown[1]-.3f) < 1e-4f);
+  frame(&r, 3, 0, 0, NATIVE, true, false, 33.3f);
+  CHECK(r.correction == 0 && r.shown[0] == 3 && r.c.restarts == 1);
+  frame(&r, 3, 0, 0, HEAD, false, false, 33.3f);
+  frame(&r, 3, 1.9f, 0, NATIVE, true, false, 33.3f);
+  CHECK(fabsf(r.correction-1.6f) < 1e-4f && fabsf(r.shown[1]-.3f) < 1e-4f);
   /* A pause longer than the helper's frame gap, and a value that is not finite: started again. */
   start(&r);
   for (int i = 0; i < 5; ++i) frame(&r, 0, 0, 0, NATIVE, true, false, 33.3f);
@@ -470,6 +471,20 @@ int main(void) {
     CHECK(w.correction == 0 && w.c.reseats == 1);
     eye[1] -= .1f; root[1] -= .1f; walk(&w, eye, root, 0, NATIVE, true, 33.3f);
     CHECK(w.correction == 0 && w.c.jumps == 0);
+  }
+  /* A change of camera while sprinting (seen in the third soak of 2026-11-22: a swap in a sprint, the head camera's
+   * eye 0.87 m ahead of the root and the rig's 0.29 m behind it): 1.17 m between the two eyes. All of it is carried
+   * and eased; with a limit of 1.0 m the 0.17 m over it was shown at once and the eye stood still in the world for
+   * that frame (0.162 m a frame before it, 0.009 m in it, 0.247 m after). */
+  {
+    TfpContinuity c; tfp_continuity_reset(&c);
+    float out[3], eye[3] = {.15f, .87f, .70f};
+    double tick = 1000;
+    for (int i = 0; i < 20; ++i) { tfp_continuity_step(&c, eye, 1, false, false, tick, 100, &T, out); tick += 33.3; }
+    const float rig[3] = {-.06f, -.28f, .78f};
+    const float carried = tfp_continuity_step(&c, rig, 2, true, false, tick, 100, &T, out);
+    CHECK(fabsf(out[0]-eye[0]) < .005f && fabsf(out[1]-eye[1]) < .005f && fabsf(out[2]-eye[2]) < .005f);
+    CHECK(carried > 1.15f && carried < 1.19f);
   }
   printf("camera continuity: %d checks, %d failed\n", checks, failed);
   return failed != 0;

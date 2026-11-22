@@ -48,7 +48,7 @@
 #include "camera_math.h"
 
 typedef struct TfpContinuityTuning { float pop_m, pop_accel, ease_accel, min_ms, max_ms, max_m, teleport_m; } TfpContinuityTuning;
-#define TFP_CONTINUITY_DEFAULT {.04f, 36.0f, 24.0f, 100.0f, 400.0f, 1.0f, 1.5f}
+#define TFP_CONTINUITY_DEFAULT {.04f, 36.0f, 24.0f, 100.0f, 400.0f, 1.6f, 2.5f} /* max_m 1.0 and teleport_m 1.5 until 0.6.0-feel.39: a change of camera in a sprint is 1.2 m */
 #define TFP_CONTINUITY_RUN_MS 70.0   /* jumps in a row are taken up for this long without a change of source */
 #define TFP_CONTINUITY_QUIET_MS 80.0f
 #define TFP_CONTINUITY_SPEED_FRAMES 4u /* the frames looked at for the speed believed when a run's time is over */
