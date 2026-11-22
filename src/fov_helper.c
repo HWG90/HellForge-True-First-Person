@@ -7,6 +7,7 @@
  * and expression is retail's. "cpp:a-b" above a function is its line range in
  * the retail file. What differs is in docs/translation/FOV-HELPER-TRANSLATION.md. */
 #include "fov_helper.h"
+#include "fov_lock.h"
 #include <math.h>
 #include <stdatomic.h>
 #include <string.h>
@@ -604,22 +605,21 @@ static bool hook_exit_request(const Policy *p) {
 /* Beyond retail (tfp_fov_set_lock): one field of view for every frame of the view, whatever the weapon, action or
  * camera. 0 switches it off, and then nothing here runs. The value glides (80 ms) so switching it never pops. */
 static volatile float lock_radians, lock_seen_native, lock_shown; static volatile uint32_t lock_zoom; static _Atomic uint64_t lock_camera, lock_applied;
-static double lock_at; static volatile double lock_clock; /* milliseconds, as the binder last gave them */
+static TfpFovLock lock_state; static volatile double lock_clock; /* milliseconds, as the binder last gave them */
 void tfp_fov_set_lock(float radians, bool zoom_when_aiming, double now_ms) { lock_clock = now_ms; lock_zoom = zoom_when_aiming ? 1u : 0u; lock_radians = radians > .05f && radians < 3.0f ? radians : 0; }
 void tfp_fov_lock_stats(TfpFovLockStats *out) {
   if (!out) return;
   out->applied = atomic_load(&lock_applied); out->game_radians = lock_seen_native; out->shown_radians = lock_shown;
 }
+/* The arithmetic is src/fov_lock.h. Switched off, the value glides out to the game's as it glided in (three or four
+ * frames more of this), and then nothing here changes anything. Another camera than the armed one is never touched. */
 static float lock_field(void *camera, float native, float applied, bool aiming) {
   const float wanted = lock_radians;
   lock_seen_native = native;
-  if (!(wanted > 0) || (uint64_t)(uintptr_t)camera != atomic_load_explicit(&lock_camera, memory_order_relaxed)) { lock_shown = 0; return applied; }
-  const float target = aiming && lock_zoom ? applied : wanted;
-  const double tick = lock_clock; float shown = lock_shown;
-  if (!(shown > 0) || tick < lock_at || tick-lock_at > 250) shown = applied; /* start from what was on screen */
-  else if (tick > lock_at) shown += (target-shown)*(1-expf(-(float)(tick-lock_at)/80.0f));
-  lock_at = tick; lock_shown = shown;
-  atomic_fetch_add_explicit(&lock_applied, 1, memory_order_relaxed);
+  if ((uint64_t)(uintptr_t)camera != atomic_load_explicit(&lock_camera, memory_order_relaxed)) { tfp_fov_lock_reset(&lock_state); lock_shown = 0; return applied; }
+  const float shown = tfp_fov_lock_step(&lock_state, wanted, lock_zoom != 0, aiming, applied, lock_clock);
+  lock_shown = tfp_fov_lock_active(&lock_state) ? shown : 0;
+  if (wanted > 0 && tfp_fov_lock_active(&lock_state)) atomic_fetch_add_explicit(&lock_applied, 1, memory_order_relaxed);
   return shown;
 }
 void tfp_fov_setter_from(uint64_t caller, void *camera, float native) {
