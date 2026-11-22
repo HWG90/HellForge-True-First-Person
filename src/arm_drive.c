@@ -121,6 +121,7 @@ static struct {
   bool bound, bound_bend, aligned;
   TfpGraft map;
   unsigned joints; /* 42, or 1 for the test bend */
+  unsigned view; /* the rig node with the view's axes (src/arm_graft.h tfp_graft_view_node); not for the test bend */
   Units units;
   uintptr_t locals;
   uint32_t arms[ARM_UNITS];
@@ -392,7 +393,7 @@ static bool bind(const Units *u) {
   } else {
     if (!u32(u->body + L_UNIT_NODES, &body_count) || body_count != TFP_GRAFT_BODY_NODES || !ptr(u->body + L_UNIT_NAMES, &bnames) ||
         !ptr(u->body + L_UNIT_LINKS, &blinks) || !rd(bnames, bn, sizeof bn) || !rd(blinks, bl, sizeof bl) || !body_matrices(u->body, body) ||
-        !tfp_graft_view(body, &fp[TFP_GRAFT_RIG_ROOT]) || !tfp_graft_bind(&d.map, bn, bl, fn, fl, body, fp))
+        !tfp_graft_view_node(fl, &d.view) || !tfp_graft_view(body, &fp[d.view]) || !tfp_graft_bind(&d.map, bn, bl, fn, fl, body, fp))
       return false;
     d.joints = TFP_GRAFT_JOINTS;
   }
@@ -633,9 +634,9 @@ static uint32_t drive(const Units *u) {
       (!d.bend && !body_matrices(u->body, body)))
     return TFP_ARM_READ;
   if (!d.bend) { /* the arms are seen in the view's frame (src/arm_graft.h tfp_graft_view) */
-    TfpGraftMatrix rig_root;
-    if (!rd(rig_worlds + TFP_GRAFT_RIG_ROOT * sizeof rig_root, &rig_root, sizeof rig_root)) return TFP_ARM_READ;
-    if (!tfp_graft_view(body, &rig_root)) return TFP_ARM_POSE;
+    TfpGraftMatrix rig_view;
+    if (!rd(rig_worlds + d.view * sizeof rig_view, &rig_view, sizeof rig_view)) return TFP_ARM_READ;
+    if (!tfp_graft_view(body, &rig_view)) return TFP_ARM_POSE;
   }
   for (unsigned i = 0; i < d.joints; ++i)
     base[i] = tfp_graft_underlying((d.owned >> i) & 1, &d.original[i], &d.applied[i], current[d.map.fp[i]]);

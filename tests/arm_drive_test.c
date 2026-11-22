@@ -30,13 +30,15 @@ static const TfpGraftLocal REST = {.basis = {1, 0, 0, 0, 1, 0, 0, 0, 1}, .preser
 /* ---- the recorded frame ---- */
 static uint32_t bn[TFP_GRAFT_BODY_NODES], bl[TFP_GRAFT_BODY_NODES], fn[TFP_GRAFT_RIG_NODES], fl[TFP_GRAFT_RIG_NODES];
 static TfpGraftMatrix body_now[TFP_GRAFT_BODY_NODES], body_later[TFP_GRAFT_BODY_NODES], rig_world[TFP_GRAFT_RIG_NODES];
-/* The drive sees the body in the view's frame (tfp_graft_view with the rig's root). What these tests expect is worked
+/* The drive sees the body in the view's frame (tfp_graft_view with the rig's view node). What these tests expect is worked
  * out from the same bodies seen the same way: every graft call below that takes a body goes through seen(). */
 static const TfpGraftMatrix *seen(const TfpGraftMatrix *body) {
   static TfpGraftMatrix copies[8][TFP_GRAFT_BODY_NODES]; static unsigned next;
   TfpGraftMatrix *copy = copies[next++ % 8];
   memcpy(copy, body, sizeof copies[0]);
-  if (!tfp_graft_view(copy, &rig_world[TFP_GRAFT_RIG_ROOT])) memcpy(copy, body, sizeof copies[0]); /* not rigid: as given, and refused as before */
+  unsigned view;
+  CHECK(tfp_graft_view_node(fl, &view) && view == 4);
+  if (!tfp_graft_view(copy, &rig_world[view])) memcpy(copy, body, sizeof copies[0]); /* not rigid: as given, and refused as before */
   return copy;
 }
 #define tfp_graft_bind(out, bn, bl, fn, fl, body, fp) tfp_graft_bind(out, bn, bl, fn, fl, seen(body), fp)
@@ -894,6 +896,57 @@ static void test_view_pitch(void) {
     put(worlds_of(RIG), rig_world, sizeof rig_world), body_is(body_now);
   }
 }
+/* The mod's own placement and motion rotation (and the game's own animation) go on rig node 5, the parent of the rig's
+ * root: node 5 and everything under it turn, node 5's parent, which the view carries, does not. The driven arms and gun
+ * turn with it, rigidly: the socket ends where the rotation takes it. With the rig's root as the frame (0.6.0-feel.35)
+ * the rotation was cancelled and the arms and gun stayed where they were. */
+static void test_rig_rotation(void) {
+  static TfpGraftMatrix rig[TFP_GRAFT_RIG_NODES];
+  TfpGraftLocal now[TFP_GRAFT_RIG_NODES];
+  CHECK(fl[TFP_GRAFT_RIG_ROOT] == ((5u << 16) | 1u) && fl[5] == ((4u << 16) | 1u));
+  rest_start();
+  CHECK(!frame());
+  rig_locals(now);
+  const TfpGraftMatrix local = tfp_graft_local_matrix(&now[TFP_GRAFT_RIG_SOCKET]);
+  TfpGraftMatrix want = tfp_graft_product(&local, &rig_world[TFP_GRAFT_RIG_ROOT]);
+  /* 15 degrees about node 5's own X through node 5: a placement pitch */
+  const float *axis = rig_world[5].values, *centre = rig_world[5].values + 12;
+  memcpy(rig, rig_world, sizeof rig);
+  for (unsigned n = 5; n < TFP_GRAFT_RIG_NODES; n++) {
+    unsigned up = n;
+    while (up > 5 && (fl[up] & 65535) == 1) up = fl[up] >> 16;
+    if (up != 5) continue;
+    for (unsigned row = 0; row < 3; row++) turned_about(axis, centre, 15, rig[n].values + 4 * row, false);
+    turned_about(axis, centre, 15, rig[n].values + 12, true);
+  }
+  CHECK(!memcmp(&rig[4], &rig_world[4], 64) && !memcmp(&rig[TFP_GRAFT_RIG_EYE], &rig_world[TFP_GRAFT_RIG_EYE], 64) &&
+        memcmp(&rig[TFP_GRAFT_RIG_ROOT], &rig_world[TFP_GRAFT_RIG_ROOT], 64) && memcmp(&rig[TFP_GRAFT_RIG_SOCKET], &rig_world[TFP_GRAFT_RIG_SOCKET], 64));
+  for (unsigned row = 0; row < 3; row++) turned_about(axis, centre, 15, want.values + 4 * row, false);
+  turned_about(axis, centre, 15, want.values + 12, true);
+  put(worlds_of(RIG), rig, sizeof rig);
+  CHECK(!frame());
+  rig_locals(now);
+  const TfpGraftMatrix after = tfp_graft_local_matrix(&now[TFP_GRAFT_RIG_SOCKET]);
+  const TfpGraftMatrix got = tfp_graft_product(&after, &rig[TFP_GRAFT_RIG_ROOT]);
+  float m = 0, trace = 0;
+  for (unsigned k = 0; k < 3; k++) m += (got.values[12 + k] - want.values[12 + k]) * (got.values[12 + k] - want.values[12 + k]);
+  for (unsigned row = 0; row < 3; row++)
+    for (unsigned k = 0; k < 3; k++) trace += got.values[4 * row + k] * want.values[4 * row + k];
+  CHECK(sqrtf(m) < .001f && trace > 2.99998f); /* 1 mm; a third of a degree */
+  CHECK(stats().binds == 1 && !stats().refused);
+  put(worlds_of(RIG), rig_world, sizeof rig_world);
+  /* another chain above the rig's root: no view node, and nothing is bound */
+  uint32_t links[TFP_GRAFT_RIG_NODES];
+  unsigned view = 99;
+  memcpy(links, fl, sizeof links);
+  links[5] = (4u << 16) | 2u;
+  CHECK(!tfp_graft_view_node(links, &view) && view == 99);
+  links[5] = (3u << 16) | 1u; /* no longer the eye's parent */
+  CHECK(!tfp_graft_view_node(links, &view) && view == 99);
+  rest_start();
+  put(links_of(RIG), links, sizeof links);
+  CHECK(!frame() && stats().refused == 1 && stats().reason == TFP_ARM_BIND && !stats().binds && !sets);
+}
 static void test_rest_after_a_draw(void) {
   TfpGraftLocal now[TFP_GRAFT_RIG_NODES], want[TFP_GRAFT_RIG_NODES];
   const TfpGraftLocal *rest = &game_locals[TFP_GRAFT_RIG_SOCKET];
@@ -1627,6 +1680,7 @@ int main(int argc, char **argv) {
   test_hold_edge();
   test_rest_grip();
   test_view_pitch();
+  test_rig_rotation();
   test_rest_after_a_draw();
   test_binding_while_aiming();
   test_rest_gates();

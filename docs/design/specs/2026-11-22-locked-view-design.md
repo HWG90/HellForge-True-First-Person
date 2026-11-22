@@ -528,6 +528,9 @@ The user played feel.34 and reported three things; all are fixed and seen in the
    does: the arms' pitch (and any twist of the body under the view) was counted twice. The root's matrix now gets
    the axes of the rig's root before anything is bound, aligned or posed (`tfp_graft_view`). In the game: 0.002 to
    0.006 m level, 0.044 m at 35 degrees down, 0.076 m at 70 down, 0.036 m at 35 up.
+   Corrected after review (not yet seen in the game): the axes are those of rig node 4, the parent of node 5 and of
+   the eye (`tfp_graft_view_node`), not of the rig's root, node 7. Node 7 is under node 5, where the placement and the
+   motion rotation are written, so with node 7's axes that rotation cancelled for the driven arms and gun.
 2. **"Switching weapons causes a momentary vignette."** The game's first-person vignette, which the mod switches off
    behind the depth-of-field lease: every swap ended the view for 0.3 s, the vignette (and `dof_enabled`) was given
    back and taken again. Both are now held for 1.5 s after the view goes away while first person is on

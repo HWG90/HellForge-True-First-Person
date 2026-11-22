@@ -142,11 +142,26 @@ static inline void tfp_graft_axes(const float q[4], TfpGraftMatrix *matrix) { /*
 /* The frame the body's arms are seen in turns with the view, not with the body's root: the rig hangs on the view, so
  * with the root's axes every degree the body's arms pitch (or twist) after the view was counted twice, once in the
  * arms and once in the rig, and looking down the gun arm ended half a metre and 60 degrees from its place (seen in
- * the game 2026-11-22). The root's matrix in `body` gets the axes of the rig's root (its node 7 in the world); its
- * position stays. Called on the body's matrices before anything is bound, aligned or posed from them. */
-static inline bool tfp_graft_view(TfpGraftMatrix *body, const TfpGraftMatrix *rig_root) {
-  if (!tfp_graft_rigid(rig_root) || !tfp_graft_rigid(&body[0])) return false;
-  for (unsigned row = 0; row < 3; ++row) memcpy(body[0].values + 4 * row, rig_root->values + 4 * row, 3 * sizeof(float));
+ * the game 2026-11-22). The root's matrix in `body` gets the axes of the rig's view node in the world
+ * (tfp_graft_view_node); its position stays. Called on the body's matrices before anything is bound, aligned or posed
+ * from them. */
+static inline bool tfp_graft_view(TfpGraftMatrix *body, const TfpGraftMatrix *rig_view) {
+  if (!tfp_graft_rigid(rig_view) || !tfp_graft_rigid(&body[0])) return false;
+  for (unsigned row = 0; row < 3; ++row) memcpy(body[0].values + 4 * row, rig_view->values + 4 * row, 3 * sizeof(float));
+  return true;
+}
+/* The rig node whose axes are the view's: the parent of the parent of the rig's root (node 7). The root's parent,
+ * node 5, is the node the placement and the motion rotation are written on (src/pose_helper.c) and the game animates
+ * itself; with the root's own axes as the frame (0.6.0-feel.35) that rotation was in the frame and in the rig both,
+ * and cancelled for the driven arms and gun. Node 5's parent, node 4, is also the parent of the eye the camera is
+ * linked to, and has the eye's axes in the recorded frames: it turns with the view and with nothing else. fl: the
+ * rig's links. false: not this rig's chain. */
+static inline bool tfp_graft_view_node(const uint32_t *fl, unsigned *node) {
+  const uint32_t root = fl[TFP_GRAFT_RIG_ROOT], placed = root >> 16;
+  if ((root & 65535) != 1 || placed >= TFP_GRAFT_RIG_ROOT || (fl[placed] & 65535) != 1 || (fl[placed] >> 16) >= placed ||
+      fl[TFP_GRAFT_RIG_EYE] != fl[placed])
+    return false;
+  *node = fl[placed] >> 16;
   return true;
 }
 /* The body's frame the arm roots are expressed in: the root node's axes (the view's, after tfp_graft_view) at the
