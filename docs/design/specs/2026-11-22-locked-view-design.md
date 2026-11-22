@@ -459,3 +459,8 @@ Seen in the game, view on:
 
 Not seen: Resupply and Reinforce (both unavailable in this solo session), a support weapon or sentry call-in.
 
+Second look, same day: with the list open the left forearm with the wrist pad is raised and the rifle hangs low in
+the right hand, as in third person. At a level view the pad sits at the lower edge of the frame; it is in full view
+when looking down or walking. Nothing is hidden that should show. A glance down at the pad on opening the list was
+considered and left out: it would move the view against the player's hand.
+
