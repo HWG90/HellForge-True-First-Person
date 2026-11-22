@@ -167,6 +167,65 @@ int main(void) {
   const float once = r.shown[0];
   frame(&r, .2f, 0, 0, NATIVE, true, false, 0);
   CHECK(r.shown[0] == once);
+  /* A rig eye that flickers (seen in the soak of 2026-11-22, 0.6.0-feel.37, 19:46:23.8 to 19:46:24.3, the body
+   * standing: after an entry the rig eye went back and forth between two places 0.19 m apart from one frame to the
+   * next, then stood). The logged wanted eye, frame for frame. The flips are taken up; what was wrong is what came
+   * when the run's time was over: the last flip's 0.2 m in one frame was believed as a speed of 6 m/s, and the
+   * presented eye went off at it while the wanted eye stood (0.143 m in the frame at 266 ms after the entry, 0.134 m
+   * and 0.204 m in those at 466 and 499 ms, 0.43 m carried). No speed is believed from one frame's step. */
+  {
+    static const struct { float ms; uint32_t source; float eye[3]; } logged[] = {
+    {0.0f, HEAD, {-6.6584f, 40.2668f, 3.4523f}},
+    {33.4f, HEAD, {-6.6442f, 40.1923f, 3.4680f}},
+    {66.7f, HEAD, {-6.6352f, 40.1471f, 3.4728f}},
+    {100.2f, HEAD, {-6.6293f, 40.1200f, 3.4717f}},
+    {133.6f, HEAD, {-6.6251f, 40.1041f, 3.4687f}},
+    {166.1f, HEAD, {-6.6220f, 40.0951f, 3.4656f}},
+    {199.4f, HEAD, {-6.6195f, 40.0901f, 3.4625f}},
+    {233.7f, HEAD, {-6.6176f, 40.0876f, 3.4594f}},
+    {267.0f, HEAD, {-6.6165f, 40.0865f, 3.4566f}},
+    {300.7f, NATIVE, {-6.6161f, 40.1443f, 3.6391f}},
+    {334.7f, NATIVE, {-6.6340f, 40.1444f, 3.5983f}},
+    {367.4f, NATIVE, {-6.6276f, 40.1443f, 3.6013f}},
+    {401.8f, NATIVE, {-6.8099f, 40.1450f, 3.4960f}},
+    {434.9f, NATIVE, {-6.6377f, 40.1444f, 3.5962f}},
+    {468.1f, NATIVE, {-6.7985f, 40.1449f, 3.5040f}},
+    {501.8f, NATIVE, {-6.6430f, 40.1443f, 3.5945f}},
+    {534.8f, NATIVE, {-6.6255f, 40.1443f, 3.6053f}},
+    {568.2f, NATIVE, {-6.6502f, 40.1443f, 3.5917f}},
+    {601.6f, NATIVE, {-6.6833f, 40.1444f, 3.5719f}},
+    {634.8f, NATIVE, {-6.7030f, 40.1445f, 3.5598f}},
+    {667.1f, NATIVE, {-6.8838f, 40.1450f, 3.4554f}},
+    {700.9f, NATIVE, {-6.8699f, 40.1449f, 3.4635f}},
+    {734.2f, NATIVE, {-6.8697f, 40.1449f, 3.4636f}},
+    {767.7f, NATIVE, {-6.7408f, 40.1445f, 3.5380f}}};
+    start(&r);
+    float before[3] = {0}, worst_still = 0, carried = 0; double last = 0;
+    for (unsigned i = 0; i < sizeof logged/sizeof *logged; ++i) {
+      const float moved = sqrtf((logged[i].eye[0]-before[0])*(logged[i].eye[0]-before[0])+(logged[i].eye[1]-before[1])*(logged[i].eye[1]-before[1])
+          +(logged[i].eye[2]-before[2])*(logged[i].eye[2]-before[2]));
+      frame(&r, logged[i].eye[0], logged[i].eye[1], logged[i].eye[2], logged[i].source, true, false, i ? (float)(logged[i].ms-last) : 33.3f);
+      last = logged[i].ms; memcpy(before, logged[i].eye, sizeof before);
+      if (i && logged[i].source == NATIVE && logged[i-1].source == NATIVE) {
+        if (moved < .03f && r.step > worst_still) worst_still = r.step; /* the wanted eye all but stood in this frame */
+        if (r.correction > carried) carried = r.correction;
+      }
+    }
+    CHECK(worst_still < .05f);
+    CHECK(carried < .25f);
+  }
+  /* The same made by hand: back and forth by 0.19 m for ten frames, then still. While it flickers and after, the
+   * presented eye does not go anywhere: under 0.03 m in any frame, and at the rig's eye once the catch-up is over. At
+   * 30 and at 60 frames a second. */
+  for (int rate = 0; rate < 2; ++rate) {
+    const float dt = rate ? 1000.0f/60 : 1000.0f/30;
+    start(&r);
+    for (int i = 0; i < 10; ++i) frame(&r, 0, 0, 1.5f, NATIVE, true, false, dt);
+    for (int i = 0; i < 10; ++i) frame(&r, i%2 ? 0 : .17f, 0, i%2 ? 1.5f : 1.4f, NATIVE, true, false, dt);
+    for (int i = 0; i < 40; ++i) frame(&r, 0, 0, 1.5f, NATIVE, true, false, dt);
+    CHECK(r.travelled < .03f);
+    CHECK(r.correction == 0 && fabsf(r.shown[0]) < 1e-4f && fabsf(r.shown[2]-1.5f) < 1e-4f);
+  }
   printf("camera continuity: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }
