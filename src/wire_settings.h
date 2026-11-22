@@ -65,7 +65,7 @@ bool tfp_wire_settings_menu_set(TfpWire *w, TfpSettingsMenuId id, bool is_bool, 
  * The own settings panel writes them (src/wire_panel.c); a change counts as a store change and is saved
  * like any other. false: no store bound, not an option, the wrong kind. */
 bool tfp_wire_settings_locked_set(TfpWire *w, TfpSettingsLockedId id, bool is_bool, bool boolean, double number);
-/* The nine options by name, for the units that act on them. With no store bound each answers its default.
+/* The options by name, for the units that act on them. With no store bound each answers its default.
  * Plain reads of one stored value each: no game call, no lock, so a read from another thread than the
  * game thread sees the old or the new value of a change in flight, never a torn one on x86-64.
  * The two strengths are percentages (0 .. 100), the two angles degrees. */
@@ -76,8 +76,13 @@ bool tfp_locked_view_fov_zoom_when_aiming(TfpWire *w);
 double tfp_locked_view_kick_strength(TfpWire *w);
 double tfp_locked_view_kick_max_degrees(TfpWire *w);
 double tfp_locked_view_thrown_kick_strength(TfpWire *w);
+/* The three that switch a feature live (src/wire_options.h decides with them and the test files). */
+bool tfp_locked_view_animated_arms(TfpWire *w);
+bool tfp_locked_view_put_away(TfpWire *w);
+bool tfp_locked_view_smooth_eye(TfpWire *w);
+/* Stored and shown greyed; nothing acts on it: the behaviour comes from the character's own animation while
+ * animated_arms is on. */
 bool tfp_locked_view_one_handed_pistols(TfpWire *w);
-bool tfp_locked_view_holster_animation(TfpWire *w);
 
 /* Actions.actions (action_placement.lua:66-67) is handed to the editor as this value: a ref to
  * tfp_wire_settings_actions, TFP_ACT_COUNT rows of {name, label}. */

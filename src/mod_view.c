@@ -32,6 +32,7 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "mod_editor.h"
 #include "render_slot.h"
 #include "arm_drive.h"
+#include "wire_options.h"
 #define TFP_VIEW_VERSION "0.6.0-feel.23"
 #else
 #include "wire_win.h"
@@ -59,16 +60,22 @@ static DWORD tick_thread; /* the game thread, as the tick last saw it */
 static TfpWireFeel feel;
 static TfpFxPlatform fx_platform;
 static bool lock_wanted = true;
+/* Three features are switched by options of the settings panel's "Locked view" tab, live (src/wire_options.h): the
+ * arm drive (Animated arms), the action hold (Weapon put-away) and the eye's continuity (Smooth eye). Test files
+ * beside the DLL, read once at the start, override the option: arms_live.txt / hold_lease.txt force the feature on,
+ * arms_off.txt / hold_off.txt / smooth_off.txt force it off. The three flags below are what is in effect now; only
+ * the setters option_arms / option_hold / option_smooth write them, on the game thread. */
+static TfpWireOptions options;
 /* Under the camera lock: the eye's continuity (src/camera_continuity.h) and the per-frame "Trace:" lines after each
- * State edge. Files smooth_off.txt and trace_off.txt beside the DLL switch each off; neither does anything without the lock. */
+ * State edge. A file trace_off.txt beside the DLL switches the lines off; neither does anything without the lock. */
 static bool smooth_wanted = true, trace_wanted = true;
 static bool mcm_wanted; /* test switch mcm_on.txt: the settings menu in DBF-MCM instead of the mod's own panel */
-/* Test switches of the arm drive (src/arm_drive.h), files beside the DLL read once at the start: arms_live.txt
- * switches it on; arms_live_restore.txt makes it put the game's joint values back after every draw instead of
- * leaving them; arm_bend.txt makes it bend one shoulder instead of following the body. */
+/* The arm drive (src/arm_drive.h). arms_live: it is on (the Animated arms option, or its files). Test switches, files
+ * beside the DLL read once at the start: arms_live_restore.txt makes it put the game's joint values back after every
+ * draw instead of leaving them; arm_bend.txt makes it bend one shoulder instead of following the body. */
 static bool arms_live, arms_restore, arms_bend;
-/* Test switch of the action hold (a probe; docs/design/ACTION-CAMERA.md "Action hold"): a file hold_lease.txt beside
- * the DLL, read once at the start. Without it none of the hold's code is reached. */
+/* The action hold (docs/design/ACTION-CAMERA.md "Action hold") is on: the Weapon put-away option, or its files.
+ * While it is off none of the hold's code is reached. */
 static bool hold_lease;
 static char arms_refusal[200]; /* why the render hook may not go in, as last logged: one line per reason */
 static bool engine_hooked, pose_hook_told[TFP_WIN_POSE_HOOKS];
@@ -330,7 +337,7 @@ static void trace_note(void) {
 #endif
 
 #ifdef TFP_FEEL
-/* ---- the action hold (hold_lease.txt): the binder's two hooks (src/wire.h TfpWireHold) ----------------
+/* ---- the action hold (the Weapon put-away option): the binder's two hooks (src/wire.h TfpWireHold) ----------------
  * Each tick, after the controller decided. The pose helper tolerates an action from the moment a lease runs
  * (armed), not only once the controller holds: HellForge runs this tick before the game's update, so the game's
  * first rig write of an action comes before the tick that sees the action. The arm drive is told both: "ready"
@@ -354,17 +361,46 @@ static void hold_probe(TfpWire *w, const TfpOpsHold *view, uint32_t weapon_unit,
   out->has_eye = rig.has_eye, out->has_rig_eye = rig.has_rig_eye;
   for (int i = 0; i < 3; i++) out->eye[i] = rig.eye[i], out->rig_eye[i] = rig.rig_eye[i];
 }
-static void hold_start(void) { /* after tfp_wire_init, before on_enable */
-  if (!hold_lease) return;
-  tfp_wire_hold_set(&wire, true);
+/* The two hooks are there from the start (nothing calls them while the hold is off); the switch itself is option_hold's. */
+static void hold_start(void) { /* after tfp_wire_init and tfp_wire_options_start, before on_enable */
   wire.hold.apply = hold_apply, wire.hold.probe = hold_probe;
-  say("Test: hold_lease.txt: action hold probe: while a lease runs, an action (weapon swap, grenade, stim) no longer ends the game's "
+  if (!hold_lease) { say("Hold: off: an action (weapon swap, grenade, stim) ends the native first-person view, as before the hold"); return; }
+  say("Hold: on: while a lease runs, an action (weapon swap, grenade, stim) no longer ends the game's "
       "first-person camera request as long as that request is still the lease's own (kind 6, same record, same player, not a ragdoll, "
-      "not seated, not full aim, no other camera owner); at most 4000 ms, then today's exit");
-  say("Test: hold_lease.txt: the pose helper keeps its placement through an action; \"Hold:\" lines say what the rig and the camera do; %s",
-      arms_live ? "arms_live.txt is there: while a lease runs the arm drive keeps its binding when the gun leaves the rig, and puts the game's joint "
+      "not seated, not full aim, no other camera owner); at most 4000 ms, then the exit as without the hold");
+  say("Hold: the pose helper keeps its placement through an action; \"Hold:\" lines say what the rig and the camera do; %s",
+      arms_live ? "the arm drive is on: while a lease runs it keeps its binding when the gun leaves the rig, and puts the game's joint "
                   "values back after every draw during a hold and in any frame whose gun is away"
-                : "arms_live.txt is not there: the arm drive is off, so the rig's arms are the game's own during a hold");
+                : "the arm drive is off, so the rig's arms are the game's own during a hold");
+}
+
+/* ---- the three live features' setters (src/wire_options.h) ----------------------------------------------
+ * Called on the game thread only: once from start(), then from the tick when the answer changed, and never while
+ * the controller holds a lease through an action or waits for a lease's native exit (tfp_wire_options_busy).
+ *
+ * The arm drive: only the flag. arms_tick, later in the same tick, does the rest with the discipline it has for
+ * F11: on, the render hook goes in (retried every 500 ms, refusals said once); off, the drive is switched off,
+ * the game's joint values are put back here on the game thread, and only then the hook comes out. */
+static void option_arms(void *user, bool on) { (void)user; arms_live = on; }
+/* The action hold: the controller's switch (an exit an action causes is held back, or taken as in retail), the
+ * backend's (how a lease is released after a hold) and the binder's per-tick part. Off, the pose helper's tolerance
+ * and the arm drive's two hold flags are cleared once, since the binder's tick no longer reaches them. No lease is
+ * being held or released when this runs, so no native request changes owner here: with a lease running and no action
+ * the next action is simply held (on) or ends the native view as in retail (off). */
+static void option_hold(void *user, bool on) {
+  const bool was_on = hold_lease; /* never on: the pose helper and the arm drive were never told of a hold, and are not now */
+  (void)user;
+  hold_lease = on;
+  tfp_wire_hold_set(&wire, on);
+  if (!on && was_on) hold_apply(&wire, false, false);
+}
+/* The eye's continuity: one atomic flag the camera hook reads each frame. Off, a correction still being carried is
+ * dropped with the next frame (at most one small step, never during a hold); on, it starts from the next change of
+ * camera. Without the camera lock (lock_off.txt) it stays off. */
+static void option_smooth(void *user, bool on) {
+  (void)user;
+  smooth_wanted = on;
+  tfp_camera_set_continuity(lock_wanted && on, lock_wanted && trace_wanted);
 }
 
 /* ---- the arm drive (src/arm_drive.c, src/render_slot.c) ----------------------------------------------
@@ -374,8 +410,9 @@ static void arms_start(void) {
   tfp_arm_drive_set_bend(arms_bend);
   if (arms_bend) say("Test: arm_bend.txt: while the native first-person view is shown, the first-person rig's l_shoulder (node 10) is turned "
                      "70 degrees about its own Z at the primary draw; the body is ignored");
-  else if (arms_live) say("Test: arms_live.txt: the body's arm animation is written onto the first-person arm rig at the primary draw while the "
+  else if (arms_live) say("Arms: on: the body's arm animation is written onto the first-person arm rig at the primary draw while the "
                           "native first-person view is shown (42 joints)");
+  else say("Arms: off: the first-person rig's arms are the game's own");
   if ((arms_live || arms_bend) && arms_restore) say("Test: arms_live_restore.txt: the rig's own joint values are put back after every primary draw");
   else if (arms_live || arms_bend) say("Arms: written joint values stay until the next frame, where the game's own are recovered (a file "
                                        "arms_live_restore.txt beside the DLL puts them back after every draw instead)");
@@ -386,9 +423,9 @@ static void arms_start(void) {
   }
   else say("Arms: render hook contract passed: the primary draw (game+0xab7ac7) calls the world renderer (exe+0x318150) through the "
            "application table's slot +0x28, which holds it; %s", arms_live || arms_bend ? "the hook goes in when the view is switched on"
-           : "the hook is not put in (no arms_live.txt or arm_bend.txt beside the DLL)");
+           : "the hook is not put in while Animated arms is off (it goes in when the option is switched on with the view on)");
 }
-/* Every tick while running. The hook is in only while the drive is switched on (a switch file and the view on);
+/* Every tick while running. The hook is in only while the drive is switched on (Animated arms, or arm_bend.txt, and the view on);
  * when it goes off the game's joint values are put back first, here on the game thread, then the hook comes out. */
 static void arms_tick(void) {
   static uint64_t next_try, next_note;
@@ -466,7 +503,7 @@ static void start(void) {
         strcpy(slash + 1, "smooth_off.txt");
         FILE *smooth_file = fopen(parts_path, "r");
         if (smooth_file) fclose(smooth_file);
-        smooth_wanted = smooth_file == NULL;
+        if (smooth_file) options.force_off[TFP_FEATURE_SMOOTH] = "smooth_off.txt";
         strcpy(slash + 1, "trace_off.txt");
         FILE *trace_file = fopen(parts_path, "r");
         if (trace_file) fclose(trace_file);
@@ -477,18 +514,25 @@ static void start(void) {
         mcm_wanted = mcm_file != NULL;
         if (mcm_wanted) say("Test: mcm_on.txt: the settings menu is registered with DBF-MCM (goose.mcm) instead of the mod's own panel");
 #ifdef TFP_FEEL
-        static const char *const arm_files[] = {"arms_live.txt", "arms_live_restore.txt", "arm_bend.txt"};
-        bool *const arm_switches[] = {&arms_live, &arms_restore, &arms_bend};
-        for (int i = 0; i < 3; i++) {
+        static const char *const arm_files[] = {"arms_live_restore.txt", "arm_bend.txt"};
+        bool *const arm_switches[] = {&arms_restore, &arms_bend};
+        for (int i = 0; i < 2; i++) {
           strcpy(slash + 1, arm_files[i]);
           FILE *arm_file = fopen(parts_path, "r");
           if (arm_file) fclose(arm_file);
           *arm_switches[i] = arm_file != NULL;
         }
-        strcpy(slash + 1, "hold_lease.txt");
-        FILE *hold_file = fopen(parts_path, "r");
-        if (hold_file) fclose(hold_file);
-        hold_lease = hold_file != NULL;
+        /* The overrides of the three live features (src/wire_options.h): for testing only. */
+        static const struct { const char *name; TfpFeature feature; bool on; } forced[] = {
+          {"arms_live.txt", TFP_FEATURE_ARMS, true}, {"arms_off.txt", TFP_FEATURE_ARMS, false},
+          {"hold_lease.txt", TFP_FEATURE_HOLD, true}, {"hold_off.txt", TFP_FEATURE_HOLD, false}};
+        for (size_t i = 0; i < sizeof forced / sizeof *forced; i++) {
+          strcpy(slash + 1, forced[i].name);
+          FILE *forced_file = fopen(parts_path, "r");
+          if (!forced_file) continue;
+          fclose(forced_file);
+          *(forced[i].on ? &options.force_on[forced[i].feature] : &options.force_off[forced[i].feature]) = forced[i].name;
+        }
 #endif
         if (digit >= '1' && digit <= '7') {
           tfp_head_set_parts((unsigned)(digit - '0'));
@@ -504,12 +548,7 @@ static void start(void) {
   say(lock_wanted ? "Ready: camera lock: the view stays first person through every action and camera of your own character, death included; "
                     "body movement kicks the view (35 %% up to 8 degrees on foot, 70 %% up to 35 when thrown; a file lock_off.txt beside the DLL switches it off)"
                   : "Test: lock_off.txt: the camera lock is off");
-  tfp_camera_set_continuity(lock_wanted && smooth_wanted, lock_wanted && trace_wanted);
-  if (lock_wanted)
-    say(smooth_wanted ? "Ready: eye continuity: while the lock holds the view, a change of camera (head camera, native view) and a one-frame move of the "
-                        "first-person rig are carried as a correction of at most 1 m and eased out over 100 to 400 ms; farther than 1.5 m is shown at "
-                        "once; nothing is taken up in full aim (a file smooth_off.txt beside the DLL switches it off)"
-                      : "Test: smooth_off.txt: eye continuity is off: changes of camera and rig moves are shown as they are");
+  tfp_camera_set_continuity(false, lock_wanted && trace_wanted); /* the continuity itself: option_smooth, once the settings are read */
   if (lock_wanted && !trace_wanted) say("Test: trace_off.txt: no \"Trace:\" lines after State edges");
   say("Ready: action camera: the head camera also takes the pick-up action (mask 0x%x); the eye is held through %u ms without an action "
       "(a stim) and glides back before the weapon returns; the aim button is read from Windows, again as the script update begins",
@@ -520,8 +559,6 @@ static void start(void) {
 #endif
   measure_reads();
 #ifdef TFP_FEEL
-  arms_start();
-  hold_start();
   {
     char where[MAX_PATH + 16], text[360];
     TfpWireFeelParts parts;
@@ -537,6 +574,17 @@ static void start(void) {
     parts.editor = tfp_mod_editor_platform(&fx_platform);
     tfp_wire_feel_bind(&wire, &feel, &parts);
     tfp_wire_settings_saver(&wire, save_settings, NULL);
+    /* The three live features, now that the settings are read: each setter once, and a line each that says whether the
+     * feature is on and whether the option or a file decided. Then what each one's start-up has to say. */
+    options.set[TFP_FEATURE_ARMS] = option_arms, options.set[TFP_FEATURE_HOLD] = option_hold, options.set[TFP_FEATURE_SMOOTH] = option_smooth;
+    tfp_wire_options_start(&wire, &options);
+    arms_start();
+    hold_start();
+    if (!lock_wanted) say("Smooth: eye continuity stays off whatever the option says: the camera lock is off (lock_off.txt)");
+    else say(smooth_wanted ? "Smooth: on: while the lock holds the view, a change of camera (head camera, native view) and a one-frame move of the "
+                             "first-person rig are carried as a correction of at most 1 m and eased out over 100 to 400 ms; farther than 1.5 m is "
+                             "shown at once; nothing is taken up in full aim"
+                           : "Smooth: off: changes of camera and rig moves are shown as they are");
     int slots = tfp_win_pose_check(text, sizeof text);
     say(slots == 1 ? "Ready: pose slots: %s" : slots == 0 ? "Refused: pose: %s" : "Waiting: pose slots are not readable yet: %s", text);
   }
@@ -721,6 +769,7 @@ static void tick_body(void) {
   trace_note();
   tfp_wire_panel_frame(&wire);         /* what the user did in the mod's own panel since the last tick */
   tfp_wire_menu_frame(&wire);          /* the menu's queued buttons and toggles, and the two status rows */
+  tfp_wire_options_tick(&wire, &options); /* Animated arms, Weapon put-away, Smooth eye: a changed answer reaches its setter (not during a hold) */
   tfp_wire_settings_save_frame(&wire); /* writes only when the store changed since the last write */
   eng_temp_end();
   arms_tick();

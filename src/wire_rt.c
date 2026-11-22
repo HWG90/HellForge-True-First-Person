@@ -1301,7 +1301,7 @@ void tfp_wire_frame(TfpWire *w, const char *extra) {
   } else w->entry_fault[0] = 0;
 
   if (w->frame_extra) w->frame_extra(w);
-  tfp_wire_hold_frame(w); /* nothing without hold_lease.txt */
+  tfp_wire_hold_frame(w); /* nothing while the hold is off */
   TfpViewSample s;
   TfpFovResult fov;
   TfpBlurResult blur;

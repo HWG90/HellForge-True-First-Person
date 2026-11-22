@@ -82,11 +82,15 @@ typedef struct TfpSettingsMenuValue { bool is_bool, boolean; double number; } Tf
 /* The locked view's options (docs/design/specs/2026-11-22-locked-view-design.md), which retail does not have:
  * X(id, 1 Boolean / 0 number, default, least, most, step). The two strengths are percentages. They are stored
  * under "locked_view" in settings.json; a file without that section reads as the defaults. The store only
- * holds them: what they do is the camera's and the arm rig's business (the getters are in src/wire_settings.h). */
+ * holds them: what they do is the camera's and the arm rig's business (the getters are in src/wire_settings.h).
+ * animated_arms, put_away and smooth_eye switch a feature live (src/wire_options.h); one_handed_pistols sets nothing. */
 #define TFP_SETTINGS_LOCKED(X) \
   X(camera_lock, 1, 1, 0, 1, 1) X(fov_lock, 1, 1, 0, 1, 1) X(fov_degrees, 0, 80, 50, 120, 1) X(fov_zoom_when_aiming, 1, 1, 0, 1, 1) \
   X(kick_strength, 0, 35, 0, 100, 5) X(kick_max_degrees, 0, 8, 0, 20, 1) X(thrown_kick_strength, 0, 70, 0, 100, 5) \
-  X(one_handed_pistols, 1, 1, 0, 1, 1) X(holster_animation, 1, 1, 0, 1, 1)
+  X(animated_arms, 1, 1, 0, 1, 1) X(one_handed_pistols, 1, 1, 0, 1, 1) X(put_away, 1, 1, 0, 1, 1) X(smooth_eye, 1, 1, 0, 1, 1)
+/* "holster_animation" (an option until 0.6.0-feel.23 that did nothing) is read as put_away when the file has no
+ * put_away of its own, and is never written: the next save holds put_away only. */
+#define TFP_SETTINGS_LOCKED_OLD_PUT_AWAY "holster_animation"
 typedef enum TfpSettingsLockedId {
 #define TFP_SETTINGS_LOCKED_ID(name, is_bool, value, least, most, step) TFP_LOCKED_##name,
   TFP_SETTINGS_LOCKED(TFP_SETTINGS_LOCKED_ID)
