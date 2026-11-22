@@ -556,3 +556,24 @@ and `matrix.judge` compared the frames on either side of the pause. It no longer
 0.042 to 0.057 m (three runs). Numbers before this date for phases that span two trace windows may be too high for
 the same reason.
 
+### feel.37 (2026-11-22): a fifth review, of the feel.35 and feel.36 changes
+
+Four areas, each finding checked twice; ten confirmed, none a crash. Fixed, each with a test that failed first and an
+independent check afterwards:
+
+1. The view frame taken from rig node 7 also held the rotation the pose helper puts on node 5 (placement
+   yaw/pitch/roll, sprint tilt, sway), which then cancelled for the driven arms and gun. The frame is node 4, the
+   parent of node 5 and of the eye (`tfp_graft_view_node`; the bind is refused if the links are otherwise).
+2. A rest is measured within 8 degrees of level (20 before): one kept at 15 to 20 degrees was about 2 cm off at
+   level and never replaced.
+3. The effects hold is keyed on first person being switched on (`controller.enabled`), not on the phase; an explicit
+   stop stops at once; the depth of field's hold has its own exposed rule and a test.
+4. The eye damping filtered the eye's forward arm with the head, so a turn of the view swung the eye up to 0.10 m.
+   Only the head against the body root is damped; a carried lag is let go over 40 ms when a gate closes.
+5. The field-of-view glide runs on the host clock in every rendered frame; `lock_field` has tests through the helper.
+
+In the game on feel.37: socket off the rig's own 0.010 to 0.025 m level, 0.048 m at 35 degrees down, 0.080 m at 70
+down, 0.037 m at 35 up (node 4 pitches with the view: the recordings could not show that); the sprint pose turns the
+rifle (motion line: sprint, 24.6 degrees); four swaps without a give-back of vignette or depth of field, one of each
+at F11 off; a grenade and a stim while turning the view 0.014 and 0.029 m.
+

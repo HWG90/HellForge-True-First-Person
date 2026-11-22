@@ -1,4 +1,4 @@
-# True First Person for HellForge: test build 0.6.0-feel.36
+# True First Person for HellForge: test build 0.6.0-feel.37
 
 For HellForge on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
@@ -24,6 +24,19 @@ DBF-MCM is no longer needed. The mod has its own panel.
 - **F10** opens the settings panel "True First Person" (also in NEST's list, Page Down). Three tabs:
   First person, Bob and sway, Locked view.
 - **Page Up** opens the weapon placement editor.
+
+## Fixed in 0.6.0-feel.37
+
+Found by a review of the feel.36 changes before anyone played them:
+
+- **Weapon placement rotation and the sprint pose with Animated arms.** The arm fix of feel.36 also cancelled the
+  rotation the mod itself puts on the weapon: a placement's yaw, pitch or roll, and the sprint tilt, no longer turned
+  the gun. They do again, and the arms still stay in place when looking up or down. Tested in the game.
+- **Camera damping while turning.** Turning the view during a grenade, stim or swap could swing the eye sideways by
+  up to 10 cm. Only the head's own movement is damped now. Tested in the game: 1.4 to 2.9 cm.
+- **Camera damping when a dive or full aim begins** no longer lets go of its lag in one frame.
+- **Vignette and depth of field** also stay off through a swap made during an action that delays the weapon change.
+- **Field-of-view glide** is smooth at high frame rates (it moved in steps of the system clock).
 
 ## New and fixed in 0.6.0-feel.36
 
