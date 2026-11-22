@@ -33,6 +33,7 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "render_slot.h"
 #include "arm_drive.h"
 #include "wire_options.h"
+#include "arm_weight.h"
 #define TFP_VIEW_VERSION "0.6.0-feel.27"
 #else
 #include "wire_win.h"
@@ -513,7 +514,14 @@ static void arms_tick(void) {
   const uint64_t now = GetTickCount64();
   const bool wanted = (arms_live || arms_bend) && wire.controller.enabled;
   tfp_render_slot_tick();
-  tfp_arm_drive_set(wanted, arms_restore, 1.0f);
+  { /* While aiming the game's own aim pose shows (src/arm_weight.h): the copy fades out and back in 120 ms. */
+    static float weight = 1; static uint64_t weighed;
+    const TfpMotionRuntime *aim_motion = tfp_wire_motion_runtime(&wire);
+    const bool aiming = aim_motion && aim_motion->state.phase == TFP_MOTION_PHASE_ACTIVE
+        && (aim_motion->state.action == TFP_ACT_AIM || aim_motion->state.action == TFP_ACT_ADS);
+    weight = tfp_arm_weight_step(weight, aiming, weighed ? (float)(now - weighed) : 0); weighed = now;
+    tfp_arm_drive_set(wanted, arms_restore, weight);
+  }
   { /* The resting weapon pose (src/arm_drive.h): the clock, whether this tick is a rest and in which stance, and the body's layer states.
      * The action alone is not a rest: a walk, hip fire, an ammo check and a melee are "idle" to it (src/action_select.c), and in the game
      * a reload was too. So also: the speed over the ground, the look pitch and the fire button (the left mouse button: the game's key
