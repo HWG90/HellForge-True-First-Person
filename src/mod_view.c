@@ -34,7 +34,7 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "arm_drive.h"
 #include "wire_options.h"
 #include "arm_weight.h"
-#define TFP_VIEW_VERSION "0.6.0-feel.35"
+#define TFP_VIEW_VERSION "0.6.0-feel.36"
 #else
 #include "wire_win.h"
 #include "wire_action.h"
