@@ -278,6 +278,14 @@ bool tfp_wire_panel_bind(TfpWire *w, const OvApi *ov, const TfpPanelPlatform *pl
     /* Last: from here the host may call draw. The title bar stays, so the window can be moved and closed with the mouse. */
     OvPanelDef def = {sizeof def, platform->panel_id, "True First Person", OV_PANEL_WINDOW, TFP_PANEL_KEY, 0, 620, 760, draw, p};
     p->handle = ov->register_panel(&def);
+    if (!p->handle && platform->panel_id_reload) {
+      /* Most likely a replaced build of this mod still holds the id (the host cannot take a panel out). */
+      def.id = platform->panel_id_reload;
+      p->handle = ov->register_panel(&def);
+      if (p->handle)
+        tfp_wire_say(w, "Settings panel: NEST (Goose Overlay Host) did not take the panel's usual id (a replaced build of this mod still holds "
+                        "it), so this one has an id of its own until the game restarts: the window opens at its first place and size");
+    }
     if (!p->handle) tfp_wire_menu_unbind(w), why = "NEST (Goose Overlay Host) did not take the panel";
   }
   if (why) {

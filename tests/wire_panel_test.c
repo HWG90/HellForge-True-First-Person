@@ -265,6 +265,7 @@ static struct {
   bool hover, active;
   char last[200];
   int disabled, disabled_depth, tab_bars, tab_items, bad_colours, locks, lock_depth, connects;
+  const char *taken;          /* an id the host already holds (a replaced build's panel): refused */
   uint32_t asked;             /* the API version the panel last asked the host's export for */
   bool no_host;
 } ov;
@@ -284,7 +285,7 @@ static const char *drawn_part(const char *part) {
 static bool is(const char *a, const char *b) { return a && b && !strcmp(a, b); }
 static OvPanel *o_register(const OvPanelDef *def) {
   ov.registered++;
-  if (ov.refuse_panel) return NULL;
+  if (ov.refuse_panel || is(ov.taken, def->id)) return NULL;
   ov.def = *def; snprintf(ov.id, sizeof ov.id, "%s", def->id); snprintf(ov.title, sizeof ov.title, "%s", def->title);
   return HANDLE;
 }
@@ -376,7 +377,7 @@ static const OvApi *p_connect(void *u, uint32_t version) {
 static unsigned mcm_ticks, edits;
 static void p_mcm(void *u, TfpWire *w, unsigned unavailable, TfpMenuEditFn edit) { (void)u; (void)w; (void)unavailable; (void)edit; mcm_ticks++; }
 static const char *test_edit(TfpWire *w) { (void)w; edits++; return NULL; }
-static const TfpPanelPlatform platform = {NULL, p_lock, p_unlock, p_connect, p_mcm, false, "goose.true-first-person/settings@test", 33};
+static const TfpPanelPlatform platform = {NULL, p_lock, p_unlock, p_connect, p_mcm, false, "goose.true-first-person/settings", "goose.true-first-person/settings@test", 33};
 static int log_count(const char *part) {
   int n = 0;
   for (int i = 0; i < line_count; i++) if (strstr(lines[i], part)) n++;
@@ -464,7 +465,7 @@ static int panel_part(void) {
   new_host(8); api.key_cap = NULL;                               /* the right version with a function missing */
   CHECK(!tfp_wire_panel_bind(&wire, &api, &platform, 0, test_edit) && log_count("Refused: settings panel") == 1 && !ov.registered);
   new_host(8); ov.refuse_panel = true;                           /* the host does not take the panel */
-  CHECK(!tfp_wire_panel_bind(&wire, &api, &platform, 0, test_edit) && ov.registered == 1 && logged("did not take the panel"));
+  CHECK(!tfp_wire_panel_bind(&wire, &api, &platform, 0, test_edit) && ov.registered == 2 && logged("did not take the panel"));
   CHECK(!tfp_wire_panel_bound(&wire) && !tfp_wire_menu_bound(&wire));
   CHECK(!tfp_wire_panel_bind(&wire, NULL, &platform, 0, test_edit));
   tfp_wire_panel_free(&wire);
@@ -480,6 +481,8 @@ static int panel_part(void) {
   new_host(8);
   for (uint64_t ms = 0; ms < 5000; ms += 100) tfp_wire_panel_tick(&wire, &platform, ms, 0, test_edit);
   CHECK(ov.connects == 1 && ov.registered == 1 && tfp_wire_panel_bound(&wire) && tfp_wire_menu_bound(&wire) && !mcm_ticks);
+  /* the same id at every game start: the host keeps the window's place and size by it, and its config can name it */
+  CHECK(!strcmp(ov.id, "goose.true-first-person/settings") && !logged("replaced build"));
   CHECK(!strcmp(ov.title, "True First Person") && !strcmp(ov.id, platform.panel_id) && ov.def.kind == OV_PANEL_WINDOW && ov.def.size == sizeof ov.def);
   CHECK(ov.def.hotkey == 0x79 && TFP_PANEL_KEY == 0x79 && ov.def.draw && !(ov.def.window_flags & OV_WINDOW_NO_TITLE));
   CHECK(logged("Ready: settings panel") && logged("F10") && logged("Ready: menu: registered with the mod's own panel") && !logged("DBF-MCM as"));
@@ -875,6 +878,28 @@ static int rebind_part(void) {
   CHECK(!tfp_wire_menu_key_edge(&editor, 0, false) && !tfp_wire_menu_key_edge(&editor, 'K', true) && !tfp_wire_menu_key_edge(&editor, 'K', false) &&
         tfp_wire_menu_key_edge(&editor, 'K', true));
   end_panel();
+
+  /* ---- after a live replace the old build's panel still holds the id (the host cannot take a panel out and refuses
+   * a second one with the same id): this load registers under its own id, and says so ---- */
+  CHECK(start_wire());
+  new_host(8); ov.taken = platform.panel_id;
+  for (uint64_t ms = 0; ms < 3000; ms += 100) tfp_wire_panel_tick(&wire, &platform, ms, 0, test_edit);
+  CHECK(ov.connects == 1 && ov.registered == 2 && tfp_wire_panel_bound(&wire) && tfp_wire_menu_bound(&wire) && !logged("Refused"));
+  CHECK(!strcmp(ov.id, "goose.true-first-person/settings@test") && !strcmp(ov.id, platform.panel_id_reload) && ov.def.hotkey == TFP_PANEL_KEY);
+  CHECK(log_count("replaced build") == 1 && logged("Ready: settings panel"));
+  ov.hover = true;
+  draw_frame(); game_update();
+  CHECK(drawn("tab:Locked view"));
+  end_panel();
+  /* no second id to offer: refused as before, and the menu is free again */
+  CHECK(start_wire());
+  new_host(8); ov.taken = platform.panel_id;
+  TfpPanelPlatform one_id = platform;
+  one_id.panel_id_reload = NULL;
+  CHECK(!tfp_wire_panel_bind(&wire, &api, &one_id, 0, test_edit) && ov.registered == 1 && logged("did not take the panel"));
+  CHECK(!tfp_wire_panel_bound(&wire) && !tfp_wire_menu_bound(&wire));
+  tfp_wire_panel_free(&wire);
+  tfp_wire_settings_free(&wire);
 
   /* ---- F8 for the placement editor: a stored 119 means "the default" (Page Up here), so the row would show F8 while
    * Page Up stayed the key. The panel does not take it, says why in the row, and goes on asking. ---- */

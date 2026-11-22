@@ -33,7 +33,10 @@ typedef struct TfpPanelPlatform {
   /* DBF-MCM's registration (tfp_mod_menu_tick). Called only when mcm_wanted; may be NULL. */
   void (*mcm_tick)(void *user, TfpWire *w, unsigned unavailable, TfpMenuEditFn edit);
   bool mcm_wanted;                             /* the switch: the menu goes to DBF-MCM and no panel is made. Default: false */
-  const char *panel_id;                        /* unique per load: the host cannot take a panel out */
+  const char *panel_id;                        /* the same at every game start: the host keeps the window's place and size, and a hotkey override, by it */
+  /* Unique per load, or NULL. The host cannot take a panel out and refuses a second one with the same id, and a
+   * replaced build of this mod leaves its panel behind: when the host does not take panel_id, this one is tried. */
+  const char *panel_id_reload;
   int editor_key;                              /* what a stored 119 (retail's F8) means here: Page Up */
 } TfpPanelPlatform;
 

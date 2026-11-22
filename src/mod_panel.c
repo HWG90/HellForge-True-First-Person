@@ -9,7 +9,8 @@ static SRWLOCK lock = SRWLOCK_INIT;
 static const HfApi *hf_api;
 static HfMod *hf_mod;
 static TfpWire *bound;
-static char panel_id[96];
+static const char PANEL_ID[] = "goose.true-first-person/settings";
+static char panel_id[96];   /* PANEL_ID@<process>-<tick>: this load's own */
 
 static void p_lock(void *u) { (void)u; AcquireSRWLockExclusive(&lock); }
 static void p_unlock(void *u) { (void)u; ReleaseSRWLockExclusive(&lock); }
@@ -26,11 +27,13 @@ static void p_mcm(void *u, TfpWire *w, unsigned unavailable, TfpMenuEditFn edit)
 void tfp_mod_panel_tick(const HfApi *hf, HfMod *mod, TfpWire *w, bool mcm_wanted, unsigned unavailable, TfpMenuEditFn edit) {
   ULONGLONG now = GetTickCount64();
   hf_api = hf, hf_mod = mod, bound = w;
-  /* The host cannot take a panel out and refuses a second one with the same id, and a replaced build of this
-   * mod leaves its panel behind: every load registers under an id of its own (as src/mod_editor.c does). */
+  /* The panel's id is the same at every game start, so the host keeps the window's place and size and its config
+   * can give the panel another key (hotkey.<id> in overlay-host.ini). But the host cannot take a panel out and
+   * refuses a second one with the same id, and a replaced build of this mod leaves its panel behind: for that
+   * case every load also has an id of its own, tried when the host does not take the first. */
   if (!panel_id[0])
-    snprintf(panel_id, sizeof panel_id, "goose.true-first-person/settings@%lx-%llx", (unsigned long)GetCurrentProcessId(), (unsigned long long)now);
-  const TfpPanelPlatform platform = {NULL, p_lock, p_unlock, p_connect, p_mcm, mcm_wanted, panel_id, TFP_EDITOR_KEY};
+    snprintf(panel_id, sizeof panel_id, "%s@%lx-%llx", PANEL_ID, (unsigned long)GetCurrentProcessId(), (unsigned long long)now);
+  const TfpPanelPlatform platform = {NULL, p_lock, p_unlock, p_connect, p_mcm, mcm_wanted, PANEL_ID, panel_id, TFP_EDITOR_KEY};
   tfp_wire_panel_tick(w, &platform, now, unavailable, edit);
 }
 bool tfp_mod_panel_is_open(void) { return bound && tfp_wire_panel_is_open(bound); }
