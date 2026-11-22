@@ -10,10 +10,13 @@ Three things retail has that the first HellForge builds lacked. All three are bu
 
 ## Saving
 
-- **Where:** `%LOCALAPPDATA%\Goose\HellForge\TrueFirstPerson\settings.json`. HellForge holds a session's mod files read-only, so the mod cannot write beside its DLL.
+- **Where:** `%LOCALAPPDATA%\Goose\HellForge\TrueFirstPerson\settings.json` (placements and menu values) and `locked_view.json` beside it (the Locked view tab's options, since 0.6.0-feel.25). HellForge holds a session's mod files read-only, so the mod cannot write beside its DLL.
 - **Reading:** that file is read first. Until it exists, the `settings.json` shipped beside the DLL is used (the placements and menu values imported from the retail mod, `import/`).
 - **When:** only when something changed. The store counts every change (`mod.set`, a menu control); the tick compares that count with what was last written and writes once per change. Nothing is written per frame or on a timer.
-- **How:** the whole file to `settings.json.new`, flushed, then renamed over `settings.json`. Game thread only.
+- **How:** the whole file to `settings.json.new`, flushed, then renamed over `settings.json`; `locked_view.json` the same way, and only when one of its options changed. Game thread only.
+- **Why two files:** 0.6.0-feel.19 and older refuse a `settings.json` with a member they do not know and then save their defaults over it. So `settings.json` only ever holds `first_person`, `format` and `menu`, and anything newer goes into a file of its own. In `locked_view.json` a name the build does not know is skipped with one log line.
+- **Conversion:** a `settings.json` that holds `locked_view` (written by 0.6.0-feel.20 to feel.24) is converted when the mod starts, not at the next change: `locked_view.json` is written from it (unless that file is already there, which then wins), the file is copied to `settings.json.before-feel25` (an existing copy of that name is kept), and `settings.json` is written again without the member. A step that fails logs one `Refused:` line; the session uses the loaded values and the next start tries again.
+- **A refused file is kept:** when a file could not be read (the log says `Refused: settings: …`), the first save of the session first copies it to `settings.json.refused` (`.refused-2` … `.refused-9` when the name is taken; `locked_view.json.refused` for the other file). If the copy cannot be made the save fails.
 - **A failed write** is tried once per change, not once a frame. The log says `Refused: settings were not saved: …`, the session keeps its values, and a live replace is refused while a change is unsaved.
 - **Consequence:** once your own file exists, a newer build's shipped `settings.json` no longer applies. Delete your file to take the shipped one again.
 

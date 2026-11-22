@@ -72,6 +72,24 @@ jumped more than 5 cm.
 - **The crash while the game closes is guarded** (an engine fault of build 25480438, with or without first
   person). Tell me if you see a crash on quit.
 
+## Settings files (from 0.6.0-feel.25)
+
+Your settings are in `%LOCALAPPDATA%\Goose\HellForge\TrueFirstPerson\`.
+
+- **Two files.** `settings.json` holds the weapon placements and the menu values. `locked_view.json` holds
+  the options of the Locked view tab.
+- **Settings written by 0.6.0-feel.20 to feel.24 are converted on the first start.** Those builds kept the
+  Locked view options inside `settings.json`, and 0.6.0-feel.19 and older then refused the whole file and
+  wrote their defaults over it, placements included. The first start of this build moves the options to
+  `locked_view.json` and writes `settings.json` without them. A copy of the file as it was is kept as
+  `settings.json.before-feel25`. After that 0.6.0-feel.19 and older read `settings.json` again.
+- **Going back to 0.6.0-feel.20 to feel.24** is safe for the placements. Those builds do not read
+  `locked_view.json`, so their Locked view options start at the defaults, and their next save puts the
+  options back into `settings.json`; this build converts it again on its next start.
+- **A file this build cannot read is never written over without a copy.** Before the first save it is
+  copied to `settings.json.refused` (or `.refused-2` and so on; `locked_view.json.refused` for the other
+  file). The log says `Kept: ...` when that happens.
+
 ## Not checked yet
 
 Vehicles and emplacements, multiplayer, stratagem throws and call-ins, picking up items, terminals,
