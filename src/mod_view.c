@@ -41,6 +41,7 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "camera_helper.h"
 #define TFP_VIEW_VERSION "0.6.0-view.1"
 #endif
+#include "camera_damp.h"
 #define TFP_CONFLICT_ID "goose.first-person-controller"
 
 static const HfApi *hf;
@@ -714,7 +715,7 @@ static void start(void) {
   /* What build 25480438 does differently during actions (src/wire_action.h). */
   tfp_camera_set_action_tuning(TFP_ACTION_PICKUP_MASK, TFP_ACTION_EYE_IDLE_MS, TFP_ACTION_EYE_RETURN);
   /* The camera lock (docs/design/specs/2026-11-22-locked-view-design.md): first person through every action and camera. */
-  tfp_camera_set_lock(lock_wanted, .35f, 8.0f, 300.0f, .7f, 35.0f);
+  tfp_camera_set_lock(lock_wanted, .35f, 8.0f, 300.0f, .7f, 35.0f, tfp_camera_damping_ms(60)); /* the options' defaults; lock_note sets the saved ones */
 #ifdef TFP_FEEL
   tfp_wire_engine_set_held_body(tfp_camera_lock_off_foot_body); /* head hiding stays on while the lock holds a body that is off foot */
   tfp_wire_engine_set_lock_view(lock_view_now);                 /* and while the game presents the lease's own first-person request (a stim) */
@@ -860,7 +861,8 @@ static void lock_note(void) { /* once a second while the view is on: frames by c
   next = now + 1000;
   /* The Locked view tab's options (src/wire_settings.h); lock_off.txt beside the DLL overrides the toggle. */
   tfp_camera_set_lock(lock_wanted && tfp_locked_view_camera_lock(&wire), (float)(tfp_locked_view_kick_strength(&wire)/100),
-                      (float)tfp_locked_view_kick_max_degrees(&wire), 300.0f, (float)(tfp_locked_view_thrown_kick_strength(&wire)/100), 35.0f);
+                      (float)tfp_locked_view_kick_max_degrees(&wire), 300.0f, (float)(tfp_locked_view_thrown_kick_strength(&wire)/100), 35.0f,
+                      tfp_camera_damping_ms(tfp_locked_view_camera_damping(&wire)));
   TfpCameraLockStats s; tfp_camera_lock_stats(&s);
   if (s.frames == told_frames && s.missed == told_missed) return;
   /* The kind and error are the last missed frame's: 0 in a second without one. tools/harness/matrix.py reads this line. */

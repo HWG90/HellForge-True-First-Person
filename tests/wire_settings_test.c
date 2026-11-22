@@ -828,6 +828,24 @@ static int compat_part(void) {
       tfp_wire_settings_free(&wire);
     }
   }
+  { /* ---- locked_view.json from before camera_damping was an option: its default, and the file is not taken for a
+     * later build's (no note, no copy at the first write of it) ---- */
+    static const char before[] = "{\"format\":1,\"locked_view\":{\"fov_degrees\":95,\"kick_strength\":40,\"thrown_kick_strength\":70,\"smooth_eye\":true}}";
+    disk_clear();
+    disk_put("settings.json", feel19_text, strlen(feel19_text));
+    disk_put("locked_view.json", before, sizeof before - 1);
+    CHECK(start_on_disk() && !logged("Refused") && !logged("Note") && !logged("skipped") && tfp_locked_view_camera_damping(&wire) == 60 &&
+          tfp_locked_view_fov_degrees(&wire) == 95 && tfp_locked_view_kick_strength(&wire) == 40);
+    for (int k = 0; k < 3; k++) tfp_wire_settings_save_frame(&wire);
+    CHECK(!disk_writes[0] && !disk_writes[1] && !disk_copies && disk_count() == 2);       /* no change: nothing touched */
+    CHECK(tfp_wire_settings_locked_set(&wire, TFP_LOCKED_camera_damping, false, false, 80));
+    tfp_wire_settings_save_frame(&wire);
+    CHECK(disk_writes[1] == 1 && !disk_copies && disk_count() == 2 && strstr(disk_text("locked_view.json"), "\"camera_damping\": 80") &&
+          strstr(disk_text("locked_view.json"), "\"fov_degrees\": 95"));
+    tfp_wire_settings_free(&wire);
+    CHECK(start_on_disk() && !logged("Note") && tfp_locked_view_camera_damping(&wire) == 80);
+    tfp_wire_settings_free(&wire);
+  }
   { /* ---- locked_view.json of a later build (names or members this build skips): the first write of it by this build
      * would drop them, so the file as it is is copied to locked_view.json.newer first, once ---- */
     static const char unknown[] = "{\"format\":1,\"locked_view\":{\"fov_degrees\":95,\"future_option\":3,\"camera_lock\":false,\"another\":\"x\"}}";

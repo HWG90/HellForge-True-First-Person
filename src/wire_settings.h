@@ -133,7 +133,7 @@ bool tfp_wire_settings_locked_set(TfpWire *w, TfpSettingsLockedId id, bool is_bo
 /* The options by name, for the units that act on them. With no store bound each answers its default.
  * Plain reads of one stored value each: no game call, no lock, so a read from another thread than the
  * game thread sees the old or the new value of a change in flight, never a torn one on x86-64.
- * The two strengths are percentages (0 .. 100), the two angles degrees. */
+ * The two strengths and camera_damping are percentages (0 .. 100), the two angles degrees. */
 bool tfp_locked_view_camera_lock(TfpWire *w);
 bool tfp_locked_view_fov_lock(TfpWire *w);
 double tfp_locked_view_fov_degrees(TfpWire *w);
@@ -141,6 +141,7 @@ bool tfp_locked_view_fov_zoom_when_aiming(TfpWire *w);
 double tfp_locked_view_kick_strength(TfpWire *w);
 double tfp_locked_view_kick_max_degrees(TfpWire *w);
 double tfp_locked_view_thrown_kick_strength(TfpWire *w);
+double tfp_locked_view_camera_damping(TfpWire *w);
 /* The three that switch a feature live (src/wire_options.h decides with them and the test files). */
 bool tfp_locked_view_animated_arms(TfpWire *w);
 bool tfp_locked_view_put_away(TfpWire *w);

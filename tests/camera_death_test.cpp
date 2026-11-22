@@ -138,14 +138,14 @@ struct Game {
   void die() { s.state = 50; ragdoll = true; }
 };
 
-static void fresh(bool lock, bool smooth = false, float thrown_gain = 0, float thrown_max = 0) {
+static void fresh(bool lock, bool smooth = false, float thrown_gain = 0, float thrown_max = 0, float damping_ms = 0) {
   tfp_camera_reset_for_tests();
   TfpCameraHost host{};
   host.hook = reinterpret_cast<uint64_t>(&hook_marker); host.read = host_read; host.readable_span = host_readable_span; host.now = host_now;
   host.writable_slot = host_true_slot; host.executable = host_executable; host.cas = host_cas; host.write = host_write; host.pin = host_pin;
   host.lock_exclusive = host_lock; host.unlock_exclusive = host_lock; host.lock_shared = host_lock; host.unlock_shared = host_lock; host.forward = host_forward;
   tfp_camera_set_host(&host);
-  tfp_camera_set_lock(lock, 0, 0, 300, thrown_gain, thrown_max);
+  tfp_camera_set_lock(lock, 0, 0, 300, thrown_gain, thrown_max, damping_ms);
   tfp_camera_set_continuity(smooth, false);
   clock_ms += 5000;
 }
@@ -267,6 +267,24 @@ int main() {
     CHECK(g.own && kicked > 15 && kicked < 21);
     for (int i = 0; i < 90; ++i) { g.look(corpse_camera); g.hip(); g.frame(); }
     CHECK(degrees(g.out, yaw_q(first)) < .5f); // settled: the held direction again
+    g.end();
+  }
+  // ---- 6b. The same with camera damping at 60 % (180 ms): the kick comes into the view over several frames, never
+  // by more in one frame than the time constant allows, stays well under its undamped size, and settles the same. ----
+  {
+    fresh(true, false, .7f, 35, 180);
+    Game g; g.stand(0, 0, 0); g.alive(first);
+    g.die();
+    for (int i = 0; i < 10; ++i) { g.head(.03f + .1f * i, .06f, 1.5f); g.look(corpse_camera); g.hip(); g.frame(); }
+    CHECK(degrees(g.out, yaw_q(first)) < .5f);
+    g.head_pitch = .5f;
+    float peak = 0, most = 0; Q last = g.out;
+    for (int i = 0; i < 120; ++i) {
+      g.head(1.03f, .06f, 1.5f); g.look(corpse_camera); g.hip(); g.frame();
+      peak = std::fmax(peak, degrees(g.out, yaw_q(first))); most = std::fmax(most, degrees(g.out, last)); last = g.out;
+    }
+    CHECK(g.own && peak > 4 && peak < 12 && most < 21 * 33.3f / 180 * 1.05f);
+    CHECK(degrees(g.out, yaw_q(first)) < .5f);
     g.end();
   }
   // ---- 7. Arming on a thrown body (the helper was ended and is begun again while the body is down): with the
