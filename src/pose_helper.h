@@ -186,4 +186,21 @@ uint32_t tfp_pose_set_rotation_guard(uint32_t enabled);
 uint32_t tfp_pose_entry_position_stats(TfpPoseEntryPositionData *out);
 uint32_t tfp_pose_set_entry_position(uint32_t enabled);
 uint32_t tfp_pose_set_entry_animation(uint32_t milliseconds, float drop, float back);
+/* ---- the action hold (not in retail; a probe, docs/design/ACTION-CAMERA.md "Action hold") ----
+ * Off (the start-up state, and the state for good unless tfp_pose_set_hold is called): retail exactly.
+ * On: the ownership test of an armed lease (never the one of an entry) tolerates, for the SAME owned
+ * record (the top camera request is still the lease's, kind 6, for the lease's avatar and body, on the
+ * same rig, not seated):
+ *   - any controller byte other than the aim byte (the action flags and the guard byte),
+ *   - a weapon unit that is no longer live, a changed weapon descriptor, and a request that no longer
+ *     names the lease's weapon.
+ * Returns the previous value. The binder sets it every tick while the switch file is there: on while a
+ * lease runs and the controller would hold an action, because the game's first write of an action comes
+ * before the tick that sees the action (HellForge runs the tick before the game's update). */
+uint32_t tfp_pose_set_hold(uint32_t on);
+typedef struct TfpPoseHoldProbe {
+  uint32_t hold, armed, error;   /* the mode; whether a lease is armed; tfp_pose_error() */
+  uint64_t node5_calls;          /* position-setter calls for node 5 of the watched rig, counted from the first tfp_pose_set_hold on */
+} TfpPoseHoldProbe;
+uint32_t tfp_pose_hold_probe(TfpPoseHoldProbe *out); /* 1; reads only */
 #endif

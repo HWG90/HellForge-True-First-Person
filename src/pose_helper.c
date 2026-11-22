@@ -394,8 +394,13 @@ static bool unit_object(const TfpPoseConfig *c, uint32_t ref, uint64_t *object) 
       && generation == (uint8_t)(ref >> 22) && pointer(registry + L_REGISTRY_UNITS, &objects)
       && pointer(objects + (uint64_t)index*8, object);
 }
-/* cpp:191-228 */
+/* The action hold (pose_helper.h). hold_mode: the tolerance of ownership(). hold_probe: set by the first
+ * tfp_pose_set_hold and never cleared; only then is anything counted. Both 0 unless the binder calls it. */
+static _Atomic uint32_t hold_mode, hold_probe;
+static _Atomic uint64_t hold_node5_calls;
+/* cpp:191-228. With `hold` false every read, its order and every answer are retail's. */
 static bool ownership(Policy *p, bool entering) {
+  const bool hold = !entering && atomic_load_explicit(&hold_mode, memory_order_relaxed) != 0;
   const TfpPoseConfig *c = &p->c;
   uint64_t ctx = 0, owner = 0, camera = 0, controller = 0, descriptor = 0, object = 0, weapon_object = 0;
   uint32_t count = 0, head = 0, tail = 0, viewmodel = 0;
@@ -407,13 +412,17 @@ static bool ownership(Policy *p, bool entering) {
       || !pointer(owner + L_AVATAR_ROWS + (uint64_t)c->avatar_index*8, &descriptor)
       || !read(descriptor, d, sizeof d) || !read(owner + B_AVATAR_FLAGS + (uint64_t)c->avatar_index*B_AVATAR_STRIDE, flags, sizeof flags)
       || !value(owner + B_AVATAR_RIG + (uint64_t)c->avatar_index*B_AVATAR_STRIDE, viewmodel)
-      || viewmodel != c->viewmodel || !unit_object(c, c->viewmodel, &object) || !unit_object(c, c->weapon_unit, &weapon_object)
-      || !read(c->weapon_descriptor, wd, sizeof wd) || !value(ctx + L_CONTEXT_HEAD, head) || !value(ctx + L_CONTEXT_TAIL, tail)
+      || viewmodel != c->viewmodel || !unit_object(c, c->viewmodel, &object)) return false;
+  /* The weapon's unit and descriptor: in a hold the gun may be put away or gone; the record decides below. */
+  const bool weapon_read = unit_object(c, c->weapon_unit, &weapon_object) && read(c->weapon_descriptor, wd, sizeof wd);
+  if (!weapon_read && !hold) return false;
+  if (!value(ctx + L_CONTEXT_HEAD, head) || !value(ctx + L_CONTEXT_TAIL, tail)
       || head >= 32 || tail >= 32) return false;
   uint32_t avatar = 0, body = 0; memcpy(&avatar, d + 8, 4); memcpy(&body, d + 12, 4);
   uint32_t weapon = 0, weapon_unit = 0; memcpy(&weapon, wd + 8, 4); memcpy(&weapon_unit, wd + 12, 4);
-  if (avatar != c->avatar || body != c->body || weapon != c->weapon || weapon_unit != c->weapon_unit || (flags[L_FLAG_SEATED] & 4) != 0) return false;
-  for (unsigned i = 0; i < 6; ++i) if (i != L_CONTROL_AIM && controller_bytes[i]) return false;
+  if (avatar != c->avatar || body != c->body || (flags[L_FLAG_SEATED] & 4) != 0) return false;
+  if (!hold && (weapon != c->weapon || weapon_unit != c->weapon_unit)) return false;
+  if (!hold) for (unsigned i = 0; i < 6; ++i) if (i != L_CONTROL_AIM && controller_bytes[i]) return false;
   /* Bit48 belongs to the native camera lifecycle. Normal accepted aim uses
    * agreeing character bits82/125 even while a forced kind6 keeps48 clear.
    * An inconsistent pair cannot claim shoulder presentation; no extra reads. */
@@ -429,6 +438,10 @@ static bool ownership(Policy *p, bool entering) {
     memcpy(p->descriptor_bytes, d, 20); memcpy(p->weapon_bytes, wd, 20);
     return true;
   }
+  if (hold) /* the same owned record, avatar, body and rig; the weapon's side is not asked */
+    return top == c->request && (request[0] & 0xffff) == 6 && request[3] == c->body
+        && camera == p->camera && controller == p->controller && descriptor == p->descriptor && object == p->object
+        && memcmp(d, p->descriptor_bytes, 20) == 0;
   return top == c->request && (request[0] & 0xffff) == 6 && request[2] == c->weapon && request[3] == c->body
       && camera == p->camera && controller == p->controller && descriptor == p->descriptor && object == p->object
       && weapon_object == p->weapon_object && memcmp(d, p->descriptor_bytes, 20) == 0 && memcmp(wd, p->weapon_bytes, 20) == 0;
@@ -1379,6 +1392,9 @@ static void position_call(uint64_t caller, uint32_t unit, uint32_t node, const f
 /* cpp:1137-1141 position_hook */
 void tfp_pose_position_from(uint64_t return_address, uint32_t unit, uint32_t node, const float *pose, uint64_t native_stack) {
   atomic_fetch_add_explicit(&seen[0], 1, memory_order_relaxed);
+  if (node == RIG_NODE && atomic_load_explicit(&hold_probe, memory_order_relaxed)
+      && unit == atomic_load_explicit(&watched_viewmodel, memory_order_relaxed))
+    atomic_fetch_add_explicit(&hold_node5_calls, 1, memory_order_relaxed); /* the hold probe's count; nothing reads it but tfp_pose_hold_probe */
   position_call(return_address, unit, node, pose, native_stack);
 }
 /* cpp:1192-1200 */
@@ -1992,6 +2008,20 @@ void tfp_pose_reset_for_tests(void) {
   guard_reference_unit = 0; guard_candidate_unit = 0; guard_candidate_count = 0;
   memset(entry_positions, 0, sizeof entry_positions); entry_position_next = 0; entry_position_writes = 0;
   atomic_store(&entry_position_enabled, 1);
+  atomic_store(&hold_mode, 0); atomic_store(&hold_probe, 0); atomic_store(&hold_node5_calls, 0);
+}
+/* Not in retail (pose_helper.h). */
+uint32_t tfp_pose_set_hold(uint32_t on) {
+  atomic_store_explicit(&hold_probe, 1, memory_order_relaxed);
+  return atomic_exchange_explicit(&hold_mode, on ? 1 : 0, memory_order_relaxed);
+}
+uint32_t tfp_pose_hold_probe(TfpPoseHoldProbe *out) {
+  if (!out) return 0;
+  out->hold = atomic_load_explicit(&hold_mode, memory_order_relaxed);
+  out->armed = atomic_load_explicit(&armed, memory_order_acquire);
+  out->error = atomic_load_explicit(&last_error, memory_order_acquire);
+  out->node5_calls = atomic_load_explicit(&hold_node5_calls, memory_order_relaxed);
+  return 1;
 }
 /* Not in retail (pose_helper.h). Reads only. */
 uint32_t tfp_pose_input_held(void) {

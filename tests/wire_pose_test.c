@@ -43,6 +43,16 @@ void pose_world_first_person(void) {
   const float zero = 0; std::memcpy(scene.request + 0x98, &zero, 4);
   sync();
 }
+/* An action: the first controller byte (the action flags), nothing else. 0: none. */
+void pose_world_action(unsigned flags) { scene.controller[0] = static_cast<uint8_t>(flags); sync(); }
+/* The gun leaves: its unit's generation retires and the request no longer names the weapon; back: both return. */
+void pose_world_weapon(int present) {
+  const uint32_t weapon = present ? WEAPON : 0;
+  scene.generations[WEAPON_UNIT & 0x3fffff] = present ? 1 : 2;
+  std::memcpy(scene.request + 8, &weapon, 4);
+  sync();
+}
+void pose_world_seated(int seated) { scene.flags[14] = seated ? 4 : 0; sync(); }
 void pose_world_build(PoseWorld *out) {
   W.build(HERE);
   for (uint32_t i = 0; i < RIG_NODES; ++i) { scene.hashes[i] = 0x1000 + i; scene.links[i] = 0x10001; }
@@ -456,6 +466,9 @@ typedef struct PoseWorld {
 void pose_world_build(PoseWorld *out);
 void pose_world_third_person(void);
 void pose_world_first_person(void);
+void pose_world_action(unsigned flags);
+void pose_world_weapon(int present);
+void pose_world_seated(int seated);
 static PoseWorld world;
 static int lock_depth[2], lock_faults;
 static unsigned forwarded_calls, getter_calls, cas_calls, input_only_calls;
@@ -649,6 +662,76 @@ static int real(void) {
   CHECK(H->finish(H->user, handle, &has_stats, &stats, &why) == TFP_OPS_TRUE);
   for (int i = 0; i < 5; i++) CHECK(slot_now(i) == world.native[i]);
   CHECK(lock_faults == 0 && input_only_calls == 0);
+
+  /* ---- the action hold (not in retail). Off: the first frame of an action ends the placement, as retail ---- */
+  TfpPoseHoldProbe probe;
+  CHECK(H->prepare(H->user, &c, &native, &why) == TFP_OPS_TRUE && H->begin(H->user, &c, native, &handle, &why) == TFP_OPS_TRUE);
+  pose_world_first_person();
+  game_frame(handle, &stats, 300);
+  CHECK(applied_is(.15, 0, -.12) && stats.armed == 1);
+  CHECK(tfp_pose_hold_probe(&probe) && probe.armed == 1 && probe.hold == 0 && probe.node5_calls == 0); /* nothing is counted while it is off */
+  pose_world_action(2);
+  game_frame(handle, &stats, 16);
+  CHECK(applied_is(0, 0, 0) && tfp_pose_hold_probe(&probe) && probe.armed == 0 && probe.error == TFP_POSE_OWNER_MISMATCH);
+  H->finish(H->user, handle, &has_stats, &stats, &why);
+  /* On: the same frame keeps the placement, for the same owned record */
+  pose_world_action(0);
+  pose_world_third_person();
+  CHECK(H->prepare(H->user, &c, &native, &why) == TFP_OPS_TRUE && H->begin(H->user, &c, native, &handle, &why) == TFP_OPS_TRUE);
+  pose_world_first_person();
+  game_frame(handle, &stats, 300);
+  CHECK(applied_is(.15, 0, -.12));
+  CHECK(tfp_pose_set_hold(1) == 0 && tfp_pose_hold_probe(&probe) && probe.hold == 1);
+  pose_world_action(2);
+  game_frame(handle, &stats, 16);
+  CHECK(applied_is(.15, 0, -.12) && tfp_pose_hold_probe(&probe) && probe.armed == 1 && probe.error == 0 && probe.node5_calls == 1);
+  pose_world_action(0x40); /* any action flags, and the guard byte's neighbours: not named */
+  game_frame(handle, &stats, 16);
+  CHECK(applied_is(.15, 0, -.12) && tfp_pose_hold_probe(&probe) && probe.armed == 1 && probe.node5_calls == 2);
+  pose_world_weapon(0); /* the gun is put away: its unit and the request's weapon field no longer match */
+  game_frame(handle, &stats, 16);
+  CHECK(applied_is(.15, 0, -.12) && tfp_pose_hold_probe(&probe) && probe.armed == 1 && probe.error == 0);
+  CHECK(H->set_placement(H->user, handle, .1, .02, -.1, &why) == TFP_OPS_TRUE); /* a control call's own ownership test tolerates it too */
+  game_frame(handle, &stats, 16);
+  CHECK(applied_is(.1, .02, -.1) && tfp_pose_hold_probe(&probe) && probe.armed == 1);
+  pose_world_weapon(1);
+  pose_world_action(0);
+  game_frame(handle, &stats, 16);
+  CHECK(applied_is(.1, .02, -.1) && stats.armed == 1 && stats.error == 0); /* the action is over: nothing was lost */
+  /* what a hold never tolerates: a seated avatar, another record on top */
+  pose_world_action(2);
+  pose_world_seated(1);
+  game_frame(handle, &stats, 16);
+  CHECK(applied_is(0, 0, 0) && tfp_pose_hold_probe(&probe) && probe.armed == 0 && probe.error == TFP_POSE_OWNER_MISMATCH);
+  H->finish(H->user, handle, &has_stats, &stats, &why);
+  pose_world_seated(0);
+  pose_world_action(0);
+  pose_world_third_person();
+  CHECK(H->prepare(H->user, &c, &native, &why) == TFP_OPS_TRUE && H->begin(H->user, &c, native, &handle, &why) == TFP_OPS_TRUE);
+  pose_world_first_person();
+  game_frame(handle, &stats, 300);
+  CHECK(applied_is(.15, 0, -.12));
+  pose_world_action(2);
+  pose_world_third_person(); /* the game ended its first-person request: the top record is another one */
+  pose_world_action(2);
+  now_ms += 16;
+  tfp_pose_position_from(world.rig_return, world.viewmodel, 5, (const float *)(uintptr_t)(world.request + 0x48), world.stack);
+  CHECK(tfp_pose_hold_probe(&probe) && probe.armed == 0 && probe.error == TFP_POSE_OWNER_MISMATCH);
+  H->finish(H->user, handle, &has_stats, &stats, &why);
+  /* and switched off again it is strict again */
+  pose_world_action(0);
+  pose_world_third_person();
+  CHECK(tfp_pose_set_hold(0) == 1);
+  CHECK(H->prepare(H->user, &c, &native, &why) == TFP_OPS_TRUE && H->begin(H->user, &c, native, &handle, &why) == TFP_OPS_TRUE);
+  pose_world_first_person();
+  game_frame(handle, &stats, 300);
+  pose_world_action(2);
+  game_frame(handle, &stats, 16);
+  CHECK(applied_is(0, 0, 0) && tfp_pose_hold_probe(&probe) && probe.armed == 0 && probe.hold == 0);
+  H->finish(H->user, handle, &has_stats, &stats, &why);
+  pose_world_action(0);
+  for (int i = 0; i < 5; i++) CHECK(slot_now(i) == world.native[i]);
+  CHECK(lock_faults == 0 && lock_depth[0] == 0 && lock_depth[1] == 0);
   return 0;
 }
 
