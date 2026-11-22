@@ -75,6 +75,14 @@ static uint32_t h_begin_b(const TfpBlurConfig *c, uint64_t *g) { (void)c; (void)
 static uint32_t h_stats_b(uint64_t g, TfpBlurStats *s) { (void)g; (void)s; helper_calls++; return 0; }
 
 static TfpWire wire;
+/* The action hold's two hooks, as the feel build's would be. */
+static unsigned hold_applies, hold_probes;
+static bool hold_armed, hold_holding;
+static void hold_apply(TfpWire *w, bool armed, bool holding) { (void)w; hold_applies++, hold_armed = armed, hold_holding = holding; }
+static void hold_probe(TfpWire *w, const TfpOpsHold *view, uint32_t weapon_unit, TfpWireHoldProbe *out) {
+  (void)w; (void)view; (void)weapon_unit; (void)out;
+  hold_probes++;
+}
 /* A saved per-weapon placement as another binder would decode it: the ref points at six numbers. */
 static bool saved_decode(TfpWire *w, TfpRtValue value, TfpOpsPlacement *out) {
   const double *v = value.ref;
@@ -464,6 +472,81 @@ int main(void) {
     now_seconds += 1;
     CHECK(between.host.backend_keep_aim_view(&between.host, &table) && aim_writes == 4 && between.ops.aim_view_keeps == 2);
     CHECK(tfp_wire_call(&between, TFP_RT_E_on_disable, NULL, r) == TFP_RT_OK);
+  }
+  { /* the action hold probe (hold_lease.txt): the switch, the hooks, the lines */
+    static TfpWire off, on;
+    static TfpWireLease held_lease;
+    char text[640];
+    /* without the switch: no hook call, no line, the controller's hold off, whatever the controller's state says */
+    tfp_wire_init(&off, &memory, &platform, &helpers);
+    off.hold.apply = hold_apply, off.hold.probe = hold_probe;
+    CHECK(tfp_wire_call(&off, TFP_RT_E_on_enable, NULL, r) == TFP_RT_OK && !off.controller.hold_enabled && !tfp_wire_hold_on(&off));
+    line_count = 0, hold_applies = hold_probes = 0;
+    off.controller.enabled = true, off.controller.holding = true;
+    tfp_wire_frame(&off, NULL);
+    tfp_wire_hold_frame(&off);
+    CHECK(hold_applies == 0 && hold_probes == 0 && !logged("Hold:") && !logged("State: hold"));
+    off.controller.enabled = off.controller.holding = false;
+    CHECK(tfp_wire_call(&off, TFP_RT_E_on_disable, NULL, r) == TFP_RT_OK);
+    /* with it: the controller made by on_enable has its hold on, the hooks get the controller's state each tick */
+    tfp_wire_init(&on, &memory, &platform, &helpers);
+    tfp_wire_hold_set(&on, true);
+    on.hold.apply = hold_apply, on.hold.probe = hold_probe;
+    CHECK(tfp_wire_call(&on, TFP_RT_E_on_enable, NULL, r) == TFP_RT_OK && on.controller.hold_enabled && tfp_wire_hold_on(&on));
+    line_count = 0;
+    tfp_wire_frame(&on, NULL);
+    CHECK(hold_applies == 1 && !hold_armed && !hold_holding && !logged("Hold:")); /* the view is off: the hooks hear "no", nothing is written */
+    on.controller.enabled = true;
+    on.controller.lease = &held_lease.view, on.controller.phase = TFP_PHASE_RUNNING;
+    held_lease.view.request = held_lease.ops.request = 0x1200, held_lease.ops.origin = sample(true);
+    tfp_wire_hold_frame(&on);
+    CHECK(hold_applies == 2 && hold_armed && !hold_holding);
+    CHECK(logged("Hold: player not proven (") && logged("holding=0 why=-")); /* this test has no game memory behind it */
+    on.controller.holding = true, on.controller.holds = 1;
+    snprintf(on.controller.hold_why, sizeof on.controller.hold_why, "Gameplay action or camera owns the view");
+    line_count = 0;
+    tfp_wire_hold_frame(&on);
+    CHECK(hold_armed && hold_holding && logged("State: holding the native view through an action") && logged("holding=1 why=Gameplay action"));
+    int said = line_count;
+    tfp_wire_hold_frame(&on); /* one line per tick while holding, the State line only on the edge */
+    CHECK(line_count == said + 1);
+    on.controller.holding = false, on.controller.hold_exits = 1;
+    snprintf(on.controller.hold_why, sizeof on.controller.hold_why, "the cap was reached (4000 ms)");
+    line_count = 0;
+    tfp_wire_hold_frame(&on);
+    CHECK(logged("State: hold ended: the cap was reached (4000 ms)") && !hold_holding);
+    /* ten more ticks after the edge, then rate-limited while nothing happens: one line a second */
+    line_count = 0;
+    for (int i = 0; i < 12; i++) { now_seconds += 1 / 60.0; tfp_wire_hold_frame(&on); }
+    CHECK(line_count == 10);
+    line_count = 0;
+    for (int i = 0; i < 30; i++) { now_seconds += 1 / 60.0; tfp_wire_hold_frame(&on); }
+    CHECK(line_count <= 1);
+    now_seconds += 1;
+    tfp_wire_hold_frame(&on);
+    CHECK(line_count >= 1 && line_count <= 2);
+    /* the line itself, from a view and a probe */
+    TfpOpsHold view;
+    TfpWireHoldProbe extra;
+    memset(&view, 0, sizeof view);
+    memset(&extra, 0, sizeof extra);
+    view.player = sample(false), view.player.controller_bytes[0] = 2, view.player.controller_bytes[4] = 0, view.player.controller_bytes[5] = 0;
+    view.player.request_weapon = 912, view.wielded = 913;
+    extra.gun_parent = "body", extra.has_camera = true, extra.camera_parent_is_rig_eye = true, extra.has_pose = true, extra.pose_armed = true;
+    extra.pose_error = 0, extra.has_eye = extra.has_rig_eye = true;
+    extra.eye[0] = 1, extra.eye[1] = 2, extra.eye[2] = 3.5, extra.rig_eye[0] = 1, extra.rig_eye[1] = 2, extra.rig_eye[2] = 3.25;
+    on.controller.holding = true;
+    snprintf(on.controller.hold_why, sizeof on.controller.hold_why, "Gameplay action or camera owns the view");
+    tfp_wire_hold_line(&on, &view, NULL, &extra, 3, text, sizeof text);
+    CHECK(!strcmp(text, "Hold: mask=00000002 active=0 byte5=0 kind=6 record_ours=1 request_weapon=912 wielded=913 gun_parent=body "
+                        "camera_parent_is_rig_eye=1 pose_armed=1 pose_error=0 node5_calls=+3 eye=(1.000 2.000 3.500) rig_eye=(1.000 2.000 3.250) "
+                        "holding=1 why=Gameplay action or camera owns the view"));
+    view.player.record = 0x1300, extra.has_camera = extra.has_pose = extra.has_eye = extra.has_rig_eye = false, extra.gun_parent = NULL;
+    on.controller.holding = false;
+    tfp_wire_hold_line(&on, &view, NULL, &extra, 0, text, sizeof text);
+    CHECK(strstr(text, "record_ours=0") && strstr(text, "gun_parent=- camera_parent_is_rig_eye=- pose_armed=- pose_error=- node5_calls=+0 eye=- rig_eye=- holding=0"));
+    on.controller.enabled = false, on.controller.lease = NULL, on.controller.phase = TFP_PHASE_IDLE;
+    CHECK(tfp_wire_call(&on, TFP_RT_E_on_disable, NULL, r) == TFP_RT_OK);
   }
   CHECK(tfp_wire_call(&wire, TFP_RT_E_on_disable, NULL, r) == TFP_RT_OK && r[0].kind == TFP_RT_TRUE);
   CHECK(!wire.rt.has[TFP_RT_O_CONTROLLER]);

@@ -59,6 +59,30 @@ enum { TFP_WIRE_SNAPS = 48, TFP_WIRE_VIEWS = 8, TFP_WIRE_ARENA = 16384 };
 /* Whose state sits in TfpWire.ext[]. */
 enum { TFP_WIRE_EXT_SETTINGS, TFP_WIRE_EXT_POSE, TFP_WIRE_EXT_MOTION, TFP_WIRE_EXT_ENGINE, TFP_WIRE_EXT_EFFECTS, TFP_WIRE_EXT_LOG,
        TFP_WIRE_EXT_SPARE, TFP_WIRE_EXT_MENU, TFP_WIRE_EXT_EDITOR, TFP_WIRE_EXT_PANEL, TFP_WIRE_EXT_N };
+/* What the action hold's line says about the pose helper and the two rigs: gathered by the feel build
+ * (src/mod_view.c), which has the helper and the arm drive; a has_* false or a NULL text prints "-". */
+typedef struct TfpWireHoldProbe {
+  const char *gun_parent;                 /* "rig", "body", "other", "none" */
+  bool has_camera, camera_parent_is_rig_eye, has_pose, pose_armed, has_eye, has_rig_eye;
+  uint32_t pose_error;
+  uint64_t node5_calls;                   /* running count; the line prints the difference to the line before */
+  double eye[3], rig_eye[3];
+} TfpWireHoldProbe;
+struct TfpWire;
+/* The action hold (a probe; a file hold_lease.txt beside the DLL). Everything false, 0 and NULL without it:
+ * then nothing here is called and nothing is written. */
+typedef struct TfpWireHold {
+  bool on, was_holding, has_mask;
+  uint32_t mask;                          /* the action flags of the line before */
+  unsigned after;                         /* ticks still to be written after a change of the flags */
+  double next_line;
+  uint64_t node5_calls;
+  /* Each tick: armed (a lease runs and an action would be held) and holding (one is). The feel build
+   * hands them to the pose helper and the arm drive. May be NULL. */
+  void (*apply)(struct TfpWire *w, bool armed, bool holding);
+  /* For the line. view NULL: the player is not proven. weapon_unit: the lease's gun, 0 without a lease. May be NULL. */
+  void (*probe)(struct TfpWire *w, const TfpOpsHold *view, uint32_t weapon_unit, TfpWireHoldProbe *out);
+} TfpWireHold;
 typedef struct TfpWire {
   TfpRt rt;
   TfpRtHost host;
@@ -129,6 +153,7 @@ typedef struct TfpWire {
   /* The pose helper's running counts at the last status poll (controller.lua's weapon_updates /
    * zero_restores, which the backend's statistics do not carry). false: none. */
   bool (*pose_counts)(const struct TfpWire *w, double *weapon_updates, double *zero_restores);
+  TfpWireHold hold;
 } TfpWire;
 
 /* Builds the host (off answers first, then the wired view) and the runtime's start state. The
@@ -144,6 +169,16 @@ void tfp_wire_frame(TfpWire *w, const char *extra);
  * acted. Its writes are the keeper's own two, on the tick's snapshot, re-checked against memory. */
 bool tfp_wire_aim_due(TfpWire *w);
 bool tfp_wire_aim_probe(TfpWire *w, int right, int middle);
+
+/* The action hold's switch. Before on_enable (the controller made there takes it); later calls reach the
+ * controller that exists. Off after tfp_wire_init. */
+void tfp_wire_hold_set(TfpWire *w, bool on);
+bool tfp_wire_hold_on(const TfpWire *w);
+/* The hold's part of a tick; tfp_wire_frame calls it after on_update. Does nothing while the switch is off. */
+void tfp_wire_hold_frame(TfpWire *w);
+/* The "Hold:" line. view NULL: the player is not proven, `unproven` says why (may be NULL). */
+void tfp_wire_hold_line(const TfpWire *w, const TfpOpsHold *view, const char *unproven, const TfpWireHoldProbe *probe, uint64_t node5_delta,
+                        char *out, size_t size);
 
 /* Glue with logic, exported for tests/wire_glue_test.c. */
 void tfp_wire_snapshot_table(TfpWire *w, const TfpOpsSnapshot *s, TfpRtTable *out);

@@ -333,6 +333,21 @@ static bool api_release(void *u, TfpLease *lease, char *why, size_t size) {
   why_out(&text, why, size);
   return r == TFP_OPS_TRUE;
 }
+/* The action hold's view (controller.h TfpHoldView): only ever called while the hold is switched on. */
+static void api_hold_view(void *u, const TfpLease *lease, TfpHoldView *out) {
+  TfpWire *w = u;
+  const TfpWireLease *l = (const TfpWireLease *)lease;
+  TfpOpsHold h;
+  TfpOpsText why;
+  memset(out, 0, sizeof *out);
+  if (tfp_ops_hold_snapshot(&w->ops, &h, &why) != TFP_OPS_TRUE) return;
+  out->available = true;
+  out->player_identity = tfp_ops_player_key(&h.player);
+  out->camera_kind = h.player.camera_kind, out->record = h.player.record;
+  out->safe = h.player.safe, out->seated = h.player.seated, out->ragdoll = h.ragdoll;
+  out->full_aim = h.player.controller_active, out->foreign_camera = h.foreign_camera;
+  out->weapon = !h.wielded ? TFP_HOLD_WEAPON_NONE : l && h.wielded == l->ops.origin.weapon ? TFP_HOLD_WEAPON_SAME : TFP_HOLD_WEAPON_OTHER;
+}
 static void api_presentation_transition(void *u, TfpPhasePacket *out) {
   TfpWire *w = u;
   memset(out, 0, sizeof *out);
@@ -615,7 +630,11 @@ void tfp_wire_controller_state(TfpWire *w, TfpRtTable *out) { /* controller:resu
   /* blend: the pose helper's hip blend; nil without a pose helper. */
   if (w->controller_extra) w->controller_extra(w, out);
 }
-static bool rt_controller_new(TfpRtHost *h) { tfp_controller_init(&W(h)->controller, &W(h)->api); return true; }
+static bool rt_controller_new(TfpRtHost *h) {
+  tfp_controller_init(&W(h)->controller, &W(h)->api);
+  if (W(h)->hold.on) tfp_controller_set_hold(&W(h)->controller, true); /* the action hold probe; off without its switch file */
+  return true;
+}
 static bool rt_controller_is_enabled(TfpRtHost *h, V *o1) { *o1 = boolean(W(h)->controller.enabled); return true; }
 static bool rt_controller_is_clean(TfpRtHost *h, V *o1) { *o1 = boolean(tfp_controller_is_clean(&W(h)->controller)); return true; }
 static bool rt_controller_result(TfpRtHost *h, TfpRtTable *o1) { tfp_wire_controller_state(W(h), o1); return true; }
@@ -1115,7 +1134,7 @@ void tfp_wire_init(TfpWire *w, const TfpOpsHost *memory, const TfpWirePlatform *
 
   w->null_pose = (TfpOpsPoseHelper){w, np_prepare, np_begin, np_owned, np_finish, np_stats, np_xyz, np_zoom, np_xyz, np_transition, np_motion};
   w->api = (TfpBackendApi){w, api_snapshot, api_player_snapshot, api_camera_only_weapon, api_prepare_pose, api_enter_pose, api_pose_status,
-                           api_release, api_presentation_transition, api_set_pose_transition, api_clock};
+                           api_release, api_presentation_transition, api_set_pose_transition, api_clock, api_hold_view};
   w->camera_api = (TfpCameraAdapterApi){w, helpers->camera, NULL, cam_config, cam_snapshot, cam_controller, io_enabled, cam_clock, io_log};
   w->fov_io = (TfpFovIo){w, fov_config, fov_packet, fov_controller, io_enabled, fov_lease, io_clock, io_log};
   w->blur_io = (TfpBlurIo){w, blur_config, blur_controller, io_enabled, blur_lease, io_clock, io_log};
@@ -1185,6 +1204,70 @@ void tfp_wire_init(TfpWire *w, const TfpOpsHost *memory, const TfpWirePlatform *
   tfp_rt_init(&w->rt, h);
 }
 
+/* ---- the action hold probe (wire.h TfpWireHold; docs/design/ACTION-CAMERA.md "Action hold") ---- */
+void tfp_wire_hold_set(TfpWire *w, bool on) {
+  w->hold.on = on;
+  tfp_controller_set_hold(&w->controller, on); /* a controller made later takes it in rt_controller_new */
+}
+bool tfp_wire_hold_on(const TfpWire *w) { return w->hold.on; }
+void tfp_wire_hold_line(const TfpWire *w, const TfpOpsHold *view, const char *unproven, const TfpWireHoldProbe *probe, uint64_t node5_delta,
+                        char *out, size_t size) {
+  const TfpController *c = &w->controller;
+  char rig[400], eye[64] = "-", rig_eye[64] = "-", camera[4] = "-", armed[4] = "-", error[16] = "-";
+  if (probe && probe->has_camera) snprintf(camera, sizeof camera, "%d", (int)probe->camera_parent_is_rig_eye);
+  if (probe && probe->has_pose) snprintf(armed, sizeof armed, "%d", (int)probe->pose_armed), snprintf(error, sizeof error, "%u", (unsigned)probe->pose_error);
+  if (probe && probe->has_eye) snprintf(eye, sizeof eye, "(%.3f %.3f %.3f)", probe->eye[0], probe->eye[1], probe->eye[2]);
+  if (probe && probe->has_rig_eye) snprintf(rig_eye, sizeof rig_eye, "(%.3f %.3f %.3f)", probe->rig_eye[0], probe->rig_eye[1], probe->rig_eye[2]);
+  snprintf(rig, sizeof rig, "gun_parent=%.8s camera_parent_is_rig_eye=%s pose_armed=%s pose_error=%s node5_calls=+%llu eye=%s rig_eye=%s",
+           probe && probe->gun_parent ? probe->gun_parent : "-", camera, armed, error, (unsigned long long)node5_delta, eye, rig_eye);
+  const char *why = c->hold_why[0] ? c->hold_why : "-";
+  if (!view) {
+    snprintf(out, size, "Hold: player not proven (%s) %s holding=%d why=%s", unproven && *unproven ? unproven : "no reason given", rig,
+             (int)c->holding, why);
+    return;
+  }
+  const TfpOpsSnapshot *p = &view->player;
+  snprintf(out, size, "Hold: mask=%02x%02x%02x%02x active=%u byte5=%u kind=%u record_ours=%d request_weapon=%u wielded=%u %s holding=%d why=%s",
+           p->controller_bytes[3], p->controller_bytes[2], p->controller_bytes[1], p->controller_bytes[0], (unsigned)p->controller_bytes[4],
+           (unsigned)p->controller_bytes[5], (unsigned)p->camera_kind,
+           (int)(c->lease && c->lease->request && p->camera_kind == 6 && p->record == c->lease->request), (unsigned)p->request_weapon,
+           (unsigned)view->wielded, rig, (int)c->holding, why);
+}
+void tfp_wire_hold_frame(TfpWire *w) {
+  TfpWireHold *hold = &w->hold;
+  const TfpController *c = &w->controller;
+  if (!hold->on) return;
+  const bool holding = c->holding;
+  if (hold->apply) hold->apply(w, tfp_controller_hold_armed(c), holding);
+  if (holding != hold->was_holding) {
+    if (holding) tfp_view_log_event(&w->log, "State: holding the native view through an action");
+    else tfp_view_log_event(&w->log, "State: hold ended: %s", c->hold_why[0] ? c->hold_why : "no reason recorded");
+    hold->was_holding = holding;
+    hold->after = 11; /* this tick and the ten after it */
+    if (!holding && !c->enabled) return; /* switched off (F11): the edge is said, no line follows */
+  }
+  if (!c->enabled) return;
+  TfpOpsHold view;
+  TfpOpsText why = {false, ""};
+  const bool proven = tfp_ops_hold_snapshot(&w->ops, &view, &why) == TFP_OPS_TRUE;
+  uint32_t mask = 0;
+  if (proven) memcpy(&mask, view.player.controller_bytes, 4);
+  if (proven != hold->has_mask || mask != hold->mask) hold->after = 11, hold->has_mask = proven, hold->mask = mask; /* an edge of the action flags */
+  const double now = w->platform.clock ? w->platform.clock(w->platform.user) : 0;
+  const bool due = holding || hold->after || !(now < hold->next_line);
+  if (!due) return;
+  if (hold->after && !holding) hold->after--;
+  hold->next_line = now + 1;
+  TfpWireHoldProbe probe;
+  memset(&probe, 0, sizeof probe);
+  const TfpWireLease *lease = held(w);
+  if (hold->probe) hold->probe(w, proven ? &view : NULL, lease ? lease->ops.origin.weapon_unit : 0, &probe);
+  char line[640];
+  tfp_wire_hold_line(w, proven ? &view : NULL, why.present ? why.text : NULL, &probe, probe.node5_calls - hold->node5_calls, line, sizeof line);
+  hold->node5_calls = probe.node5_calls;
+  tfp_view_log_event(&w->log, "%s", line);
+}
+
 TfpRtStatus tfp_wire_call(TfpWire *w, TfpRtEntry entry, const TfpRtArgs *args, TfpRtValue *ret) {
   if (w->depth++ == 0) w->arena_used = 0;
   TfpRtStatus status = tfp_rt_call(&w->rt, entry, args, ret);
@@ -1205,6 +1288,7 @@ void tfp_wire_frame(TfpWire *w, const char *extra) {
   } else w->entry_fault[0] = 0;
 
   if (w->frame_extra) w->frame_extra(w);
+  tfp_wire_hold_frame(w); /* nothing without hold_lease.txt */
   TfpViewSample s;
   TfpFovResult fov;
   TfpBlurResult blur;
