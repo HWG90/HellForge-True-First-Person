@@ -288,7 +288,12 @@ counts frame for frame with the switches on and off; `tests/run-native.sh` compa
 call for call). Without `hold_lease.txt` the release path and the hold view are not reached
 (`tests/run-vectors-backend-ops.sh`: retail still waits its four polls).
 
-**A stim.** Not treated on its own. The game keeps kind 6 for about 0.85 s and refuses the exit (mask 64), as in
+**A stim (0.6.0-feel.26).** Treated on its own since the captures of 2026-11-23 (the helmet from behind for half a
+second): the frames of the game's request after the exit was asked for, with the gun off the rig, present the head
+camera's eye, and head hiding stays on for the lease's own request. See "The stim's orphaned frames" in
+`docs/design/specs/2026-11-22-locked-view-design.md`. What follows is 0.6.0-feel.23's text.
+
+**A stim, 0.6.0-feel.23.** Not treated on its own. The game keeps kind 6 for about 0.85 s and refuses the exit (mask 64), as in
 retail, and the mod still waits for it. What the three readers agreed on is covered by 2: the two rig steps at its
 start are taken up in the native view (the helper reads the rig under that mask now, for this only), the head-camera
 frame at its end continues from the presented eye, and the return to the weapon is one glide. Keeping the pose helper

@@ -33,7 +33,7 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "render_slot.h"
 #include "arm_drive.h"
 #include "wire_options.h"
-#define TFP_VIEW_VERSION "0.6.0-feel.25"
+#define TFP_VIEW_VERSION "0.6.0-feel.26"
 #else
 #include "wire_win.h"
 #include "wire_action.h"
@@ -366,6 +366,54 @@ static void trace_note(void) {
 #endif
 
 #ifdef TFP_FEEL
+/* ---- the orphaned native frames (0.6.0-feel.26; src/wire_action.h, src/camera_helper.h tfp_camera_set_orphan) ----
+ * A stim: the game keeps its first-person request for about 0.85 s after the exit was asked for, with the gun on
+ * the body and the rig's eye at the body's head. Each tick, after the controller decided: the camera helper is told
+ * while that lasts (it presents the head camera's eye in those frames), and one line is written when it is over.
+ * Nothing is read and nothing is said with the camera lock off, or outside the controller's wait for an exit.
+ *   frames       frames presented at the head's eye (camera calls, not ticks)
+ *   rig eye      how far behind that eye the game's own eye was at most, along the level view direction
+ *   head hidden  1: head visibility was hiding rows on every tick of the window
+ *   why          what the exit waited for; then, when there were any, the frames that could not be presented so */
+static bool lock_view_now(void) { return lock_wanted && tfp_locked_view_camera_lock(&wire); }
+static void orphan_note(void) {
+  static bool was;
+  static unsigned ticks, hidden;
+  static TfpCameraOrphanStats start;
+  static float behind;
+  static char why[200];
+  const bool on = lock_view_now() && tfp_wire_orphan(&wire);
+  if (on != was) {
+    tfp_camera_set_orphan(on);
+    tfp_camera_continuity_event();
+    if (trace_wanted) tfp_camera_trace_edge();
+  }
+  TfpCameraOrphanStats now;
+  if (on || was) tfp_camera_orphan_stats(&now);
+  if (on && !was) {
+    start = now, ticks = hidden = 0, behind = 0;
+    const char *label = wire.controller.label, *reason = strstr(label, "Waiting for the held native request: ");
+    snprintf(why, sizeof why, "%s", reason ? reason + strlen("Waiting for the held native request: ") : label);
+  }
+  if (on) {
+    ticks++;
+    if (tfp_wire_engine_head_hidden(&wire) > 0) hidden++;
+    if (now.frames != start.frames && now.behind_m > behind) behind = now.behind_m;
+  }
+  if (!on && was) {
+    char extra[160] = "";
+    if (now.frames != start.frames && now.behind_m > behind) behind = now.behind_m;
+    if (now.refused != start.refused)
+      snprintf(extra, sizeof extra, "; +%llu frames followed the rig's eye (the head or the rig's eye was not proven)", (unsigned long long)(now.refused - start.refused));
+    say("Orphan: kind=6 frames=+%llu eye held at the head (rig eye %.3f m behind), head hidden=%d, why=%s%s%s", (unsigned long long)(now.frames - start.frames),
+        (double)behind, (int)(ticks && hidden == ticks), why[0] ? why : "-", extra,
+        ticks && hidden != ticks ? hidden ? "; head visibility was not hiding on every tick" : "; head visibility hid nothing" : "");
+  }
+  was = on;
+}
+#endif
+
+#ifdef TFP_FEEL
 /* ---- the action hold (the Weapon put-away option): the binder's two hooks (src/wire.h TfpWireHold) ----------------
  * Each tick, after the controller decided. The pose helper tolerates an action from the moment a lease runs
  * (armed), not only once the controller holds: HellForge runs this tick before the game's update, so the game's
@@ -576,6 +624,7 @@ static void start(void) {
   tfp_camera_set_lock(lock_wanted, .35f, 8.0f, 300.0f, .7f, 35.0f);
 #ifdef TFP_FEEL
   tfp_wire_engine_set_held_body(tfp_camera_lock_off_foot_body); /* head hiding stays on while the lock holds a body that is off foot */
+  tfp_wire_engine_set_lock_view(lock_view_now);                 /* and while the game presents the lease's own first-person request (a stim) */
 #endif
   say(lock_wanted ? "Ready: camera lock: the view stays first person through every action and camera of your own character, death included; "
                     "body movement kicks the view (35 %% up to 8 degrees on foot, 70 %% up to 35 when thrown; a file lock_off.txt beside the DLL switches it off)"
@@ -821,6 +870,7 @@ static void tick_body(void) {
   if (tfp_mod_editor_settled()) tfp_mod_panel_tick(hf, owner, &wire, mcm_wanted, menu_unavailable(), tfp_wire_editor_toggle);
   tfp_wire_frame(&wire, extra);
   entry_note();
+  orphan_note(); /* before the trace: its edges open a trace window too */
   trace_note();
   tfp_wire_panel_frame(&wire);         /* what the user did in the mod's own panel since the last tick */
   tfp_wire_menu_frame(&wire);          /* the menu's queued buttons and toggles, and the two status rows */

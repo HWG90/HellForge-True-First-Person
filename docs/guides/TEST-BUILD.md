@@ -1,4 +1,4 @@
-# True First Person for HellForge: test build 0.6.0-feel.25
+# True First Person for HellForge: test build 0.6.0-feel.26
 
 For HellForge on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
@@ -24,6 +24,15 @@ DBF-MCM is no longer needed. The mod has its own panel.
 - **F10** opens the settings panel "True First Person" (also in NEST's list, Page Down). Three tabs:
   First person, Bob and sway, Locked view.
 - **Page Up** opens the weapon placement editor.
+
+## Fixed in 0.6.0-feel.26
+
+- **Stim: your own helmet from behind.** In 0.6.0-feel.25 every stim showed the back of your helmet for
+  about half a second, the rifle on your back in front of it. The game keeps its own first-person camera
+  for most of a stim and moves it into the head once the weapon is away. The view now goes to the eyes
+  instead, as it does for a grenade, and your head, torso and shoulders stay hidden for the whole stim.
+  Built and tested outside the game; not yet seen in play. The Locked view toggle must be on; with Smooth
+  eye off the view goes to the eyes in one step instead of a glide.
 
 ## What is new since 0.6.0-feel.19
 

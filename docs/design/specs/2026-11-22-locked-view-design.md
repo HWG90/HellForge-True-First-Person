@@ -262,3 +262,81 @@ ragdoll flag whose head leaves walking range only later while the game's camera 
 6. Respawn: `Lock:` holding from the first second on the new body, head hiding back, no key pressed.
 7. A death by explosion or a head shot, where the head may leave the neck: `refused` with the neck reason.
 
+
+## The stim's orphaned frames, 2026-11-23 (0.6.0-feel.26, branch `stim-view`; offline, not yet run in the game)
+
+Seen in the game on 0.6.0-feel.25 (session `8d992b8d`, 12:17:38.895 to 12:17:39.830, eight captured frames): for
+about half a second of every stim the screen showed the player's own helmet from behind, the rifle on the back.
+
+What the log says, tick by tick:
+
+- 38.895: mask 0 to 0x40, kind 6, the lease's record, gun on the rig; the hold begins. By the code head hiding
+  stops on this tick: its snapshot is not safe, and only mask 2 (a swap) or the head camera's masks keep it
+  (`head_visibility.c` `available()`); `Feel:` says `head=idle:0` at 38.961 and `head=active:90` again at 39.964.
+- 38.928: gun on the body, placement finished, "hold ended: the gun has left the hands", and the release is refused
+  ("the action does not allow the exit yet", `backend_ops.c` `release_held`, mask 64). The controller waits in
+  cleanup pending with the lease until 39.795 (0.87 s, 26 frames), and the game presents kind 6 all that time.
+- 38.961 and 38.995: the rig's eye moves 0.28 m and 0.22 m, to (-2.861 1.137 5.635), and stays. The one head-camera
+  frame of the stim (39.796) wanted (-2.849 1.344 5.635): the rig's eye sat 0.21 m behind the head camera's eye at
+  the same height, which is 0.03 m behind the head node: inside the helmet. The weapon's eye before the stim was
+  0.68 m behind that point and 0.13 m above it.
+- Since 0.6.0-feel.23 the continuity follows the rig's eye there in 0.4 s (steps of 0.03 to 0.06 m) and it stays
+  there for another 0.43 s. Two things together made the picture: the eye went into the head, and the head was drawn.
+  A grenade has neither: mask 2 keeps the head hidden, and its exit is acknowledged on the tick the gun leaves.
+- By the log the stim has one head-camera frame; the "hands seen from the head" of capture frames 3 and 4 are the
+  native view after 39.830 (a new lease, the weapon coming up).
+
+Built, all of it only while the camera lock is on:
+
+- **The eye** (`src/camera_helper.c` `orphan_head`, `tfp_camera_set_orphan`). The binder says "orphaned" while the
+  controller waits for the exit of its lease, the game's top request is still that lease's kind 6, and the lease's gun
+  is not on the first-person rig (`src/wire_action.h` `tfp_orphan_step`, `src/wire_rt.c` `tfp_wire_orphan`; not
+  seated, not full aim, no ragdoll, no other camera owner; kept through a tick that cannot be read; ends when the gun
+  is on the rig again). In those native frames the helper presents the head camera's own point (the head, 0.18 m
+  along the level view direction, 0.04 m up) as the head source of the continuity, converted to the rig eye's frame
+  for the game's parent-local argument. The change from the weapon's eye is a change of camera for the continuity:
+  taken up whole and eased out (0.68 m in 0.4 s here, no step changing by more than 0.035 m at 30 frames a second).
+  The game's exit then brings the head camera, which wants the same point: nothing to take up. The native view's
+  return is a change of camera as before. A frame whose head or rig eye is not proven is presented as before
+  (following the rig) and counted.
+- **Head hiding** (`src/wire_engine.c` `io_snapshot_for`, `src/wire_action.h` `tfp_action_own_native`). While the
+  game presents the lease's own first-person request (kind 6, the lease's record, not seated), the head module's
+  snapshot carries the flag it already takes for a vault and a pick-up, so it never lets go: from the stim's first
+  tick, through the wait, until the exit, where the ordinary camera's own rules take over. The module itself is not
+  changed. This also covers any other action flag in the lease's native view.
+- **Not changed:** the put-away (the gun on the rig: the game's own view, byte for byte in
+  `tests/run-camera-smooth.sh`), the native view, full aim, everything with the lock off (same forwarded bytes and
+  the same number of memory reads with the binder's word on or off).
+- Log, one line when such a window ends:
+  `Orphan: kind=6 frames=+N eye held at the head (rig eye R m behind), head hidden=<0/1>, why=<...>`.
+  N: camera frames presented at the head's eye. R: the most the game's own eye was behind that point along the level
+  view direction. head hidden: head visibility was hiding rows on every tick of the window. why: what the exit waited
+  for, then `+M frames followed the rig's eye` when frames were refused, and a note when head hiding was not on
+  throughout. The window's edges open a `Trace:` window; its rows say `kind=6 ... source=head`.
+
+Offline: `tests/run-camera-smooth.sh` section 12 (the logged stim on the fake game memory, with and without the
+binder's word; full aim; a head that is not proven; Smooth eye off; the lock off), `tests/wire_action_test.c` (the
+window tick by tick as logged, each way out of it, the head rule).
+
+**The first stim in the game must check:**
+
+1. The screen: no helmet, no torso, no rifle on the back at any moment of the stim. Burst captures as on 2026-11-23.
+2. One `Orphan:` line per stim: `frames=+24` to `+27`, `rig eye 0.2` m behind, `head hidden=1`,
+   `why=the action does not allow the exit yet`. No `Orphan:` line after a grenade or a swap.
+3. `Feel:` during the stim: `head=active:N` with N above 0 (34 was seen with empty hands in the head camera). If it
+   says `head=unavailable`, head visibility's own proofs refuse the state with the gun on the body under mask 0x40,
+   and that module needs the next look.
+4. `Trace:` rows of the window: `source=head` from the frame after "hold ended", `step` never changing by more than
+   0.035 m, `correction` from about 0.68 to 0 in 0.4 s, and the kind 4 row at the exit with a correction near 0
+   (it was 0.2078).
+5. What the arms are. Not known offline: whether the first-person rig's arms are drawn in these frames (the arm
+   drive refuses them: "player or weapon not proven") and how they look from 0.21 m in front of the rig's eye, or
+   whether the body's own arms do the injection as they do for a grenade. Arms too close, doubled or cut by the near
+   plane are the next thing to fix (hide the rig, or drive it).
+6. The direction of the view in the window: it is still the rig eye's rotation. A turn of the view at the start of
+   the window or at the exit would mean the rig's eye is rotated when it is re-seated.
+7. The glide itself: 0.68 m forward in 0.4 s at the stim's start, and 0.4 m back when the weapon returns. Whether
+   that reads as fluid or as a push-in. If the weapon's eye really is that far behind the head (the distances rest on
+   one head sample), the same glide already happens on every grenade.
+8. With Weapon put-away off: the window should begin one tick later (the exit is asked on the mask's first tick, the
+   gun leaves on the next); the same checks.
