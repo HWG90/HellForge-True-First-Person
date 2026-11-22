@@ -135,4 +135,14 @@ uint32_t tfp_camera_anchor_stats(TfpCameraAnchorData *out);
  *   eye_idle_ms      how long the held eye tolerates mask 0 around a swap (retail: 300)
  *   eye_return       after the eye let go, glide back to the incoming weapon's remembered eye while it is drawn */
 void tfp_camera_set_action_tuning(uint32_t extra_head_mask, uint32_t eye_idle_ms, bool eye_return);
+/* Beyond retail: the camera lock. While it is on and the view is presented, the head camera is kept through every
+ * action mask, off-foot state and camera kind of the player's own avatar (a death camera included), without the
+ * glide in from the game's camera; and the view's rotation takes a kick from the head's own movement
+ * (src/camera_lock.h): `gain`/`max_degrees` on foot, the `thrown_` pair in any other state. Off: retail's behaviour. */
+void tfp_camera_set_lock(bool on, float gain, float max_degrees, float settle_ms, float thrown_gain, float thrown_max_degrees);
+/* missed: frames of the presented view that were neither the native view nor the head camera (0xffff: the
+ * camera record was not ours), with the kind and the helper's error of the last one. */
+typedef struct TfpCameraLockStats { uint64_t frames, foreign_frames, missed; uint32_t last_kind, missed_kind, missed_error; float peak_kick_degrees; } TfpCameraLockStats;
+/* Counts since the start; the peak is the largest kick since the last call. */
+void tfp_camera_lock_stats(TfpCameraLockStats *out);
 #endif

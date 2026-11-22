@@ -6,6 +6,7 @@
  * and expression is retail's. "cpp:a-b" above a function is its line range in
  * the retail file. What differs is in docs/translation/CAMERA-HELPER-TRANSLATION.md. */
 #include "camera_helper.h"
+#include "camera_lock.h"
 #include "camera_math.h"
 #include <stdatomic.h>
 
@@ -164,12 +165,18 @@ typedef struct Policy {
   uint32_t weapon_key, native_weapon_key, stretch_key, stretch_key_frames, eye_glides;
   bool guard_only, guard_grace; double last_view_tick; uint32_t guard_grace_frames;
   bool hold_seated, seated_now, anchor_ads, native_full_ads, ads_gap_active; double ads_gap_started; uint32_t ads_gap_frames, ads_learned; double last_native_tick; uint32_t exit_holds;
+  bool lock_now; /* beyond retail: this frame is held by the camera lock */
   uint32_t seated_frames, entry_trace_frame; TfpQ seated_q; bool seated_q_valid; uint32_t entry_trace_pad, entry_trace_count; TfpCameraEntryTraceRow entry_trace[TFP_CAMERA_ENTRY_TRACE_ROWS];
 } Policy;
 /* Policy{}: the default member initialisers. Everything 0/false except the
  * correction's (progress 1, duration 150) and the identity quaternions. */
 /* Beyond retail (tfp_camera_set_action_tuning); the defaults are retail's behaviour. */
 static _Atomic uint32_t tuning_extra_mask, tuning_eye_idle_ms = 300, tuning_eye_return;
+/* Beyond retail (tfp_camera_set_lock): the camera lock. Off by default, and then nothing here runs. */
+static _Atomic uint32_t lock_on, lock_last_kind;
+static _Atomic uint64_t lock_frames, lock_foreign_frames, lock_missed; static _Atomic uint32_t lock_missed_kind, lock_missed_error;
+static volatile float lock_gain, lock_max, lock_settle = 300, lock_thrown_gain, lock_thrown_max, lock_peak;
+static TfpKick lock_kick; static TfpQ lock_view = {0, 0, 0, 1}, lock_last_kick = {0, 0, 0, 1}; static bool lock_view_known; static double lock_tick;
 static void policy_init(Policy *p) {
   memset(p, 0, sizeof *p);
   tfp_correction_reset(&p->correction);
@@ -748,7 +755,7 @@ static bool commit_current(Policy *p, uint32_t expected_kind, uint32_t *failure)
       || !pointer(p->foot_instance + L_ANIM_ACTIVE, &foot) || foot != p->foot_array
       || !pointer(p->foot_array + L_ANIM_LAYER*8, &foot) || foot != p->foot_current) return false;
   const uint32_t ownership = owner_status(p, false); if (ownership != OK) { *failure = ownership; return false; }
-  if (!(p->fallback_safe || (p->guard_grace && p->guard_only)) || !dispatch_owned(p) || !top(p, &kind) || kind != expected_kind
+  if (!(p->fallback_safe || p->lock_now || (p->guard_grace && p->guard_only)) || !dispatch_owned(p) || !top(p, &kind) || kind != expected_kind
       || !read(p->body_object + L_UNIT_HEADER, header, sizeof header)) return false;
   memcpy(&count, header, 4); memcpy(&matrices, header + L_HEADER_WORLDS, 8);
   memcpy(&links, header + L_HEADER_LINKS, 8); memcpy(&hashes, header + L_HEADER_HASHES, 8);
@@ -759,6 +766,41 @@ static bool commit_current(Policy *p, uint32_t expected_kind, uint32_t *failure)
       && value(p->camera_object + L_UNIT_PARENT, parent) && parent == 0;
 }
 /* cpp:733-746 observe_camera_parent: retired (NADSC_ObserveParent), not translated. */
+
+/* Beyond retail. With the lock on: the view's rotation takes a kick from the head's own movement, and in a camera
+ * that is not the game's first-person or ordinary one (a death camera) the direction is the last first-person one.
+ * `native` + L_ARGUMENT_ROTATION is the rotation the game passes next: world for an unparented camera, parent-local
+ * in the native view (kind 6), where a rotation in the view's own frame is applied the same way. */
+static void lock_rotation(Policy *p, const float *native, uint32_t kind, double tick) {
+  if (!p->lock_now) { lock_view_known = false; tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity(); return; }
+  float *argument = (float *)(uintptr_t)native + L_ARGUMENT_ROTATION/4;
+  TfpQ given = tfp_q_identity(), view = tfp_q_identity(), head = tfp_q_identity(); float matrix[16] = {0}; uint64_t matrices = 0;
+  const bool foreign = kind != 4 && kind != 6;
+  atomic_fetch_add_explicit(&lock_frames, 1, memory_order_relaxed); atomic_store_explicit(&lock_last_kind, kind, memory_order_relaxed);
+  if (foreign) atomic_fetch_add_explicit(&lock_foreign_frames, 1, memory_order_relaxed);
+  if (!read((uint64_t)(uintptr_t)argument, &given, 16) || !tfp_q_valid(given)) { tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity(); return; }
+  given = tfp_q_normalised(given);
+  if (kind == 6) {
+    TfpQ rendered = tfp_q_identity(); /* last frame's view in the world, with last frame's kick in it */
+    if (!rendered_rotation(p, &rendered)) { tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity(); return; }
+    view = tfp_q_normalised(tfp_q_mul(tfp_q_normalised(rendered), tfp_q_inv(lock_last_kick)));
+  } else if (foreign) {
+    if (!lock_view_known) return;
+    view = lock_view;
+  } else view = given;
+  lock_view = view; lock_view_known = true;
+  const float dt = lock_tick > 0 && tick > lock_tick ? (float)(tick-lock_tick)/1000 : 0; lock_tick = tick;
+  TfpQ kick = tfp_q_identity();
+  if (pointer(p->body_object + L_UNIT_WORLDS, &matrices) && read(matrices + (uint64_t)p->head_node*L_MATRIX, matrix, 64) && tfp_matrix_q(matrix, &head)) {
+    const bool thrown = foreign || !p->fallback_safe;
+    const TfpKickTuning tuning = {thrown ? lock_thrown_gain : lock_gain, thrown ? lock_thrown_max : lock_max, lock_settle};
+    kick = tfp_kick_step(&lock_kick, view, head, dt, &tuning);
+  } else tfp_kick_reset(&lock_kick);
+  const float size = tfp_degrees_between(kick, tfp_q_identity()); if (size > lock_peak) lock_peak = size;
+  const TfpQ out = tfp_kick_apply(foreign ? view : given, kick);
+  lock_last_kick = kick;
+  if (tfp_q_valid(out)) memcpy(argument, &out, 16);
+}
 
 /* The original setter, called as retail calls it (cpp:751, 1020). */
 static void call_original(void *camera, uint32_t unit, const float *output) {
@@ -775,13 +817,16 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
     atomic_fetch_add_explicit(&forwarded, 1, memory_order_relaxed); call_original(camera, unit, native); return;
   }
   policy_acquire();
-  const float *output = native; _Alignas(16) float adjusted[4] = {0}; bool diagnostics_changed = false;
+  const float *output = native; _Alignas(16) float adjusted[4] = {0}; bool diagnostics_changed = false, lock_shown = false, lock_asked = false; uint32_t lock_kind = 0;
   if (entered_generation && entered_generation == atomic_load_explicit(&callback_generation, memory_order_acquire)
       && atomic_load_explicit(&armed, memory_order_acquire) && (uint64_t)(uintptr_t)camera == policy.c.camera && unit == policy.c.camera_unit) {
     diagnostics_changed = true;
     uint32_t kind = 0; const double tick = now();
     if (policy.native6_seen && (tick < policy.native6_at || tick-policy.native6_at > policy.c.max_gap_ms)) policy.native6_seen = false;
-    const bool supported = top(&policy, &kind) && (kind == 4 || kind == 6);
+    const bool known_kind = top(&policy, &kind);
+    policy.lock_now = known_kind && policy.presentation_enabled && atomic_load_explicit(&lock_on, memory_order_relaxed);
+    lock_asked = policy.presentation_enabled && atomic_load_explicit(&lock_on, memory_order_relaxed); lock_kind = known_kind ? kind : 0xffff;
+    const bool supported = known_kind && (kind == 4 || kind == 6 || policy.lock_now);
     if (supported && kind == 6) {
       /* Read-only sampling can precede the terminal lease proof because
        * this branch ALWAYS forwards the game's entire native frame. */
@@ -843,15 +888,16 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
           if (policy.handoff_entry_ms > 0 && ease_native_entry(&policy, &sample, native, tick, from_head, head_relative, adjusted)) output = adjusted;
         }
         /* cpp:823 observe_camera_parent(policy,tick): retired, dropped. */
+        lock_rotation(&policy, native, kind, tick); lock_shown = true;
         error(OK); }
     } else {
       const uint32_t current = owner_status(&policy, false);
       if (current != OK || !dispatch_owned(&policy)) {
         atomic_store_explicit(&armed, 0, memory_order_release); reset(&policy, false); error(current != OK ? current : OWNER_MISMATCH);
       } else if (!supported) { reset(&policy, false); }
-      else if (!policy.fallback_safe && !(policy.guard_grace = policy.guard_only && policy.last_view_tick > 0
+      else if (!policy.fallback_safe && !policy.lock_now && !(policy.guard_grace = policy.guard_only && policy.last_view_tick > 0
               && tick >= policy.last_view_tick && tick-policy.last_view_tick <= 250.0)) { reset(&policy, false); }
-      else if (!on_foot(&policy)) { reset(&policy, false); error(ON_FOOT_REQUIRED); }
+      else if (!policy.lock_now && !on_foot(&policy)) { reset(&policy, false); error(ON_FOOT_REQUIRED); }
       else {
         float root[3] = {0}, head[3] = {0}, forward[3] = {0}, up[3] = {0}, root_basis[9] = {0};
         /* A seated interaction (turning a valve): with cut-hold bit 3 the view stays at the head. */
@@ -877,11 +923,14 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
         }
         else if (!read((uint64_t)(uintptr_t)native, adjusted, 16) || !finite3(adjusted)
             || (held_view ? !held_axes(policy.seated_q, forward, up)
-                : (!basis(&policy, forward, up) || distance(adjusted, head) > 8 || distance(adjusted, root) > 10))) {
+                : (!basis(&policy, forward, up) || (!policy.lock_now && (distance(adjusted, head) > 8 || distance(adjusted, root) > 10))))) {
           reset(&policy, false); error(POSE_INVALID);
         } else {
           /* The game's argument is not a usable start for the blend in the held view. */
           if (held_view) { policy.blend = 1; memcpy(adjusted, head, 12); }
+          /* Beyond retail: in a camera that is not the game's ordinary one the eye is placed along the last
+           * first-person direction, not along that camera's own. */
+          if (policy.lock_now && kind != 4 && lock_view_known) held_axes(lock_view, forward, up);
           /* Remove current body-root rotation before damping animation.
            * Fresh root translation/rotation is restored after filtering. */
           float local_head[3] = {0};
@@ -901,6 +950,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
           const float lag_length = sqrtf(lag[0]*lag[0]+lag[1]*lag[1]+lag[2]*lag[2]);
           if (lag_length > .06f) for (unsigned i = 0; i < 3; ++i) lag[i] *= .06f/lag_length;
           policy.blend = policy.c.blend_ms > 0 ? fminf(1, policy.blend+dt*1000/policy.c.blend_ms) : 1;
+          if (policy.lock_now) policy.blend = 1; /* the lock never shows the way in from the game's own camera */
           /* Native6 arguments are parent-local. Never reuse those values
            * for a world-space bridge or expose a TPV frame on retirement. */
           const bool from_native = policy.native6_seen; tfp_ease_reset(&policy.entry.ease);
@@ -1034,6 +1084,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
                 memcpy((float *)(uintptr_t)native + L_ARGUMENT_ROTATION/4, &policy.seated_q, 16);
                 tfp_ease_reset(&policy.turn.ease); policy.forwarded_q_valid = false; ++policy.seated_frames;
               } else if (policy.presentation_enabled) ease_normal_rotation(&policy, native, tick, from_native);
+              lock_rotation(&policy, native, kind, tick); lock_shown = true;
               output = adjusted; atomic_fetch_add_explicit(&replaced, 1, memory_order_relaxed); error(OK); }
           }
         }
@@ -1041,6 +1092,10 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
     }
   }
   /* Serialize actual adjusted call with End, not just the calculation. */
+  if (lock_asked && !lock_shown) { /* a frame of the view that was not first person: what the test matrix counts */
+    atomic_fetch_add_explicit(&lock_missed, 1, memory_order_relaxed); atomic_store_explicit(&lock_missed_kind, lock_kind, memory_order_relaxed);
+    atomic_store_explicit(&lock_missed_error, atomic_load_explicit(&last_error, memory_order_relaxed), memory_order_relaxed);
+  }
   atomic_fetch_add_explicit(&forwarded, 1, memory_order_relaxed); call_original(camera, unit, output);
   if (diagnostics_changed) publish_diagnostics(&policy);
   policy_release();
@@ -1275,7 +1330,18 @@ void tfp_camera_set_action_tuning(uint32_t extra_head_mask, uint32_t eye_idle_ms
   atomic_store(&tuning_extra_mask, extra_head_mask); atomic_store(&tuning_eye_idle_ms, eye_idle_ms ? eye_idle_ms : 300u);
   atomic_store(&tuning_eye_return, eye_return ? 1u : 0u);
 }
+void tfp_camera_set_lock(bool on, float gain, float max_degrees, float settle_ms, float thrown_gain, float thrown_max_degrees) {
+  lock_gain = gain; lock_max = max_degrees; lock_settle = settle_ms > 1 ? settle_ms : 300; lock_thrown_gain = thrown_gain; lock_thrown_max = thrown_max_degrees;
+  atomic_store(&lock_on, on ? 1u : 0u);
+}
+void tfp_camera_lock_stats(TfpCameraLockStats *out) {
+  if (!out) return;
+  out->frames = atomic_load(&lock_frames); out->foreign_frames = atomic_load(&lock_foreign_frames); out->last_kind = atomic_load(&lock_last_kind);
+  out->peak_kick_degrees = lock_peak; lock_peak = 0;
+  out->missed = atomic_load(&lock_missed); out->missed_kind = atomic_load(&lock_missed_kind); out->missed_error = atomic_load(&lock_missed_error);
+}
 void tfp_camera_reset_for_tests(void) {
+  atomic_store(&lock_on, 0);
   atomic_store(&original, 0);
   atomic_store(&installed, 0); atomic_store(&armed, 0); atomic_store(&reserved, 0); atomic_store(&last_error, 0);
   atomic_store(&callback_generation, 0);

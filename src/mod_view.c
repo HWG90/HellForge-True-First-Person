@@ -28,7 +28,7 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "engine.h"
 #include "mod_menu.h"
 #include "mod_editor.h"
-#define TFP_VIEW_VERSION "0.6.0-feel.19"
+#define TFP_VIEW_VERSION "0.6.0-feel.20"
 #else
 #include "wire_win.h"
 #include "wire_action.h"
@@ -54,6 +54,7 @@ static DWORD tick_thread; /* the game thread, as the tick last saw it */
 #ifdef TFP_FEEL
 static TfpWireFeel feel;
 static TfpFxPlatform fx_platform;
+static bool lock_wanted = true;
 static bool engine_hooked, pose_hook_told[TFP_WIN_POSE_HOOKS];
 static char settings_text[TFP_SETTINGS_MAX];
 /* Two places hold settings.json. The one beside this DLL is made at build time (tools/convert_settings.py)
@@ -301,6 +302,10 @@ static void start(void) {
         if (arms_file) fclose(arms_file);
         tfp_wire_engine_allow_arms(arms_file != NULL);
         if (arms_file) say("Test: arms_on.txt: sleeves and hand grips are allowed to run");
+        strcpy(slash + 1, "lock_off.txt");
+        FILE *lock_file = fopen(parts_path, "r");
+        if (lock_file) fclose(lock_file);
+        lock_wanted = lock_file == NULL;
         if (digit >= '1' && digit <= '7') {
           tfp_head_set_parts((unsigned)(digit - '0'));
           say("Test: head_parts.txt: hiding parts mask %d (1 head, 2 torso, 4 shoulders)", digit - '0');
@@ -310,6 +315,11 @@ static void start(void) {
   }
   /* What build 25480438 does differently during actions (src/wire_action.h). */
   tfp_camera_set_action_tuning(TFP_ACTION_PICKUP_MASK, TFP_ACTION_EYE_IDLE_MS, TFP_ACTION_EYE_RETURN);
+  /* The camera lock (docs/design/specs/2026-11-22-locked-view-design.md): first person through every action and camera. */
+  tfp_camera_set_lock(lock_wanted, .35f, 8.0f, 300.0f, .7f, 35.0f);
+  say(lock_wanted ? "Ready: camera lock: the view stays first person through every action and camera of your own character, death included; "
+                    "body movement kicks the view (35 %% up to 8 degrees on foot, 70 %% up to 35 when thrown; a file lock_off.txt beside the DLL switches it off)"
+                  : "Test: lock_off.txt: the camera lock is off");
   say("Ready: action camera: the head camera also takes the pick-up action (mask 0x%x); the eye is held through %u ms without an action "
       "(a stim) and glides back before the weapon returns; the aim button is read from Windows, again as the script update begins",
       TFP_ACTION_PICKUP_MASK, TFP_ACTION_EYE_IDLE_MS);
@@ -408,8 +418,20 @@ static void quit_guard(void) {
   say("Quit guard: on: the game's faulty release of its table at state+0x%x is skipped while closing (game.dll+0x%x)", TFP_QUIT_GUARD_TABLE, TFP_QUIT_GUARD_RELEASE);
 }
 
+static void lock_note(void) { /* once a second while the view is on: frames by camera, frames missed, the largest kick */
+  static uint64_t next, told_frames, told_foreign, told_missed;
+  const uint64_t now = GetTickCount64();
+  if (now < next) return;
+  next = now + 1000;
+  TfpCameraLockStats s; tfp_camera_lock_stats(&s);
+  if (s.frames == told_frames && s.missed == told_missed) return;
+  say("Lock: +%llu frames held (+%llu in another camera, kind now %u), +%llu missed (kind %u, helper error %u), largest kick %.1f degrees",
+      (unsigned long long)(s.frames - told_frames), (unsigned long long)(s.foreign_frames - told_foreign), s.last_kind,
+      (unsigned long long)(s.missed - told_missed), s.missed_kind, s.missed_error, (double)s.peak_kick_degrees);
+  told_frames = s.frames; told_foreign = s.foreign_frames; told_missed = s.missed;
+}
 static void tick_body(void) {
-  if (stage == RUNNING) quit_guard();   /* not earlier: the game module and the guarded reader are set up in WAIT_MODULES */
+  if (stage == RUNNING) { quit_guard(); lock_note(); }   /* not earlier: the game module and the guarded reader are set up in WAIT_MODULES */
   if (stage == REFUSED) return;
   tick_thread = GetCurrentThreadId();
   if (!told_tick_thread) {
