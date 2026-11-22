@@ -94,14 +94,37 @@ int main(void) {
   x = 0;
   for (int i = 0; i < 12; ++i) { x += 2*.0333f; frame(&r, x, 0, 0, NATIVE, true, false, 33.3f); }
   for (int i = 0; i < 6; ++i) { frame(&r, x, 0, 0, NATIVE, true, false, 33.3f); CHECK(r.correction == 0); }
-  /* A sustained fast start (0 to 3 m/s in one frame) is held back for three frames at most, then followed. */
-  start(&r);
-  for (int i = 0; i < 10; ++i) frame(&r, 0, 0, 0, NATIVE, true, false, 33.3f);
-  x = 0;
-  for (int i = 0; i < 4; ++i) { x += 3*.0333f; frame(&r, x, 0, 0, NATIVE, true, false, 33.3f); }
-  CHECK(r.c.jumps == 3 && r.correction < .31f);
-  for (int i = 0; i < 14; ++i) { x += 3*.0333f; frame(&r, x, 0, 0, NATIVE, true, false, 33.3f); }
-  CHECK(r.c.jumps == 3 && r.correction == 0 && fabsf(r.shown[0]-x) < 1e-4f);
+  /* A sustained change of speed where jumps are looked for (0 to 3 m/s, 0 to 6 m/s, 2.5 to 0 and back to 2.5 m/s
+   * sideways): taken up for 70 ms at most, at any frame rate; in the frame the new speed is believed the presented
+   * eye keeps its speed (no step change beyond the curve's own), and it has caught up within the longest catch-up. */
+  for (int rate = 0; rate < 3; ++rate) for (int fast = 0; fast < 2; ++fast) {
+    const float dt = rate == 0 ? 1000.0f/30 : rate == 1 ? 1000.0f/60 : 1000.0f/144, v = fast ? 6.0f : 3.0f;
+    start(&r);
+    for (int i = 0; i < 10; ++i) frame(&r, 0, 0, 0, NATIVE, true, false, dt);
+    x = 0; float held = 0; int taken = 0;
+    for (int i = 0; i < (int)(600/dt); ++i) { x += v*dt/1000; const uint64_t before = r.c.jumps; frame(&r, x, 0, 0, NATIVE, true, false, dt);
+      if (r.c.jumps != before) { ++taken; held = (i+1)*dt; } }
+    /* (below the limit of 0.04 m in a frame nothing is taken up at all: 3 m/s at 144 frames a second) */
+    CHECK(v*dt/1000 < T.pop_m ? taken == 0 : (taken >= 1 && held <= 70+dt && held > 70-dt));
+    CHECK(r.correction == 0 && fabsf(r.shown[0]-x) < 1e-4f);
+    /* raw, the frame the eye starts shows a step change of v*dt: 0.1 m and 0.2 m at 30 frames a second */
+    CHECK(r.change < (taken ? .5f*v*dt/1000 : T.pop_m) && r.change < .081f);
+  }
+  /* Where jumps are not looked for (the native view away from any event) a change of speed is the eye's own motion:
+   * nothing is taken up, at any speed, and the eye is where the game put it in every frame. */
+  for (int rate = 0; rate < 2; ++rate) {
+    const float dt = rate ? 1000.0f/144 : 1000.0f/30;
+    start(&r);
+    for (int i = 0; i < 10; ++i) frame(&r, 0, 0, 0, NATIVE, false, false, dt);
+    x = 0;
+    for (int i = 0; i < 30; ++i) { x += 6*dt/1000; frame(&r, x, 0, 0, NATIVE, false, false, dt); CHECK(r.correction == 0 && r.shown[0] == x); }
+    for (int i = 0; i < 30; ++i) { const float angle = 15*i*dt/1000; /* an eye 0.3 m from the body root, turning at 15 rad/s */
+      frame(&r, x+.3f*sinf(angle), .3f*(1-cosf(angle)), 0, NATIVE, false, false, dt); CHECK(r.correction == 0); }
+    CHECK(r.c.jumps == 0);
+    /* a change of source is still taken up there */
+    frame(&r, x+.2f, 0, 0, HEAD, false, false, dt);
+    CHECK(r.c.edges == 1 && r.correction > .1f);
+  }
   /* The head camera's eye turns about the head with the view: within that source nothing is looked for. */
   start(&r);
   for (int i = 0; i < 10; ++i) frame(&r, .18f, 0, 1.6f, HEAD, false, false, 33.3f);

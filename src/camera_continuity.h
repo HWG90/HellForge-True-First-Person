@@ -10,9 +10,13 @@
  *  - Positions are in the body's frame (the body root's position and axes), so the body's own travel is not a
  *    jump and "the eye never moves faster than the body plus a bounded catch-up".
  *  - A jump is a frame whose step differs from the wanted eye's own recent speed by more than
- *    max(pop_m, pop_accel * dt * dt). A change of source takes up any difference. A step shorter than the speed
- *    predicted, in the same direction, is the motion slowing down and is followed, not taken up; three jumps in a
- *    row are the most that are taken up before the new speed is believed (a sustained fast motion is not held back).
+ *    max(pop_m, pop_accel * dt * dt). A change of source takes up any difference. Jumps within a source are looked
+ *    for only where the caller says so (`detect`: the short time after something that can re-seat the rig); anywhere
+ *    else a change of speed is the eye's own motion and is followed. A step shorter than the speed predicted, in the
+ *    same direction, is the motion slowing down and is followed, not taken up. Jumps in a row are taken up for
+ *    TFP_CONTINUITY_RUN_MS at most (a time, not a number of frames); then the new speed is believed, and the
+ *    difference between the two speeds goes into the correction's curve, so the presented eye keeps its speed in
+ *    that frame and gathers the new one along the curve.
  *  - The catch-up is a cubic with zero end speed whose length follows from the distance, so that its largest
  *    acceleration is ease_accel: sqrt(6 * distance / ease_accel), between min_ms and max_ms. A new jump during a
  *    catch-up starts the curve again from the correction's present value and speed.
@@ -24,14 +28,14 @@
 #include "camera_math.h"
 
 typedef struct TfpContinuityTuning { float pop_m, pop_accel, ease_accel, min_ms, max_ms, max_m, teleport_m; } TfpContinuityTuning;
-#define TFP_CONTINUITY_DEFAULT {.06f, 60.0f, 24.0f, 100.0f, 400.0f, 1.0f, 1.5f}
-#define TFP_CONTINUITY_RUN 3u        /* jumps in a row that are taken up without a change of source */
+#define TFP_CONTINUITY_DEFAULT {.04f, 36.0f, 24.0f, 100.0f, 400.0f, 1.0f, 1.5f}
+#define TFP_CONTINUITY_RUN_MS 70.0   /* jumps in a row are taken up for this long without a change of source */
 #define TFP_CONTINUITY_QUIET_MS 80.0f
 
 typedef struct TfpContinuity {
   bool known, active, moving; /* moving: the wanted eye's speed is known (a step has been seen since the start) */
   uint32_t source, run;
-  double tick, started;
+  double tick, started, run_started; /* run_started: the first jump of the present run */
   float wanted[3], speed[3], shown[3];   /* last frame: the wanted eye, its smoothed speed (m/s), the presented eye */
   float from[3], from_speed[3], duration; /* the correction's curve: value and speed at `started`, length in ms */
   uint64_t jumps, edges, restarts;       /* taken up within a source; at a change of source; started again */
@@ -98,18 +102,32 @@ static inline float tfp_continuity_step(TfpContinuity *c, const float *wanted, u
   const float along = step[0]*expected[0]+step[1]*expected[1]+step[2]*expected[2];
   const bool slowing = along >= 0 && tfp_continuity_length(step) < tfp_continuity_length(expected);
   const bool over = size > limit;
-  const bool take = !quiet && size > 1e-4f && (edge || (detect && over && !slowing && c->run < TFP_CONTINUITY_RUN));
+  const bool jump = !quiet && !edge && detect && over && !slowing;
+  const bool within = !c->run || (tick >= c->run_started && tick-c->run_started <= TFP_CONTINUITY_RUN_MS);
+  const bool believe = jump && !within; /* jumps for longer than the run: a new speed, not a re-seated rig */
+  const bool take = !quiet && size > 1e-4f && (edge || jump);
   if (take) {
-    float next[3];
-    for (unsigned i = 0; i < 3; ++i) next[i] = value[i]-difference[i];
+    float next[3], from_speed[3], rate = 0;
+    for (unsigned i = 0; i < 3; ++i) { next[i] = value[i]-difference[i]; from_speed[i] = speed[i]; }
     float length = tfp_continuity_length(next);
     if (length > t->max_m) { for (unsigned i = 0; i < 3; ++i) next[i] *= t->max_m/length; length = t->max_m; }
-    float duration = 1000*sqrtf(6*length/fmaxf(t->ease_accel, 1e-3f));
+    if (believe) {
+      /* This frame is still taken up, so the presented eye goes on at the old speed; the wanted eye's speed is
+       * now the new one, and the difference of the two goes into the correction's curve. */
+      float fresh[3]; for (unsigned i = 0; i < 3; ++i) fresh[i] = step[i]/dt;
+      const float fast = tfp_continuity_length(fresh);
+      if (fast > 8) for (unsigned i = 0; i < 3; ++i) fresh[i] *= 8/fast;
+      for (unsigned i = 0; i < 3; ++i) { from_speed[i] += c->speed[i]-fresh[i]; c->speed[i] = fresh[i]; }
+      rate = tfp_continuity_length(from_speed);
+    }
+    /* The curve's length: its largest acceleration is ease_accel where max_ms allows (6 d / T^2 + 4 v / T). */
+    const float a = fmaxf(t->ease_accel, 1e-3f);
+    float duration = 1000*(4*rate+sqrtf(16*rate*rate+24*a*length))/(2*a);
     duration = fminf(fmaxf(duration, t->min_ms), t->max_ms);
-    tfp_continuity_begin(c, next, speed, tick, duration);
+    tfp_continuity_begin(c, next, from_speed, tick, duration);
     for (unsigned i = 0; i < 3; ++i) value[i] = next[i];
-    if (edge) { ++c->edges; c->run = 0; } else { ++c->jumps; ++c->run; }
-    /* the wanted eye's speed is kept: after a jump it goes on as it went */
+    if (edge) { ++c->edges; c->run = 0; } else if (believe) c->run = 0; else { ++c->jumps; if (!c->run++) c->run_started = tick; }
+    /* otherwise the wanted eye's speed is kept: after a jump it goes on as it went */
   } else {
     c->run = 0;
     const float k = over || !c->moving ? 1 : 1-expf(-dt/.05f); /* a new speed is believed at once, an ordinary frame is averaged in */
