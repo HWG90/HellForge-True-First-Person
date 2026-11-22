@@ -32,7 +32,7 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "mod_editor.h"
 #include "render_slot.h"
 #include "arm_drive.h"
-#define TFP_VIEW_VERSION "0.6.0-feel.20"
+#define TFP_VIEW_VERSION "0.6.0-feel.21"
 #else
 #include "wire_win.h"
 #include "wire_action.h"

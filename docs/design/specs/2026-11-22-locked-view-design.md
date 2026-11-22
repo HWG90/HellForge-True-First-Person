@@ -118,3 +118,21 @@ Three sessions. In the last, 32 phases:
   94 % of the writes were gone by the next frame (the rig is re-posed before drawing). The names match on both rigs.
   Joint writes have to happen where the pose helper already works (the game's own setter calls for the rig), or in
   a hook after the rig's animation; that hook is not found yet. Parts 4 to 6 wait on it.
+
+## Arms in the game, 2026-11-22 evening (0.6.0-feel.21, `arms_live.txt` beside the DLL)
+
+- **Where writes are drawn.** Not from the script: a joint bent at the Lua `render` or `update` callback, with or
+  without refreshing the glove and sleeve units, never showed (`tools/harness/arm_bend.lua`). At the game's primary
+  world-render call it does: with `arm_bend.txt` the left arm left the view and the pistol was held in one hand.
+- **The arm drive** (`src/arm_drive.c`, `src/arm_graft.h`, `src/render_slot.c`) is the retired First Person
+  Controller's 0.3.36/0.3.37 method, lifted: 42 rig joints from the body's world matrices at the primary draw, the
+  rig, its sleeve and glove units and the weapon tree refreshed, the game's own values recovered the next frame.
+  Reviewed by three readers against the retired source before it ran.
+- **Recorded** (`probe_rig.py`): the first-person rig's joints now change in step with the body's in idle, walk,
+  sprint, fire and aim (they never changed before). 42 joints a frame, 10 units refreshed, two refusals in a session.
+- **Seen in captures** (`work/captures/feel21-arms-2026-11-22.jpg`): both forearms and hands on the rifle in sprint,
+  reload and ammo check; the pistol in one hand at the hip and in two hands when aiming, as the body holds it.
+- **Matrix with the arms on:** 24 of 27; swap to primary 0.051 m and vault 0.057 m are just over the 0.05 m limit,
+  stim 0.21 m as before.
+- **Not there:** arms during swap, grenade and stim (the game leaves its first-person camera there, so the rig is
+  not the one drawn); the put-away transition; a menu option for the arm drive (it is a test file); death.
