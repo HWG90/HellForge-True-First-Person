@@ -36,8 +36,9 @@ enum {
   TFP_ARM_ALIGN_NONE = 0,
   TFP_ARM_ALIGN_PROVISIONAL, /* no rest alignment is kept for this weapon yet: the first driven frame's (a new binding), or the one
                               * already in use (another gun on a kept binding); replaced at the weapon's first rest. One
-                              * taken while the copy was hidden or fading (weight under 1: the player aiming) is taken once
-                              * more, eased, on the first driven frame at full weight, unless a better one replaced it */
+                              * taken while the copy was hidden or fading (weight under 1: the player aiming), in a hold or
+                              * with the gun away is taken once more, eased, on the first driven frame at full weight with no
+                              * hold and the gun on the rig, unless a better one replaced it */
   TFP_ARM_ALIGN_KEPT,        /* the rest alignment kept for this weapon and stance: on a new binding at once, otherwise eased */
   TFP_ARM_ALIGN_REST,        /* measured with the body at rest and confirmed by a second measurement; kept for this weapon and
                               * stance; eased */
@@ -45,6 +46,11 @@ enum {
                               * kept: a new binding does not start from it */
 };
 enum { TFP_ARM_REST_NONE = 0, TFP_ARM_REST_STAND, TFP_ARM_REST_CROUCH, TFP_ARM_REST_PRONE, TFP_ARM_REST_KINDS };
+enum {
+  TFP_ARM_RETAKE_NONE = 0,
+  TFP_ARM_RETAKE_AIM,   /* taken while the copy was hidden or fading: the player aiming */
+  TFP_ARM_RETAKE_ACTION /* taken in a hold or with the gun away: the middle of an action */
+};
 typedef struct TfpArmDriveAlign {
   uint64_t count;
   uint32_t how, weapon, stance; /* TFP_ARM_ALIGN_*, the gun's unit, TFP_ARM_REST_* */
@@ -52,6 +58,7 @@ typedef struct TfpArmDriveAlign {
   uint32_t key;                 /* TFP_ARM_ALIGN_REST, _TENTATIVE: the body's animation layer states then (tfp_arm_drive_rest_of; 0: not known) */
   float moved_m, moved_degrees; /* the weapon socket as the new alignment shows it now, from where the one in use shows it */
   bool eased;
+  uint32_t retake;              /* TFP_ARM_ALIGN_PROVISIONAL: taken once more, and why the first one was not good (TFP_ARM_RETAKE_*; 0: not a retake) */
 } TfpArmDriveAlign;
 
 typedef struct TfpArmDriveStats {

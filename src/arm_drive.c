@@ -115,7 +115,7 @@ static struct {
   bool has_host, on, restore_after, bend;
   bool hold, ready; /* tfp_arm_drive_set_hold, tfp_arm_drive_set_hold_ready */
   float weight;
-  bool retake; /* the binding's provisional alignment was taken while the copy was hidden or fading (the player aiming): align() */
+  uint32_t retake; /* TFP_ARM_RETAKE_*: why the binding's provisional alignment is to be taken once more (0: it is not): align() */
   TfpArmDriveStats stats;
   /* the binding: only while `bound`, and only for exactly these units */
   bool bound, bound_bend, aligned;
@@ -453,6 +453,7 @@ static void use(const TfpGraftMatrix *grip, const TfpGraftMatrix *alignment, boo
   d.to_grip = *grip, d.to_alignment = *alignment;
 }
 static void aligned(uint32_t how, uint32_t weapon, unsigned stance, uint64_t rest_ms, float m, float degrees) {
+  /* (.retake stays 0: only the retake in align() names one) */
   d.stats.align = (TfpArmDriveAlign){.count = d.stats.align.count + 1, .how = how, .weapon = weapon, .stance = stance,
                                      .rest_ms = rest_ms > UINT32_MAX ? UINT32_MAX : (uint32_t)rest_ms, .key = d.key, .moved_m = m, .moved_degrees = degrees,
                                      .eased = d.easing};
@@ -514,13 +515,16 @@ static bool align(const Units *u, const TfpGraftMatrix *body, const TfpGraftLoca
   const TfpGraftLocal *own = &base[TFP_GRAFT_JOINTS - 1];
   const uint32_t weapon = u->gun_away ? 0 : u->weapon_ref;
   float m = 0, degrees = 0;
+  bool retaken = false;
   if (d.aligned && d.retake && d.weight >= 1 && !d.hold && !u->gun_away) {
     /* The first driven frame the copy is fully shown again and no action holds it (in a hold, or with the gun away,
-     * the frame is mid-action and no better than the aim pose: the retake stays armed for the frame after). The provisional alignment was taken in the aim pose, where
-     * body and rig differ most (src/arm_weight.h), and shown it leaves the rifle displaced at rest until a rest is
-     * measured, which a player who keeps moving never gives. Unless a kept or a measured one replaced it meanwhile,
-     * it is taken again from this frame (as good as any other provisional one) and eased in from what is shown. */
-    d.retake = false;
+     * the frame is mid-action and no better than the aim pose: the retake stays armed for the frame after). The
+     * provisional alignment was taken in the aim pose, where body and rig differ most (src/arm_weight.h), or in the
+     * middle of an action, and shown it leaves the rifle displaced at rest until a rest is measured, which a player
+     * who keeps moving never gives. Unless a kept or a measured one replaced it meanwhile, it is taken again from
+     * this frame (as good as any other provisional one) and eased in from what is shown. */
+    const uint32_t why = d.retake;
+    d.retake = TFP_ARM_RETAKE_NONE;
     if (!d.used && !d.tentative) {
       TfpGraft fresh = d.map;
       fresh.grip = d.to_grip;
@@ -533,8 +537,10 @@ static bool align(const Units *u, const TfpGraftMatrix *body, const TfpGraftLoca
         }
         use(&fresh.grip, &fresh.alignment, true);
         aligned(TFP_ARM_ALIGN_PROVISIONAL, weapon, d.rest, 0, m, degrees);
+        d.stats.align.retake = why;
+        retaken = true;
         m = degrees = 0;
-      } else d.retake = true; /* not rigid on this frame: the next one */
+      } else d.retake = why; /* not rigid on this frame: the next one */
     }
   }
   if (!d.aligned) {
@@ -546,7 +552,10 @@ static bool align(const Units *u, const TfpGraftMatrix *body, const TfpGraftLoca
     use(&d.map.grip, &d.map.alignment, false);
     d.aligned = true, d.still = false, d.tentative = false, d.used = k ? (unsigned)(k - d.kept) + 1 : 0, d.cur_weapon = weapon, d.cur_stance = d.rest;
     aligned(k ? TFP_ARM_ALIGN_KEPT : TFP_ARM_ALIGN_PROVISIONAL, weapon, d.rest, 0, 0, 0);
-    d.retake = !k && d.weight < 1; /* provisional, and taken while the copy is hidden or fading: once more when it is fully shown */
+    /* Provisional, and taken in the middle of an action (a hold, or the gun away), or while the copy is hidden or
+     * fading: once more when it is fully shown and no action holds it. A binding that begins again inside a hold
+     * owes this whatever the weight, and whatever the binding before it owed. */
+    d.retake = k ? TFP_ARM_RETAKE_NONE : d.hold || u->gun_away ? TFP_ARM_RETAKE_ACTION : d.weight < 1 ? TFP_ARM_RETAKE_AIM : TFP_ARM_RETAKE_NONE;
   }
   const TfpGraftMatrix anchor = tfp_graft_anchor(&d.map, body);
   const TfpGraftMatrix source = tfp_graft_relative(&body[d.map.body[TFP_GRAFT_JOINTS - 1]], &anchor), shown = tfp_graft_local_matrix(own);
@@ -567,7 +576,8 @@ static bool align(const Units *u, const TfpGraftMatrix *body, const TfpGraftLoca
       aligned(TFP_ARM_ALIGN_KEPT, weapon, stance, 0, m, degrees);
     } else if (!k && other_gun) {
       d.used = 0;
-      aligned(TFP_ARM_ALIGN_PROVISIONAL, weapon, stance, 0, 0, 0);
+      /* (taken again on this very frame, for this gun: that record says provisional already, and what it moved) */
+      if (!retaken) aligned(TFP_ARM_ALIGN_PROVISIONAL, weapon, stance, 0, 0, 0);
     }
     d.cur_weapon = weapon, d.cur_stance = stance, d.still = false, d.tentative = false;
   }
@@ -762,10 +772,12 @@ const char *tfp_arm_drive_align_line(const TfpArmDriveAlign *a) {
              (unsigned)a->weapon, (double)a->moved_m, (double)a->moved_degrees, stance);
   else if (a->how == TFP_ARM_ALIGN_KEPT)
     snprintf(line, sizeof line, "aligned (weapon %u, the rest alignment kept for it, from the first frame of a new binding); %s", (unsigned)a->weapon, stance);
-  else if (a->how == TFP_ARM_ALIGN_PROVISIONAL && a->eased)
-    snprintf(line, sizeof line, "aligned (weapon %u, no rest alignment kept for it yet: the one taken while aiming is taken again now that the arms show, "
-             "moved %.3f m / %.1f degrees from the one in use, eased; provisional until its first rest); %s",
-             (unsigned)a->weapon, (double)a->moved_m, (double)a->moved_degrees, stance);
+  else if (a->how == TFP_ARM_ALIGN_PROVISIONAL && a->retake)
+    snprintf(line, sizeof line, "aligned (weapon %u, no rest alignment kept for it yet: the one taken %s, "
+             "moved %.3f m / %.1f degrees from the one in use%s; provisional until its first rest); %s", (unsigned)a->weapon,
+             a->retake == TFP_ARM_RETAKE_ACTION ? "in the middle of an action is taken again now that the action is over"
+                                                : "while aiming is taken again now that the arms show",
+             (double)a->moved_m, (double)a->moved_degrees, a->eased ? ", eased" : "", stance);
   else if (a->how == TFP_ARM_ALIGN_PROVISIONAL && a->weapon)
     snprintf(line, sizeof line, "aligned (weapon %u, no rest alignment kept for it yet: provisional until its first rest); %s", (unsigned)a->weapon, stance);
   else if (a->how == TFP_ARM_ALIGN_PROVISIONAL)

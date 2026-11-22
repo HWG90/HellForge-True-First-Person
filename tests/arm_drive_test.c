@@ -712,7 +712,7 @@ static void test_hold_edge(void) {
 }
 
 /* ---- the resting weapon pose (tfp_arm_drive_set_rest) ---- */
-enum { GUN2 = 502 };
+enum { GUN2 = 502, GUN3 = 503 };
 static TfpGraftMatrix body_draw[TFP_GRAFT_BODY_NODES], body_crouch[TFP_GRAFT_BODY_NODES], body_sway[TFP_GRAFT_BODY_NODES];
 /* The recorded body with its arms somewhere else relative to the head: the root's axes turned about their own Z and
  * the head moved. Every joint below a shoulder keeps its relation to its parent. */
@@ -1091,6 +1091,58 @@ static void test_binding_while_aiming(void) {
   for (unsigned n = 0; n < 60; n++) CHECK(!frame());
   shown = socket_shown();
   CHECK(stats().align.count == 2 && stats().binds == 2 && apart_m(&shown, rest) < .0001f);
+
+  /* aim, then an action while still aiming, and one frame of the hold is not driven (the game replaces a unit, a
+   * proof fails): the binding begins again inside the hold at full weight. Its alignment is of a mid-action frame,
+   * no better than the aim pose: it is taken again on the first fully shown frame after the hold. */
+  rest_start();
+  stance = TFP_ARM_REST_NONE;
+  tfp_arm_drive_set(true, false, 0);
+  body_is(body_draw);
+  for (unsigned n = 0; n < 10; n++) CHECK(!frame());
+  tfp_arm_drive_set_hold(true);
+  body_is(body_crouch);
+  tfp_arm_drive_set(true, false, 1);
+  for (unsigned n = 0; n < 5; n++) { CHECK(frame()); tfp_arm_drive_after_render(); }
+  request(4); /* one frame in another camera: the binding is gone */
+  CHECK(!frame());
+  request(6);
+  for (unsigned n = 0; n < 5; n++) { CHECK(frame()); tfp_arm_drive_after_render(); }
+  s = stats();
+  CHECK(s.binds == 2 && s.align.count == 2 && s.align.how == TFP_ARM_ALIGN_PROVISIONAL && !s.align.eased);
+  CHECK(!strstr(tfp_arm_drive_align_line(&s.align), "taken again"));
+  tfp_arm_drive_set_hold(false);
+  body_is(body_now);
+  CHECK(!frame());
+  s = stats();
+  CHECK(s.align.count == 3 && s.align.how == TFP_ARM_ALIGN_PROVISIONAL && s.align.eased && s.align.moved_m > .05f && s.binds == 2);
+  CHECK(strstr(tfp_arm_drive_align_line(&s.align), "taken in the middle of an action is taken again now that the action is over"));
+  CHECK(!strstr(tfp_arm_drive_align_line(&s.align), "while aiming"));
+  for (unsigned n = 0; n < 60; n++) CHECK(!frame());
+  shown = socket_shown();
+  CHECK(stats().align.count == 3 && stats().binds == 2 && apart_m(&shown, rest) < .0001f);
+
+  /* no aim at all: a binding that begins with the gun away at full weight (a hold that is ready, the gun on the body)
+   * is of a mid-action frame too. The gun comes back to the same binding: taken again there, and the log's one line
+   * for that frame is the retake with what it moved, not the returning gun's "provisional". */
+  rest_start();
+  stance = TFP_ARM_REST_NONE;
+  tfp_arm_drive_set_hold_ready(true);
+  break_gun_parent();
+  body_is(body_crouch);
+  for (unsigned n = 0; n < 10; n++) { CHECK(frame()); tfp_arm_drive_after_render(); }
+  s = stats();
+  CHECK(s.binds == 1 && s.align.count == 1 && s.align.how == TFP_ARM_ALIGN_PROVISIONAL && !s.align.weapon);
+  mend_gun_parent();
+  body_is(body_now);
+  CHECK(!frame());
+  s = stats();
+  CHECK(s.binds == 1 && s.align.count == 2 && s.align.how == TFP_ARM_ALIGN_PROVISIONAL && s.align.weapon == GUN && s.align.eased && s.align.moved_m > .05f);
+  CHECK(strstr(tfp_arm_drive_align_line(&s.align), "taken in the middle of an action is taken again now that the action is over"));
+  for (unsigned n = 0; n < 60; n++) CHECK(!frame());
+  shown = socket_shown();
+  CHECK(stats().align.count == 2 && stats().binds == 1 && apart_m(&shown, rest) < .0001f);
+  tfp_arm_drive_set_hold_ready(false);
 }
 
 /* What is not a rest: an action (the tick says so), a hold, a gun that is away, a body that keeps moving, layer states
@@ -1365,6 +1417,18 @@ static void test_rest_other_gun(void) {
   for (unsigned n = 0; n < 6; n++) CHECK(!frame());
   shown = socket_shown();
   CHECK(stats().align.count == 8 && stats().align.how == TFP_ARM_ALIGN_KEPT && stats().align.weapon == GUN2 && apart_m(&shown, rest) < .0001f);
+  /* a third gun, nothing kept for it, while the ease to the first one's kept alignment is under way: provisional and
+   * no more; an ease begun for something else is not a retake in the log */
+  gun_is(GUN);
+  body_is(body_crouch);
+  CHECK(!frame());
+  CHECK(stats().align.count == 9 && stats().align.how == TFP_ARM_ALIGN_KEPT && stats().align.eased);
+  make_unit(GUN3, 4, object_of(RIG), (8u << 16) | 2);
+  gun_is(GUN3);
+  CHECK(!frame());
+  s = stats();
+  CHECK(s.binds == 1 && s.align.count == 10 && s.align.how == TFP_ARM_ALIGN_PROVISIONAL && s.align.weapon == GUN3);
+  CHECK(!strstr(tfp_arm_drive_align_line(&s.align), "taken again") && strstr(tfp_arm_drive_align_line(&s.align), "provisional until its first rest"));
 }
 
 /* What the tick calls a rest (tfp_arm_drive_rest_of): the action alone is not enough. */
