@@ -392,7 +392,7 @@ static bool bind(const Units *u) {
   } else {
     if (!u32(u->body + L_UNIT_NODES, &body_count) || body_count != TFP_GRAFT_BODY_NODES || !ptr(u->body + L_UNIT_NAMES, &bnames) ||
         !ptr(u->body + L_UNIT_LINKS, &blinks) || !rd(bnames, bn, sizeof bn) || !rd(blinks, bl, sizeof bl) || !body_matrices(u->body, body) ||
-        !tfp_graft_bind(&d.map, bn, bl, fn, fl, body, fp))
+        !tfp_graft_view(body, &fp[TFP_GRAFT_RIG_ROOT]) || !tfp_graft_bind(&d.map, bn, bl, fn, fl, body, fp))
       return false;
     d.joints = TFP_GRAFT_JOINTS;
   }
@@ -632,6 +632,11 @@ static uint32_t drive(const Units *u) {
   if (!ptr(u->rig + L_UNIT_LOCALS, &locals) || locals != d.locals || !ptr(u->rig + L_UNIT_WORLDS, &rig_worlds) || !rd(locals, current, sizeof current) ||
       (!d.bend && !body_matrices(u->body, body)))
     return TFP_ARM_READ;
+  if (!d.bend) { /* the arms are seen in the view's frame (src/arm_graft.h tfp_graft_view) */
+    TfpGraftMatrix rig_root;
+    if (!rd(rig_worlds + TFP_GRAFT_RIG_ROOT * sizeof rig_root, &rig_root, sizeof rig_root)) return TFP_ARM_READ;
+    if (!tfp_graft_view(body, &rig_root)) return TFP_ARM_POSE;
+  }
   for (unsigned i = 0; i < d.joints; ++i)
     base[i] = tfp_graft_underlying((d.owned >> i) & 1, &d.original[i], &d.applied[i], current[d.map.fp[i]]);
   if (d.bend) {

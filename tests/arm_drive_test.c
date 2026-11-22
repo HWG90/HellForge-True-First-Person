@@ -30,6 +30,19 @@ static const TfpGraftLocal REST = {.basis = {1, 0, 0, 0, 1, 0, 0, 0, 1}, .preser
 /* ---- the recorded frame ---- */
 static uint32_t bn[TFP_GRAFT_BODY_NODES], bl[TFP_GRAFT_BODY_NODES], fn[TFP_GRAFT_RIG_NODES], fl[TFP_GRAFT_RIG_NODES];
 static TfpGraftMatrix body_now[TFP_GRAFT_BODY_NODES], body_later[TFP_GRAFT_BODY_NODES], rig_world[TFP_GRAFT_RIG_NODES];
+/* The drive sees the body in the view's frame (tfp_graft_view with the rig's root). What these tests expect is worked
+ * out from the same bodies seen the same way: every graft call below that takes a body goes through seen(). */
+static const TfpGraftMatrix *seen(const TfpGraftMatrix *body) {
+  static TfpGraftMatrix copies[8][TFP_GRAFT_BODY_NODES]; static unsigned next;
+  TfpGraftMatrix *copy = copies[next++ % 8];
+  memcpy(copy, body, sizeof copies[0]);
+  if (!tfp_graft_view(copy, &rig_world[TFP_GRAFT_RIG_ROOT])) memcpy(copy, body, sizeof copies[0]); /* not rigid: as given, and refused as before */
+  return copy;
+}
+#define tfp_graft_bind(out, bn, bl, fn, fl, body, fp) tfp_graft_bind(out, bn, bl, fn, fl, seen(body), fp)
+#define tfp_graft_align(map, body, own) tfp_graft_align(map, seen(body), own)
+#define tfp_graft_pose(map, body, pose) tfp_graft_pose(map, seen(body), pose)
+#define tfp_graft_anchor(map, body) tfp_graft_anchor(map, seen(body))
 static TfpGraftLocal game_locals[TFP_GRAFT_RIG_NODES]; /* what the game holds for the rig */
 static void load(const char *path) {
   FILE *in = fopen(path, "rb");
@@ -714,20 +727,30 @@ static void test_hold_edge(void) {
 /* ---- the resting weapon pose (tfp_arm_drive_set_rest) ---- */
 enum { GUN2 = 502, GUN3 = 503 };
 static TfpGraftMatrix body_draw[TFP_GRAFT_BODY_NODES], body_crouch[TFP_GRAFT_BODY_NODES], body_sway[TFP_GRAFT_BODY_NODES];
-/* The recorded body with its arms somewhere else relative to the head: the root's axes turned about their own Z and
- * the head moved. Every joint below a shoulder keeps its relation to its parent. */
-static void displaced(float degrees, float x, float y, float z, TfpGraftMatrix *out) {
+/* The recorded body with its arms somewhere else in the frame they are seen in (the view's axes at the head): the
+ * head moved, and everything turned about the view's own Z through the head, by the opposite angle (which is the
+ * frame turned by `degrees`). Every joint keeps its relation to its parent. */
+static void turned_about(const float *axis, const float *centre, float degrees, float *vector, bool point) {
   const float c = cosf(degrees * .01745329252f), s = sinf(degrees * .01745329252f);
+  float v[3], cross[3], dot = 0;
+  for (unsigned k = 0; k < 3; k++) v[k] = vector[k] - (point ? centre[k] : 0), dot += axis[k] * v[k];
+  cross[0] = axis[1] * v[2] - axis[2] * v[1], cross[1] = axis[2] * v[0] - axis[0] * v[2], cross[2] = axis[0] * v[1] - axis[1] * v[0];
+  for (unsigned k = 0; k < 3; k++) vector[k] = v[k] * c + cross[k] * s + axis[k] * dot * (1 - c) + (point ? centre[k] : 0);
+}
+static void displaced(float degrees, float x, float y, float z, TfpGraftMatrix *out) {
   unsigned head = 0;
   memcpy(out, body_now, sizeof body_now);
-  for (unsigned k = 0; k < 3; k++) {
-    const float a = body_now[0].values[k], b = body_now[0].values[4 + k];
-    out[0].values[k] = c * a + s * b, out[0].values[4 + k] = c * b - s * a;
-  }
   for (unsigned i = 0; i < TFP_GRAFT_BODY_NODES; i++)
     if (bn[i] == TFP_GRAFT_NAME_HEAD) head = i;
   CHECK(head);
   out[head].values[12] += x, out[head].values[13] += y, out[head].values[14] += z;
+  const float *axis = rig_world[TFP_GRAFT_RIG_ROOT].values + 8;
+  float centre[3];
+  memcpy(centre, out[head].values + 12, sizeof centre);
+  for (unsigned i = 1; i < TFP_GRAFT_BODY_NODES; i++) {
+    for (unsigned row = 0; row < 3; row++) turned_about(axis, centre, -degrees, out[i].values + 4 * row, false);
+    turned_about(axis, centre, -degrees, out[i].values + 12, true);
+  }
 }
 static void body_is(const TfpGraftMatrix *body) { put(worlds_of(BODY), body, sizeof body_now); }
 static float apart_m(const TfpGraftLocal *a, const TfpGraftLocal *b) {
@@ -834,6 +857,43 @@ static void test_rest_grip(void) {
  * rest the gun is off by the rest of the draw. After 350 ms of rest the alignment is measured again and eased in; once
  * that measurement is confirmed it is kept, and the next binding of this weapon, again begun in the middle of a draw,
  * ends on the rig's own socket by itself. */
+/* Looking down or up: the view (the whole rig) and the body's arms and head pitch together, the body's root does not.
+ * The arms stay where they are in the view. With the root's axes as the frame the arms' pitch was counted twice, and
+ * 40 degrees down put the socket 40 degrees and a hand's length from its place (seen in the game 2026-11-22). */
+static void test_view_pitch(void) {
+  for (int degrees = -40; degrees <= 40; degrees += 80) {
+    TfpGraftLocal level[TFP_GRAFT_RIG_NODES], pitched[TFP_GRAFT_RIG_NODES];
+    static TfpGraftMatrix body[TFP_GRAFT_BODY_NODES], rig[TFP_GRAFT_RIG_NODES];
+    unsigned head = 0;
+    rest_start();
+    CHECK(!frame());
+    rig_locals(level);
+    for (unsigned i = 0; i < TFP_GRAFT_BODY_NODES; i++)
+      if (bn[i] == TFP_GRAFT_NAME_HEAD) head = i;
+    const float *axis = rig_world[TFP_GRAFT_RIG_ROOT].values, *centre = body_now[head].values + 12;
+    memcpy(body, body_now, sizeof body), memcpy(rig, rig_world, sizeof rig);
+    for (unsigned i = 1; i < TFP_GRAFT_BODY_NODES; i++) {
+      for (unsigned row = 0; row < 3; row++) turned_about(axis, centre, (float)degrees, body[i].values + 4 * row, false);
+      turned_about(axis, centre, (float)degrees, body[i].values + 12, true);
+    }
+    for (unsigned i = 0; i < TFP_GRAFT_RIG_NODES; i++) {
+      for (unsigned row = 0; row < 3; row++) turned_about(axis, centre, (float)degrees, rig[i].values + 4 * row, false);
+      turned_about(axis, centre, (float)degrees, rig[i].values + 12, true);
+    }
+    put(worlds_of(RIG), rig, sizeof rig), body_is(body);
+    CHECK(!frame());
+    rig_locals(pitched);
+    float worst_m = 0, worst_degrees = 0;
+    for (unsigned n = 0; n < TFP_GRAFT_RIG_NODES; n++) {
+      const float m = apart_m(&pitched[n], &level[n]), turned = apart_degrees(&pitched[n], &level[n]);
+      if (m > worst_m) worst_m = m;
+      if (turned > worst_degrees) worst_degrees = turned;
+    }
+    CHECK(worst_m < .001f && worst_degrees < .2f);
+    CHECK(stats().binds == 1 && !stats().refused);
+    put(worlds_of(RIG), rig_world, sizeof rig_world), body_is(body_now);
+  }
+}
 static void test_rest_after_a_draw(void) {
   TfpGraftLocal now[TFP_GRAFT_RIG_NODES], want[TFP_GRAFT_RIG_NODES];
   const TfpGraftLocal *rest = &game_locals[TFP_GRAFT_RIG_SOCKET];
@@ -1566,6 +1626,7 @@ int main(int argc, char **argv) {
   test_hold();
   test_hold_edge();
   test_rest_grip();
+  test_view_pitch();
   test_rest_after_a_draw();
   test_binding_while_aiming();
   test_rest_gates();

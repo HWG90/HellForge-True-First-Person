@@ -139,7 +139,18 @@ static inline void tfp_graft_axes(const float q[4], TfpGraftMatrix *matrix) { /*
 }
 
 /* ---- arm_graft.h ---- */
-/* The body's frame the arm roots are expressed in: the root node's axes at the head's position. */
+/* The frame the body's arms are seen in turns with the view, not with the body's root: the rig hangs on the view, so
+ * with the root's axes every degree the body's arms pitch (or twist) after the view was counted twice, once in the
+ * arms and once in the rig, and looking down the gun arm ended half a metre and 60 degrees from its place (seen in
+ * the game 2026-11-22). The root's matrix in `body` gets the axes of the rig's root (its node 7 in the world); its
+ * position stays. Called on the body's matrices before anything is bound, aligned or posed from them. */
+static inline bool tfp_graft_view(TfpGraftMatrix *body, const TfpGraftMatrix *rig_root) {
+  if (!tfp_graft_rigid(rig_root) || !tfp_graft_rigid(&body[0])) return false;
+  for (unsigned row = 0; row < 3; ++row) memcpy(body[0].values + 4 * row, rig_root->values + 4 * row, 3 * sizeof(float));
+  return true;
+}
+/* The body's frame the arm roots are expressed in: the root node's axes (the view's, after tfp_graft_view) at the
+ * head's position. */
 static inline TfpGraftMatrix tfp_graft_anchor(const TfpGraft *g, const TfpGraftMatrix *body) {
   TfpGraftMatrix anchor = body[0];
   memcpy(anchor.values + 12, body[g->head].values + 12, 3 * sizeof(float));
