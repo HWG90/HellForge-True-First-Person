@@ -256,9 +256,10 @@ static bool dof_executable(void *u, uint64_t *exe, const char **error) {
 static bool vignette_held(TfpFx *fx);
 /* The depth of field goes with the vignette through a weapon swap: the setting is not given back for the third of a
  * second the view is away (tfp_wire_effects_vignette_view below has the rule). */
+bool tfp_wire_effects_dof_view(TfpFx *fx, bool active) { return active || vignette_held(fx); }
 static bool dof_active_view(void *u, bool *is_true, const char **error) {
   if (!entry_true(u, TFP_RT_E_active_view, is_true, error)) return false;
-  if (!*is_true && vignette_held(u)) *is_true = true;
+  *is_true = tfp_wire_effects_dof_view(u, *is_true);
   return true;
 }
 static bool dof_fallback_ready(void *u, bool *is_true, const char **error) { return entry_true(u, TFP_RT_E_dof_fallback_ready, is_true, error); }
@@ -279,10 +280,11 @@ static TfpDofAnswer dv_update(void *u, const TfpDofCompat *compat, const char **
 /* The view going away is not always its end: a weapon swap takes it away for a third of a second, and giving the
  * vignette back for that showed a dark rim at every swap (seen in the game 2026-11-22). For VIGNETTE_AWAY_S after
  * the view went away the vignette stays off, and a row the game switches on meanwhile is taken again; after that,
- * or at once when first person is switched off (the controller is neither running nor waiting), it is given back.
- * A shutdown gives it back at once. Not clean meanwhile, so the runtime keeps asking. */
+ * or at once when first person is switched off, it is given back. Switched on is the controller's enabled flag: it
+ * stays true while the controller waits for the camera or is still releasing the old lease, and a stop or a
+ * shutdown clears it. A shutdown gives it back at once. Not clean meanwhile, so the runtime keeps asking. */
 #define VIGNETTE_AWAY_S 1.5
-static bool first_person_wanted(const TfpFx *fx) { return fx->w->controller.phase == TFP_PHASE_RUNNING || fx->w->controller.phase == TFP_PHASE_WAITING; }
+static bool first_person_wanted(const TfpFx *fx) { return fx->w->controller.enabled; }
 /* True while the vignette is to stay off although the view is away (see above). */
 static bool vignette_held(TfpFx *fx) {
   double now = 0; const char *error = NULL;

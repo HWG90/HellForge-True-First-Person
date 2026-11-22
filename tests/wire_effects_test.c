@@ -372,7 +372,7 @@ static TfpRtValue t_encode(TfpWire *w, const char *const *keys, size_t count) {
 
 /* mod-side stand-ins for the driven runs: the view is ours, the executable is where the thunks are */
 static bool view_active;
-static bool t_active_view(void *u, bool *is_true, const char **error) { (void)u; (void)error; *is_true = view_active; return true; }
+static bool t_active_view(void *u, bool *is_true, const char **error) { (void)error; *is_true = tfp_wire_effects_dof_view(u, view_active); return true; } /* the product's own rule over the test's answer */
 static bool vignette_view;
 static bool t_vignette_view(void *u) { return tfp_wire_effects_vignette_view(u, view_active && vignette_view); } /* the product's own rule over the test's answer */
 static bool t_executable(void *u, uint64_t *exe, const char **error) { (void)u; (void)error; *exe = EXE; return true; }
@@ -839,6 +839,11 @@ int main(int argc, char **argv) {
   unsigned binder_checks = checks;
 
   /* ---- 5a. depth of field and the vignette, driven: the units, the glue, the engine half ---- */
+  /* the product's two view answers, kept to ask them as they are: the runtime's entry answers false here (no view),
+   * so what they say is the hold alone */
+  bool (*const product_dof_view)(void *, bool *, const char **) = fx.dof_host.active_view;
+  bool (*const product_vignette_view)(void *) = fx.vignette_host.active_view;
+  bool product_seen = true;
   fx.dof_host.active_view = t_active_view, fx.vignette_host.active_view = t_vignette_view;
   fx.dof_host.backend_alignment_executable = t_executable, fx.dof_host.backend_read = t_thunks;
   fx.dof_host.backend_renderer_dof_value = NULL; /* the cached observer needs the game's memory */
@@ -882,49 +887,74 @@ int main(int argc, char **argv) {
   G.row_enabled = true;
   now_seconds += .6;
   CHECK(h->dof_update(h, &o1, &o2) && !G.row_enabled && fx.vignette.reassertions == 1);
-  /* a weapon swap: the view is away for a third of a second. The vignette is not given back for it (the game showed
-   * it for those frames: a dark rim at every swap, seen in the game 2026-11-22). */
+  /* a weapon swap: the view is away for a third of a second. Neither is given back for it (the game showed the
+   * vignette for those frames: a dark rim at every swap, seen in the game 2026-11-22). */
   view_active = false;
   line_count = 0;
   const TfpPhase phase_before = wire.controller.phase;
-  wire.controller.phase = TFP_PHASE_WAITING; /* first person is on and waits for the camera, as in a swap */
+  const bool enabled_before = wire.controller.enabled;
+  wire.controller.enabled = true, wire.controller.phase = TFP_PHASE_WAITING; /* first person is on and waits for the camera, as in a swap */
   for (int i = 0; i < 4; i++) {
     now_seconds += .1;
     CHECK(h->dof_update(h, &o1, &o2));
     tfp_wire_effects_frame(&wire);
-    CHECK(!G.row_enabled);
+    CHECK(!G.row_enabled && !G.dof);
   }
-  CHECK(!logged("Effect: vignette: restored (1)") && !fx.dof_host.vignette_is_clean(&fx));
+  CHECK(!logged("Effect: vignette: restored (") && !logged("Effect: dof: dof_enabled restored (") && !fx.dof_host.vignette_is_clean(&fx));
+  CHECK(fx.dof.dof.phase == TFP_DOF_ACTIVE && fx.vignette.phase == TFP_VIGNETTE_ACTIVE);
+  product_seen = false;
+  CHECK(product_dof_view(&fx, &product_seen, &error) && product_seen && product_vignette_view(&fx)); /* held: the view is still there to both */
   view_active = true;
   now_seconds += .1;
-  CHECK(h->dof_update(h, &o1, &o2) && !G.row_enabled);
+  CHECK(h->dof_update(h, &o1, &o2) && !G.row_enabled && !G.dof);
   tfp_wire_effects_frame(&wire);
-  CHECK(!logged("Effect: vignette: restored (1)"));
-  /* first person switched off while the view is away: given back at once, not after the time */
+  CHECK(!logged("Effect: vignette: restored (") && !logged("Effect: dof: dof_enabled restored ("));
+  /* the same while the old lease is still being released (the action does not allow the exit yet): first person is
+   * on all the same, so both are held */
   view_active = false;
-  wire.controller.phase = TFP_PHASE_IDLE;
+  wire.controller.phase = TFP_PHASE_CLEANUP_PENDING;
+  for (int i = 0; i < 4; i++) {
+    now_seconds += .1;
+    CHECK(h->dof_update(h, &o1, &o2));
+    tfp_wire_effects_frame(&wire);
+    CHECK(!G.row_enabled && !G.dof);
+  }
+  CHECK(!logged("Effect: vignette: restored (") && !logged("Effect: dof: dof_enabled restored ("));
+  /* first person switched off while the view is away: both given back at once, not after the time */
+  wire.controller.enabled = false, wire.controller.phase = TFP_PHASE_IDLE;
   now_seconds += .1;
   CHECK(h->dof_update(h, &o1, &o2));
   tfp_wire_effects_frame(&wire);
-  CHECK(G.row_enabled && logged("Effect: vignette: restored (1)"));
-  /* and taken again when the view is back; then away for longer than the time with first person on: given back */
-  view_active = true, wire.controller.phase = TFP_PHASE_RUNNING;
-  now_seconds += .6;
-  CHECK(h->dof_update(h, &o1, &o2) && !G.row_enabled);
+  CHECK(G.row_enabled && G.dof && logged("Effect: vignette: restored (1)") && logged_count("Effect: dof: dof_enabled restored (") == 1);
+  product_seen = true;
+  CHECK(product_dof_view(&fx, &product_seen, &error) && !product_seen && !product_vignette_view(&fx));
+  /* and taken again when the view is back; then away for longer than the time with first person on: given back,
+   * both in the same tick */
+  view_active = true, wire.controller.enabled = true, wire.controller.phase = TFP_PHASE_RUNNING;
+  for (int i = 0; i < 4; i++) {
+    now_seconds += .6;
+    CHECK(h->dof_update(h, &o1, &o2));
+    tfp_wire_effects_frame(&wire);
+  }
+  CHECK(!G.row_enabled && !G.dof);
   view_active = false, wire.controller.phase = TFP_PHASE_WAITING;
-  int given_back_at = -1;
+  int given_back_at = -1, dof_back_at = -1;
   for (int i = 0; i < 60; i++) {
     now_seconds += .1;
     CHECK(h->dof_update(h, &o1, &o2));
     tfp_wire_effects_frame(&wire);
     if (G.row_enabled && given_back_at < 0) given_back_at = i;
+    if (G.dof && dof_back_at < 0) dof_back_at = i;
   }
-  CHECK(given_back_at >= 14 && given_back_at <= 30); /* not before the 1.5 s, and soon after */
+  CHECK(given_back_at >= 14 && given_back_at <= 16 && dof_back_at == given_back_at); /* the first away tick starts the 1.5 s; ticks are 0.1 s */
   view_active = true, wire.controller.phase = TFP_PHASE_RUNNING;
-  now_seconds += .6;
-  CHECK(h->dof_update(h, &o1, &o2) && !G.row_enabled);
-  tfp_wire_effects_frame(&wire);
-  wire.controller.phase = phase_before;
+  for (int i = 0; i < 4; i++) {
+    now_seconds += .6;
+    CHECK(h->dof_update(h, &o1, &o2));
+    tfp_wire_effects_frame(&wire);
+  }
+  CHECK(!G.row_enabled && !G.dof);
+  wire.controller.phase = phase_before, wire.controller.enabled = enabled_before;
   /* the view ends: both are given back */
   view_active = false;
   line_count = 0;
