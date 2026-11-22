@@ -4,7 +4,9 @@
 #      (tools/retail_ref/gen_settings.py --check; also the converter's defaults against retail's own defaults);
 #   2. tests/wire_settings_test.c: the JSON reader's refusals, the store, retail's answers through the binder;
 #   3. tools/retail_ref/check_settings.py: the conversion of the retail defaults and of the user's file, and the
-#      C store's answers after loading the converted file, key by key.
+#      C store's answers after loading the converted file, key by key;
+#   4. when git has commit e9b3c10 (the published 0.6.0-feel.19): the settings.json this build writes is read by
+#      that commit's own loader (tests/old_loader_check.c), and so is the settings.json the build ships.
 set -euo pipefail
 TFP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TFP_CC="${CC:-cc}"
@@ -30,5 +32,29 @@ else
 fi
 "$TFP_CC" -std=c11 -Wall -Wextra -Werror -ffp-contract=off -fsanitize=address,undefined -fno-sanitize-recover=all -g \
   -I "$TFP_ROOT/src" -I "$TFP_ROOT/tests" "${TFP_SOURCES[@]}" "$TFP_ROOT/tests/wire_settings_test.c" "${TFP_MCM_FLAGS[@]}" -lm -o "$TFP_WORK/wire_settings_test"
-ASAN_OPTIONS=detect_leaks=0 "$TFP_WORK/wire_settings_test"
+TFP_SETTINGS_OUT="$TFP_WORK/written-settings.json" ASAN_OPTIONS=detect_leaks=0 "$TFP_WORK/wire_settings_test"
 ASAN_OPTIONS=detect_leaks=0 python3 "$TFP_ROOT/tools/retail_ref/check_settings.py" --binary "$TFP_WORK/wire_settings_test" --work "$TFP_WORK"
+# The settings.json shipped beside the DLL (build.sh --feel makes it with the same command) holds no "locked_view".
+python3 "$TFP_ROOT/tools/convert_settings.py" --config "$TFP_ROOT/import/retail-config-2026-11-16.cfg" \
+  --menu "$TFP_ROOT/import/retail-menu-first-person-2026-11-16.ini" --out "$TFP_WORK/shipped-settings.json" >/dev/null
+if grep -q locked_view "$TFP_WORK/shipped-settings.json" "$TFP_WORK/written-settings.json"; then
+  echo "wire settings: FAILED a settings.json holds \"locked_view\", which 0.6.0-feel.19 and older refuse"; exit 1
+fi
+TFP_OLD="${TFP_OLD:-e9b3c10}"
+if git -C "$TFP_ROOT" cat-file -e "$TFP_OLD:src/tfp_settings.c" 2>/dev/null; then
+  rm -rf "$TFP_WORK/old"; mkdir -p "$TFP_WORK/old"
+  git -C "$TFP_ROOT" archive "$TFP_OLD" src | tar -x -C "$TFP_WORK/old"
+  "$TFP_CC" -std=c11 -w -I "$TFP_WORK/old/src" "$TFP_WORK/old/src/tfp_settings.c" "$TFP_WORK/old/src/action_select.c" \
+    "$TFP_ROOT/tests/old_loader_check.c" -lm -o "$TFP_WORK/old_loader_check"
+  "$TFP_WORK/old_loader_check" "$TFP_WORK/written-settings.json"
+  "$TFP_WORK/old_loader_check" "$TFP_WORK/shipped-settings.json"
+  # The check bites: the same text with the member 0.6.0-feel.20 to feel.24 wrote is refused by that loader.
+  sed 's/^ "menu": {$/ "locked_view": {"fov_degrees": 104},\n "menu": {/' "$TFP_WORK/written-settings.json" > "$TFP_WORK/feel24-settings.json"
+  if "$TFP_WORK/old_loader_check" "$TFP_WORK/feel24-settings.json" > "$TFP_WORK/old-refusal.txt"; then
+    echo "wire settings: FAILED the loader of $TFP_OLD took a settings.json with \"locked_view\"; the check proves nothing"; exit 1
+  fi
+  grep -q "locked_view: an unknown member" "$TFP_WORK/old-refusal.txt"
+  echo "wire settings: the loader of $TFP_OLD (0.6.0-feel.19) reads the settings.json this build writes and the one it ships, and refuses one with \"locked_view\""
+else
+  echo "wire settings: commit $TFP_OLD is not in this clone; the 0.6.0-feel.19 loader itself was not run (the member names are checked in the test)"
+fi

@@ -176,10 +176,12 @@ int main(void) {
   /* ---- everything bound, no game ---- */
   tfp_wire_init(&wire, &memory, &platform, &helpers);
   TfpRtHost off = wire.host;
-  TfpWireFeelParts parts = {NULL, 0, "settings.json", &pose, &pose_io, &engine, &effects, &editor_platform};
+  static const char locked_json[] = "{\"format\":1,\"locked_view\":{\"kick_max_degrees\":11}}";
+  TfpWireFeelParts parts = {NULL, 0, "settings.json", &pose, &pose_io, &engine, &effects, &editor_platform, locked_json, sizeof locked_json - 1, "locked_view.json"};
   tfp_wire_feel_bind(&wire, &feel, &parts);
   CHECK(feel.has_pose && feel.has_motion && feel.has_engine && feel.has_effects && feel.has_editor && logged("Ready: placement editor bound"));
   CHECK(logged("Refused: settings:") && logged("Ready: settings are retail's defaults")); /* no file */
+  CHECK(logged("Ready: locked view options read from locked_view.json") && tfp_locked_view_kick_max_degrees(&wire) == 11); /* its own file, read all the same */
   CHECK(logged("Ready: pose") && logged("Ready: motion bound") && logged("Ready: model shadows"));
   TfpRtHost *h = &wire.host;
   CHECK(wire.pose_helper && wire.placement_decode && wire.lease_extra && wire.controller_extra && wire.frame_extra && wire.pose_counts);

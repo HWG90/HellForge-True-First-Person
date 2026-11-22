@@ -54,6 +54,7 @@ void tfp_wire_feel_bind(TfpWire *w, TfpWireFeel *f, const TfpWireFeelParts *part
   /* Settings first: placements travel through its refs, and the motion binder refuses without it. */
   bool settings = tfp_wire_settings_bind(w, parts->settings_json, parts->settings_length, parts->settings_origin);
   if (!settings) tfp_wire_say(w, "Refused: settings: out of memory; the view build's answers stay (default placement, no saved placements)");
+  else tfp_wire_settings_bind_locked(w, parts->locked_json, parts->locked_length, parts->locked_origin);
   if (parts->pose) {
     tfp_wire_pose_bind(w, &f->pose, parts->pose, parts->pose_io, TFP_POSE_ADAPTER_PROFILE_SHIPPED);
     w->pose_counts = tfp_wire_pose_counts;

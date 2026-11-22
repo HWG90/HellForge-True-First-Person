@@ -48,22 +48,61 @@ const char *tfp_wire_settings_source(TfpWire *w, const char *key, TfpAct action,
  * weapon key changes. (tfp_wire_motion_frame calls it.) */
 void tfp_wire_settings_frame(TfpWire *w);
 
+/* The locked view's options have their own file, locked_view.json beside settings.json. json: its bytes (not
+ * kept); NULL or length 0: there is no such file, and the options are the defaults or what a settings.json of
+ * 0.6.0-feel.20 to feel.24 held under "locked_view". Call after tfp_wire_settings_bind and before
+ * tfp_wire_settings_disk. A file that names them wins over settings.json. Logs one `Note:` line when names this
+ * build does not know were skipped, and `Refused: locked view options: <why>` when the file could not be used
+ * (the options then stay as they were; settings.json is never refused for anything in either place). */
+void tfp_wire_settings_bind_locked(TfpWire *w, const char *json, size_t length, const char *origin);
+
 /* ---- saving (docs/guides/POSER-AND-MENU.md) ---------------------------------------------------------
- * The store is written when it changed, never on a timer: tfp_wire_settings_save_frame compares the
- * store's two change counters with what was last written and calls the saver once per change. (One
- * compare a tick instead of a callback in every unit that calls mod.set.) The saver gets the whole
- * settings.json text and must replace the file atomically; false with a reason leaves the store
- * unsaved until its next change, so a failing disk is tried once per change and not once a frame. */
-typedef bool (*TfpSettingsSaveFn)(void *user, const char *text, size_t length, char *why, size_t why_size);
-void tfp_wire_settings_saver(TfpWire *w, TfpSettingsSaveFn save, void *user); /* NULL: nothing is ever written */
+ * Two files in the user's folder: settings.json (first_person and menu: readable by every build since
+ * 0.6.0-feel.1) and locked_view.json (the locked view's options). Each is written when what it holds changed,
+ * never on a timer: tfp_wire_settings_save_frame compares the store's change counters with what was last
+ * written and writes a file once per change. (One compare a tick instead of a callback in every unit that
+ * calls mod.set.) A failed write leaves that file unsaved until its next change, so a failing disk is tried
+ * once per change and not once a frame.
+ *
+ * No file the user had is ever written over without a copy, in two cases:
+ *   - a file that was REFUSED at load (the store runs on defaults, so a save would replace the user's values):
+ *     before the session's first write of it, it is copied to <name>.refused (or .refused-2 .. .refused-9 when
+ *     that name is taken; a taken name is never written over). The copy failing fails that save.
+ *   - a settings.json that still holds "locked_view" (written by 0.6.0-feel.20 to feel.24, which 0.6.0-feel.19
+ *     and older refuse whole): see tfp_wire_settings_disk. */
+typedef enum TfpSettingsFile { TFP_SETTINGS_FILE, TFP_LOCKED_FILE } TfpSettingsFile;
+typedef enum TfpSettingsCopy {
+  TFP_COPY_DONE,    /* the copy was made */
+  TFP_COPY_NONE,    /* there is no such file to copy */
+  TFP_COPY_EXISTS,  /* a file of the copy's name is already there; it was left as it is */
+  TFP_COPY_FAILED   /* `why` says what went wrong */
+} TfpSettingsCopy;
+typedef struct TfpSettingsDisk {
+  void *user;
+  /* Replaces the file with this text atomically (a temporary file, then a rename). false: `why`. */
+  bool (*write)(void *user, TfpSettingsFile file, const char *text, size_t length, char *why, size_t why_size);
+  /* Copies the file as it is on disk to <its name><suffix>, never over an existing file. */
+  TfpSettingsCopy (*copy)(void *user, TfpSettingsFile file, const char *suffix, char *why, size_t why_size);
+} TfpSettingsDisk;
+#define TFP_SETTINGS_BEFORE_SPLIT ".before-feel25"
+/* Where the two files are kept; NULL: nothing is ever written. Not kept: the struct is copied. user_file: the text
+ * bound as settings.json was the user's own file, the one `write` replaces (false: the one shipped beside the DLL,
+ * or none). What is loaded counts as what the files hold, with one exception that is done here, at once: when the
+ * user's settings.json held "locked_view", (1) locked_view.json is written from the loaded options unless that file
+ * was there and read, (2) settings.json is copied to settings.json.before-feel25 (an existing copy of that name is
+ * kept: it is the older one), (3) settings.json is written again without the member, everything else as loaded.
+ * A step that fails logs one `Refused:` line and ends the conversion; the session runs on the loaded values either
+ * way. Until it has been done, no save of settings.json skips steps 1 and 2: a later save does them first and fails
+ * with them, and the next start tries again. */
+void tfp_wire_settings_disk(TfpWire *w, const TfpSettingsDisk *disk, bool user_file);
 void tfp_wire_settings_save_frame(TfpWire *w);                                /* once per tick, after the runtime's update */
-bool tfp_wire_settings_unsaved(TfpWire *w);                                   /* a change the file does not hold */
+bool tfp_wire_settings_unsaved(TfpWire *w);                                   /* a change a file does not hold */
 /* A menu control's value (the MCM binder's changed callback). false: not bound, or the wrong kind. */
 bool tfp_wire_settings_menu_set(TfpWire *w, TfpSettingsMenuId id, bool is_bool, bool boolean, double number);
 
 /* ---- the locked view's options (TFP_SETTINGS_LOCKED in src/tfp_settings.h) ---------------------------
- * The own settings panel writes them (src/wire_panel.c); a change counts as a store change and is saved
- * like any other. false: no store bound, not an option, the wrong kind. */
+ * The own settings panel writes them (src/wire_panel.c); a change is saved to locked_view.json by the next
+ * save frame. false: no store bound, not an option, the wrong kind. */
 bool tfp_wire_settings_locked_set(TfpWire *w, TfpSettingsLockedId id, bool is_bool, bool boolean, double number);
 /* The options by name, for the units that act on them. With no store bound each answers its default.
  * Plain reads of one stored value each: no game call, no lock, so a read from another thread than the

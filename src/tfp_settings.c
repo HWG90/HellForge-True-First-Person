@@ -708,6 +708,40 @@ static const TfpSettingsValue *load_field(Loader *l, TfpSettingsField field, con
   if (!made) refuse(l, path, NULL, "out of memory");
   return made;
 }
+/* The locked view's options out of one JSON object. A name this build does not know is skipped and noted in
+ * s->locked_skipped. A wrong type on a known name: strict refuses (nothing is taken, `why` says which), otherwise it is
+ * skipped and noted too. The change counter is left alone: what was read is what the file holds. */
+static void note_skipped(TfpSettings *s, const char *name) {
+  size_t used = strlen(s->locked_skipped);
+  snprintf(s->locked_skipped + used, sizeof s->locked_skipped - used, "%s%.40s", used ? ", " : "", name);
+}
+static bool load_locked_options(const JDoc *d, const JNode *object, TfpSettings *s, bool strict, char *why, size_t why_size) {
+  TfpSettingsMenuValue staged[TFP_LOCKED_COUNT];
+  char skipped[sizeof s->locked_skipped];
+  memcpy(staged, s->locked, sizeof staged);
+  memcpy(skipped, s->locked_skipped, sizeof skipped);
+  const bool has_put_away = jmember(d, object, "put_away") != NULL;
+  for (int at = object->child; at >= 0; at = d->nodes[at].next) {
+    const JNode *leaf = &d->nodes[at];
+    /* The option put_away replaced: its stored value is put_away's, unless the file names put_away itself. */
+    const bool old = !strcmp(leaf->key, TFP_SETTINGS_LOCKED_OLD_PUT_AWAY);
+    const int id = old ? (int)TFP_LOCKED_put_away : tfp_settings_locked(leaf->key);
+    if (id < 0) { note_skipped(s, leaf->key); continue; }
+    const bool is_bool = leaf->type == J_TRUE || leaf->type == J_FALSE;
+    if (is_bool != locked_info[id].is_bool || (!is_bool && leaf->type != J_NUMBER)) {
+      if (!strict) { note_skipped(s, leaf->key); continue; }
+      if (why && why_size) snprintf(why, why_size, "locked_view.%.40s: %s", leaf->key, locked_info[id].is_bool ? "expected true or false" : "expected a number");
+      memcpy(s->locked_skipped, skipped, sizeof skipped);
+      return false;
+    }
+    if (old && has_put_away) continue;
+    double number = is_bool ? 0 : leaf->number;
+    if (!is_bool) number = number < locked_info[id].min ? locked_info[id].min : number > locked_info[id].max ? locked_info[id].max : number;
+    staged[id] = (TfpSettingsMenuValue){is_bool, leaf->type == J_TRUE, number};
+  }
+  memcpy(s->locked, staged, sizeof staged);
+  return true;
+}
 static bool load_document(Loader *l) {
   const JDoc *d = l->d;
   const JNode *root = &d->nodes[0];
@@ -741,25 +775,13 @@ static bool load_document(Loader *l) {
         return refuse(l, "menu", leaf->key, menu_defaults[id].is_bool ? "expected true or false" : "expected a number");
     }
   }
-  const JNode *locked = jmember(d, root, "locked_view"); /* absent in files from before the locked view: the defaults stay */
+  /* The locked view's options as 0.6.0-feel.20 to feel.24 wrote them here. They are taken (locked_view.json, read
+   * after this, wins) and nothing in them can refuse this file. */
+  const JNode *locked = jmember(d, root, "locked_view");
   if (locked) {
-    if (locked->type != J_OBJECT) return refuse(l, "locked_view", NULL, "expected an object");
-    const bool has_put_away = jmember(d, locked, "put_away") != NULL;
-    for (int at = locked->child; at >= 0; at = d->nodes[at].next) {
-      const JNode *leaf = &d->nodes[at];
-      /* The option put_away replaced: its stored value is put_away's, unless the file names put_away itself. */
-      const bool old = !strcmp(leaf->key, TFP_SETTINGS_LOCKED_OLD_PUT_AWAY);
-      if (old && has_put_away) {
-        if (leaf->type != J_TRUE && leaf->type != J_FALSE) return refuse(l, "locked_view", leaf->key, "expected true or false");
-        continue;
-      }
-      int id = old ? (int)TFP_LOCKED_put_away : tfp_settings_locked(leaf->key);
-      if (id < 0) return refuse(l, "locked_view", leaf->key, "an unknown option");
-      bool is_bool = leaf->type == J_TRUE || leaf->type == J_FALSE;
-      if ((!is_bool && leaf->type != J_NUMBER) || !tfp_settings_set_locked(l->s, (TfpSettingsLockedId)id, is_bool, leaf->type == J_TRUE, leaf->number))
-        return refuse(l, "locked_view", leaf->key, locked_info[id].is_bool ? "expected true or false" : "expected a number");
-    }
-    l->s->locked_writes = 0; /* what was read is what the file holds */
+    l->s->locked_in_settings = true;
+    if (locked->type == J_OBJECT) load_locked_options(d, locked, l->s, false, NULL, 0);
+    else note_skipped(l->s, "locked_view (not an object)");
   }
   return true;
 }
@@ -783,6 +805,27 @@ bool tfp_settings_load(TfpSettings *s, const char *json, size_t n, char *why, si
   if (why && why_size) snprintf(why, why_size, "%s", l.why);
   if (!tfp_settings_defaults(s) && why && why_size) snprintf(why, why_size, "out of memory");
   return false;
+}
+bool tfp_settings_load_locked(TfpSettings *s, const char *json, size_t n, char *why, size_t why_size) {
+  JDoc d;
+  char problem[200] = "";
+  bool ok = false;
+  if (why && why_size) *why = 0;
+  s->locked_skipped[0] = 0;
+  memset(&d, 0, sizeof d);
+  if (!json || !n) snprintf(problem, sizeof problem, "no file");
+  else if (n > TFP_SETTINGS_MAX) snprintf(problem, sizeof problem, "the file is larger than %d bytes", TFP_SETTINGS_MAX);
+  else if (!jparse(&d, json, n)) snprintf(problem, sizeof problem, "not JSON: %s", d.why);
+  else if (d.nodes[0].type != J_OBJECT) snprintf(problem, sizeof problem, "the document must be an object");
+  else {
+    const JNode *options = jmember(&d, &d.nodes[0], "locked_view");
+    if (!options || options->type != J_OBJECT) snprintf(problem, sizeof problem, "locked_view: expected an object");
+    else ok = load_locked_options(&d, options, s, true, problem, sizeof problem);
+    /* Any other member (a later build's) is left alone: "format" is written for such a build to tell by. */
+  }
+  jfree(&d);
+  if (!ok && why && why_size) snprintf(why, why_size, "%s", problem);
+  return ok;
 }
 
 /* ================================================================== writing */
@@ -881,7 +924,7 @@ static void put_value(Writer *w, const TfpSettingsValue *v) {
 static int compare_names(const void *a, const void *b) { return strcmp(*(const char *const *)a, *(const char *const *)b); }
 size_t tfp_settings_write(const TfpSettings *s, char *out, size_t size) {
   Writer w = {out, size, 0};
-  const char *names[(int)TFP_SET_COUNT + (int)TFP_MENU_COUNT + (int)TFP_LOCKED_COUNT];
+  const char *names[(int)TFP_SET_COUNT + (int)TFP_MENU_COUNT];
   bool first = true;
   put(&w, "{\n \"first_person\": {");
   memcpy(names, field_names, sizeof field_names);
@@ -895,21 +938,28 @@ size_t tfp_settings_write(const TfpSettings *s, char *out, size_t size) {
     put(&w, ": ");
     put_value(&w, v);
   }
-  put(&w, "\n },\n \"format\": 1,\n \"locked_view\": {");
-  for (int i = 0; i < TFP_LOCKED_COUNT; i++) names[i] = locked_info[i].name;
-  qsort(names, TFP_LOCKED_COUNT, sizeof *names, compare_names);
-  for (int i = 0; i < TFP_LOCKED_COUNT; i++) {
-    const TfpSettingsMenuValue *v = &s->locked[tfp_settings_locked(names[i])];
+  put(&w, "\n },\n \"format\": 1,\n \"menu\": {");
+  memcpy(names, menu_names, sizeof menu_names);
+  qsort(names, TFP_MENU_COUNT, sizeof *names, compare_names);
+  for (int i = 0; i < TFP_MENU_COUNT; i++) {
+    const TfpSettingsMenuValue *v = &s->menu[tfp_settings_menu(names[i])];
     put(&w, i ? ",\n  " : "\n  ");
     put_string(&w, names[i]);
     put(&w, ": ");
     if (v->is_bool) put(&w, v->boolean ? "true" : "false"); else put_number(&w, v->number);
   }
-  put(&w, "\n },\n \"menu\": {");
-  memcpy(names, menu_names, sizeof menu_names);
-  qsort(names, TFP_MENU_COUNT, sizeof *names, compare_names);
-  for (int i = 0; i < TFP_MENU_COUNT; i++) {
-    const TfpSettingsMenuValue *v = &s->menu[tfp_settings_menu(names[i])];
+  put(&w, "\n }\n}\n");
+  if (out && size) out[w.used < size ? w.used : size - 1] = 0;
+  return w.used;
+}
+size_t tfp_settings_write_locked(const TfpSettings *s, char *out, size_t size) {
+  Writer w = {out, size, 0};
+  const char *names[TFP_LOCKED_COUNT];
+  put(&w, "{\n \"format\": 1,\n \"locked_view\": {");
+  for (int i = 0; i < TFP_LOCKED_COUNT; i++) names[i] = locked_info[i].name;
+  qsort(names, TFP_LOCKED_COUNT, sizeof *names, compare_names);
+  for (int i = 0; i < TFP_LOCKED_COUNT; i++) {
+    const TfpSettingsMenuValue *v = &s->locked[tfp_settings_locked(names[i])];
     put(&w, i ? ",\n  " : "\n  ");
     put_string(&w, names[i]);
     put(&w, ": ");

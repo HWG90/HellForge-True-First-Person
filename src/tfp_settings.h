@@ -5,8 +5,8 @@
  * makes from a retail settings snapshot at build time.
  *
  * No Windows, no game, no dependency: the JSON reader is in tfp_settings.c. A missing or invalid
- * text leaves retail's defaults. Writes go to memory only (this build does not save to disk);
- * tfp_settings_write gives the same JSON shape back for whoever wants to.
+ * text leaves retail's defaults. Writes go to memory only; tfp_settings_write gives the same JSON
+ * shape back, and src/wire_settings.c hands it to whoever keeps the file.
  *
  * A saved table is a TfpSettingsValue the store made and owns. A value never changes once made: a
  * write swaps the field's pointer and the old value stays readable until tfp_settings_free, as a
@@ -81,7 +81,10 @@ typedef struct TfpSettingsMenuValue { bool is_bool, boolean; double number; } Tf
 
 /* The locked view's options (docs/design/specs/2026-11-22-locked-view-design.md), which retail does not have:
  * X(id, 1 Boolean / 0 number, default, least, most, step). The two strengths are percentages. They are stored
- * under "locked_view" in settings.json; a file without that section reads as the defaults. The store only
+ * in their own file, locked_view.json beside settings.json (tfp_settings_write_locked / tfp_settings_load_locked):
+ * 0.6.0-feel.19 and older refuse a settings.json with a member they do not know, and their saver then writes
+ * their defaults over it. 0.6.0-feel.20 to feel.24 kept them under "locked_view" in settings.json; that member is
+ * still read (src/wire_settings.h converts such a file once). No file: the defaults. The store only
  * holds them: what they do is the camera's and the arm rig's business (the getters are in src/wire_settings.h).
  * animated_arms, put_away and smooth_eye switch a feature live (src/wire_options.h); one_handed_pistols sets nothing. */
 #define TFP_SETTINGS_LOCKED(X) \
@@ -108,6 +111,8 @@ typedef struct TfpSettings {
   uint64_t menu_writes;                         /* tfp_settings_set_menu calls that changed a control's value */
   TfpSettingsMenuValue locked[TFP_LOCKED_COUNT];
   uint64_t locked_writes;                       /* tfp_settings_set_locked calls that changed an option */
+  bool locked_in_settings;                      /* the settings.json last loaded had a "locked_view" member (feel.20 to feel.24) */
+  char locked_skipped[160];                     /* what the last load of either file skipped in the locked view's options; "": nothing */
 } TfpSettings;
 
 const char *tfp_settings_field_name(TfpSettingsField field);
@@ -125,7 +130,16 @@ bool tfp_settings_defaults(TfpSettings *s);
  * `why` says what was wrong (a line of text) and *s holds retail's defaults. json NULL or n 0: "no settings file". *s must be zeroed or freed. */
 bool tfp_settings_load(TfpSettings *s, const char *json, size_t n, char *why, size_t why_size);
 void tfp_settings_free(TfpSettings *s);
-/* The store as settings.json text (sorted keys). Returns the length without the NUL; when that is
+/* The text of locked_view.json, {"format": 1, "locked_view": {option: value, ...}}, over what *s holds (a loaded
+ * store or the defaults). An option the text does not name keeps its value; a name this build does not know is
+ * skipped (s->locked_skipped lists them). false: `why` says what was wrong (not JSON, no "locked_view" object, a
+ * known option of the wrong type) and no option changed. settings.json's own "locked_view" member is read with the
+ * same rules, except that nothing in it refuses settings.json: a wrong type is skipped as well. */
+bool tfp_settings_load_locked(TfpSettings *s, const char *json, size_t n, char *why, size_t why_size);
+/* The locked view's options as locked_view.json text; lengths as tfp_settings_write. */
+size_t tfp_settings_write_locked(const TfpSettings *s, char *out, size_t size);
+/* The store as settings.json text (sorted keys), without the locked view's options: its top-level members are
+ * "first_person", "format" and "menu", which every build since 0.6.0-feel.1 reads. Returns the length without the NUL; when that is
  * >= size the text was cut. out may be NULL with size 0 to measure. */
 size_t tfp_settings_write(const TfpSettings *s, char *out, size_t size);
 

@@ -33,7 +33,7 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "render_slot.h"
 #include "arm_drive.h"
 #include "wire_options.h"
-#define TFP_VIEW_VERSION "0.6.0-feel.24"
+#define TFP_VIEW_VERSION "0.6.0-feel.25"
 #else
 #include "wire_win.h"
 #include "wire_action.h"
@@ -79,13 +79,16 @@ static bool arms_live, arms_restore, arms_bend;
 static bool hold_lease;
 static char arms_refusal[200]; /* why the render hook may not go in, as last logged: one line per reason */
 static bool engine_hooked, pose_hook_told[TFP_WIN_POSE_HOOKS];
-static char settings_text[TFP_SETTINGS_MAX];
+static char settings_text[TFP_SETTINGS_MAX], locked_text[1 << 16];
 /* Two places hold settings.json. The one beside this DLL is made at build time (tools/convert_settings.py)
  * and is the first run's; HellForge holds a session's mod files read-only, so what the menu and the poser
  * change is saved to the user's own file, which is read first from then on:
- *   %LOCALAPPDATA%\Goose\HellForge\TrueFirstPerson\settings.json */
+ *   %LOCALAPPDATA%\Goose\HellForge\TrueFirstPerson\settings.json
+ * The locked view's options are in locked_view.json in that folder, and only there (src/wire_settings.h says why
+ * they are not in settings.json, and what is copied aside before a file is replaced). */
 #define TFP_USER_FOLDERS {"Goose", "Goose\\HellForge", "Goose\\HellForge\\TrueFirstPerson"}
-static bool user_settings_path(char *path, size_t size, bool make_folders) {
+static const char *const user_file_names[2] = {"settings.json", "locked_view.json"}; /* by TfpSettingsFile */
+static bool user_file_path(char *path, size_t size, TfpSettingsFile file, bool make_folders) {
   char base[MAX_PATH];
   static const char *const folders[] = TFP_USER_FOLDERS;
   DWORD n = GetEnvironmentVariableA("LOCALAPPDATA", base, sizeof base);
@@ -94,24 +97,24 @@ static bool user_settings_path(char *path, size_t size, bool make_folders) {
     snprintf(path, size, "%s\\%s", base, folders[i]);
     CreateDirectoryA(path, NULL); /* an existing folder is fine; a real failure shows when the file is made */
   }
-  return (size_t)snprintf(path, size, "%s\\%s\\settings.json", base, folders[sizeof folders / sizeof *folders - 1]) < size;
+  return (size_t)snprintf(path, size, "%s\\%s\\%s", base, folders[sizeof folders / sizeof *folders - 1], user_file_names[file]) < size;
 }
-static size_t read_file(const char *path) {
+static size_t read_file(const char *path, char *text, size_t size) {
   HANDLE file = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
   if (file == INVALID_HANDLE_VALUE) return 0;
   DWORD got = 0, total = 0;
-  while (total < sizeof settings_text && ReadFile(file, settings_text + total, (DWORD)(sizeof settings_text - total), &got, NULL) && got) total += got;
+  while (total < size && ReadFile(file, text + total, (DWORD)(size - total), &got, NULL) && got) total += got;
   CloseHandle(file);
   return total;
 }
-/* 0: no file in either place. */
-static size_t read_settings(char *where, size_t where_size) {
+/* 0: no file in either place. *user_file: the text is the user's own file (the one the saver replaces). */
+static size_t read_settings(char *where, size_t where_size, bool *user_file) {
   HMODULE self = NULL;
-  char path[MAX_PATH + 16];
-  where[0] = 0;
-  if (user_settings_path(path, sizeof path, false)) {
-    size_t total = read_file(path);
-    if (total) { snprintf(where, where_size, "%s", path); return total; }
+  char path[MAX_PATH + 32];
+  where[0] = 0, *user_file = false;
+  if (user_file_path(path, sizeof path, TFP_SETTINGS_FILE, false)) {
+    size_t total = read_file(path, settings_text, sizeof settings_text);
+    if (total) { snprintf(where, where_size, "%s", path); *user_file = true; return total; }
   }
   if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)(void *)read_settings, &self))
     return 0;
@@ -121,14 +124,19 @@ static size_t read_settings(char *where, size_t where_size) {
   if (!slash) return 0;
   strcpy(slash + 1, "settings.json");
   snprintf(where, where_size, "%s", path);
-  return read_file(path);
+  return read_file(path, settings_text, sizeof settings_text);
 }
-/* TfpSettingsSaveFn: a temporary file beside the target, flushed, then renamed over it. Game thread only
- * (tfp_wire_settings_save_frame is called from the tick). */
-static bool save_settings(void *user, const char *text, size_t length, char *why, size_t why_size) {
-  char path[MAX_PATH + 16], temp[MAX_PATH + 24];
+static size_t read_locked(char *where, size_t where_size) { /* 0: no locked_view.json */
+  where[0] = 0;
+  if (!user_file_path(where, where_size, TFP_LOCKED_FILE, false)) { where[0] = 0; return 0; }
+  return read_file(where, locked_text, sizeof locked_text);
+}
+/* TfpSettingsDisk.write: a temporary file beside the target, flushed, then renamed over it. Game thread only
+ * (tfp_wire_settings_disk is called from the first tick's start-up, tfp_wire_settings_save_frame from the tick). */
+static bool write_user_file(void *user, TfpSettingsFile which, const char *text, size_t length, char *why, size_t why_size) {
+  char path[MAX_PATH + 32], temp[MAX_PATH + 40];
   (void)user;
-  if (!user_settings_path(path, sizeof path, true)) { snprintf(why, why_size, "LOCALAPPDATA is not set"); return false; }
+  if (!user_file_path(path, sizeof path, which, true)) { snprintf(why, why_size, "LOCALAPPDATA is not set"); return false; }
   snprintf(temp, sizeof temp, "%s.new", path);
   HANDLE file = CreateFileA(temp, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
   if (file == INVALID_HANDLE_VALUE) { snprintf(why, why_size, "%s could not be made (Windows error %lu)", temp, (unsigned long)GetLastError()); return false; }
@@ -139,6 +147,24 @@ static bool save_settings(void *user, const char *text, size_t length, char *why
   if (ok && !MoveFileExA(temp, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) ok = false, code = GetLastError();
   if (!ok) { DeleteFileA(temp); snprintf(why, why_size, "%s could not be written (Windows error %lu)", path, (unsigned long)code); }
   return ok;
+}
+/* TfpSettingsDisk.copy: the file as it is on disk to <name><suffix>, never over a file that is there. */
+static TfpSettingsCopy copy_user_file(void *user, TfpSettingsFile which, const char *suffix, char *why, size_t why_size) {
+  char path[MAX_PATH + 32], copy[MAX_PATH + 64];
+  (void)user;
+  if (!user_file_path(path, sizeof path, which, false)) { snprintf(why, why_size, "LOCALAPPDATA is not set"); return TFP_COPY_FAILED; }
+  if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES) {
+    DWORD code = GetLastError();
+    if (code == ERROR_FILE_NOT_FOUND || code == ERROR_PATH_NOT_FOUND) return TFP_COPY_NONE;
+    snprintf(why, why_size, "%s could not be looked at (Windows error %lu)", path, (unsigned long)code);
+    return TFP_COPY_FAILED;
+  }
+  snprintf(copy, sizeof copy, "%s%s", path, suffix);
+  if (CopyFileA(path, copy, TRUE)) return TFP_COPY_DONE; /* TRUE: fail when the copy's name is taken */
+  DWORD code = GetLastError();
+  if (code == ERROR_FILE_EXISTS || code == ERROR_ALREADY_EXISTS) return TFP_COPY_EXISTS;
+  snprintf(why, why_size, "Windows error %lu", (unsigned long)code);
+  return TFP_COPY_FAILED;
 }
 #endif
 
@@ -563,12 +589,16 @@ static void start(void) {
   measure_reads();
 #ifdef TFP_FEEL
   {
-    char where[MAX_PATH + 16], text[360];
+    char where[MAX_PATH + 32], where_locked[MAX_PATH + 32], text[360];
+    bool user_file = false;
     TfpWireFeelParts parts;
     memset(&parts, 0, sizeof parts);
-    parts.settings_length = read_settings(where, sizeof where);
+    parts.settings_length = read_settings(where, sizeof where, &user_file);
     parts.settings_json = parts.settings_length ? settings_text : NULL;
     parts.settings_origin = where[0] ? where : "settings.json";
+    parts.locked_length = read_locked(where_locked, sizeof where_locked);
+    parts.locked_json = parts.locked_length ? locked_text : NULL;
+    parts.locked_origin = where_locked[0] ? where_locked : "locked_view.json";
     parts.pose = tfp_wire_pose_linked(), parts.pose_io = tfp_win_pose_io();
     parts.engine = engine_hooked ? tfp_win_engine_api() : NULL;
     if (!engine_hooked) say("Refused: engine bridge: %s", eng_status());
@@ -576,7 +606,9 @@ static void start(void) {
     parts.effects = &fx_platform;
     parts.editor = tfp_mod_editor_platform(&fx_platform);
     tfp_wire_feel_bind(&wire, &feel, &parts);
-    tfp_wire_settings_saver(&wire, save_settings, NULL);
+    /* Where the two files are saved. A settings.json of 0.6.0-feel.20 to feel.24 is converted here, at once. */
+    static const TfpSettingsDisk user_disk = {NULL, write_user_file, copy_user_file};
+    tfp_wire_settings_disk(&wire, &user_disk, user_file);
     /* The three live features, now that the settings are read: each setter once, and a line each that says whether the
      * feature is on and whether the option or a file decided. Then what each one's start-up has to say. */
     options.set[TFP_FEATURE_ARMS] = option_arms, options.set[TFP_FEATURE_HOLD] = option_hold, options.set[TFP_FEATURE_SMOOTH] = option_smooth;

@@ -87,13 +87,15 @@ static unsigned saves;
 static bool save_fails;
 static char saved_text[TFP_SETTINGS_MAX];
 static size_t saved_length;
-static bool test_save(void *user, const char *text, size_t length, char *why, size_t why_size) {
+static TfpSettingsFile saved_file;
+static bool test_save(void *user, TfpSettingsFile file, const char *text, size_t length, char *why, size_t why_size) {
   (void)user;
-  saves++;
+  saves++, saved_file = file;
   if (save_fails) { snprintf(why, why_size, "disk full"); return false; }
   memcpy(saved_text, text, length); saved_text[length] = 0; saved_length = length;
   return true;
 }
+static const TfpSettingsDisk test_disk = {NULL, test_save, NULL};
 #define STORE_PART
 static int store_part(void) {
   TfpSettings s;
@@ -129,57 +131,93 @@ static int store_part(void) {
   CHECK(tfp_settings_set_locked(&s, TFP_LOCKED_kick_max_degrees, false, false, -3) && tfp_settings_locked_number(&s, TFP_LOCKED_kick_max_degrees) == 0);
   CHECK(tfp_settings_set_locked(&s, TFP_LOCKED_camera_lock, true, false, 0) && !tfp_settings_locked_flag(&s, TFP_LOCKED_camera_lock));
   CHECK(s.menu_writes == 0 && s.writes == 0);
-  /* written under "locked_view", and read back */
+  /* written as locked_view.json, never into settings.json (0.6.0-feel.19 and older refuse a member they do not know), and read back */
   static char text[65536], why[200];
   size_t n = tfp_settings_write(&s, text, sizeof text);
-  CHECK(n && n < sizeof text && strstr(text, "\"locked_view\": {") && strstr(text, "\"camera_lock\": false") && strstr(text, "\"fov_degrees\": 120") &&
+  CHECK(n && n < sizeof text && !strstr(text, "locked_view") && !strstr(text, "fov_degrees"));
+  n = tfp_settings_write_locked(&s, text, sizeof text);
+  CHECK(n && n < sizeof text && tfp_settings_write_locked(&s, NULL, 0) == n && strstr(text, "{\n \"format\": 1,\n \"locked_view\": {") == text &&
+        strstr(text, "\"camera_lock\": false") && strstr(text, "\"fov_degrees\": 120") &&
         strstr(text, "\"kick_max_degrees\": 0") && strstr(text, "\"put_away\": true") && strstr(text, "\"thrown_kick_strength\": 70") &&
         strstr(text, "\"animated_arms\": true") && strstr(text, "\"smooth_eye\": true") && !strstr(text, "holster_animation"));
   TfpSettings back;
   memset(&back, 0, sizeof back);
-  CHECK(tfp_settings_load(&back, text, n, why, sizeof why));
+  CHECK(tfp_settings_defaults(&back) && tfp_settings_load_locked(&back, text, n, why, sizeof why) && !back.locked_skipped[0] && back.locked_writes == 0);
   for (int i = 0; i < TFP_LOCKED_COUNT; i++)
     CHECK(back.locked[i].is_bool == s.locked[i].is_bool && back.locked[i].boolean == s.locked[i].boolean && back.locked[i].number == s.locked[i].number);
   tfp_settings_free(&back);
   tfp_settings_free(&s);
-  /* a file from before the section: the defaults */
+  /* a settings.json without the member (0.6.0-feel.19 and older, and this build): the defaults */
   static const char old[] = "{\"format\":1,\"first_person\":{}}";
   CHECK(tfp_settings_load(&s, old, sizeof old - 1, why, sizeof why) && tfp_settings_locked_number(&s, TFP_LOCKED_fov_degrees) == 80 &&
-        tfp_settings_locked_flag(&s, TFP_LOCKED_camera_lock));
+        tfp_settings_locked_flag(&s, TFP_LOCKED_camera_lock) && !s.locked_in_settings);
   tfp_settings_free(&s);
+  /* a settings.json of 0.6.0-feel.20 to feel.24: the member is still read */
   static const char part[] = "{\"format\":1,\"first_person\":{},\"locked_view\":{\"one_handed_pistols\":false,\"kick_strength\":250}}";
   CHECK(tfp_settings_load(&s, part, sizeof part - 1, why, sizeof why) && !tfp_settings_locked_flag(&s, TFP_LOCKED_one_handed_pistols) &&
-        tfp_settings_locked_number(&s, TFP_LOCKED_kick_strength) == 100 && tfp_settings_locked_flag(&s, TFP_LOCKED_put_away));
+        tfp_settings_locked_number(&s, TFP_LOCKED_kick_strength) == 100 && tfp_settings_locked_flag(&s, TFP_LOCKED_put_away) && s.locked_in_settings &&
+        s.locked_writes == 0);
   tfp_settings_free(&s);
-  /* the migration: a stored "holster_animation" is put_away's value, unless the file has a put_away of its own
-   * (wherever it stands); it is not written back, and the load does not count as a change */
-  static const struct { const char *json; bool put_away; } old_keys[] = {
-    {"{\"format\":1,\"first_person\":{},\"locked_view\":{\"holster_animation\":false}}", false},
-    {"{\"format\":1,\"first_person\":{},\"locked_view\":{\"holster_animation\":true}}", true},
-    {"{\"format\":1,\"first_person\":{},\"locked_view\":{\"holster_animation\":false,\"put_away\":true}}", true},
-    {"{\"format\":1,\"first_person\":{},\"locked_view\":{\"put_away\":false,\"holster_animation\":true}}", false},
-    {"{\"format\":1,\"first_person\":{},\"locked_view\":{\"put_away\":false}}", false},
+  /* "holster_animation" is put_away's value, unless the text has a put_away of its own (wherever it stands); it is
+   * not written back, and the load does not count as a change. The same in either file. */
+  static const struct { const char *options; bool put_away; } old_keys[] = {
+    {"{\"holster_animation\":false}", false},
+    {"{\"holster_animation\":true}", true},
+    {"{\"holster_animation\":false,\"put_away\":true}", true},
+    {"{\"put_away\":false,\"holster_animation\":true}", false},
+    {"{\"put_away\":false}", false},
   };
-  for (size_t i = 0; i < COUNT(old_keys); i++) {
-    CHECK(tfp_settings_load(&s, old_keys[i].json, strlen(old_keys[i].json), why, sizeof why));
-    CHECK(tfp_settings_locked_flag(&s, TFP_LOCKED_put_away) == old_keys[i].put_away && s.locked_writes == 0);
+  for (size_t i = 0; i < COUNT(old_keys) * 2; i++) {
+    char json[200];
+    const bool own_file = i >= COUNT(old_keys);
+    const bool put_away = old_keys[i % COUNT(old_keys)].put_away;
+    snprintf(json, sizeof json, own_file ? "{\"format\":1,\"locked_view\":%s}" : "{\"format\":1,\"first_person\":{},\"locked_view\":%s}", old_keys[i % COUNT(old_keys)].options);
+    if (own_file) CHECK(tfp_settings_defaults(&s) && tfp_settings_load_locked(&s, json, strlen(json), why, sizeof why));
+    else CHECK(tfp_settings_load(&s, json, strlen(json), why, sizeof why));
+    CHECK(tfp_settings_locked_flag(&s, TFP_LOCKED_put_away) == put_away && s.locked_writes == 0 && !s.locked_skipped[0]);
     CHECK(tfp_settings_locked_flag(&s, TFP_LOCKED_animated_arms) && tfp_settings_locked_flag(&s, TFP_LOCKED_smooth_eye));
-    n = tfp_settings_write(&s, text, sizeof text);
-    CHECK(n && n < sizeof text && !strstr(text, "holster_animation") && strstr(text, old_keys[i].put_away ? "\"put_away\": true" : "\"put_away\": false"));
+    n = tfp_settings_write_locked(&s, text, sizeof text);
+    CHECK(n && n < sizeof text && !strstr(text, "holster_animation") && strstr(text, put_away ? "\"put_away\": true" : "\"put_away\": false"));
     tfp_settings_free(&s);
   }
+  /* Nothing under "locked_view" refuses settings.json any more: what cannot be read is skipped and named. */
+  static const struct { const char *json, *skipped; double fov; } lenient[] = {
+    {"{\"format\":1,\"first_person\":{},\"locked_view\":[]}", "locked_view (not an object)", 80},
+    {"{\"format\":1,\"first_person\":{},\"locked_view\":{\"volume\":1,\"fov_degrees\":95}}", "volume", 95},
+    {"{\"format\":1,\"first_person\":{},\"locked_view\":{\"fov_degrees\":95,\"camera_lock\":1}}", "camera_lock", 95},
+    {"{\"format\":1,\"first_person\":{},\"locked_view\":{\"fov_degrees\":true}}", "fov_degrees", 80},
+    {"{\"format\":1,\"first_person\":{},\"locked_view\":{\"holster_animation\":1,\"later\":{\"a\":[1]}}}", "holster_animation, later", 80},
+  };
+  for (size_t i = 0; i < COUNT(lenient); i++) {
+    CHECK(tfp_settings_load(&s, lenient[i].json, strlen(lenient[i].json), why, sizeof why) && s.locked_in_settings);
+    CHECK(!strcmp(s.locked_skipped, lenient[i].skipped) && tfp_settings_locked_number(&s, TFP_LOCKED_fov_degrees) == lenient[i].fov);
+    CHECK(tfp_settings_locked_flag(&s, TFP_LOCKED_camera_lock) && tfp_settings_locked_flag(&s, TFP_LOCKED_put_away));
+    tfp_settings_free(&s);
+  }
+  /* locked_view.json: a name this build does not know is skipped; a known one of the wrong type refuses that file,
+   * and then no option of it is taken */
+  static const char later[] = "{\"format\":2,\"locked_view\":{\"fov_degrees\":95,\"volume\":1,\"camera_lock\":false,\"deeper\":{\"x\":1}},\"other\":[1,2]}";
+  CHECK(tfp_settings_defaults(&s) && tfp_settings_load_locked(&s, later, sizeof later - 1, why, sizeof why) && !strcmp(s.locked_skipped, "volume, deeper"));
+  CHECK(tfp_settings_locked_number(&s, TFP_LOCKED_fov_degrees) == 95 && !tfp_settings_locked_flag(&s, TFP_LOCKED_camera_lock) &&
+        tfp_settings_locked_flag(&s, TFP_LOCKED_fov_lock) && s.locked_writes == 0);
+  tfp_settings_free(&s);
   static const struct { const char *json, *why; } refusals[] = {
-    {"{\"format\":1,\"first_person\":{},\"locked_view\":[]}", "locked_view: expected an object"},
-    {"{\"format\":1,\"first_person\":{},\"locked_view\":{\"volume\":1}}", "an unknown option"},
-    {"{\"format\":1,\"first_person\":{},\"locked_view\":{\"camera_lock\":1}}", "expected true or false"},
-    {"{\"format\":1,\"first_person\":{},\"locked_view\":{\"fov_degrees\":true}}", "expected a number"},
-    {"{\"format\":1,\"first_person\":{},\"locked_view\":{\"holster_animation\":1}}", "expected true or false"},
+    {"{\"format\":1,\"locked_view\":[]}", "locked_view: expected an object"},
+    {"{\"format\":1}", "locked_view: expected an object"},
+    {"[]", "the document must be an object"},
+    {"{\"locked_view\":{", "not JSON"},
+    {"{\"locked_view\":{\"fov_degrees\":95,\"camera_lock\":1}}", "locked_view.camera_lock: expected true or false"},
+    {"{\"locked_view\":{\"camera_lock\":false,\"fov_degrees\":true}}", "locked_view.fov_degrees: expected a number"},
+    {"{\"locked_view\":{\"camera_lock\":false,\"put_away\":true,\"holster_animation\":1}}", "expected true or false"},
   };
   for (size_t i = 0; i < COUNT(refusals); i++) {
-    CHECK(!tfp_settings_load(&s, refusals[i].json, strlen(refusals[i].json), why, sizeof why) && strstr(why, refusals[i].why));
-    CHECK(tfp_settings_locked_number(&s, TFP_LOCKED_fov_degrees) == 80); /* refused: the defaults */
+    CHECK(tfp_settings_defaults(&s));
+    CHECK(!tfp_settings_load_locked(&s, refusals[i].json, strlen(refusals[i].json), why, sizeof why) && strstr(why, refusals[i].why));
+    CHECK(tfp_settings_locked_number(&s, TFP_LOCKED_fov_degrees) == 80 && tfp_settings_locked_flag(&s, TFP_LOCKED_camera_lock)); /* refused: nothing taken */
     tfp_settings_free(&s);
   }
+  CHECK(tfp_settings_defaults(&s) && !tfp_settings_load_locked(&s, NULL, 0, why, sizeof why) && strstr(why, "no file"));
+  tfp_settings_free(&s);
 
   /* through the binder: the named getters, and a change is saved once */
   new_wire();
@@ -189,14 +227,15 @@ static int store_part(void) {
         tfp_locked_view_put_away(&wire) && tfp_locked_view_smooth_eye(&wire));
   CHECK(!tfp_wire_settings_locked_set(&wire, TFP_LOCKED_fov_degrees, false, false, 90)); /* no store bound: the defaults answer */
   CHECK(tfp_wire_settings_bind(&wire, part, sizeof part - 1, "test") && logged("Ready: settings") && !logged("Refused"));
-  tfp_wire_settings_saver(&wire, test_save, NULL);
+  tfp_wire_settings_disk(&wire, &test_disk, false);
   CHECK(!tfp_locked_view_one_handed_pistols(&wire) && tfp_locked_view_kick_strength(&wire) == 100 && tfp_locked_view_fov_degrees(&wire) == 80);
   saves = 0;
   tfp_wire_settings_save_frame(&wire);
   CHECK(saves == 0 && !tfp_wire_settings_unsaved(&wire));
   CHECK(tfp_wire_settings_locked_set(&wire, TFP_LOCKED_fov_degrees, false, false, 104) && tfp_wire_settings_unsaved(&wire));
   tfp_wire_settings_save_frame(&wire);
-  CHECK(saves == 1 && strstr(saved_text, "\"fov_degrees\": 104") && !tfp_wire_settings_unsaved(&wire) && tfp_locked_view_fov_degrees(&wire) == 104);
+  CHECK(saves == 1 && saved_file == TFP_LOCKED_FILE && strstr(saved_text, "\"fov_degrees\": 104") && !tfp_wire_settings_unsaved(&wire) &&
+        tfp_locked_view_fov_degrees(&wire) == 104 && logged("Saved: locked view options (locked_view.json"));
   tfp_wire_settings_save_frame(&wire);
   CHECK(tfp_wire_settings_locked_set(&wire, TFP_LOCKED_fov_degrees, false, false, 104));
   tfp_wire_settings_save_frame(&wire);
@@ -354,7 +393,7 @@ static const char settings_json[] = "{\"format\":1,\"first_person\":{},\"menu\":
 static bool start_wire(void) {
   new_wire();
   if (!tfp_wire_settings_bind(&wire, settings_json, sizeof settings_json - 1, "test")) return false;
-  tfp_wire_settings_saver(&wire, test_save, NULL);
+  tfp_wire_settings_disk(&wire, &test_disk, false);
   saves = 0; mcm_ticks = 0; edits = 0;
   new_options();
   return true;

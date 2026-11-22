@@ -18,8 +18,11 @@ enum { RING = 64, TEXTS = 8, TEXT = 64 };
 
 typedef struct NearAnswer { double hip, aim; bool profile; } NearAnswer;
 typedef struct Settings {
-  TfpSettingsSaveFn save; void *save_user;
-  uint64_t saved_revision, tried_revision; /* the store's change count last written, and last tried */
+  TfpSettingsDisk disk;
+  uint64_t saved_revision[2], tried_revision[2]; /* per TfpSettingsFile: its change count last written, and last tried */
+  bool refused[2];           /* per file: the text was refused at load, and no copy of the file has been kept yet */
+  bool loaded, locked_loaded; /* settings.json / locked_view.json was read and taken */
+  bool convert;              /* the user's settings.json still holds "locked_view": see convert_first */
   TfpWire *w;
   TfpSettings store;
   TfpActionCatalogue catalogue;
@@ -371,6 +374,7 @@ bool tfp_wire_settings_bind(TfpWire *w, const char *json, size_t length, const c
     tfp_wire_say(w, "Refused: settings: out of memory; the view build's answers stay");
     return false;
   }
+  st->loaded = loaded, st->refused[TFP_SETTINGS_FILE] = !loaded;
   st->catalogue = (TfpActionCatalogue){st->weapons, TFP_ACTION_GEAR_COUNT, 0};
   tfp_action_configure_catalogue(&st->catalogue, tfp_action_gear, TFP_ACTION_GEAR_COUNT);
   w->ext[TFP_WIRE_EXT_SETTINGS] = st;
@@ -424,15 +428,116 @@ bool tfp_wire_settings_bind(TfpWire *w, const char *json, size_t length, const c
   tfp_wire_say(w, line);
   return true;
 }
-/* ---- saving ---- */
-static uint64_t revision(const Settings *st) { return st->store.writes + st->store.menu_writes + st->store.locked_writes; }
-void tfp_wire_settings_saver(TfpWire *w, TfpSettingsSaveFn save, void *user) {
+void tfp_wire_settings_bind_locked(TfpWire *w, const char *json, size_t length, const char *origin) {
   Settings *st = state(w);
+  char line[500], why[200] = "";
   if (!st) return;
-  st->save = save, st->save_user = user;
-  st->saved_revision = st->tried_revision = revision(st); /* what is loaded is what the file holds */
+  if (!origin) origin = "locked_view.json";
+  if (st->store.locked_skipped[0]) { /* from settings.json's own "locked_view" member */
+    snprintf(line, sizeof line, "Note: settings: the \"locked_view\" member held what this build does not read; skipped: %s", st->store.locked_skipped);
+    tfp_wire_say(w, line);
+  }
+  if (!json || !length) return;
+  st->locked_loaded = tfp_settings_load_locked(&st->store, json, length, why, sizeof why);
+  st->refused[TFP_LOCKED_FILE] = !st->locked_loaded;
+  if (!st->locked_loaded)
+    snprintf(line, sizeof line, "Refused: locked view options: %s: %s; they stay %s", origin, why,
+             st->store.locked_in_settings ? "as settings.json has them" : "at their defaults");
+  else if (st->store.locked_skipped[0])
+    snprintf(line, sizeof line, "Note: locked view options: %s names what this build does not know; skipped: %s", origin, st->store.locked_skipped);
+  else snprintf(line, sizeof line, "Ready: locked view options read from %s", origin);
+  tfp_wire_say(w, line);
 }
-bool tfp_wire_settings_unsaved(TfpWire *w) { Settings *st = state(w); return st && st->save && revision(st) != st->saved_revision; }
+/* ---- saving ---- */
+static const char *const file_names[2] = {"settings.json", "locked_view.json"};
+static uint64_t revision(const Settings *st, TfpSettingsFile file) {
+  return file == TFP_LOCKED_FILE ? st->store.locked_writes : st->store.writes + st->store.menu_writes;
+}
+/* The file that was refused at load is copied aside before it is replaced. false: it could not be (`why`). */
+static bool keep_refused(Settings *st, TfpSettingsFile file, char *why, size_t why_size) {
+  char suffix[24] = ".refused", line[300];
+  if (!st->refused[file]) return true;
+  if (!st->disk.copy) { snprintf(why, why_size, "the %s that could not be read cannot be copied aside first", file_names[file]); return false; }
+  for (int n = 2;; n++) {
+    TfpSettingsCopy answer = st->disk.copy(st->disk.user, file, suffix, why, why_size);
+    if (answer == TFP_COPY_DONE) {
+      snprintf(line, sizeof line, "Kept: the %s that could not be read is now %s%s; nothing of it was changed", file_names[file], file_names[file], suffix);
+      tfp_wire_say(st->w, line);
+    }
+    if (answer == TFP_COPY_DONE || answer == TFP_COPY_NONE) { st->refused[file] = false; return true; }
+    if (answer == TFP_COPY_FAILED) {
+      char reason[160];
+      snprintf(reason, sizeof reason, "%s", why);
+      snprintf(why, why_size, "the %s that could not be read could not be copied to %s%s first (%s)", file_names[file], file_names[file], suffix, reason);
+      return false;
+    }
+    if (n > 9) { snprintf(why, why_size, "%s.refused to .refused-9 are all taken; move them away", file_names[file]); return false; }
+    snprintf(suffix, sizeof suffix, ".refused-%d", n);
+  }
+}
+static bool write_file(Settings *st, TfpSettingsFile file, size_t *written, char *why, size_t why_size);
+/* Before a settings.json that holds "locked_view" (0.6.0-feel.20 to feel.24) is replaced by one without it: the
+ * options are in locked_view.json, and the file as it is has a copy. Whatever replaces that settings.json goes
+ * through here, at the start or later, so neither can be skipped. false: `why`, and settings.json is not written. */
+static bool convert_first(Settings *st, char *why, size_t why_size) {
+  char reason[200] = "";
+  size_t length = 0;
+  if (!st->locked_loaded) { /* not there, or refused (then copied aside first, as before any write of it) */
+    if (!write_file(st, TFP_LOCKED_FILE, &length, reason, sizeof reason)) { snprintf(why, why_size, "locked_view.json could not be written: %s", reason); return false; }
+    st->locked_loaded = true;
+  }
+  TfpSettingsCopy copy = st->disk.copy ? st->disk.copy(st->disk.user, TFP_SETTINGS_FILE, TFP_SETTINGS_BEFORE_SPLIT, reason, sizeof reason) : TFP_COPY_FAILED;
+  if (copy == TFP_COPY_DONE || copy == TFP_COPY_EXISTS) return true; /* an existing copy is the older one: kept */
+  snprintf(why, why_size, "settings.json could not be copied to settings.json" TFP_SETTINGS_BEFORE_SPLIT ": %s",
+           copy == TFP_COPY_NONE ? "the file is not there" : reason[0] ? reason : "no reason given");
+  return false;
+}
+/* One file from the store. true: written (and counted as saved). false: `why`. */
+static bool write_file(Settings *st, TfpSettingsFile file, size_t *written, char *why, size_t why_size) {
+  size_t (*const text_of_store)(const TfpSettings *, char *, size_t) = file == TFP_LOCKED_FILE ? tfp_settings_write_locked : tfp_settings_write;
+  const uint64_t now = revision(st, file);
+  st->tried_revision[file] = now;
+  if (!st->disk.write) { snprintf(why, why_size, "there is nowhere to write to"); return false; }
+  if (!keep_refused(st, file, why, why_size)) return false;
+  if (file == TFP_SETTINGS_FILE && st->convert && !convert_first(st, why, why_size)) return false;
+  size_t length = text_of_store(&st->store, NULL, 0);
+  char *text = length < TFP_SETTINGS_MAX ? malloc(length + 1) : NULL;
+  bool ok = false;
+  if (!text) snprintf(why, why_size, "the text is %zu bytes (most: %d)", length, TFP_SETTINGS_MAX);
+  else if (text_of_store(&st->store, text, length + 1) != length) snprintf(why, why_size, "the store changed while it was written");
+  else ok = st->disk.write(st->disk.user, file, text, length, why, why_size);
+  free(text);
+  if (ok) {
+    st->saved_revision[file] = now, *written = length;
+    if (file == TFP_SETTINGS_FILE) st->convert = false;
+  } else if (!why[0]) snprintf(why, why_size, "no reason given");
+  return ok;
+}
+void tfp_wire_settings_disk(TfpWire *w, const TfpSettingsDisk *disk, bool user_file) {
+  Settings *st = state(w);
+  char line[900], why[400] = "";
+  size_t length = 0;
+  if (!st) return;
+  if (disk) st->disk = *disk; else memset(&st->disk, 0, sizeof st->disk);
+  for (int file = 0; file < 2; file++) st->saved_revision[file] = st->tried_revision[file] = revision(st, (TfpSettingsFile)file); /* what is loaded is what the files hold */
+  st->convert = disk && disk->write && user_file && st->loaded && st->store.locked_in_settings;
+  if (!st->convert) return;
+  /* The user's settings.json is one that 0.6.0-feel.20 to feel.24 wrote. Converted now, not at the next change. */
+  const bool had_locked = st->locked_loaded;
+  if (write_file(st, TFP_SETTINGS_FILE, &length, why, sizeof why))
+    snprintf(line, sizeof line, "Converted: settings.json was written by 0.6.0-feel.20 to feel.24 and held the locked view's options; they are in "
+             "locked_view.json now%s, settings.json is as it was without them (0.6.0-feel.19 and older read it again), and the file as it was is "
+             "kept as settings.json" TFP_SETTINGS_BEFORE_SPLIT, had_locked ? " (that file was already there and its values are the ones used)" : "");
+  else
+    snprintf(line, sizeof line, "Refused: settings.json still holds the locked view's options, which 0.6.0-feel.19 and older cannot read: %.300s; "
+             "this session uses the values as loaded, and the conversion is tried again at the next save or the next start", why);
+  tfp_wire_say(w, line);
+}
+bool tfp_wire_settings_unsaved(TfpWire *w) {
+  Settings *st = state(w);
+  return st && st->disk.write && (revision(st, TFP_SETTINGS_FILE) != st->saved_revision[TFP_SETTINGS_FILE] ||
+                                  revision(st, TFP_LOCKED_FILE) != st->saved_revision[TFP_LOCKED_FILE]);
+}
 bool tfp_wire_settings_menu_set(TfpWire *w, TfpSettingsMenuId id, bool is_bool, bool boolean, double number) {
   Settings *st = state(w);
   return st && tfp_settings_set_menu(&st->store, id, is_bool, boolean, number);
@@ -451,27 +556,20 @@ TFP_SETTINGS_LOCKED(LOCKED_GETTER)
 #undef LOCKED_GETTER_0
 #undef LOCKED_GETTER_1
 void tfp_wire_settings_save_frame(TfpWire *w) {
+  static const char *const what[2] = {"settings", "locked view options"};
   Settings *st = state(w);
-  if (!st || !st->save) return;
-  uint64_t now = revision(st);
-  if (now == st->tried_revision) return;
-  st->tried_revision = now;
-  char line[300], why[160] = "";
-  size_t length = tfp_settings_write(&st->store, NULL, 0);
-  char *text = length < TFP_SETTINGS_MAX ? malloc(length + 1) : NULL;
-  if (!text) snprintf(why, sizeof why, "the text is %zu bytes (most: %d)", length, TFP_SETTINGS_MAX);
-  else if (tfp_settings_write(&st->store, text, length + 1) != length) snprintf(why, sizeof why, "the store changed while it was written");
-  else if (st->save(st->save_user, text, length, why, sizeof why)) {
-    st->saved_revision = now;
-    snprintf(line, sizeof line, "Saved: settings (%zu bytes, change %llu)", length, (unsigned long long)now);
+  if (!st || !st->disk.write) return;
+  for (int file = 0; file < 2; file++) {
+    const uint64_t now = revision(st, (TfpSettingsFile)file);
+    if (now == st->tried_revision[file]) continue;
+    char line[500], why[300] = "";
+    size_t length = 0;
+    if (write_file(st, (TfpSettingsFile)file, &length, why, sizeof why))
+      snprintf(line, sizeof line, "Saved: %s (%s, %zu bytes, change %llu)", what[file], file_names[file], length, (unsigned long long)now);
+    else
+      snprintf(line, sizeof line, "Refused: %s were not saved: %s; they stay as they are for this session and are tried again at the next change", what[file], why);
     tfp_wire_say(w, line);
-    free(text);
-    return;
   }
-  free(text);
-  snprintf(line, sizeof line, "Refused: settings were not saved: %s; they stay as they are for this session and are tried again at the next change",
-           why[0] ? why : "no reason given");
-  tfp_wire_say(w, line);
 }
 
 void tfp_wire_settings_free(TfpWire *w) {

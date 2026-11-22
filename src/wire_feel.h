@@ -26,6 +26,9 @@ typedef struct TfpWireFeelParts {
   const TfpWireEngineApi *engine;      /* NULL: head, shadows, sleeves and grips stay off */
   const TfpFxPlatform *effects;        /* NULL: the five effect modules stay off */
   const TfpEditorPlatform *editor;     /* NULL: the placement editor stays off */
+  const char *locked_json;             /* the bytes of locked_view.json; NULL: no such file */
+  size_t locked_length;
+  const char *locked_origin;
 } TfpWireFeelParts;
 typedef struct TfpWireFeel {
   TfpWirePose pose;
