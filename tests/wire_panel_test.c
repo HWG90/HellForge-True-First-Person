@@ -571,8 +571,22 @@ static int panel_part(void) {
   CHECK(drawn("text:Status: First person off") && drawn_part("text:Weapon: enable First Person with a firearm"));
   CHECK(drawn("slider:This weapon: hip clearance (cm)=15[5..40] (disabled)") && drawn("button:Save clipping for this weapon (disabled)"));
   CHECK(drawn("check:Camera lock=on") && drawn("check:Field of view lock=on") && drawn("slider:Field of view (degrees)=80[50..120]") &&
-        drawn("check:Zoom when aiming=on") && drawn("slider:View kick strength (%)=35[0..100]") && drawn("slider:View kick limit (degrees)=8[0..20]") &&
-        drawn("slider:View kick when thrown (%)=70[0..100]") && drawn("slider:Camera damping (%)=60[0..100]") && drawn("check:Animated arms=on") && drawn("check:Weapon put-away=on") && drawn("check:Smooth eye=on"));
+        drawn("check:Zoom when aiming=on") && drawn("slider:View kick strength (%)=35[0..100] (disabled)") && drawn("slider:View kick limit (degrees)=8[0..20] (disabled)") &&
+        drawn("slider:View kick when thrown (%)=70[0..100]") && drawn("slider:Camera damping (%)=60[0..100] (disabled)") && drawn("check:Animated arms=on") && drawn("check:Weapon put-away=on") && drawn("check:Smooth eye=on"));
+  /* The camera style. Bodycam is off (the Stable camera): its row is directly above the kick sliders, with what the
+   * two styles are; the three sliders only Bodycam uses are greyed through the host, with one line that says so, and
+   * the thrown slider, which both styles use, is not. */
+  {
+    const char *row = drawn("check:Bodycam=off"), *tip_line = drawn("tip:Off: a steady, traditional first-person camera. On: the view moves with your head, like a body "
+      "camera: it takes kicks from your body's movement and follows the head through actions.");
+    const char *note = drawn("text:View kick strength, View kick limit and Camera damping apply to Bodycam.");
+    const char *first = drawn("slider:View kick strength (%)=35[0..100] (disabled)"), *above = drawn("check:Zoom when aiming=on");
+    CHECK(row && tip_line && note && first && above && above < row && row < tip_line && tip_line < note && note < first && first - note == (ptrdiff_t)sizeof ov.drawn[0]);
+    CHECK(!drawn("slider:View kick strength (%)=35[0..100]") && !drawn("slider:View kick limit (degrees)=8[0..20]") && !drawn("slider:Camera damping (%)=60[0..100]") &&
+          !drawn("slider:View kick when thrown (%)=70[0..100] (disabled)"));
+    CHECK(drawn("tip:How much of your body's movement reaches the view while on foot. Default 35.") &&
+          drawn("tip:How much of your body's movement reaches the view while you are thrown or ragdolled. The Stable camera uses half of it, as a slow sway. Default 70."));
+  }
   CHECK(drawn("tip:The first-person arms follow your character's own animation.") &&
         drawn("tip:Keep first person while the weapon is put away for a swap, grenade or stim.") &&
         drawn("tip:No camera pops when the game changes its camera."));
@@ -649,12 +663,27 @@ static int panel_part(void) {
   ov.flip = "Camera lock";
   draw_frame(); game_update();
   CHECK(!tfp_locked_view_camera_lock(&wire) && saves == 7 && strstr(saved_text, "\"camera_lock\": false"));
+  /* greyed while Bodycam is off: a drag on one of its three sliders does nothing */
+  static const char *const greyed[] = {"View kick strength (%)", "View kick limit (degrees)", "Camera damping (%)"};
+  for (size_t i = 0; i < COUNT(greyed); i++) {
+    ov.slide = ov.release = greyed[i]; ov.slide_to = 15; draw_frame(); game_update();
+    CHECK(ov.slide && saves == 7);
+  }
+  ov.slide = ov.release = NULL;
+  CHECK(tfp_locked_view_kick_strength(&wire) == 35 && tfp_locked_view_kick_max_degrees(&wire) == 8 && tfp_locked_view_camera_damping(&wire) == 60);
+  /* Bodycam on: saved, and from the next frame the three are ordinary sliders and the line is gone */
+  ov.flip = "Bodycam"; draw_frame(); game_update();
+  CHECK(tfp_locked_view_bodycam(&wire) && saves == 8 && strstr(saved_text, "\"bodycam\": true"));
+  draw_frame();
+  CHECK(drawn("check:Bodycam=on") && drawn("slider:View kick strength (%)=35[0..100]") && drawn("slider:View kick limit (degrees)=8[0..20]") &&
+        drawn("slider:Camera damping (%)=60[0..100]") && drawn("slider:View kick when thrown (%)=70[0..100]") && !drawn_part("apply to Bodycam") &&
+        !drawn_part("View kick strength (%)=35[0..100] (disabled)"));
   ov.slide = "View kick strength (%)"; ov.slide_to = 52; ov.active = true;
   draw_frame(); game_update();
   CHECK(tfp_locked_view_kick_strength(&wire) == 35);
   ov.release = "View kick strength (%)"; ov.active = false;
   draw_frame(); game_update();
-  CHECK(tfp_locked_view_kick_strength(&wire) == 50 && saves == 8 && strstr(saved_text, "\"kick_strength\": 50"));
+  CHECK(tfp_locked_view_kick_strength(&wire) == 50 && saves == 9 && strstr(saved_text, "\"kick_strength\": 50"));
   static const struct { const char *label; bool (*get)(TfpWire *); } flags[] = {
     {"Field of view lock", tfp_locked_view_fov_lock}, {"Zoom when aiming", tfp_locked_view_fov_zoom_when_aiming},
     {"Animated arms", tfp_locked_view_animated_arms}, {"Weapon put-away", tfp_locked_view_put_away}, {"Smooth eye", tfp_locked_view_smooth_eye}};
@@ -673,10 +702,22 @@ static int panel_part(void) {
     ov.slide = ov.release = numbers[i].label; ov.slide_to = numbers[i].to; draw_frame(); game_update();
     CHECK(numbers[i].get(&wire) == numbers[i].to);
   }
-  CHECK(saves == 17);
+  CHECK(saves == 18);
   draw_frame();
   CHECK(drawn("check:Camera lock=off") && drawn("slider:View kick strength (%)=50[0..100]") && drawn("slider:Field of view (degrees)=103[50..120]") &&
         drawn("slider:Camera damping (%)=25[0..100]") && strstr(saved_text, "\"camera_damping\": 25"));
+  /* Bodycam off again while a slider of its three is being dragged: the drag is let go, nothing is stored from it, and
+   * the sliders are greyed with the values they had */
+  ov.slide = "Camera damping (%)"; ov.slide_to = 90; ov.active = true;
+  draw_frame(); game_update();
+  ov.flip = "Bodycam"; draw_frame(); game_update();
+  CHECK(!tfp_locked_view_bodycam(&wire) && saves == 19 && strstr(saved_text, "\"bodycam\": false") && strstr(saved_text, "\"camera_damping\": 25"));
+  ov.active = false; ov.release = "Camera damping (%)";
+  draw_frame(); game_update();
+  CHECK(tfp_locked_view_camera_damping(&wire) == 25 && saves == 19 && drawn("check:Bodycam=off") && drawn("slider:Camera damping (%)=25[0..100] (disabled)") &&
+        drawn("slider:View kick strength (%)=50[0..100] (disabled)") && drawn("slider:View kick limit (degrees)=12[0..20] (disabled)") &&
+        drawn("slider:View kick when thrown (%)=85[0..100]") && drawn_part("apply to Bodycam") && !ov.disabled_depth && !ov.disabled);
+  ov.release = NULL;
   /* a button: done at the next update, through the menu's own queue */
   ov.click = "Edit arms and weapon placement";
   draw_frame();

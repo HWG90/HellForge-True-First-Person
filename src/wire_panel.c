@@ -17,7 +17,8 @@ static const struct { const char *label, *description, *note; } LOCKED[TFP_LOCKE
               "your body's movement and follows the head through actions.", NULL},
   {"View kick strength (%)", "How much of your body's movement reaches the view while on foot. Default 35.", NULL},
   {"View kick limit (degrees)", "The most the view is turned by a kick while on foot. Default 8.", NULL},
-  {"View kick when thrown (%)", "How much of your body's movement reaches the view while you are thrown or ragdolled. Default 70.", NULL},
+  {"View kick when thrown (%)", "How much of your body's movement reaches the view while you are thrown or ragdolled. The Stable camera uses "
+                               "half of it, as a slow sway. Default 70.", NULL},
   {"Camera damping (%)", "How much the view is steadied against your body's movement. 0 is the raw movement; higher is calmer and slower. "
                         "Default 60.", NULL},
   {"Animated arms", "The first-person arms follow your character's own animation.", NULL},
@@ -29,6 +30,11 @@ static const struct { const char *label, *description, *note; } LOCKED[TFP_LOCKE
 };
 _Static_assert(TFP_LOCKED_COUNT == 13 && TFP_LOCKED_bodycam == 4 && TFP_LOCKED_kick_strength == 5 && TFP_LOCKED_camera_damping == 8 &&
                TFP_LOCKED_animated_arms == 9 && TFP_LOCKED_one_handed_pistols == 10 && TFP_LOCKED_put_away == 11 && TFP_LOCKED_smooth_eye == 12, "LOCKED names the options of TFP_SETTINGS_LOCKED in its order");
+
+/* The camera style (src/camera_damp.h): the three sliders only the Bodycam camera uses. While Bodycam is off they are
+ * drawn greyed, as stored, and BODYCAM_NOTE under the Bodycam row says why. */
+static bool bodycam_only(int id) { return id == TFP_LOCKED_kick_strength || id == TFP_LOCKED_kick_max_degrees || id == TFP_LOCKED_camera_damping; }
+static const char *const BODYCAM_NOTE = "View kick strength, View kick limit and Camera damping apply to Bodycam.";
 
 typedef struct Row { TfpMenuValue value; bool disabled; char label[300]; } Row;
 typedef struct Event { int index; bool locked, activate; TfpMenuValue value, previous; } Event;
@@ -199,6 +205,7 @@ static void draw_locked(Panel *p) {
   const OvApi *ov = p->ov;
   ov->text_wrapped("First person through every action, one field of view, and how much your body's movement moves the view.");
   ov->spacing();
+  const bool bodycam = p->shown_locked[TFP_LOCKED_bodycam].boolean;   /* as this frame began: a click takes effect from the next */
   for (int i = 0; i < TFP_LOCKED_COUNT; i++) {
     const TfpSettingsLockedInfo *info = tfp_settings_locked_info((TfpSettingsLockedId)i);
     int v = p->shown_locked[i].boolean;
@@ -210,8 +217,23 @@ static void draw_locked(Panel *p) {
       ov->text_colored(ov->theme(OV_THEME_TEXT_DIM), LOCKED[i].note);
       continue;
     }
+    if (!info->is_bool && bodycam_only(i) && !bodycam) {
+      const double stored = p->shown_locked[i].number;
+      v = (int)(stored + (stored < 0 ? -.5 : .5));
+      if (p->held == p->count + i) p->held = -1;   /* Bodycam was switched off in the middle of a drag: let go, nothing stored */
+      ov->begin_disabled(1);
+      ov->slider_int(LOCKED[i].label, &v, (int)info->min, (int)info->max);   /* shown as stored; the host blocks it */
+      ov->end_disabled();
+      tip(p, LOCKED[i].description);
+      continue;
+    }
     if (info->is_bool) {
       if (ov->checkbox(LOCKED[i].label, &v)) push(p, i, true, false, (TfpMenuValue){TFP_MENU_VALUE_BOOL, v != 0, 0});
+      if (i == TFP_LOCKED_bodycam && !bodycam) {
+        tip(p, LOCKED[i].description);
+        ov->text_colored(ov->theme(OV_THEME_TEXT_DIM), BODYCAM_NOTE);
+        continue;   /* the last item is the note: no tooltip on it */
+      }
     } else if (slider(p, p->count + i, LOCKED[i].label, p->shown_locked[i].number, info->min, info->max, info->step, &v))
       push(p, i, true, false, (TfpMenuValue){TFP_MENU_VALUE_NUMBER, false, v});
     tip(p, LOCKED[i].description);
