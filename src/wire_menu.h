@@ -21,11 +21,30 @@ typedef struct TfpMenuHost {
   bool (*set)(void *user, const char *id, const TfpMenuValue *value); /* saves; MCM calls `changed` back */
   bool (*set_disabled)(void *user, const char *id, bool disabled);
   bool (*set_label)(void *user, const char *id, const char *label);
+  const char *name;         /* what the log calls this menu; NULL: DBF-MCM */
 } TfpMenuHost;
 /* Features this build cannot offer: their controls are shown disabled and one log line says why. */
 enum { TFP_MENU_NO_ARMS = 1u, TFP_MENU_NO_EDITOR = 2u };
 /* The editor's toggle for the "Edit arms and weapon placement" button: NULL done, else what the footer shows. */
 typedef const char *(*TfpMenuEditFn)(TfpWire *w);
+
+/* The controls themselves, for a front end that draws them itself (src/wire_panel.c). TFP_MK_CHECK is a toggle
+ * shown as a checkbox; TFP_MK_STATUS a row of text whose label changes (set_label). */
+typedef enum TfpMenuKind { TFP_MK_BUTTON, TFP_MK_TOGGLE, TFP_MK_CHECK, TFP_MK_SLIDER, TFP_MK_CHOICE, TFP_MK_KEY, TFP_MK_STATUS } TfpMenuKind;
+typedef struct TfpMenuControl {
+  const char *id; TfpMenuKind kind; const char *label;
+  double min, max, step;    /* TFP_MK_SLIDER */
+  int menu;                 /* TfpSettingsMenuId the value is stored under, or -1 */
+  const char *description;  /* NULL: none */
+  int page;                 /* an index into tfp_wire_menu_pages */
+} TfpMenuControl;
+const TfpMenuControl *tfp_wire_menu_controls(int *count);
+extern const char *const tfp_wire_menu_pages[2];    /* "First person", "Bob and sway" */
+extern const char *const tfp_wire_menu_presets[3];  /* TFP_MK_CHOICE: the values 1, 2, 3 */
+/* What a control shows before the user touches it, as the definition below states it: the store's value (a
+ * slider's inside its range, the editor key's retail 119 as `editor_key`). false: a button or a status row,
+ * or settings are not bound. */
+bool tfp_wire_menu_default(TfpWire *w, const TfpMenuControl *c, int editor_key, TfpMenuValue *out);
 
 /* The retail default of the editor key is F8 (119), which is HellForge's own editor here: a stored 119
  * becomes `editor_key`. Returns the JSON's length; >= size: it did not fit. Settings must be bound. */

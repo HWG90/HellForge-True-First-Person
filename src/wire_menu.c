@@ -5,74 +5,70 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* K_STATUS: retail's two 'text' rows whose label changes. DBF-MCM for HellForge can relabel only a control it can
- * find by id, and a text block is not one, so here they are buttons that are always disabled. */
-typedef enum Kind { K_BUTTON, K_TOGGLE, K_CHECK, K_SLIDER, K_CHOICE, K_KEY, K_STATUS } Kind;
-typedef struct Control {
-  const char *id; Kind kind; const char *label;
-  double min, max, step;
-  int menu;                 /* TfpSettingsMenuId the value is stored under, or -1 */
-  const char *description;  /* NULL: none */
-  int page;                 /* 0 'test' (First person), 1 'movement' (Bob and sway) */
-} Control;
+/* TFP_MK_STATUS: retail's two 'text' rows whose label changes. DBF-MCM for HellForge can relabel only a control it can
+ * find by id, and a text block is not one, so there they are buttons that are always disabled. */
+typedef TfpMenuControl Control;
 #define M(name) TFP_MENU_##name
 /* :343-418, in retail's order. Not here: 'start_free_aim' and 'start_native_test' (30-second test tools of
  * modes this build does not wire) and the commented-out Fird Person controls. */
 static const Control CONTROLS[] = {
-  {"start_true_first_person", K_BUTTON, "Enable True First Person", 0, 0, 0, -1, NULL, 0},
-  {"stop_test", K_BUTTON, "Turn first-person view off", 0, 0, 0, -1, NULL, 0},
-  {"show_aim_markers", K_CHECK, "Show aim markers", 0, 0, 0, -1,
+  {"start_true_first_person", TFP_MK_BUTTON, "Enable True First Person", 0, 0, 0, -1, NULL, 0},
+  {"stop_test", TFP_MK_BUTTON, "Turn first-person view off", 0, 0, 0, -1, NULL, 0},
+  {"show_aim_markers", TFP_MK_CHECK, "Show aim markers", 0, 0, 0, -1,
    "Show the crosshair and aiming circle while aiming in first person. Both remain visible when not aiming. Saved weapon preferences apply "
    "until you change this option. Hit markers and scope markings keep their normal behavior.", 0},
-  {"edit_placement", K_BUTTON, "Edit arms and weapon placement", 0, 0, 0, -1, NULL, 0},
-  {"editor_key", K_KEY, "Open / close placement editor", 0, 0, 0, M(editor_key),
+  {"edit_placement", TFP_MK_BUTTON, "Edit arms and weapon placement", 0, 0, 0, -1, NULL, 0},
+  {"editor_key", TFP_MK_KEY, "Open / close placement editor", 0, 0, 0, M(editor_key),
    "Default Page Up (F8 is HellForge's own editor). Closing the editor restores unsaved placement and leaves first person on.", 0},
-  {"toggle_key", K_KEY, "Toggle True First Person", 0, 0, 0, M(toggle_key),
+  {"toggle_key", TFP_MK_KEY, "Toggle True First Person", 0, 0, 0, M(toggle_key),
    "Default F11. Toggle True First Person; it stays enabled when changing weapons.", 0},
-  {"true_native_ads", K_CHECK, "True First Person: native ADS", 0, 0, 0, M(true_native_ads),
+  {"true_native_ads", TFP_MK_CHECK, "True First Person: native ADS", 0, 0, 0, M(true_native_ads),
    "Use the game's native sights and zoom while aiming in True First Person.", 0},
-  {"show_torso", K_CHECK, "True First Person: show torso", 0, 0, 0, M(show_torso),
+  {"show_torso", TFP_MK_CHECK, "True First Person: show torso", 0, 0, 0, M(show_torso),
    "Keep your torso armour visible in the moments without the first-person arms: holding a stratagem, turning a valve, swapping weapons. "
    "While the first-person arms are up the torso is always hidden. The head and shoulders stay hidden.", 0},
-  {"fird_person_arms", K_CHECK, "Fird Person Arms", 0, 0, 0, M(fird_person_arms),
+  {"fird_person_arms", TFP_MK_CHECK, "Fird Person Arms", 0, 0, 0, M(fird_person_arms),
    "Dress the first-person arms like your body: sleeves and shoulders follow your torso, and the left hand holds the weapon grip the way it "
    "does in third person. Off leaves the game's own first-person arms and hand animation untouched.", 0},
-  {"family_placement_defaults", K_CHECK, "Use weapon-family placement defaults", 0, 0, 0, -1,
+  {"family_placement_defaults", TFP_MK_CHECK, "Use weapon-family placement defaults", 0, 0, 0, -1,
    "Opt in to conservative defaults for catalogue-identified firearms. Saved weapon/action placements and your customised global placement "
    "take precedence. Unknown weapons retain the existing baseline.", 0},
-  {"motion_preset", K_CHOICE, "Motion preset", 0, 0, 0, M(motion_preset),
+  {"motion_preset", TFP_MK_CHOICE, "Motion preset", 0, 0, 0, M(motion_preset),
    "Comfort adds restrained weapon movement. Natural adds more weapon motion. Custom restores your existing sliders; selecting a preset never "
    "overwrites them. The game controls camera movement.", 0},
-  {"motion_enabled", K_TOGGLE, "Weapon movement", 0, 0, 0, M(motion_enabled),
+  {"motion_enabled", TFP_MK_TOGGLE, "Weapon movement", 0, 0, 0, M(motion_enabled),
    "Walking bob, turn inertia and a lowered sprint position. ADS remains steady.", 0},
-  {"motion_strength", K_SLIDER, "Weapon movement strength", 0, 200, 5, M(motion_strength), NULL, 0},
-  {"motion_bob_enabled", K_CHECK, "Weapon movement: walking bob", 0, 0, 0, M(motion_bob_enabled), "The weapon bobbing with your steps.", 0},
-  {"motion_sway_enabled", K_CHECK, "Weapon movement: sway", 0, 0, 0, M(motion_sway_enabled),
+  {"motion_strength", TFP_MK_SLIDER, "Weapon movement strength", 0, 200, 5, M(motion_strength), NULL, 0},
+  {"motion_bob_enabled", TFP_MK_CHECK, "Weapon movement: walking bob", 0, 0, 0, M(motion_bob_enabled), "The weapon bobbing with your steps.", 0},
+  {"motion_sway_enabled", TFP_MK_CHECK, "Weapon movement: sway", 0, 0, 0, M(motion_sway_enabled),
    "The weapon lagging behind when you turn or strafe.", 0},
-  {"motion_sprint_enabled", K_CHECK, "Weapon movement: sprint pose", 0, 0, 0, M(motion_sprint_enabled),
+  {"motion_sprint_enabled", TFP_MK_CHECK, "Weapon movement: sprint pose", 0, 0, 0, M(motion_sprint_enabled),
    "The weapon lowering and turning while you sprint.", 0},
-  {"near_clip_cm", K_SLIDER, "Near clip distance (cm)", 5, 40, 1, M(near_clip_cm),
+  {"near_clip_cm", TFP_MK_SLIDER, "Near clip distance (cm)", 5, 40, 1, M(near_clip_cm),
    "Hides anything closer to the first-person camera than this, such as armor edges. 5 is the game's own distance (off). Full ADS always "
    "uses the game's distance.", 0},
-  {"near_clip_aim", K_TOGGLE, "Near clip while aiming", 0, 0, 0, M(near_clip_aim),
+  {"near_clip_aim", TFP_MK_TOGGLE, "Near clip while aiming", 0, 0, 0, M(near_clip_aim),
    "Keep the near clip during normal aim. Off returns to the game's distance while aiming so sights are not cut.", 0},
-  {"weapon_composition_status", K_STATUS, "Weapon: no active firearm", 0, 0, 0, -1, NULL, 0},
-  {"weapon_near_hip_cm", K_SLIDER, "This weapon: hip clearance (cm)", 5, 40, 1, M(weapon_near_hip_cm),
+  {"weapon_composition_status", TFP_MK_STATUS, "Weapon: no active firearm", 0, 0, 0, -1, NULL, 0},
+  {"weapon_near_hip_cm", TFP_MK_SLIDER, "This weapon: hip clearance (cm)", 5, 40, 1, M(weapon_near_hip_cm),
    "Draft for this firearm only. Save below to apply. 5 keeps the game distance.", 0},
-  {"weapon_near_aim_cm", K_SLIDER, "This weapon: normal-aim clearance (cm)", 5, 40, 1, M(weapon_near_aim_cm),
+  {"weapon_near_aim_cm", TFP_MK_SLIDER, "This weapon: normal-aim clearance (cm)", 5, 40, 1, M(weapon_near_aim_cm),
    "Independent normal-aim clearance. Full native ADS always keeps the game distance.", 0},
-  {"save_weapon_near", K_BUTTON, "Save clipping for this weapon", 0, 0, 0, -1, NULL, 0},
-  {"reset_weapon_near", K_BUTTON, "Use global clipping for this weapon", 0, 0, 0, -1, NULL, 0},
-  {"runtime_status", K_STATUS, "Status: First person off", 0, 0, 0, -1, NULL, 0},
+  {"save_weapon_near", TFP_MK_BUTTON, "Save clipping for this weapon", 0, 0, 0, -1, NULL, 0},
+  {"reset_weapon_near", TFP_MK_BUTTON, "Use global clipping for this weapon", 0, 0, 0, -1, NULL, 0},
+  {"runtime_status", TFP_MK_STATUS, "Status: First person off", 0, 0, 0, -1, NULL, 0},
   /* :21-27, :334 (step 5) */
-  {"weapon_bob_strength", K_SLIDER, "Weapon bob strength", 0, 300, 5, M(weapon_bob_strength), NULL, 1},
-  {"weapon_bob_speed", K_SLIDER, "Weapon bob speed", 25, 200, 5, M(weapon_bob_speed), NULL, 1},
-  {"weapon_sway_strength", K_SLIDER, "Weapon sway strength", 0, 300, 5, M(weapon_sway_strength), NULL, 1},
-  {"weapon_sway_speed", K_SLIDER, "Weapon sway response speed", 25, 200, 5, M(weapon_sway_speed), NULL, 1},
-  {"sprint_motion_strength", K_SLIDER, "Sprint weapon movement", 0, 200, 5, M(sprint_motion_strength), NULL, 1},
+  {"weapon_bob_strength", TFP_MK_SLIDER, "Weapon bob strength", 0, 300, 5, M(weapon_bob_strength), NULL, 1},
+  {"weapon_bob_speed", TFP_MK_SLIDER, "Weapon bob speed", 25, 200, 5, M(weapon_bob_speed), NULL, 1},
+  {"weapon_sway_strength", TFP_MK_SLIDER, "Weapon sway strength", 0, 300, 5, M(weapon_sway_strength), NULL, 1},
+  {"weapon_sway_speed", TFP_MK_SLIDER, "Weapon sway response speed", 25, 200, 5, M(weapon_sway_speed), NULL, 1},
+  {"sprint_motion_strength", TFP_MK_SLIDER, "Sprint weapon movement", 0, 200, 5, M(sprint_motion_strength), NULL, 1},
 };
 #undef M
 enum { CONTROL_COUNT = sizeof CONTROLS / sizeof *CONTROLS };
+const TfpMenuControl *tfp_wire_menu_controls(int *count) { if (count) *count = CONTROL_COUNT; return CONTROLS; }
+const char *const tfp_wire_menu_pages[2] = {"First person", "Bob and sway"};
+const char *const tfp_wire_menu_presets[3] = {"Custom (keep existing sliders)", "Comfort", "Natural"};
 
 typedef struct Menu {
   TfpMenuHost host;
@@ -138,6 +134,25 @@ static bool current_bool(TfpWire *w, const Control *c) {
   }
   return false;
 }
+bool tfp_wire_menu_default(TfpWire *w, const TfpMenuControl *c, int editor_key, TfpMenuValue *out) {
+  TfpSettings *s = tfp_wire_settings(w);
+  if (!s || !c || !out) return false;
+  double value = c->menu >= 0 ? tfp_settings_menu_number(s, (TfpSettingsMenuId)c->menu) : 0;
+  switch (c->kind) {
+    case TFP_MK_TOGGLE: case TFP_MK_CHECK: *out = (TfpMenuValue){TFP_MENU_VALUE_BOOL, current_bool(w, c), 0}; return true;
+    case TFP_MK_SLIDER:
+      if (!(value >= c->min && value <= c->max)) value = value < c->min ? c->min : c->max; /* MCM refuses a default outside the range */
+      break;
+    case TFP_MK_CHOICE: value = value >= 1 && value <= 3 ? (int)value : 1; break;
+    case TFP_MK_KEY:
+      value = value >= 0 && value <= 257 ? (int)value : 0;
+      if (c->menu == TFP_MENU_editor_key && value == 119) value = editor_key;
+      break;
+    default: return false;
+  }
+  *out = (TfpMenuValue){TFP_MENU_VALUE_NUMBER, false, value};
+  return true;
+}
 size_t tfp_wire_menu_definition(TfpWire *w, int editor_key, char *out, size_t size) {
   TfpSettings *s = tfp_wire_settings(w);
   char number[96];
@@ -147,36 +162,31 @@ size_t tfp_wire_menu_definition(TfpWire *w, int editor_key, char *out, size_t si
   at = put_text(out, size, at, "Use the game's first-person arms and weapon view. F11 toggles True First Person.");
   at = put(out, size, at, ",\"pages\":[");
   for (int page = 0; page < 2; page++) {
-    at = put(out, size, at, page ? ",{\"id\":\"movement\",\"name\":\"Bob and sway\"" : "{\"id\":\"test\",\"name\":\"First person\"");
+    at = put(out, size, at, page ? ",{\"id\":\"movement\",\"name\":" : "{\"id\":\"test\",\"name\":"), at = put_text(out, size, at, tfp_wire_menu_pages[page]);
     at = put(out, size, at, ",\"require_confirmation\":false,\"controls\":[");
     bool first = true;
     for (int i = 0; i < CONTROL_COUNT; i++) {
       const Control *c = &CONTROLS[i];
       static const char *const types[] = {"button", "toggle", "toggle", "slider", "choice", "keybind", "button"};
+      TfpMenuValue value = {TFP_MENU_VALUE_NONE, false, 0};
       if (c->page != page) continue;
+      tfp_wire_menu_default(w, c, editor_key, &value);
       at = put(out, size, at, first ? "{\"id\":\"" : ",{\"id\":\""), first = false;
       at = put(out, size, at, c->id), at = put(out, size, at, "\",\"type\":\""), at = put(out, size, at, types[c->kind]);
       at = put(out, size, at, "\",\"label\":"), at = put_text(out, size, at, c->label);
-      if (c->kind == K_CHECK) at = put(out, size, at, ",\"presentation\":\"checkbox\"");
-      if (c->kind == K_BUTTON || c->kind == K_STATUS || !strcmp(c->id, "show_aim_markers")) at = put(out, size, at, ",\"require_confirmation\":false");
-      if (c->kind == K_TOGGLE || c->kind == K_CHECK) at = put(out, size, at, current_bool(w, c) ? ",\"default\":true" : ",\"default\":false");
-      if (c->kind == K_SLIDER) {
+      if (c->kind == TFP_MK_CHECK) at = put(out, size, at, ",\"presentation\":\"checkbox\"");
+      if (c->kind == TFP_MK_BUTTON || c->kind == TFP_MK_STATUS || !strcmp(c->id, "show_aim_markers")) at = put(out, size, at, ",\"require_confirmation\":false");
+      if (c->kind == TFP_MK_TOGGLE || c->kind == TFP_MK_CHECK) at = put(out, size, at, value.boolean ? ",\"default\":true" : ",\"default\":false");
+      if (c->kind == TFP_MK_SLIDER) {
         snprintf(number, sizeof number, ",\"min\":%g,\"max\":%g,\"step\":%g", c->min, c->max, c->step), at = put(out, size, at, number);
-        double value = tfp_settings_menu_number(s, (TfpSettingsMenuId)c->menu);
-        if (!(value >= c->min && value <= c->max)) value = value < c->min ? c->min : c->max; /* MCM refuses a default outside the range */
-        snprintf(number, sizeof number, ",\"default\":%.17g", value), at = put(out, size, at, number);
+        snprintf(number, sizeof number, ",\"default\":%.17g", value.number), at = put(out, size, at, number);
       }
-      if (c->kind == K_CHOICE) {
-        double value = tfp_settings_menu_number(s, (TfpSettingsMenuId)c->menu);
-        at = put(out, size, at, ",\"presentation\":\"dropdown\",\"choices\":[\"Custom (keep existing sliders)\",\"Comfort\",\"Natural\"]");
-        snprintf(number, sizeof number, ",\"default\":%d", value >= 1 && value <= 3 ? (int)value : 1), at = put(out, size, at, number);
+      if (c->kind == TFP_MK_CHOICE) {
+        at = put(out, size, at, ",\"presentation\":\"dropdown\",\"choices\":[");
+        for (int choice = 0; choice < 3; choice++) at = put(out, size, at, choice ? "," : ""), at = put_text(out, size, at, tfp_wire_menu_presets[choice]);
+        snprintf(number, sizeof number, "],\"default\":%d", (int)value.number), at = put(out, size, at, number);
       }
-      if (c->kind == K_KEY) {
-        double value = tfp_settings_menu_number(s, (TfpSettingsMenuId)c->menu);
-        int key = value >= 0 && value <= 257 ? (int)value : 0;
-        if (c->menu == TFP_MENU_editor_key && key == 119) key = editor_key;
-        snprintf(number, sizeof number, ",\"default\":%d", key), at = put(out, size, at, number);
-      }
+      if (c->kind == TFP_MK_KEY) snprintf(number, sizeof number, ",\"default\":%d", (int)value.number), at = put(out, size, at, number);
       if (c->description) at = put(out, size, at, ",\"description\":"), at = put_text(out, size, at, c->description);
       at = put(out, size, at, "}");
     }
@@ -189,7 +199,7 @@ size_t tfp_wire_menu_definition(TfpWire *w, int editor_key, char *out, size_t si
 
 /* ---- registration ---- */
 static void into_store(TfpWire *w, const Control *c, const TfpMenuValue *v) {
-  bool is_bool = c->kind == K_TOGGLE || c->kind == K_CHECK;
+  bool is_bool = c->kind == TFP_MK_TOGGLE || c->kind == TFP_MK_CHECK;
   if (c->menu < 0 || v->kind != (is_bool ? TFP_MENU_VALUE_BOOL : TFP_MENU_VALUE_NUMBER)) return;
   tfp_wire_settings_menu_set(w, (TfpSettingsMenuId)c->menu, is_bool, v->boolean, v->number);
 }
@@ -213,8 +223,8 @@ bool tfp_wire_menu_bind(TfpWire *w, const TfpMenuHost *host, unsigned unavailabl
     host->set_disabled(host->user, "edit_placement", true), host->set_disabled(host->user, "editor_key", true);
     tfp_wire_say(w, "Menu: the placement editor's button and key are shown disabled: the editor is not available in this session");
   }
-  tfp_wire_say(w, "Ready: menu: registered with DBF-MCM as \"True First Person\" (two pages; not offered: free aim and the native ADS comparison, "
-                  "which are retail's 30-second test tools)");
+  say(w, "Ready: menu: registered with %s as \"True First Person\" (two pages; not offered: free aim and the native ADS comparison, "
+         "which are retail's 30-second test tools)%s", host->name ? host->name : "DBF-MCM", "");
   return true;
 }
 void tfp_wire_menu_unbind(TfpWire *w) { free(state(w)); w->ext[TFP_WIRE_EXT_MENU] = NULL; }
@@ -350,7 +360,7 @@ static const char *run_button(TfpWire *w, Menu *m, const char *id) {
 const char *tfp_wire_menu_activate(TfpWire *w, const char *id) {
   Menu *m = state(w);
   const Control *c = control(id);
-  if (!m || !c || c->kind != K_BUTTON) return "Unknown button";
+  if (!m || !c || c->kind != TFP_MK_BUTTON) return "Unknown button";
   enqueue(w, m, id, NULL, NULL);
   return NULL;
 }
@@ -359,7 +369,7 @@ static void run_queue(TfpWire *w, Menu *m) {
   m->queue_count = 0;
   for (unsigned i = 0; i < count; i++) {
     const Control *c = control(m->queued[i].id);
-    if (c->kind != K_BUTTON) { run_toggle(w, m, c->id, &m->queued[i].value, &m->queued[i].previous); continue; }
+    if (c->kind != TFP_MK_BUTTON) { run_toggle(w, m, c->id, &m->queued[i].value, &m->queued[i].previous); continue; }
     const char *problem = run_button(w, m, c->id);
     if (problem) say(w, "Menu: \"%s\": %s", c->label, problem);
   }
