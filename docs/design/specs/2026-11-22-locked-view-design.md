@@ -483,3 +483,10 @@ two shown. A run of jumps that begins inside the time is now looked at to its en
 In the game on feel.33: level swap and list 0.027 to 0.038 m, pitched down 0.030 to 0.070 m (ten runs); a forced
 death held at the head until the replacement (one frame missed when the avatar is replaced, as before).
 
+The whole matrix on feel.33, fresh session: 35 of 35, nothing missed. Largest steps: swaps 0.035 and 0.036 m, stim
+0.041 m, stratagem list 0.017 m, emote 0.058 m and jump 0.060 m. The last two are the body's own motion, read from the
+trace: the head camera's eye is the head, which the emote's first frames move 0.28 m in 0.1 s, and a walk at 3.5 m/s
+is 0.117 m a frame; no correction was carried in either. Frame strips of nine actions (swap, swap back, stim, aim,
+sprint into aim, aim and reload, emote, look down, prone and aim) show nothing out of place; they were filmed with the
+view pitched down, because the death phase left it there (now put back).
+

@@ -56,7 +56,7 @@ PHASES = {
     "toggle-off-on": ("key f11; wait 1.0; key f11", 1.5),
     "toggle-fast": ("key f11; key f11; key f11; key f11", 2.0),
     "ragdoll": ("look 0 900; wait 0.2; key g; wait 0.4; look 0 -900; hold s 0.4", 6.0),
-    "death": ("look 0 900; wait 0.2; key g; wait 0.6; key g", 9.0),
+    "death": ("look 0 900; wait 0.2; key g; wait 0.6; key g; wait 0.4; look 0 -900", 9.0),   # the view is put back level for what runs after
 }
 LOCK = re.compile(r"Lock: \+(\d+) frames held \(\+(\d+) in another camera, kind now (\d+)\), \+(\d+) missed \(kind (\d+), helper error (\d+)\), largest kick ([\d.]+)")
 CUT = re.compile(r"Cut: largest camera jump ([\d.]+) m")
