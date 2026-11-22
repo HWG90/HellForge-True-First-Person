@@ -481,6 +481,33 @@ int main() {
     for (int i = 0; i < frames[0]; ++i) if (std::memcmp(record[0][i].position, record[1][i].position, 16) || record[0][i].own != record[1][i].own || record[0][i].reads != record[1][i].reads) ++different;
     CHECK(different == 0);
   }
+  // ---- 13. Head-camera frames inside the window after a change (mask 2, as in a swap). On foot: the head-frame jump
+  // the detection was added for (0.15 m in one frame) is taken up. Off foot and not (yet) known to be down, as in
+  // the first frames of a death that never sets the ragdoll flag: the head is thrown against the unit root, which
+  // stays behind (0.1 m more every frame: 3 m/s, the head still within 3 m), and that is the body's own motion, not
+  // a re-seated rig: the eye stays at the head. ----
+  for (int thrown = 0; thrown < 2; ++thrown) {
+    fresh(true, true);
+    Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+    standing(g, 12, 33.3, false); standing(g, 20, 33.3, true); standing(g, 20, 33.3, false);
+    CHECK(g.from_head_eye() < 1e-3f);
+    g.measure_from_here();
+    float worst = 0;
+    if (thrown) {
+      g.s.state = 50; // off foot; no ragdoll flag
+      for (int i = 0; i < 10; ++i) {
+        g.pose(1, 2, 0, .2f, 1.5f - .1f * (i + 1)); g.hip(2); g.frame(33.3);
+        worst = std::fmax(worst, g.from_head_eye());
+      }
+      CHECK(worst < .065f); // never left behind the head (0.06 m: the most the head camera's own smoothing lags)
+    } else {
+      g.pose(1, 2, 0, .2f, 1.35f);
+      for (int i = 0; i < 24; ++i) { g.hip(2); g.frame(33.3); worst = std::fmax(worst, g.from_head_eye()); }
+      CHECK(g.change < .05f && worst > .1f && g.from_head_eye() < 1e-3f); // 0.15 m in one frame: eased, and there in 0.8 s
+    }
+    std::printf("head frames, %s: step change %.3f m, farthest from the head's eye %.3f m\n", thrown ? "thrown off foot" : "a jump on foot", g.change, worst);
+    g.end();
+  }
   std::printf("camera smooth: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

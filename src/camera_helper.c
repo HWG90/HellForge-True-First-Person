@@ -971,8 +971,12 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
   memcpy(shown, wanted, 12);
   if (atomic_load_explicit(&smooth_on, memory_order_relaxed)) {
     /* Within the head camera only a change of camera is taken up: its eye turns about the head with the view. */
-    /* A body that is down moves against the unit root, which stays behind: its head's own motion is not a jump. */
-    const bool detect = smooth_detect(p, kind, source, tick) && !p->lock_down;
+    /* A body that is down moves against the unit root, which stays behind: its head's own motion is not a jump. Nor
+     * is the head's in a head-camera frame of a body that is off foot and not yet known to be down (a death that
+     * never sets the ragdoll flag, the head still within 3 m; a throw's first frames): taken for a re-seated rig, it
+     * left the eye behind the head for up to half a second. On foot the head-frame jump of a swap is still taken up,
+     * and native frames are as before. smooth_detect is called first: it keeps the watch on every frame. */
+    const bool detect = smooth_detect(p, kind, source, tick) && !p->lock_down && !(source == SMOOTH_HEAD && p->lock_off_foot);
     correction = tfp_continuity_step(&smooth, wanted_relative, source == SMOOTH_REPEAT ? SMOOTH_NATIVE : source, detect, p->full_ads, tick, p->c.max_gap_ms, &smooth_tuning, relative);
     if (correction > 1e-6f && tfp_finite3(relative)) for (unsigned component = 0; component < 3; ++component) { shown[component] = root[component];
       for (unsigned axis = 0; axis < 3; ++axis) shown[component] += relative[axis]*root_basis[axis*3+component]; }
