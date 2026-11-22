@@ -4,7 +4,7 @@
  *
  * How a change travels. The panel is a TfpMenuHost, as src/mod_menu.c is for DBF-MCM: it keeps what each
  * control shows, and hands what the user did to tfp_wire_menu_changed / tfp_wire_menu_activate. So a change
- * made here is applied and saved by the same code as a change made in MCM. The nine locked-view options are
+ * made here is applied and saved by the same code as a change made in MCM. The locked-view options are
  * not menu controls; they go to tfp_wire_settings_locked_set. Either way the store counts a change and
  * tfp_wire_settings_save_frame writes the file once.
  *

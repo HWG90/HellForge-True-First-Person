@@ -69,7 +69,7 @@ typedef struct TfpWireHoldProbe {
   double eye[3], rig_eye[3];
 } TfpWireHoldProbe;
 struct TfpWire;
-/* The action hold (a probe; a file hold_lease.txt beside the DLL). Everything false, 0 and NULL without it:
+/* The action hold (the Weapon put-away option, src/wire_options.h; tfp_wire_hold_set). Everything false, 0 and NULL while off:
  * then nothing here is called and nothing is written. */
 typedef struct TfpWireHold {
   bool on, was_holding, has_mask, gun_off_rig;
@@ -171,7 +171,9 @@ bool tfp_wire_aim_due(TfpWire *w);
 bool tfp_wire_aim_probe(TfpWire *w, int right, int middle);
 
 /* The action hold's switch. Before on_enable (the controller made there takes it); later calls reach the
- * controller that exists. Off after tfp_wire_init. */
+ * controller and the backend that exist, so it may be switched in the middle of a session: on the game thread,
+ * and not while the controller holds or a lease waits for its native exit (tfp_wire_options_busy). Off after
+ * tfp_wire_init. */
 void tfp_wire_hold_set(TfpWire *w, bool on);
 bool tfp_wire_hold_on(const TfpWire *w);
 /* The hold's part of a tick; tfp_wire_frame calls it after on_update. Does nothing while the switch is off. */

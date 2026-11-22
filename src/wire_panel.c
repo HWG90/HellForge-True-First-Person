@@ -6,18 +6,25 @@
 
 enum { ROWS = 40, QUEUE = 16, TABS = 3 };
 static const char *const LOCKED_TAB = "Locked view";
-/* The nine options of TFP_SETTINGS_LOCKED, in its order: what the panel calls them. */
-static const struct { const char *label, *description; } LOCKED[TFP_LOCKED_COUNT] = {
-  {"Camera lock", "Keep the view first person through every action and camera of your own character."},
-  {"Field of view lock", "Hold one field of view whatever the weapon or the camera asks for."},
-  {"Field of view (degrees)", "The field of view the lock holds. Default 80."},
-  {"Zoom when aiming", "Let aiming zoom in from the locked field of view. Off keeps the locked value while aiming too."},
-  {"View kick strength (%)", "How much of your body's movement reaches the view while on foot. Default 35."},
-  {"View kick limit (degrees)", "The most the view is turned by a kick while on foot. Default 8."},
-  {"View kick when thrown (%)", "How much of your body's movement reaches the view while you are thrown or ragdolled. Default 70."},
-  {"One-handed pistols", "Hold one-handed weapons in one hand at the hip; two hands when aiming."},
-  {"Holster animation", "Show the weapon being put away and drawn when you change weapons."},
+/* The options of TFP_SETTINGS_LOCKED, in its order: what the panel calls them. `note`: the option sets nothing;
+ * it is drawn greyed (the host's begin_disabled) with the note under it, since a greyed item may show no tooltip. */
+static const struct { const char *label, *description, *note; } LOCKED[TFP_LOCKED_COUNT] = {
+  {"Camera lock", "Keep the view first person through every action and camera of your own character.", NULL},
+  {"Field of view lock", "Hold one field of view whatever the weapon or the camera asks for.", NULL},
+  {"Field of view (degrees)", "The field of view the lock holds. Default 80.", NULL},
+  {"Zoom when aiming", "Let aiming zoom in from the locked field of view. Off keeps the locked value while aiming too.", NULL},
+  {"View kick strength (%)", "How much of your body's movement reaches the view while on foot. Default 35.", NULL},
+  {"View kick limit (degrees)", "The most the view is turned by a kick while on foot. Default 8.", NULL},
+  {"View kick when thrown (%)", "How much of your body's movement reaches the view while you are thrown or ragdolled. Default 70.", NULL},
+  {"Animated arms", "The first-person arms follow your character's own animation.", NULL},
+  {"One-handed pistols", "One-handed weapons are held as your character holds them. This comes from the character's own animation while "
+                         "Animated arms is on; there is nothing to set here.",
+   "Comes from your character's own animation while Animated arms is on."},
+  {"Weapon put-away", "Keep first person while the weapon is put away for a swap, grenade or stim.", NULL},
+  {"Smooth eye", "No camera pops when the game changes its camera.", NULL},
 };
+_Static_assert(TFP_LOCKED_COUNT == 11 && TFP_LOCKED_animated_arms == 7 && TFP_LOCKED_one_handed_pistols == 8 && TFP_LOCKED_put_away == 9 &&
+               TFP_LOCKED_smooth_eye == 10, "LOCKED names the options of TFP_SETTINGS_LOCKED in its order");
 
 typedef struct Row { TfpMenuValue value; bool disabled; char label[300]; } Row;
 typedef struct Event { int index; bool locked, activate; TfpMenuValue value, previous; } Event;
@@ -185,6 +192,14 @@ static void draw_locked(Panel *p) {
   for (int i = 0; i < TFP_LOCKED_COUNT; i++) {
     const TfpSettingsLockedInfo *info = tfp_settings_locked_info((TfpSettingsLockedId)i);
     int v = p->shown_locked[i].boolean;
+    if (LOCKED[i].note) {
+      ov->begin_disabled(1);
+      ov->checkbox(LOCKED[i].label, &v);   /* shown as stored; the host blocks it */
+      ov->end_disabled();
+      tip(p, LOCKED[i].description);
+      ov->text_colored(ov->theme(OV_THEME_TEXT_DIM), LOCKED[i].note);
+      continue;
+    }
     if (info->is_bool) {
       if (ov->checkbox(LOCKED[i].label, &v)) push(p, i, true, false, (TfpMenuValue){TFP_MENU_VALUE_BOOL, v != 0, 0});
     } else if (slider(p, p->count + i, LOCKED[i].label, p->shown_locked[i].number, info->min, info->max, info->step, &v))
@@ -303,7 +318,7 @@ void tfp_wire_panel_frame(TfpWire *w) {
     else if (e->activate) tfp_wire_menu_activate(w, p->controls[e->index].id);   /* done by tfp_wire_menu_frame, which also logs a refusal */
     else tfp_wire_menu_changed(w, p->controls[e->index].id, &e->value, &e->previous);
   }
-  /* The nine options show what the store holds (it keeps a number inside its range). Only after a change. */
+  /* The locked-view options show what the store holds (it keeps a number inside its range). Only after a change. */
   if (!count || !tfp_wire_settings(w)) return;
   lock(p);
   if (!p->pending_count) memcpy(p->locked, tfp_wire_settings(w)->locked, sizeof p->locked);

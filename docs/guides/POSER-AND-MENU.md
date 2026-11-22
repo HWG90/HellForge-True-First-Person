@@ -21,7 +21,7 @@ Three things retail has that the first HellForge builds lacked. All three are bu
 
 Built, not yet run in the game. `src/wire_panel.c` (the panel), `src/mod_panel.c` (lock, clock, `ov_connect`), `tests/run-wire-panel.sh`.
 
-- **What:** one NEST (Goose Overlay Host) window, "True First Person", with three tabs: **First person** and **Bob and sway** (every control of the menu below: same labels, ranges, steps, descriptions) and **Locked view** (the nine options of `locked_view` in `settings.json`).
+- **What:** one NEST (Goose Overlay Host) window, "True First Person", with three tabs: **First person** and **Bob and sway** (every control of the menu below: same labels, ranges, steps, descriptions) and **Locked view** (the eleven options of `locked_view` in `settings.json`).
 - **Opening:** F10 (the panel's own hotkey; the host's config can override it), or the host's panel list (Page Down).
 - **Needs:** the host at API 6 or newer. Missing or older: one log line, no panel, the settings in `settings.json` apply.
 - **DBF-MCM is not needed and not called.** A file `mcm_on.txt` beside the DLL is the test switch: the menu then registers with DBF-MCM as before, and the panel is not made.
@@ -29,7 +29,7 @@ Built, not yet run in the game. `src/wire_panel.c` (the panel), `src/mod_panel.c
 - **Sliders** are taken when let go, not at every step of a drag, so a drag saves once.
 - **Keys:** the host has no key-binding widget. A key row is its label, the key as a key cap, and **Change**, which takes the next key pressed (Esc keeps the old one, Delete clears it; after ten seconds the question goes away).
 - **The two status rows** are plain text here.
-- **Locked view options are stored only.** Nothing reads them yet; the getters are `tfp_locked_view_*` in `src/wire_settings.h`.
+- **Locked view options:** the getters are `tfp_locked_view_*` in `src/wire_settings.h`. Three switch a feature while the game runs (`src/wire_options.c`, called from the tick): **Animated arms** (the arm drive and its render hook), **Weapon put-away** (the action hold) and **Smooth eye** (the eye's continuity). A change is made on the game thread at the next update, and waits while a lease is held through an action or waits for its native exit. Test files beside the DLL override the option: `arms_live.txt` / `hold_lease.txt` force on, `arms_off.txt` / `hold_off.txt` / `smooth_off.txt` force off (off wins when both are there); the log's `Option:` lines say which decided. **One-handed pistols** sets nothing and is drawn greyed with a note. The old `holster_animation` is gone from the panel and the store; a stored value is read as `put_away` unless the file has `put_away`, and is not written back.
 - **The placement editor** closes the panel before it takes the cursor, as it closes MCM.
 - **Live replace:** the panel stays registered with the host, closed and drawing nothing (the host cannot take a panel out).
 

@@ -1,9 +1,13 @@
 /* The mod's own settings panel (src/wire_panel.c) and the locked view's options in the settings store
  * (src/tfp_settings.c, src/wire_settings.c), with a stand-in overlay host: no Windows, no game, no NEST.
  *
- *   1. the nine locked-view options: defaults, the "locked_view" section of settings.json read and written, the named getters;
- *   2. the panel: every option of the MCM registration and the nine new ones is drawn, a changed value reaches the
- *      store and is saved, a missing or old host is refused softly, and DBF-MCM is not called unless its switch is on. */
+ *   1. the eleven locked-view options: defaults, the "locked_view" section of settings.json read and written, the named
+ *      getters, and the old "holster_animation" read as put_away;
+ *   2. the panel: every option of the MCM registration and the eleven of the Locked view tab is drawn, a changed value
+ *      reaches the store and is saved, a missing or old host is refused softly, and DBF-MCM is not called unless its
+ *      switch is on;
+ *   3. the three live features (src/wire_options.c): a changed option reaches its setter at the next update, a test
+ *      file beats the option both ways, and a change waits while a lease is held through an action. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,6 +18,7 @@
 #include "wire_menu.h"
 #include <stddef.h>
 #include "wire_panel.h"
+#include "wire_options.h"
 
 static unsigned checks;
 #define CHECK(condition) do { checks++; if (!(condition)) { printf("wire panel: FAILED %s (line %d)\n", #condition, __LINE__); return 1; } } while (0)
@@ -94,13 +99,14 @@ static int store_part(void) {
   TfpSettings s;
   memset(&s, 0, sizeof s);
   CHECK(tfp_settings_defaults(&s));
-  /* the nine options and their defaults */
-  CHECK(TFP_LOCKED_COUNT == 9);
+  /* the eleven options and their defaults */
+  CHECK(TFP_LOCKED_COUNT == 11);
   CHECK(tfp_settings_locked_flag(&s, TFP_LOCKED_camera_lock) && tfp_settings_locked_flag(&s, TFP_LOCKED_fov_lock) &&
         tfp_settings_locked_number(&s, TFP_LOCKED_fov_degrees) == 80 && tfp_settings_locked_flag(&s, TFP_LOCKED_fov_zoom_when_aiming) &&
         tfp_settings_locked_number(&s, TFP_LOCKED_kick_strength) == 35 && tfp_settings_locked_number(&s, TFP_LOCKED_kick_max_degrees) == 8 &&
         tfp_settings_locked_number(&s, TFP_LOCKED_thrown_kick_strength) == 70 && tfp_settings_locked_flag(&s, TFP_LOCKED_one_handed_pistols) &&
-        tfp_settings_locked_flag(&s, TFP_LOCKED_holster_animation));
+        tfp_settings_locked_flag(&s, TFP_LOCKED_animated_arms) && tfp_settings_locked_flag(&s, TFP_LOCKED_put_away) &&
+        tfp_settings_locked_flag(&s, TFP_LOCKED_smooth_eye));
   const TfpSettingsLockedInfo *info = tfp_settings_locked_info(TFP_LOCKED_fov_degrees);
   CHECK(info && !strcmp(info->name, "fov_degrees") && !info->is_bool && info->value == 80 && info->min == 50 && info->max == 120 && info->step == 1);
   info = tfp_settings_locked_info(TFP_LOCKED_kick_strength);
@@ -110,7 +116,9 @@ static int store_part(void) {
   info = tfp_settings_locked_info(TFP_LOCKED_thrown_kick_strength);
   CHECK(info && info->min == 0 && info->max == 100 && info->step == 5 && info->value == 70);
   CHECK(tfp_settings_locked_info(TFP_LOCKED_camera_lock)->is_bool && !tfp_settings_locked_info(TFP_LOCKED_COUNT));
-  CHECK(tfp_settings_locked("holster_animation") == TFP_LOCKED_holster_animation && tfp_settings_locked("near_clip_cm") < 0 && tfp_settings_locked(NULL) < 0);
+  CHECK(tfp_settings_locked("put_away") == TFP_LOCKED_put_away && tfp_settings_locked("near_clip_cm") < 0 && tfp_settings_locked(NULL) < 0);
+  CHECK(tfp_settings_locked("animated_arms") == TFP_LOCKED_animated_arms && tfp_settings_locked("smooth_eye") == TFP_LOCKED_smooth_eye);
+  CHECK(tfp_settings_locked("holster_animation") < 0);   /* no longer an option of its own (read as put_away: below) */
   /* writes: counted once per change, the wrong kind and not-a-number refused, a number kept inside its range */
   CHECK(s.locked_writes == 0);
   CHECK(tfp_settings_set_locked(&s, TFP_LOCKED_fov_degrees, false, false, 95) && s.locked_writes == 1 && tfp_settings_locked_number(&s, TFP_LOCKED_fov_degrees) == 95);
@@ -125,7 +133,8 @@ static int store_part(void) {
   static char text[65536], why[200];
   size_t n = tfp_settings_write(&s, text, sizeof text);
   CHECK(n && n < sizeof text && strstr(text, "\"locked_view\": {") && strstr(text, "\"camera_lock\": false") && strstr(text, "\"fov_degrees\": 120") &&
-        strstr(text, "\"kick_max_degrees\": 0") && strstr(text, "\"holster_animation\": true") && strstr(text, "\"thrown_kick_strength\": 70"));
+        strstr(text, "\"kick_max_degrees\": 0") && strstr(text, "\"put_away\": true") && strstr(text, "\"thrown_kick_strength\": 70") &&
+        strstr(text, "\"animated_arms\": true") && strstr(text, "\"smooth_eye\": true") && !strstr(text, "holster_animation"));
   TfpSettings back;
   memset(&back, 0, sizeof back);
   CHECK(tfp_settings_load(&back, text, n, why, sizeof why));
@@ -140,13 +149,31 @@ static int store_part(void) {
   tfp_settings_free(&s);
   static const char part[] = "{\"format\":1,\"first_person\":{},\"locked_view\":{\"one_handed_pistols\":false,\"kick_strength\":250}}";
   CHECK(tfp_settings_load(&s, part, sizeof part - 1, why, sizeof why) && !tfp_settings_locked_flag(&s, TFP_LOCKED_one_handed_pistols) &&
-        tfp_settings_locked_number(&s, TFP_LOCKED_kick_strength) == 100 && tfp_settings_locked_flag(&s, TFP_LOCKED_holster_animation));
+        tfp_settings_locked_number(&s, TFP_LOCKED_kick_strength) == 100 && tfp_settings_locked_flag(&s, TFP_LOCKED_put_away));
   tfp_settings_free(&s);
+  /* the migration: a stored "holster_animation" is put_away's value, unless the file has a put_away of its own
+   * (wherever it stands); it is not written back, and the load does not count as a change */
+  static const struct { const char *json; bool put_away; } old_keys[] = {
+    {"{\"format\":1,\"first_person\":{},\"locked_view\":{\"holster_animation\":false}}", false},
+    {"{\"format\":1,\"first_person\":{},\"locked_view\":{\"holster_animation\":true}}", true},
+    {"{\"format\":1,\"first_person\":{},\"locked_view\":{\"holster_animation\":false,\"put_away\":true}}", true},
+    {"{\"format\":1,\"first_person\":{},\"locked_view\":{\"put_away\":false,\"holster_animation\":true}}", false},
+    {"{\"format\":1,\"first_person\":{},\"locked_view\":{\"put_away\":false}}", false},
+  };
+  for (size_t i = 0; i < COUNT(old_keys); i++) {
+    CHECK(tfp_settings_load(&s, old_keys[i].json, strlen(old_keys[i].json), why, sizeof why));
+    CHECK(tfp_settings_locked_flag(&s, TFP_LOCKED_put_away) == old_keys[i].put_away && s.locked_writes == 0);
+    CHECK(tfp_settings_locked_flag(&s, TFP_LOCKED_animated_arms) && tfp_settings_locked_flag(&s, TFP_LOCKED_smooth_eye));
+    n = tfp_settings_write(&s, text, sizeof text);
+    CHECK(n && n < sizeof text && !strstr(text, "holster_animation") && strstr(text, old_keys[i].put_away ? "\"put_away\": true" : "\"put_away\": false"));
+    tfp_settings_free(&s);
+  }
   static const struct { const char *json, *why; } refusals[] = {
     {"{\"format\":1,\"first_person\":{},\"locked_view\":[]}", "locked_view: expected an object"},
     {"{\"format\":1,\"first_person\":{},\"locked_view\":{\"volume\":1}}", "an unknown option"},
     {"{\"format\":1,\"first_person\":{},\"locked_view\":{\"camera_lock\":1}}", "expected true or false"},
     {"{\"format\":1,\"first_person\":{},\"locked_view\":{\"fov_degrees\":true}}", "expected a number"},
+    {"{\"format\":1,\"first_person\":{},\"locked_view\":{\"holster_animation\":1}}", "expected true or false"},
   };
   for (size_t i = 0; i < COUNT(refusals); i++) {
     CHECK(!tfp_settings_load(&s, refusals[i].json, strlen(refusals[i].json), why, sizeof why) && strstr(why, refusals[i].why));
@@ -158,7 +185,8 @@ static int store_part(void) {
   new_wire();
   CHECK(tfp_locked_view_camera_lock(&wire) && tfp_locked_view_fov_lock(&wire) && tfp_locked_view_fov_degrees(&wire) == 80 &&
         tfp_locked_view_fov_zoom_when_aiming(&wire) && tfp_locked_view_kick_strength(&wire) == 35 && tfp_locked_view_kick_max_degrees(&wire) == 8 &&
-        tfp_locked_view_thrown_kick_strength(&wire) == 70 && tfp_locked_view_one_handed_pistols(&wire) && tfp_locked_view_holster_animation(&wire));
+        tfp_locked_view_thrown_kick_strength(&wire) == 70 && tfp_locked_view_one_handed_pistols(&wire) && tfp_locked_view_animated_arms(&wire) &&
+        tfp_locked_view_put_away(&wire) && tfp_locked_view_smooth_eye(&wire));
   CHECK(!tfp_wire_settings_locked_set(&wire, TFP_LOCKED_fov_degrees, false, false, 90)); /* no store bound: the defaults answer */
   CHECK(tfp_wire_settings_bind(&wire, part, sizeof part - 1, "test") && logged("Ready: settings") && !logged("Refused"));
   tfp_wire_settings_saver(&wire, test_save, NULL);
@@ -304,9 +332,22 @@ static void draw_frame(void) {
   ov.drawn_count = 0;
   if (ov.def.draw) ov.def.draw(&frame, ov.def.user);
 }
+/* The three features' stand-in setters: how often each was called, and with what last. */
+static struct { unsigned calls[TFP_FEATURE_COUNT]; bool value[TFP_FEATURE_COUNT]; } features;
+static void set_arms(void *u, bool on) { (void)u; features.calls[TFP_FEATURE_ARMS]++, features.value[TFP_FEATURE_ARMS] = on; }
+static void set_hold(void *u, bool on) { (void)u; features.calls[TFP_FEATURE_HOLD]++, features.value[TFP_FEATURE_HOLD] = on; }
+static void set_smooth(void *u, bool on) { (void)u; features.calls[TFP_FEATURE_SMOOTH]++, features.value[TFP_FEATURE_SMOOTH] = on; }
+static TfpWireOptions options;
+static void new_options(void) {
+  memset(&options, 0, sizeof options);
+  memset(&features, 0, sizeof features);
+  options.set[TFP_FEATURE_ARMS] = set_arms, options.set[TFP_FEATURE_HOLD] = set_hold, options.set[TFP_FEATURE_SMOOTH] = set_smooth;
+}
+static bool feature(TfpFeature f, unsigned calls, bool value) { return features.calls[f] == calls && features.value[f] == value; }
 static void game_update(void) {
   tfp_wire_panel_frame(&wire);
   tfp_wire_menu_frame(&wire);
+  tfp_wire_options_tick(&wire, &options);
   tfp_wire_settings_save_frame(&wire);
 }
 static const char settings_json[] = "{\"format\":1,\"first_person\":{},\"menu\":{\"motion_strength\":120,\"toggle_key\":122}}";
@@ -315,6 +356,7 @@ static bool start_wire(void) {
   if (!tfp_wire_settings_bind(&wire, settings_json, sizeof settings_json - 1, "test")) return false;
   tfp_wire_settings_saver(&wire, test_save, NULL);
   saves = 0; mcm_ticks = 0; edits = 0;
+  new_options();
   return true;
 }
 
@@ -365,7 +407,7 @@ static int panel_part(void) {
   CHECK(logged("Ready: settings panel") && logged("F10") && logged("Ready: menu: registered with the mod's own panel") && !logged("DBF-MCM as"));
   CHECK(!ov.open && !tfp_wire_panel_is_open(&wire) && !saves);
 
-  /* ---- every option of the MCM registration and the nine new ones is drawn ---- */
+  /* ---- every option of the MCM registration and the eleven of the Locked view tab is drawn ---- */
   game_update();
   /* as with MCM: the editor key's retail default (F8, HellForge's own editor) is stored as Page Up once the menu is bound */
   CHECK(saves == 1 && strstr(saved_text, "\"editor_key\": 33") && strstr(saved_text, "\"motion_strength\": 120"));
@@ -412,7 +454,14 @@ static int panel_part(void) {
   CHECK(drawn("slider:This weapon: hip clearance (cm)=15[5..40] (disabled)") && drawn("button:Save clipping for this weapon (disabled)"));
   CHECK(drawn("check:Camera lock=on") && drawn("check:Field of view lock=on") && drawn("slider:Field of view (degrees)=80[50..120]") &&
         drawn("check:Zoom when aiming=on") && drawn("slider:View kick strength (%)=35[0..100]") && drawn("slider:View kick limit (degrees)=8[0..20]") &&
-        drawn("slider:View kick when thrown (%)=70[0..100]") && drawn("check:One-handed pistols=on") && drawn("check:Holster animation=on"));
+        drawn("slider:View kick when thrown (%)=70[0..100]") && drawn("check:Animated arms=on") && drawn("check:Weapon put-away=on") && drawn("check:Smooth eye=on"));
+  CHECK(drawn("tip:The first-person arms follow your character's own animation.") &&
+        drawn("tip:Keep first person while the weapon is put away for a swap, grenade or stim.") &&
+        drawn("tip:No camera pops when the game changes its camera."));
+  /* One-handed pistols sets nothing: greyed through the host, with a note that says where the behaviour comes from */
+  CHECK(drawn("check:One-handed pistols=on (disabled)") && !drawn("check:One-handed pistols=on") && !drawn_part("Holster animation"));
+  CHECK(drawn("text:Comes from your character's own animation while Animated arms is on.") &&
+        drawn("tip:One-handed weapons are held as your character holds them. This comes from the character's own animation while Animated arms is on; there is nothing to set here."));
   CHECK(!ov.tab_bars && !ov.tab_items && !ov.disabled_depth && !ov.disabled && !ov.lock_depth && ov.locks && !ov.bad_colours);
   ov.hover = false;
   ov.tab = "Bob and sway";                                        /* one tab selected: only its controls */
@@ -477,7 +526,7 @@ static int panel_part(void) {
   ov.click = "Change##editor_key"; draw_frame();
   for (int i = 0; i < 660; i++) draw_frame();                      /* nothing pressed for ten seconds: the question goes away */
   CHECK(!drawn_part("Press a key") && saves == 6);
-  /* the nine new options */
+  /* the Locked view tab's options */
   ov.flip = "Camera lock";
   draw_frame(); game_update();
   CHECK(!tfp_locked_view_camera_lock(&wire) && saves == 7 && strstr(saved_text, "\"camera_lock\": false"));
@@ -489,11 +538,15 @@ static int panel_part(void) {
   CHECK(tfp_locked_view_kick_strength(&wire) == 50 && saves == 8 && strstr(saved_text, "\"kick_strength\": 50"));
   static const struct { const char *label; bool (*get)(TfpWire *); } flags[] = {
     {"Field of view lock", tfp_locked_view_fov_lock}, {"Zoom when aiming", tfp_locked_view_fov_zoom_when_aiming},
-    {"One-handed pistols", tfp_locked_view_one_handed_pistols}, {"Holster animation", tfp_locked_view_holster_animation}};
+    {"Animated arms", tfp_locked_view_animated_arms}, {"Weapon put-away", tfp_locked_view_put_away}, {"Smooth eye", tfp_locked_view_smooth_eye}};
   for (size_t i = 0; i < COUNT(flags); i++) {
     ov.flip = flags[i].label; draw_frame(); game_update();
     CHECK(!flags[i].get(&wire));
   }
+  CHECK(strstr(saved_text, "\"animated_arms\": false") && strstr(saved_text, "\"put_away\": false") && strstr(saved_text, "\"smooth_eye\": false"));
+  ov.flip = "One-handed pistols"; draw_frame(); game_update();     /* greyed: a click does nothing */
+  CHECK(tfp_locked_view_one_handed_pistols(&wire) && ov.flip);
+  ov.flip = NULL;
   static const struct { const char *label; int to; double (*get)(TfpWire *); } numbers[] = {
     {"Field of view (degrees)", 103, tfp_locked_view_fov_degrees}, {"View kick limit (degrees)", 12, tfp_locked_view_kick_max_degrees},
     {"View kick when thrown (%)", 85, tfp_locked_view_thrown_kick_strength}};
@@ -501,7 +554,7 @@ static int panel_part(void) {
     ov.slide = ov.release = numbers[i].label; ov.slide_to = numbers[i].to; draw_frame(); game_update();
     CHECK(numbers[i].get(&wire) == numbers[i].to);
   }
-  CHECK(saves == 15);
+  CHECK(saves == 16);
   draw_frame();
   CHECK(drawn("check:Camera lock=off") && drawn("slider:View kick strength (%)=50[0..100]") && drawn("slider:Field of view (degrees)=103[50..120]"));
   /* a button: done at the next update, through the menu's own queue */
@@ -558,8 +611,134 @@ static int panel_part(void) {
   return 0;
 }
 
+/* ---- the three live features: the option, the files, and when a change may be made ---- */
+static const char *const F_ARMS = "Animated arms", *const F_HOLD = "Weapon put-away", *const F_SMOOTH = "Smooth eye";
+static bool bind_panel(void) {
+  if (!start_wire()) return false;
+  new_host(8);
+  if (!tfp_wire_panel_bind(&wire, &api, &platform, 0, test_edit)) return false;
+  tfp_wire_panel_frame(&wire); tfp_wire_menu_frame(&wire); tfp_wire_settings_save_frame(&wire);
+  return true;
+}
+static void end_panel(void) {
+  tfp_wire_menu_unbind(&wire);
+  tfp_wire_panel_free(&wire);
+  tfp_wire_settings_free(&wire);
+}
+static void flip(const char *label) { ov.flip = label; draw_frame(); game_update(); }
+static int options_part(void) {
+  /* ---- the start: every setter once, with the option's value (defaults: on), and a line each that names who decided ---- */
+  CHECK(bind_panel());
+  line_count = 0;
+  CHECK(tfp_wire_options_wanted(&wire, &options, TFP_FEATURE_ARMS, NULL));
+  tfp_wire_options_tick(&wire, &options);                          /* before the start: nothing */
+  CHECK(feature(TFP_FEATURE_ARMS, 0, false) && feature(TFP_FEATURE_HOLD, 0, false) && feature(TFP_FEATURE_SMOOTH, 0, false));
+  tfp_wire_options_start(&wire, &options);
+  CHECK(feature(TFP_FEATURE_ARMS, 1, true) && feature(TFP_FEATURE_HOLD, 1, true) && feature(TFP_FEATURE_SMOOTH, 1, true));
+  CHECK(logged("Option: Animated arms: on (the option on the Locked view tab)") && logged("Option: Weapon put-away: on (the option on the Locked view tab)") &&
+        logged("Option: Smooth eye: on (the option on the Locked view tab)") && log_count("Option:") == 3);
+  /* nothing changed: no setter is called again, however many updates pass */
+  for (int i = 0; i < 5; i++) { draw_frame(); game_update(); }
+  CHECK(feature(TFP_FEATURE_ARMS, 1, true) && feature(TFP_FEATURE_HOLD, 1, true) && feature(TFP_FEATURE_SMOOTH, 1, true) && log_count("Option:") == 3);
+  /* ---- a change in the panel reaches the store, and the feature's setter at the next update: only that one ---- */
+  ov.flip = F_ARMS; draw_frame();
+  CHECK(tfp_locked_view_animated_arms(&wire) && feature(TFP_FEATURE_ARMS, 1, true));   /* drawn, not yet a game update */
+  game_update();
+  CHECK(!tfp_locked_view_animated_arms(&wire) && feature(TFP_FEATURE_ARMS, 2, false) && strstr(saved_text, "\"animated_arms\": false"));
+  CHECK(feature(TFP_FEATURE_HOLD, 1, true) && feature(TFP_FEATURE_SMOOTH, 1, true));
+  CHECK(logged("Option: Animated arms: switched off (the option on the Locked view tab)"));
+  flip(F_ARMS);
+  CHECK(feature(TFP_FEATURE_ARMS, 3, true) && logged("Option: Animated arms: switched on (the option on the Locked view tab)"));
+  flip(F_HOLD);
+  CHECK(!tfp_locked_view_put_away(&wire) && feature(TFP_FEATURE_HOLD, 2, false) && feature(TFP_FEATURE_ARMS, 3, true) && feature(TFP_FEATURE_SMOOTH, 1, true));
+  flip(F_HOLD);
+  CHECK(feature(TFP_FEATURE_HOLD, 3, true));
+  flip(F_SMOOTH);
+  CHECK(!tfp_locked_view_smooth_eye(&wire) && feature(TFP_FEATURE_SMOOTH, 2, false) && feature(TFP_FEATURE_ARMS, 3, true) && feature(TFP_FEATURE_HOLD, 3, true));
+  flip(F_SMOOTH);
+  CHECK(feature(TFP_FEATURE_SMOOTH, 3, true));
+  /* ---- a lease held through an action: every change waits, one line says so, and it is made once the hold is over ---- */
+  wire.controller.holding = true;
+  CHECK(tfp_wire_options_busy(&wire));
+  line_count = 0;
+  flip(F_HOLD); flip(F_ARMS); flip(F_SMOOTH);
+  for (int i = 0; i < 4; i++) game_update();
+  CHECK(!tfp_locked_view_put_away(&wire) && !tfp_locked_view_animated_arms(&wire) && !tfp_locked_view_smooth_eye(&wire));   /* the store has them */
+  CHECK(feature(TFP_FEATURE_HOLD, 3, true) && feature(TFP_FEATURE_ARMS, 3, true) && feature(TFP_FEATURE_SMOOTH, 3, true));   /* the features not yet */
+  CHECK(log_count("waits until the action in progress is over") == 3 && logged("Option: Weapon put-away: switching off waits"));
+  flip(F_ARMS);                                                    /* changed back while waiting: nothing is left to do for it */
+  wire.controller.holding = false, wire.hold.was_holding = true;   /* the controller let go; the hold's own tick has not yet said so */
+  CHECK(tfp_wire_options_busy(&wire));
+  game_update();
+  CHECK(feature(TFP_FEATURE_HOLD, 3, true));
+  wire.hold.was_holding = false, wire.controller.phase = TFP_PHASE_CLEANUP_PENDING;   /* the lease waits for its native exit */
+  CHECK(tfp_wire_options_busy(&wire));
+  game_update();
+  CHECK(feature(TFP_FEATURE_HOLD, 3, true) && feature(TFP_FEATURE_SMOOTH, 3, true));
+  wire.controller.phase = TFP_PHASE_WAITING;
+  CHECK(!tfp_wire_options_busy(&wire));
+  game_update();
+  CHECK(feature(TFP_FEATURE_HOLD, 4, false) && feature(TFP_FEATURE_SMOOTH, 4, false) && feature(TFP_FEATURE_ARMS, 3, true));
+  CHECK(logged("Option: Weapon put-away: switched off") && !logged("Option: Animated arms: switched"));
+  game_update();
+  CHECK(feature(TFP_FEATURE_HOLD, 4, false) && feature(TFP_FEATURE_SMOOTH, 4, false));
+  wire.controller.phase = TFP_PHASE_RUNNING;                       /* a lease that runs with no action: a change is made at once */
+  flip(F_HOLD);
+  CHECK(feature(TFP_FEATURE_HOLD, 5, true));
+  end_panel();
+
+  /* ---- a file forces the feature on, whatever the option says ---- */
+  CHECK(bind_panel());
+  flip(F_ARMS); flip(F_HOLD);                                      /* both options off, in the panel */
+  CHECK(!tfp_locked_view_animated_arms(&wire) && !tfp_locked_view_put_away(&wire) && !features.calls[TFP_FEATURE_ARMS]);
+  options.force_on[TFP_FEATURE_ARMS] = "arms_live.txt", options.force_on[TFP_FEATURE_HOLD] = "hold_lease.txt";
+  const char *file = NULL;
+  CHECK(tfp_wire_options_wanted(&wire, &options, TFP_FEATURE_ARMS, &file) && is(file, "arms_live.txt"));
+  CHECK(tfp_wire_options_wanted(&wire, &options, TFP_FEATURE_SMOOTH, &file) && !file);
+  line_count = 0;
+  tfp_wire_options_start(&wire, &options);
+  CHECK(feature(TFP_FEATURE_ARMS, 1, true) && feature(TFP_FEATURE_HOLD, 1, true) && feature(TFP_FEATURE_SMOOTH, 1, true));
+  CHECK(logged("Option: Animated arms: on (test file arms_live.txt beside the DLL; the option on the Locked view tab is off and is not used)"));
+  CHECK(logged("Option: Weapon put-away: on (test file hold_lease.txt beside the DLL; the option on the Locked view tab is off and is not used)"));
+  CHECK(logged("Option: Smooth eye: on (the option on the Locked view tab)"));
+  flip(F_ARMS); flip(F_HOLD);                                      /* the option on, off again: the file decides, no setter is called */
+  CHECK(tfp_locked_view_animated_arms(&wire) && tfp_locked_view_put_away(&wire) && feature(TFP_FEATURE_ARMS, 1, true) && feature(TFP_FEATURE_HOLD, 1, true));
+  flip(F_ARMS); flip(F_HOLD);
+  CHECK(!tfp_locked_view_animated_arms(&wire) && !tfp_locked_view_put_away(&wire) && feature(TFP_FEATURE_ARMS, 1, true) && feature(TFP_FEATURE_HOLD, 1, true));
+  end_panel();
+
+  /* ---- a file forces the feature off, whatever the option says; with both files, off wins ---- */
+  CHECK(bind_panel());
+  options.force_off[TFP_FEATURE_ARMS] = "arms_off.txt", options.force_off[TFP_FEATURE_HOLD] = "hold_off.txt", options.force_off[TFP_FEATURE_SMOOTH] = "smooth_off.txt";
+  options.force_on[TFP_FEATURE_HOLD] = "hold_lease.txt";
+  CHECK(tfp_locked_view_animated_arms(&wire) && tfp_locked_view_put_away(&wire) && tfp_locked_view_smooth_eye(&wire));
+  CHECK(!tfp_wire_options_wanted(&wire, &options, TFP_FEATURE_HOLD, &file) && is(file, "hold_off.txt"));
+  line_count = 0;
+  tfp_wire_options_start(&wire, &options);
+  CHECK(feature(TFP_FEATURE_ARMS, 1, false) && feature(TFP_FEATURE_HOLD, 1, false) && feature(TFP_FEATURE_SMOOTH, 1, false));
+  CHECK(logged("Option: Animated arms: off (test file arms_off.txt beside the DLL; the option on the Locked view tab is on and is not used)"));
+  CHECK(logged("Option: Weapon put-away: off (test file hold_off.txt beside the DLL; the option on the Locked view tab is on and is not used)"));
+  CHECK(logged("Option: Smooth eye: off (test file smooth_off.txt beside the DLL; the option on the Locked view tab is on and is not used)"));
+  flip(F_ARMS); flip(F_HOLD); flip(F_SMOOTH);
+  CHECK(!tfp_locked_view_animated_arms(&wire) && !tfp_locked_view_put_away(&wire) && !tfp_locked_view_smooth_eye(&wire));
+  CHECK(feature(TFP_FEATURE_ARMS, 1, false) && feature(TFP_FEATURE_HOLD, 1, false) && feature(TFP_FEATURE_SMOOTH, 1, false));
+  flip(F_ARMS); flip(F_HOLD); flip(F_SMOOTH);
+  CHECK(tfp_locked_view_animated_arms(&wire) && tfp_locked_view_put_away(&wire) && tfp_locked_view_smooth_eye(&wire));
+  CHECK(feature(TFP_FEATURE_ARMS, 1, false) && feature(TFP_FEATURE_HOLD, 1, false) && feature(TFP_FEATURE_SMOOTH, 1, false) && log_count("Option:") == 3);
+  end_panel();
+
+  /* ---- no settings store (it could not be made): the defaults, on; a missing setter is skipped ---- */
+  new_wire();
+  new_options();
+  options.set[TFP_FEATURE_SMOOTH] = NULL;
+  tfp_wire_options_start(&wire, &options);
+  tfp_wire_options_tick(&wire, &options);
+  CHECK(feature(TFP_FEATURE_ARMS, 1, true) && feature(TFP_FEATURE_HOLD, 1, true) && feature(TFP_FEATURE_SMOOTH, 0, false) && log_count("Option:") == 3);
+  return 0;
+}
+
 int main(void) {
-  if (store_part() || panel_part()) return 1;
+  if (store_part() || panel_part() || options_part()) return 1;
   printf("wire panel: %u checks passed\n", checks);
   return 0;
 }

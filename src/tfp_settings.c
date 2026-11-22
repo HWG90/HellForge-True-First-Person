@@ -744,9 +744,16 @@ static bool load_document(Loader *l) {
   const JNode *locked = jmember(d, root, "locked_view"); /* absent in files from before the locked view: the defaults stay */
   if (locked) {
     if (locked->type != J_OBJECT) return refuse(l, "locked_view", NULL, "expected an object");
+    const bool has_put_away = jmember(d, locked, "put_away") != NULL;
     for (int at = locked->child; at >= 0; at = d->nodes[at].next) {
       const JNode *leaf = &d->nodes[at];
-      int id = tfp_settings_locked(leaf->key);
+      /* The option put_away replaced: its stored value is put_away's, unless the file names put_away itself. */
+      const bool old = !strcmp(leaf->key, TFP_SETTINGS_LOCKED_OLD_PUT_AWAY);
+      if (old && has_put_away) {
+        if (leaf->type != J_TRUE && leaf->type != J_FALSE) return refuse(l, "locked_view", leaf->key, "expected true or false");
+        continue;
+      }
+      int id = old ? (int)TFP_LOCKED_put_away : tfp_settings_locked(leaf->key);
       if (id < 0) return refuse(l, "locked_view", leaf->key, "an unknown option");
       bool is_bool = leaf->type == J_TRUE || leaf->type == J_FALSE;
       if ((!is_bool && leaf->type != J_NUMBER) || !tfp_settings_set_locked(l->s, (TfpSettingsLockedId)id, is_bool, leaf->type == J_TRUE, leaf->number))
