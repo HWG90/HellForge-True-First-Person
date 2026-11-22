@@ -1,84 +1,97 @@
-# True First Person for HellForge: test build 0.6.0-feel.19
+# True First Person for HellForge: test build 0.6.0-feel.24
 
 For HellForge on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
 
 ## Install
 
-Take the **complete** ZIP unless you already run DBF-MCM and NEST for HellForge.
+Take the **complete** ZIP unless you already run NEST for HellForge.
 
 1. Close the game and the HellForge launcher.
-2. Unpack `True-First-Person-0.6.0-feel.19-HellForge-25480438-complete.zip` into HellForge's `mods` folder.
-   It adds three folders:
+2. Unpack the ZIP into HellForge's `mods` folder. It adds:
    - `true-first-person`: the mod.
-   - `mcm`: DBF-MCM 0.1.74-hellforge.3, the settings menu (DEL).
-   - `overlay-host`: NEST 0.8.3-tfp.1, the shared in-game UI the menu and the weapon placement editor
-     (Page Up) draw through.
+   - `overlay-host`: NEST 0.8.3-tfp.1, the shared in-game UI the settings panel and the weapon placement
+     editor draw through.
 3. Switch off any other first-person mod (First Person Controller, First Person + VR Mode, the rig trial).
    Two of them cannot run together.
-4. Start HellForge and check that all three are switched on in the mod list.
+4. Start HellForge and check that both are switched on in the mod list.
 
-If you already have `mcm` or `overlay-host`, keep yours when they are newer and take only
-`true-first-person` (or the smaller `-test.zip`, which holds just the mod). The mod itself starts without
-the other two; you then have F11 and the default settings, but no menu and no editor.
+DBF-MCM is no longer needed. The mod has its own panel.
 
 ## Use
 
 - **F11** switches first person on and off. Use it in a mission, on foot, with a weapon in hand.
-- The settings menu is "True First Person" in DBF-MCM.
+- **F10** opens the settings panel "True First Person" (also in NEST's list, Page Down). Three tabs:
+  First person, Bob and sway, Locked view.
+- **Page Up** opens the weapon placement editor.
 
-## Changed since 0.6.0-feel.18
+## What is new since 0.6.0-feel.19
 
-- **Sleeves and hand grips are off.** They attach armour pieces to the first-person arms and correct the
-  hand's grip every frame. They had never run on this game build before feel.18, and a tester reported the
-  hands doing odd things. In my own captures the hands looked the same with them on and off, so I cannot
-  say this fixes that report; it removes the part I trust least. A file `arms_on.txt` beside the DLL
-  switches them back on.
+- **Locked view.** Once on, the view stays first person through every action: swaps, grenades, stims,
+  emotes, vaults, dives, going prone. Nothing drops to third person any more.
+- **Animated arms.** The first-person arms follow your character's own animation: sprint, reload, ammo
+  check, aiming, melee. A pistol is held in one hand at the hip and in two when you aim.
+- **Weapon put-away.** On a swap, grenade or stim you see the arms put the weapon away before the view
+  goes to the hands.
+- **Smooth eye.** The camera no longer pops when the game changes its own camera. Returning to the weapon
+  after a swap moved the camera 14 to 17 cm in one go before; it is now eased, with 3 to 4 cm at most
+  between two moments.
+- **Field of view lock.** One field of view (80 degrees by default, 50 to 120 in the panel) whatever the
+  weapon or action. "Zoom when aiming" keeps the weapon's own zoom in full aim.
+- **Kicks.** The view tilts a little with what your body does: a dive, a landing, being thrown. Mouse look
+  and recoil do not cause it. Strength and limit are in the panel.
+- **Own settings panel.** F10. Animated arms, Weapon put-away and Smooth eye are options on the Locked
+  view tab and switch while you play.
+- **Dying.** The view is meant to stay at the head as the body falls. See the limits.
 
-## What was checked in the game (2026-11-20, solo missions)
+## What was checked in the game (2026-11-22 and 23, solo missions)
 
-- F11 on and off, also pressed four times within a second.
-- Standing, walking, sprinting, strafing, crouching, diving: the view stays first person.
-- Hip fire, holding aim, firing while aiming, reloading: the view stays first person.
-- Weapon swap, grenade, stim: the view stays first person (see the limits below).
-- The helmet, torso and shoulder pads are hidden from the camera.
-- Most of this list was run on feel.18. On feel.19 I ran two missions (F11, hip, looking down, walking,
-  aiming, rifle and pistol, leaving and quitting), once with sleeves and grips off and once with them on.
-- Leaving a mission with the view on, and quitting the game afterwards.
+A scripted run of 32 actions, each judged by two rules: no frame left first person, and the camera never
+jumped more than 5 cm.
+
+- **Pass:** standing, walking, backing, strafing, sprinting, looking around, crouching, going prone, diving
+  forward and back, standing up, firing, aiming, firing and walking while aiming, reloading, ammo check,
+  swapping to secondary, support and primary, quick swaps, pistol fire, aim and reload, grenade, melee,
+  emote, F11 off and on.
+- **Just over the limit, by 1 cm or less:** stim (6 cm), vault (5.5 cm).
+- **Arms:** recorded moving with the body's arms in idle, walk, sprint, fire and aim; seen in captures on
+  the rifle in sprint, reload and ammo check, and on the pistol.
 
 ## Limits you will see
 
-- **Swap, grenade and stim move the eye.** For these three the game drops its first-person camera for
-  0.3 to 1.5 seconds. The mod keeps you in first person from the character's head during that time, then
-  returns to the weapon view. The return can shift the camera by up to 40 cm.
-- **During those actions you see the character's own arms**, so they are only on screen when they are in
-  front of the eyes. Looking straight ahead you may see just the pistol, the grenade or the stim.
-- **Reloads have no hand animation in the weapon view.** The game's first-person arms are a fixed pose
-  per weapon plus recoil; the game has no first-person reload animation to show.
+- **Grenade and stim with empty hands.** After the put-away the view is from your character's head and
+  the arms are the character's own, so you see them when they pass in front of the eyes.
+- **Dying.** Twice a death was caught in a test run. In 0.6.0-feel.23 the game's own death camera showed
+  for about five seconds. In 0.6.0-feel.24 the view held for the first third of a second and then let go,
+  because the explosion had taken the head off the neck; that rule is relaxed in this build and has not
+  been seen working yet. The view comes back by itself after the respawn.
 - **Holding aim raises the weapon to the shoulder.** Looking through the sight is a separate option
-  ("true native ADS" in the menu) and was not part of this check.
-- **Dying left first person in feel.23.** The game's own camera showed the body for about five seconds.
-  feel.24 keeps the view at the head of the falling body; this has not been seen in the game yet. The few
-  seconds between the body and the new drop pod stay the game's own camera.
-- **The crash while the game closes is guarded.** Build 25480438 has a fault in its own shutdown (it
-  releases some of its tables through the wrong allocator) that crashed about half of my sessions, with or
-  without first person in use. This build skips that faulty release. In 9 sessions since, none produced the
-  crash report; one still ended with an error code and no report. Tell me if you see a crash on quit.
+  ("true native ADS") and was not part of these checks.
+- **The settings panel** was opened and closed in the game, and the options were seen to apply. Nobody has
+  clicked through every row yet.
+- **The crash while the game closes is guarded** (an engine fault of build 25480438, with or without first
+  person). Tell me if you see a crash on quit.
 
 ## Not checked yet
 
-Vehicles and emplacements, multiplayer, stratagem throws and call-ins, picking up items, the placement
-editor, changing settings in the menu while playing, weapons other than a primary rifle, a support weapon
-and a pistol.
+Vehicles and emplacements, multiplayer, stratagem throws and call-ins, picking up items, terminals,
+climbing ladders, the placement editor, weapons other than a rifle, a support weapon and a pistol.
 
 ## Reporting a problem
 
 Send the file `logs/sessions/<newest folder>/mod-goose.true-first-person.log` from the HellForge folder,
 and say what you did in the seconds before it went wrong. A clip helps most.
 
-## Test switches
+## Switches for testing
 
-A file `head_parts.txt` beside the DLL holding one digit chooses which armour parts are hidden from the
-camera: 1 head, 2 torso, 4 shoulder pads, added together (7 is the default). Only for testing.
+Empty files beside the DLL, read when the game starts:
 
-An empty file `arms_on.txt` beside the DLL switches sleeves and hand grips on. Only for testing.
+| File | Effect |
+|---|---|
+| `lock_off.txt` | the locked view, kicks, smooth eye and field-of-view lock off |
+| `arms_off.txt` / `arms_live.txt` | animated arms off / on, whatever the panel says |
+| `hold_off.txt` / `hold_lease.txt` | weapon put-away off / on, whatever the panel says |
+| `smooth_off.txt` | smooth eye off |
+| `trace_off.txt` | no per-frame `Trace:` lines in the log |
+| `mcm_on.txt` | the settings go to DBF-MCM instead of the mod's own panel |
+| `head_parts.txt` | one digit: which armour parts are hidden from the camera (1 head, 2 torso, 4 shoulders, added) |
