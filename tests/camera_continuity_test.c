@@ -248,6 +248,84 @@ int main(void) {
     CHECK(r.travelled < .03f);
     CHECK(r.correction == 0 && fabsf(r.shown[0]) < 1e-4f && fabsf(r.shown[2]-1.5f) < 1e-4f);
   }
+  /* The speed believed when a run's time is over, at every frame time (the check of the soak fixes, 2026-11-22: with
+   * 35 to 70 ms a frame the run holds two jumps when its time ends, and the middle of three alternating flips is a
+   * flip; 0.16 m in a frame while the wanted eye stood, 0.35 to 0.64 m carried).
+   * A flicker between two places is no speed at all: N flips of 0.19 m, then still. While the wanted eye stands no
+   * frame of the presented eye is over 0.06 m, and never more than 0.25 m is carried, flickering or after. With the
+   * world given (the root standing) and without. */
+  {
+    static const float times[] = {4, 8, 16.7f, 33.3f, 40, 50, 66, 100};
+    float worst_still = 0, worst_carried = 0, worst_speed = 0, worst_fast = 0;
+    for (unsigned d = 0; d < sizeof times/sizeof *times; ++d) for (int flips = 2; flips <= 12; ++flips) for (int placed = 0; placed < 2; ++placed) {
+      const float dt = times[d], root[3] = {0, 0, 0}; float eye[3] = {0, .1f, 1.6f}, still = 0, carried = 0;
+      Walk w; begin_walk(&w); start(&r);
+#define FLICKER_FRAME() do { if (placed) walk(&w, eye, root, 0, NATIVE, true, dt); else frame(&r, eye[0], eye[1], eye[2], NATIVE, true, false, dt); } while (0)
+#define FLICKER_OF(member) (placed ? w.member : r.member)
+      for (int i = 0; i < 10; ++i) FLICKER_FRAME();
+      for (int i = 0; i < flips; ++i) { eye[0] = i%2 ? 0 : .19f; FLICKER_FRAME(); if (FLICKER_OF(correction) > carried) carried = FLICKER_OF(correction); }
+      for (int i = 0; i < (int)(1500/dt); ++i) { FLICKER_FRAME();
+        if (FLICKER_OF(step) > still) still = FLICKER_OF(step);
+        if (FLICKER_OF(correction) > carried) carried = FLICKER_OF(correction); }
+      /* What is carried (0.19 m at most) is eased out, and that is the presented eye's own way: 1.3 m/s at its
+       * fastest, which is more than 0.06 m in a frame only at 50 ms a frame and above. */
+      const float allowed = fmaxf(.06f, 1.4f*dt/1000);
+      if (still > allowed || carried > .25f) printf("  flicker, %g ms a frame, %d flips%s: %.3f m in a frame while the wanted eye stands, %.3f m carried\n",
+                                                    (double)dt, flips, placed ? ", world given" : "", (double)still, (double)carried);
+      CHECK(still <= allowed);
+      CHECK(carried <= .25f);
+      if (still/dt > worst_speed) worst_speed = still/dt;
+      if (dt <= 40 && still > worst_fast) worst_fast = still;
+      CHECK(FLICKER_OF(correction) == 0 && fabsf(FLICKER_OF(shown)[0]-eye[0]) < 1e-4f);
+      if (still > worst_still) worst_still = still;
+      if (carried > worst_carried) worst_carried = carried;
+#undef FLICKER_FRAME
+#undef FLICKER_OF
+    }
+    printf("flicker, 4 to 100 ms a frame, 2 to 12 flips: at most %.3f m in a frame while the wanted eye stands (%.3f m up to 40 ms a frame; "
+           "%.2f m/s), %.3f m carried\n", (double)worst_still, (double)worst_fast, (double)worst_speed*1000, (double)worst_carried);
+  }
+  /* A genuine new speed is still believed after the run: the eye starts moving at 3 m/s where jumps are looked for
+   * and keeps moving. The run holds it for its 70 ms (to the frame), then 3 m/s is believed (not less: the next frame
+   * would be a jump again and a second run would hold the eye for another 70 ms), nothing more is taken up, and the
+   * eye has caught up when the longest catch-up is over. Kept from before: 300 ms after the start the presented eye
+   * is behind by no more than what the run held back and 0.04 m, and no frame of it is more than the motion's own
+   * step and three quarters (the catch-up's own speed).
+   * `seat`: the rig re-seated by 0.15 m in the frame the motion begins, the same way and the other way. One frame is
+   * far off and the rest alike; the rest is the speed (the run's way divided by its time would give 5 m/s and 1 m/s). */
+  {
+    static const float times[] = {4, 8, 16.7f, 33.3f, 40, 50, 66, 100};
+    float worst_gap = 0, worst_over = 0, worst_speed = 0;
+    for (unsigned d = 0; d < sizeof times/sizeof *times; ++d) for (int seat = -1; seat <= 1; ++seat) {
+      const float dt = times[d], v = 3, own = v*dt/1000;
+      start(&r);
+      for (int i = 0; i < 10; ++i) frame(&r, 0, 0, 1.6f, NATIVE, true, false, dt);
+      x = seat*.15f; float gap = -1, over = 0, since = 0, last_jump = 0, believed = 0; uint64_t jumps = 0;
+      for (int i = 0; i < (int)(900/dt); ++i) {
+        x += own; since += dt; frame(&r, x, 0, 1.6f, NATIVE, true, false, dt);
+        if (r.c.jumps != jumps) { jumps = r.c.jumps; last_jump = since; }
+        if (r.step-own > over) over = r.step-own;
+        if (gap < 0 && since >= 300) { gap = fabsf(x-r.shown[0]); believed = r.c.speed[0]; }
+      }
+      if (!seat) {
+        /* (below 0.04 m in a frame, and below the measure at 100 ms a frame, nothing is taken up at all) */
+        CHECK(last_jump <= 70+dt);
+        CHECK(fabsf(believed-v) < .05f);
+        CHECK(gap <= v*(70+dt)/1000+.04f);
+        CHECK(over <= .75f*own);
+        if (gap > worst_gap) worst_gap = gap;
+        if (over > worst_over) worst_over = over;
+        printf("  a start at 3 m/s, %g ms a frame: %.3f m behind 300 ms later, %.3f m over the motion's own step of %.3f m\n",
+               (double)dt, (double)gap, (double)over, (double)own);
+      } else {
+        CHECK(fabsf(believed-v) < .3f);
+        if (fabsf(believed-v) > worst_speed) worst_speed = fabsf(believed-v);
+      }
+      CHECK(r.correction == 0 && fabsf(r.shown[0]-x) < 1e-4f);
+    }
+    printf("a start at 3 m/s, 4 to 100 ms a frame: at most %.3f m behind 300 ms later, %.3f m over the motion's own step; with a re-seat "
+           "in its first frame the speed believed is within %.2f m/s\n", (double)worst_gap, (double)worst_over, (double)worst_speed);
+  }
   /* The body root re-seated by itself (seen in the soak of 2026-11-22, 0.6.0-feel.37, 19:45:12.826: a backwards dive
    * begun 170 ms after an entry; the wanted eye went on at its 0.08 m a frame in the world, the presented eye went
    * 0.70 m in that frame and 0.61 m of correction appeared). A step that is a jump in the root's frame only, with the

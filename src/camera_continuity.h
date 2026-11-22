@@ -24,10 +24,11 @@
  *    same direction, is the motion slowing down and is followed, not taken up. Jumps in a row are taken up for
  *    TFP_CONTINUITY_RUN_MS at most (a time, not a number of frames); then the new speed is believed, and the
  *    difference between the two speeds goes into the correction's curve, so the presented eye keeps its speed in
- *    that frame and gathers the new one along the curve. The new speed is the middle one of the run's last frames
- *    (TFP_CONTINUITY_SPEED_FRAMES at most, each axis by itself), never one frame's step alone: the frame the time
- *    runs out in can itself be a jump (seen in the game 2026-11-22: a rig eye going back and forth by 0.19 m from
- *    frame to frame; the last flip, believed as 6 m/s, sent the presented eye off at that speed while the rig stood).
+ *    that frame and gathers the new one along the curve. The new speed is what the run's last frames agree on
+ *    (TFP_CONTINUITY_SPEED_FRAMES at most, each axis by itself: tfp_continuity_believed), never one frame's step
+ *    alone: the frame the time runs out in can itself be a jump (seen in the game 2026-11-22: a rig eye going back
+ *    and forth by 0.19 m from frame to frame; the last flip, believed as 6 m/s, sent the presented eye off at that
+ *    speed while the rig stood). A flicker is no speed at any frame time; a motion that begins and goes on is.
  *  - The catch-up is a cubic with zero end speed whose length follows from the distance, so that its largest
  *    acceleration is ease_accel: sqrt(6 * distance / ease_accel), between min_ms and max_ms. A new jump during a
  *    catch-up starts the curve again from the correction's present value and speed.
@@ -42,7 +43,7 @@ typedef struct TfpContinuityTuning { float pop_m, pop_accel, ease_accel, min_ms,
 #define TFP_CONTINUITY_DEFAULT {.04f, 36.0f, 24.0f, 100.0f, 400.0f, 1.0f, 1.5f}
 #define TFP_CONTINUITY_RUN_MS 70.0   /* jumps in a row are taken up for this long without a change of source */
 #define TFP_CONTINUITY_QUIET_MS 80.0f
-#define TFP_CONTINUITY_SPEED_FRAMES 4u /* the frames whose middle speed is believed when a run's time is over */
+#define TFP_CONTINUITY_SPEED_FRAMES 4u /* the frames looked at for the speed believed when a run's time is over */
 
 typedef struct TfpContinuity {
   bool known, active, moving; /* moving: the wanted eye's speed is known (a step has been seen since the start) */
@@ -92,17 +93,28 @@ static inline void tfp_continuity_begin(TfpContinuity *c, const float *value, co
   for (unsigned i = 0; i < 3; ++i) { c->from[i] = value[i]; c->from_speed[i] = speed[i]; }
   c->started = tick; c->duration = duration_ms; c->active = true;
 }
-/* The middle one of the last `count` frames' speeds along one axis (of two in the middle, their mean). */
-static inline float tfp_continuity_middle(const TfpContinuity *c, unsigned axis, unsigned count) {
-  float sorted[TFP_CONTINUITY_SPEED_FRAMES] = {0};
+/* The speed believed along one axis when a run's time is over, from the last `count` frames' speeds (the run's and
+ * the present one).
+ *  - The frames that count are the newest and those before it for as long as none goes the other way from the one
+ *    after it. An eye that flickers between two places goes back in every frame: the newest stands alone, and one
+ *    frame's step is no speed (0). With two or three flips in the run the middle of all its frames was itself a flip
+ *    (35 to 70 ms a frame: 0.16 m in a frame while the wanted eye stood).
+ *  - Of two frames that agree, the slower; of three or four, the middle. A rig re-seated in the frame a motion
+ *    begins is one frame far off and the rest alike: the rest is the speed. (The run's way divided by its time
+ *    would take the re-seat for speed, and gives 2.7 m/s for an odd number of flips.)
+ *  Believing too little is the safe side: the next frame is then a jump again and the next run settles it. */
+static inline float tfp_continuity_believed(const TfpContinuity *c, unsigned axis, unsigned count) {
+  float sorted[TFP_CONTINUITY_SPEED_FRAMES] = {0}; unsigned agree = 0; float after = 0;
   if (count > TFP_CONTINUITY_SPEED_FRAMES) count = TFP_CONTINUITY_SPEED_FRAMES;
-  if (!count) return 0;
   for (unsigned i = 0; i < count; ++i) {
     const float v = c->recent[(c->recent_at+TFP_CONTINUITY_SPEED_FRAMES-1-i)%TFP_CONTINUITY_SPEED_FRAMES][axis];
+    if (i && v*after < 0) break;
     unsigned at = i; while (at > 0 && sorted[at-1] > v) { sorted[at] = sorted[at-1]; --at; }
-    sorted[at] = v;
+    sorted[at] = v; after = v; agree = i+1;
   }
-  return count & 1 ? sorted[count/2] : (sorted[count/2-1]+sorted[count/2])/2;
+  if (agree < 2) return 0;
+  if (agree == 2) return fabsf(sorted[0]) < fabsf(sorted[1]) ? sorted[0] : sorted[1];
+  return agree & 1 ? sorted[agree/2] : (sorted[agree/2-1]+sorted[agree/2])/2;
 }
 /* One presented frame. `wanted`: the eye the helper would present, in the body's frame. `world`, `basis`: the same
  * eye in the world and the body root's axis rows (wanted = basis times (world - root)), or both NULL where the
@@ -172,6 +184,7 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
   const bool within = !c->run || (tick >= c->run_started && tick-c->run_started <= TFP_CONTINUITY_RUN_MS);
   const bool believe = jump && !within; /* jumps for longer than the run: a new speed, not a re-seated rig */
   const bool take = !quiet && size > 1e-4f && (edge || jump);
+  float gained[3] = {0, 0, 0}; /* where `believe` holds: the speed believed in this frame less the one before, in the root's axes */
   if (take) {
     float next[3], from_speed[3], rate = 0;
     for (unsigned i = 0; i < 3; ++i) { next[i] = value[i]-difference[i]; from_speed[i] = speed[i]; }
@@ -179,12 +192,13 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
     if (length > t->max_m) { for (unsigned i = 0; i < 3; ++i) next[i] *= t->max_m/length; length = t->max_m; }
     if (believe) {
       /* This frame is still taken up, so the presented eye goes on at the old speed; the wanted eye's speed is
-       * now the new one, and the difference of the two goes into the correction's curve. The new one: the middle
-       * of the run's frames and this one, so a frame that is itself a jump does not pass for a speed. */
-      float fresh[3]; for (unsigned i = 0; i < 3; ++i) fresh[i] = tfp_continuity_middle(c, i, c->run+1);
+       * now the new one, and the difference of the two goes into the correction's curve. The new one is what the
+       * run's frames and this one agree on (tfp_continuity_believed): a frame that is itself a jump does not pass
+       * for a speed. */
+      float fresh[3]; for (unsigned i = 0; i < 3; ++i) fresh[i] = tfp_continuity_believed(c, i, c->run+1);
       const float fast = tfp_continuity_length(fresh);
       if (fast > 8) for (unsigned i = 0; i < 3; ++i) fresh[i] *= 8/fast;
-      for (unsigned i = 0; i < 3; ++i) { from_speed[i] += c->speed[i]-fresh[i]; c->speed[i] = fresh[i]; }
+      for (unsigned i = 0; i < 3; ++i) { gained[i] = fresh[i]-c->speed[i]; from_speed[i] -= gained[i]; c->speed[i] = fresh[i]; }
       rate = tfp_continuity_length(from_speed);
     }
     /* The curve's length: its largest acceleration is ease_accel where max_ms allows (6 d / T^2 + 4 v / T). */
@@ -205,7 +219,11 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
   }
   if (world) {
     /* The eye's speed in the world, kept as the one in the root's frame is: a jump taken up leaves it as it was. */
-    if (placed && !(take && !believe)) {
+    if (placed && take && believe) {
+      /* The speed believed after a run is the same eye's in the world too, so what it gained is gained there:
+       * this frame's own step in the world can be a jump as much as in the root's frame. */
+      for (unsigned k = 0; k < 3; ++k) for (unsigned a = 0; a < 3; ++a) c->world_speed[k] += gained[a]*basis[a*3+k];
+    } else if (placed && !take) {
       const float k = seen_size > limit || !was_moving ? 1 : 1-expf(-dt/.05f);
       for (unsigned i = 0; i < 3; ++i) c->world_speed[i] += ((world[i]-c->world[i])/dt-c->world_speed[i])*k;
     }
