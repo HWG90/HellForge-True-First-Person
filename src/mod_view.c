@@ -388,17 +388,21 @@ static void trace_note(void) {
   static const char *const sources[] = {"-", "head", "native", "repeat"};
   for (uint32_t i = 0; i < count; i++) {
     const TfpCameraTraceRow *r = &rows[i];
-    /* root: the body root the eye was measured against; looked: jumps within the camera were looked for; taken:
+    /* root: the body root the eye was measured against, axes: its three axis rows (the soak of 2026-11-22 on feel.39:
+     * a root whose axes turned 0.26 rad in one frame carried the eye 0.18 m, and the lines could not say so); looked:
+     * jumps within the camera were looked for; taken:
      * what the continuity did with the frame (jump, edge: taken up; root: the root alone re-seated, nothing taken
      * up; restart). Without the root a jump of the root cannot be told from a jump of the eye in these lines. */
     char taken[40] = "";
     snprintf(taken, sizeof taken, "%s%s%s%s", r->what & TFP_CAMERA_TRACE_JUMP ? "+jump" : "", r->what & TFP_CAMERA_TRACE_EDGE ? "+edge" : "",
              r->what & TFP_CAMERA_TRACE_ROOT ? "+root" : "", r->what & TFP_CAMERA_TRACE_RESTART ? "+restart" : "");
     say("Trace: t=%.1f kind=%u eye_world=(%.4f %.4f %.4f) step=%.4f wanted=(%.4f %.4f %.4f) correction=%.4f lease=0x%llx pose_armed=%d entry_ease=%.2f source=%s"
-        " root=(%.4f %.4f %.4f) looked=%d taken=%s",
+        " root=(%.4f %.4f %.4f) axes=(%.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f) looked=%d taken=%s",
         (double)r->ms, r->kind, (double)r->eye[0], (double)r->eye[1], (double)r->eye[2], (double)r->step, (double)r->wanted[0], (double)r->wanted[1],
         (double)r->wanted[2], (double)r->correction, lease, (int)(pose.armed != 0), (double)r->entry_ease, sources[r->source < 4 ? r->source : 0],
-        (double)r->root[0], (double)r->root[1], (double)r->root[2], (int)((r->what & TFP_CAMERA_TRACE_LOOKED) != 0), taken[0] ? taken + 1 : "-");
+        (double)r->root[0], (double)r->root[1], (double)r->root[2], (double)r->axes[0], (double)r->axes[1], (double)r->axes[2], (double)r->axes[3],
+        (double)r->axes[4], (double)r->axes[5], (double)r->axes[6], (double)r->axes[7], (double)r->axes[8],
+        (int)((r->what & TFP_CAMERA_TRACE_LOOKED) != 0), taken[0] ? taken + 1 : "-");
   }
 }
 #endif

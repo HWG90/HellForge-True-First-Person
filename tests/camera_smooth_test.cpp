@@ -288,6 +288,9 @@ int main() {
     // the body root the eye was measured against, and what was done with the frame: looked for a jump, took one up
     CHECK(rows[0].root[0] == g.s.root[12] && rows[0].root[1] == g.s.root[13] && rows[0].root[2] == g.s.root[14]);
     CHECK(rows[0].what == (TFP_CAMERA_TRACE_LOOKED | TFP_CAMERA_TRACE_JUMP));
+    // and that root's axes: without them a turn of the root cannot be told from a move of the eye
+    for (int axis = 0; axis < 3; ++axis) for (int k = 0; k < 3; ++k) CHECK(rows[0].axes[axis * 3 + k] == g.s.root[axis * 4 + k]);
+    CHECK(std::fabs(rows[0].axes[0] * rows[0].axes[0] + rows[0].axes[1] * rows[0].axes[1] + rows[0].axes[2] * rows[0].axes[2] - 1) < 1e-4f);
     float eye_distance = 0; for (int i = 0; i < 3; ++i) eye_distance += (rows[0].eye[i] - g.shown[i]) * (rows[0].eye[i] - g.shown[i]);
     CHECK(std::sqrt(eye_distance) < 1e-4f && std::fabs(rows[0].wanted[1] - rows[0].eye[1]) > .15f && rows[0].entry_ease == 1);
     standing(g, 30, 33.3, true, 2);

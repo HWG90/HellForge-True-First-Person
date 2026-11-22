@@ -231,7 +231,7 @@ static struct { bool known; uint32_t mask, kind, weapon, key; double until; } sm
 #define TRACE_RING 128u
 #define TRACE_BEFORE 6u   /* frames before the edge that are written with it */
 #define TRACE_MS 500.0
-typedef struct TraceFrame { double tick; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease, root[3]; uint32_t what; } TraceFrame;
+typedef struct TraceFrame { double tick; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease, root[3]; uint32_t what; float axes[9]; } TraceFrame;
 static struct { TraceFrame frames[TRACE_RING]; uint64_t head, sent; double edge, until; float last[3]; double last_tick; bool last_known, open; } trace;
 /* The native eye is not remembered for its weapon while it is being moved about (set in the native view). */
 static float eye_watch[3]; static bool eye_watch_known; static double eye_unsettled_until;
@@ -1021,7 +1021,7 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
     TraceFrame *row = &trace.frames[trace.head++ % TRACE_RING];
     row->tick = tick; row->kind = kind; row->source = source; memcpy(row->eye, shown, 12); memcpy(row->wanted, wanted, 12);
     row->step = trace.last_known && tick >= trace.last_tick && tick-trace.last_tick <= p->c.max_gap_ms ? distance(shown, trace.last) : 0;
-    row->correction = correction; memcpy(row->root, root, 12); row->what = what;
+    row->correction = correction; memcpy(row->root, root, 12); memcpy(row->axes, root_basis, 36); row->what = what;
     row->entry_ease = p->entry.ease.active && p->entry.ease.duration > 0 ? (float)fmin(1.0, fmax(0.0, (tick-p->entry.ease.started)/p->entry.ease.duration)) : 1;
     if (trace.head-trace.sent > TRACE_RING) trace.sent = trace.head-TRACE_RING;
   }
@@ -1739,7 +1739,7 @@ uint32_t tfp_camera_trace_read(TfpCameraTraceRow *rows, uint32_t capacity) {
     row->ms = (float)(frame->tick-trace.edge); row->kind = frame->kind; row->source = frame->source;
     memcpy(row->eye, frame->eye, 12); memcpy(row->wanted, frame->wanted, 12);
     row->step = frame->step; row->correction = frame->correction; row->entry_ease = frame->entry_ease;
-    memcpy(row->root, frame->root, 12); row->what = frame->what;
+    memcpy(row->root, frame->root, 12); memcpy(row->axes, frame->axes, 36); row->what = frame->what;
   }
   policy_release();
   return count;
