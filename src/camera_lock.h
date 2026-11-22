@@ -19,7 +19,14 @@ static inline TfpQ tfp_kick_step(TfpKick *k, TfpQ view, TfpQ head, float dt, con
   const TfpQ relative = tfp_q_normalised(tfp_q_mul(tfp_q_inv(tfp_q_normalised(view)), tfp_q_normalised(head)));
   if (!k->known) { k->rest = relative; k->view = view; k->known = true; return tfp_q_identity(); }
   /* The view's own turning (the mouse, recoil) moves it against the head: that is not a body movement. */
-  float still = 1 - tfp_degrees_between(view, k->view)/dt/TFP_KICK_VIEW_STILL; k->view = view;
+  /* The turn is read from the vector part of the rotation between the two frames, which is exact for small angles.
+   * Through acos of the dot product one step below 1 reads as 0.04 degrees, and a still view that carries rounding
+   * (it is rebuilt from a matrix every frame) then turns 20 degrees a second at 2 ms a frame: the kick was weaker
+   * and shorter the higher the frame rate. */
+  const TfpQ turn = tfp_q_mul(tfp_q_inv(tfp_q_normalised(k->view)), tfp_q_normalised(view));
+  const float half = sqrtf(turn.x*turn.x+turn.y*turn.y+turn.z*turn.z);
+  const float turned = 2*asinf(half < 1 ? half : 1)*180/TFP_PI;
+  float still = 1 - turned/dt/TFP_KICK_VIEW_STILL; k->view = view;
   if (!(still > 0)) still = 0;
   if (still < 1) k->rest = tfp_slerp(k->rest, relative, 1-still);
   const float settle = t->settle_ms > 1 ? t->settle_ms/1000 : .001f;

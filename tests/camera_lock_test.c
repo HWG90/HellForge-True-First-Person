@@ -56,6 +56,27 @@ int main(void) {
   /* Applying: the view is the game's rotation turned by the kick in its own frame. */
   const TfpQ applied = tfp_kick_apply(camera, about(1, 0, 0, 4));
   CHECK(tfp_degrees_between(applied, tfp_q_mul(camera, about(1, 0, 0, 4))) < .001f);
+  /* The same kick at any frame rate: a view that is still but carries rounding in its last bit (rebuilt every frame
+   * from a matrix) is still. Measured through acos, one step below 1 reads as 0.04 degrees, which at 2 ms a frame is
+   * 20 degrees a second of "turning": the kick came out weaker and gone in three frames at 500 frames a second. */
+  {
+    const TfpKickTuning tune = {1.0f, 8.0f, 300.0f};
+    float sizes[2];
+    for (int noisy = 0; noisy < 2; ++noisy) {
+      TfpKick kick; tfp_kick_reset(&kick);
+      const TfpQ steady = about(0, 0, 1, 37);
+      TfpQ rough = steady; /* the nearest rotation the acos measure tells apart from `steady` */
+      for (int n = 0; n < 4096 && !(tfp_degrees_between(steady, rough) > 0); ++n) { rough.w = nextafterf(rough.w, 0); rough.x = nextafterf(rough.x, 1); }
+      if (!noisy) CHECK(tfp_degrees_between(steady, rough) > .03f);
+      const TfpQ at_rest = tfp_q_mul(steady, about(1, 0, 0, 0)), dipped = tfp_q_mul(steady, about(1, 0, 0, 6));
+      for (int i = 0; i < 50; ++i) tfp_kick_step(&kick, noisy && (i & 1) ? rough : steady, at_rest, .002f, &tune);
+      TfpQ out = tfp_q_identity();
+      for (int i = 0; i < 25; ++i) out = tfp_kick_step(&kick, noisy && (i & 1) ? rough : steady, dipped, .002f, &tune); /* 50 ms into a 6 degree dip */
+      sizes[noisy] = tfp_degrees_between(out, tfp_q_identity());
+    }
+    CHECK(sizes[0] > 4.5f && sizes[0] < 5.5f);            /* 6 degrees less 50 ms of a 300 ms settle */
+    CHECK(fabsf(sizes[1] - sizes[0]) < .15f);
+  }
   printf("camera lock: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }
