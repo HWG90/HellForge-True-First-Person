@@ -256,6 +256,12 @@ int tfp_wire_menu_editor_key(TfpWire *w, int fallback) {
   if (key == 119) return fallback;
   return key >= 1 && key <= 255 ? (int)key : 0;
 }
+bool tfp_wire_menu_key_edge(TfpKeyEdge *edge, int key, bool down) {
+  if (key != edge->key) edge->key = key, edge->held = true;   /* just bound: counted as held until it is seen up */
+  bool pressed = down && !edge->held;
+  edge->held = down;
+  return pressed;
+}
 
 /* ---- callbacks ---- */
 static void put_back(TfpWire *w, Menu *m, const char *id, const TfpMenuValue *previous) {

@@ -63,4 +63,9 @@ void tfp_wire_menu_frame(TfpWire *w);
 /* The two keys (virtual-key codes) as the menu holds them. */
 int tfp_wire_menu_toggle_key(TfpWire *w);
 int tfp_wire_menu_editor_key(TfpWire *w, int fallback);
+/* The press of a bound key, for the caller's poll: true once when `down` turns true. A key that has just become the
+ * bound one (the user pressed it to bind it, so it is still down) does nothing until it has been seen up once.
+ * Zero-initialised to start. */
+typedef struct TfpKeyEdge { int key; bool held; } TfpKeyEdge;
+bool tfp_wire_menu_key_edge(TfpKeyEdge *edge, int key, bool down);
 #endif

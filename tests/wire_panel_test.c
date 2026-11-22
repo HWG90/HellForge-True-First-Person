@@ -818,8 +818,38 @@ static int untouched_part(void) {
   return 0;
 }
 
+/* A key bound in the panel is still down when the game thread first polls it (src/mod_view.c): it must not act
+ * until it has been let go once. */
+static int rebind_part(void) {
+  TfpKeyEdge toggle = {0}, editor = {0};
+  CHECK(bind_panel());
+  /* the keys as they were at the start: an ordinary press acts once, and not again while held */
+  CHECK(tfp_wire_menu_toggle_key(&wire) == 122 && tfp_wire_menu_editor_key(&wire, 33) == 33);
+  CHECK(!tfp_wire_menu_key_edge(&toggle, 122, false) && tfp_wire_menu_key_edge(&toggle, 122, true) && !tfp_wire_menu_key_edge(&toggle, 122, true));
+  CHECK(!tfp_wire_menu_key_edge(&toggle, 122, false) && tfp_wire_menu_key_edge(&toggle, 122, true) && !tfp_wire_menu_key_edge(&toggle, 122, false));
+  CHECK(!tfp_wire_menu_key_edge(&editor, 33, false));
+  /* the toggle key is bound to T: the panel takes the key on its way down, the game thread stores it ... */
+  ov.click = "Change##toggle_key"; draw_frame(); game_update();
+  ov.key = 'T'; draw_frame(); game_update(); ov.key = 0;
+  CHECK(tfp_wire_menu_toggle_key(&wire) == 'T');
+  /* ... and T is still down at the next polls: no toggle. Let go, then pressed: one toggle. */
+  CHECK(!tfp_wire_menu_key_edge(&toggle, tfp_wire_menu_toggle_key(&wire), true));
+  CHECK(!tfp_wire_menu_key_edge(&toggle, 'T', true) && !tfp_wire_menu_key_edge(&toggle, 'T', false));
+  CHECK(tfp_wire_menu_key_edge(&toggle, 'T', true) && !tfp_wire_menu_key_edge(&toggle, 'T', true));
+  /* the editor's key likewise */
+  ov.click = "Change##editor_key"; draw_frame(); game_update();
+  ov.key = 'P'; draw_frame(); game_update(); ov.key = 0;
+  CHECK(tfp_wire_menu_editor_key(&wire, 33) == 'P');
+  CHECK(!tfp_wire_menu_key_edge(&editor, 'P', true) && !tfp_wire_menu_key_edge(&editor, 'P', false) && tfp_wire_menu_key_edge(&editor, 'P', true));
+  /* cleared (0) and bound again while the new key is held: still nothing until it is let go */
+  CHECK(!tfp_wire_menu_key_edge(&editor, 0, false) && !tfp_wire_menu_key_edge(&editor, 'K', true) && !tfp_wire_menu_key_edge(&editor, 'K', false) &&
+        tfp_wire_menu_key_edge(&editor, 'K', true));
+  end_panel();
+  return 0;
+}
+
 int main(void) {
-  if (store_part() || panel_part() || options_part() || untouched_part()) return 1;
+  if (store_part() || panel_part() || options_part() || untouched_part() || rebind_part()) return 1;
   printf("wire panel: %u checks passed\n", checks);
   return 0;
 }
