@@ -64,6 +64,9 @@ static bool mcm_wanted; /* test switch mcm_on.txt: the settings menu in DBF-MCM 
  * switches it on; arms_live_restore.txt makes it put the game's joint values back after every draw instead of
  * leaving them; arm_bend.txt makes it bend one shoulder instead of following the body. */
 static bool arms_live, arms_restore, arms_bend;
+/* Test switch of the action hold (a probe; docs/design/ACTION-CAMERA.md "Action hold"): a file hold_lease.txt beside
+ * the DLL, read once at the start. Without it none of the hold's code is reached. */
+static bool hold_lease;
 static char arms_refusal[200]; /* why the render hook may not go in, as last logged: one line per reason */
 static bool engine_hooked, pose_hook_told[TFP_WIN_POSE_HOOKS];
 static char settings_text[TFP_SETTINGS_MAX];
@@ -285,6 +288,39 @@ static void entry_note(void) {
 #endif
 
 #ifdef TFP_FEEL
+/* ---- the action hold (hold_lease.txt): the binder's two hooks (src/wire.h TfpWireHold) ----------------
+ * Each tick, after the controller decided. The pose helper tolerates an action from the moment a lease runs
+ * (armed), not only once the controller holds: HellForge runs this tick before the game's update, so the game's
+ * first rig write of an action comes before the tick that sees the action. The arm drive follows the hold itself. */
+static void hold_apply(TfpWire *w, bool armed, bool holding) {
+  (void)w;
+  tfp_pose_set_hold(armed || holding);
+  tfp_arm_drive_set_hold(holding);
+}
+static void hold_probe(TfpWire *w, const TfpOpsHold *view, uint32_t weapon_unit, TfpWireHoldProbe *out) {
+  TfpPoseHoldProbe pose;
+  TfpArmDriveProbe rig;
+  (void)w; (void)view;
+  if (tfp_pose_hold_probe(&pose)) out->has_pose = true, out->pose_armed = pose.armed != 0, out->pose_error = pose.error, out->node5_calls = pose.node5_calls;
+  tfp_arm_drive_probe(weapon_unit, &rig);
+  if (!rig.proven) return;
+  out->gun_parent = rig.gun_parent;
+  out->has_camera = rig.has_camera, out->camera_parent_is_rig_eye = rig.camera_parent_is_rig_eye;
+  out->has_eye = rig.has_eye, out->has_rig_eye = rig.has_rig_eye;
+  for (int i = 0; i < 3; i++) out->eye[i] = rig.eye[i], out->rig_eye[i] = rig.rig_eye[i];
+}
+static void hold_start(void) { /* after tfp_wire_init, before on_enable */
+  if (!hold_lease) return;
+  tfp_wire_hold_set(&wire, true);
+  wire.hold.apply = hold_apply, wire.hold.probe = hold_probe;
+  say("Test: hold_lease.txt: action hold probe: while a lease runs, an action (weapon swap, grenade, stim) no longer ends the game's "
+      "first-person camera request as long as that request is still the lease's own (kind 6, same record, same player, not a ragdoll, "
+      "not seated, not full aim, no other camera owner); at most 4000 ms, then today's exit");
+  say("Test: hold_lease.txt: the pose helper keeps its placement through an action; \"Hold:\" lines say what the rig and the camera do; %s",
+      arms_live ? "arms_live.txt is there: the arm drive keeps its binding and puts the game's joint values back after every draw during a hold"
+                : "arms_live.txt is not there: the arm drive is off, so the rig's arms are the game's own during a hold");
+}
+
 /* ---- the arm drive (src/arm_drive.c, src/render_slot.c) ----------------------------------------------
  * Start-up: the switches, and whether the render hook's contract holds (reads only). */
 static void arms_start(void) {
@@ -395,6 +431,10 @@ static void start(void) {
           if (arm_file) fclose(arm_file);
           *arm_switches[i] = arm_file != NULL;
         }
+        strcpy(slash + 1, "hold_lease.txt");
+        FILE *hold_file = fopen(parts_path, "r");
+        if (hold_file) fclose(hold_file);
+        hold_lease = hold_file != NULL;
 #endif
         if (digit >= '1' && digit <= '7') {
           tfp_head_set_parts((unsigned)(digit - '0'));
@@ -420,6 +460,7 @@ static void start(void) {
   measure_reads();
 #ifdef TFP_FEEL
   arms_start();
+  hold_start();
   {
     char where[MAX_PATH + 16], text[360];
     TfpWireFeelParts parts;
