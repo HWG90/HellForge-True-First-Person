@@ -146,3 +146,53 @@ No new kind of write: the keeper's two (retail's), from one more place in the fr
 - **The cut on return is reduced, not removed.** Even a plain swap, where the eye is held the whole time, returned with 0.25 to 0.39 m. The held eye follows the third-person head; the native eye sits on the first-person rig; they differ by the head's own movement in the animation. The `Entry` line gives its direction. Removing it needs either the eased entry (proposal 3; retail found it did not work live on its build) or holding the eye relative to the body instead of the head.
 - **A vault-like action and a dive** return with 0.2 to 0.8 m: the body's height changed in between. Not touched.
 - **Arms.** In the gaps the arms are the third-person body's, seen from the eye. The sleeves and hand grips that cover the native view's arms still refuse at start-up (section 2.2). Moving the third-person arms into view was tried in retail on 2026-11-12 and judged bad (arms sweep through the lens during a swap).
+
+## 6. Action hold (a probe, 2026-11-22; branch `action-hold`)
+
+Built offline; nothing of this section has run in the game.
+
+**The finding.** On a weapon swap and a grenade it is this mod that ends the game's first-person camera request (kind 6), not the game: the snapshot stops being `safe`, `src/controller.c` goes to `manual_wait`, and `tfp_ops_release` calls the game's own exit. During a stim that exit cannot complete and the game keeps kind 6 by itself for about 0.9 s. Since 0.6.0-feel.21 the arm drive copies the body's arm animation onto the first-person rig while kind 6 is shown. If kind 6 stays up through these actions, the rig's arms would play the game's own stow, throw, injection and draw.
+
+**The switch.** A file `hold_lease.txt` beside the DLL, read once at the start (`src/mod_view.c`, like `arms_live.txt`). Without it none of the code below is reached: the controller's hold is off, the pose helper's and the arm drive's hold modes are never set, no line is written. The only difference is one failed `fopen` at the start.
+
+**When a hold begins and continues** (`src/controller.c` `hold_refusal`). A lease is running, the snapshot would make the controller leave the native view ("Gameplay action or camera owns the view" or "Native camera request or firearm changed"), and all of these hold:
+
+- the hold view is available (`tfp_ops_hold_snapshot`: the player snapshot, which needs no weapon; the camera request is the local avatar's);
+- it is the lease's own player;
+- the top camera request is kind 6 and is the lease's own record;
+- the avatar is not a ragdoll, not seated, not in full aim, and no other camera (Photo Mode) owns the view;
+- it is not the case that the player-level snapshot is safe again while another weapon than the lease's is in the hands;
+- the hold is younger than 4000 ms.
+
+No action mask is named: whatever takes `safe` away is held, as long as the request is still ours.
+
+**When it ends.** Resumed, with no exit and no entry: the first update whose full snapshot is safe, has the lease's weapon identity, kind 6 and the lease's record. Today's exit (`manual_wait`, then a new entry when the view is safe again): any of the conditions above fails; the cap; F11; a recovery suspension from the runtime (a camera or field-of-view policy fault). While a hold lasts the controller does not poll the pose helper (the backend's poll retires a lease whose snapshot is unsafe).
+
+**The pose helper** (`tfp_pose_set_hold`). In hold mode the ownership test of an armed lease tolerates any controller byte other than the aim byte, a weapon unit that is no longer live, a changed weapon descriptor and a request that no longer names the weapon, for the same owned record (top request still the lease's, kind 6, same avatar, body and rig, not seated). The binder switches it on from the moment a lease runs, not only during a hold: HellForge's tick comes before the game's update, so the game's first rig write of an action reaches the helper before the tick that sees the action. Off is retail (`tests/run-diff-pose.sh`).
+
+**The arm drive** (`tfp_arm_drive_set_hold`, on only while the controller holds). A gun that is absent or off the rig's socket is not a refusal; a failed full snapshot falls back to the player's; the binding and its entry alignment stay while only the gun differs; the gun's units are refreshed only while the gun is on the rig; the game's joint values are put back after every draw (the retired mod's path for draws and holsters; the reason is in the comment at `tfp_arm_drive_render`).
+
+**Not changed:** `src/camera_helper.c`. In the native view it forwards the game's camera; nothing in the hold needs it to do otherwise. Whether its camera lock and the field-of-view lock behave during a hold is for the first run.
+
+**The log.**
+
+```
+Test: hold_lease.txt: action hold probe: …                       (twice, at the start)
+State: holding the native view through an action
+State: hold ended: <reason>
+Hold: mask=00000002 active=0 byte5=0 kind=6 record_ours=1 request_weapon=912 wielded=913 gun_parent=body
+      camera_parent_is_rig_eye=1 pose_armed=1 pose_error=0 node5_calls=+1 eye=(x y z) rig_eye=(x y z) holding=1 why=…
+```
+
+One `Hold:` line per tick while holding, on the tick of every change of the action flags or of the hold and the ten ticks after it, otherwise one a second while the view is on. `gun_parent` is the lease's gun unit: `rig`, `body`, `other`, `none`. `node5_calls` counts the game's position writes to the rig's node 5 since the line before. `why`: while holding, the exit that is held back; otherwise why the last hold ended, `not held: <reason>` for an exit that was not held, or `resumed: …`.
+
+**What the first run must look at.**
+
+1. Does the game keep kind 6 with the same record through a swap and a grenade once the mod no longer exits (`kind`, `record_ours`), and for how long after the action? If it keeps it forever after a swap, the hold ends with "another weapon is in the hands" and the exit and entry of today follow, later than today.
+2. `wielded` against `request_weapon` during a swap: when does the wield row change, and does the game put the new weapon into the same request?
+3. `gun_parent` and `camera_parent_is_rig_eye`: is the camera still on the rig's eye during the action, and where does the gun go? `eye` against `rig_eye`: do they stay together?
+4. `pose_armed` and `pose_error` on the first tick of an action (7 = owner mismatch would mean the tolerance came too late or another condition failed), and `node5_calls`: does the game keep writing the rig's node 5 during the action?
+5. The `Arms:` line: frames driven during a hold, refusals and their reason (`camera not on the rig's eye` would mean the rig is not what is drawn).
+6. `Fov:`, `Lock:`, `Refused:` and `Cut:` lines around a hold: the field of view and camera policies were not followed through a hold offline. A `State: hold ended: Recovering …` names a policy that ended one.
+7. The stim: is its 0.21 to 0.25 m jump gone, and what do the hands show with nothing in them?
+8. Does anything hang on: after an action, `holding=0` and the `View:` line's `phase=running` with the placement in place.
