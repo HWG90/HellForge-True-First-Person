@@ -1001,23 +1001,32 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
   return correction > 0;
 }
 /* Beyond retail (the camera damping option): in a head-camera frame the eye is at the head, so every movement of the
- * head moves the view. Here the eye follows the head through a low-pass (src/camera_damp.h), in the body root's
- * frame, so the body's own travel is not held back. Only in the ordinary camera's frames (kind 4) of a body on foot
- * that the lock holds: a body that is down or off foot is followed exactly, full aim keeps the sights on the eye, and
- * the native view is the game's own. `eye` is the wanted eye in the world and takes the damped one, before the
- * continuity sees it. True: this frame went through the low-pass; the caller forgets it in every frame that did not,
- * so it starts from the true eye whenever the frame before was not such a frame. */
-static bool lock_damp_eye(Policy *p, uint32_t kind, const float *root, const float *root_basis, double tick, float *eye) {
+ * head moves the view. Here the head's place against the body root (`head`: as the retail smoothing left it, the
+ * point the eye is built on) goes through a low-pass (src/camera_damp.h), in the root's frame, so the body's own
+ * travel is not held back, and the eye is moved by that lag. As with the retail smoothing, the eye's place in front
+ * of and above the head is not filtered: it comes from this frame's view, so turning the view (or the body under
+ * it) does not swing the eye. Only in the ordinary camera's frames (kind 4) of a body on foot that the lock holds:
+ * a body that is down or off foot is followed, full aim keeps the sights on the eye, and the native view is the
+ * game's own. When one of those begins while a lag is carried, the lag is let go over a few frames (40 ms), not in
+ * one, and nothing new is damped meanwhile. `eye` is the wanted eye in the world and takes the damped one, before
+ * the continuity sees it. True: the state is kept for the next frame; the caller forgets it in every frame that
+ * returns false or does not come here, so it starts from the true eye after those. */
+static bool lock_damp_eye(Policy *p, uint32_t kind, const float *root, const float *root_basis, const float *head, double tick, float *eye) {
   const float damp_ms = lock_damp_ms;
-  if (kind != 4 || p->lock_down || p->lock_off_foot || p->full_ads || p->ads_gap_active || !(damp_ms > 0)) return false;
-  float relative[3] = {0}, damped[3] = {0};
+  const bool damp = kind == 4 && !p->lock_down && !p->lock_off_foot && !p->full_ads && !p->ads_gap_active && damp_ms > 0;
+  float relative[3] = {0}, damped[3] = {0}, behind[3] = {0}, lag = 0;
   for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
-    relative[axis] += (eye[component]-root[component])*root_basis[axis*3+component];
-  if (!tfp_finite3(relative)) return false;
-  if (tfp_eye_damp_step(&lock_eye_damp, relative, tick, p->c.max_gap_ms, damp_ms, damped) > 0 && tfp_finite3(damped)) {
-    for (unsigned component = 0; component < 3; ++component) { eye[component] = root[component];
-      for (unsigned axis = 0; axis < 3; ++axis) eye[component] += damped[axis]*root_basis[axis*3+component]; }
-    memcpy(p->last_relative, damped, 12); /* where the eye is shown: what the way into the native view starts from */
+    relative[axis] += (head[component]-root[component])*root_basis[axis*3+component];
+  if (damp) {
+    if (!tfp_finite3(relative)) return false;
+    lag = tfp_eye_damp_step(&lock_eye_damp, relative, tick, p->c.max_gap_ms, damp_ms, damped);
+    for (unsigned axis = 0; axis < 3; ++axis) behind[axis] = damped[axis]-relative[axis];
+  } else if (!((lag = tfp_eye_damp_release(&lock_eye_damp, tick, p->c.max_gap_ms, behind)) > 0)) return false;
+  if (lag > 0 && tfp_finite3(behind)) {
+    for (unsigned component = 0; component < 3; ++component) for (unsigned axis = 0; axis < 3; ++axis)
+      eye[component] += behind[axis]*root_basis[axis*3+component];
+    /* where the eye is shown: what the way into the native view starts from */
+    for (unsigned axis = 0; axis < 3; ++axis) p->last_relative[axis] += behind[axis];
   }
   return true;
 }
@@ -1383,7 +1392,8 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
             uint32_t commit_error = OWNER_MISMATCH;
             if (!commit_current(&policy, kind, &commit_error)) { reset(&policy, false); if (commit_error == READ_FAILED) atomic_store_explicit(&armed, 0, memory_order_release); error(commit_error); }
             else { memcpy(policy.last_relative, relative, 12); policy.last_relative_tick = tick; policy.relative_valid = true;
-              if (policy.lock_now) { float shown[3] = {0}; eye_damped = lock_damp_eye(&policy, kind, root, root_basis, tick, adjusted);
+              if (policy.lock_now) { float shown[3] = {0}; const float smoothed[3] = {head[0]+lag[0], head[1]+lag[1], head[2]+lag[2]};
+                eye_damped = lock_damp_eye(&policy, kind, root, root_basis, smoothed, tick, adjusted);
                 if (smooth_present(&policy, kind, SMOOTH_HEAD, root, root_basis, adjusted, tick, shown)) memcpy(adjusted, shown, 12); }
               memcpy(policy.last_head_world, adjusted, 12);
               if (policy.fallback_safe) policy.last_view_tick = tick; else ++policy.guard_grace_frames;

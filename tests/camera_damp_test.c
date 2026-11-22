@@ -119,6 +119,49 @@ int main(void) {
     CHECK(same(first, again) && !same(first, b));
     CHECK(tfp_eye_damp_step(&d, b, 5392, 250, (float)NAN, out) == 0 && same(out, b) && !d.known); /* a time constant that is not a number: none */
   }
+  /* Letting go (the body leaves 'on foot', full aim begins): the lag that is carried is eased out on 40 ms, whatever
+   * the head does meanwhile, and the state is forgotten once it is gone. */
+  {
+    static const double rates[] = {30, 60, 144};
+    for (int r = 0; r < 3; ++r) {
+      TfpEyeDamp d; tfp_eye_damp_reset(&d);
+      float a[3] = {0, .2f, 1.5f}, b[3] = {.3f, -.2f, 1.5f}, out[3], behind[3] = {9, 9, 9};
+      CHECK(tfp_eye_damp_release(&d, 4990, 250, behind) == 0 && behind[0] == 0 && behind[1] == 0 && behind[2] == 0); /* nothing carried */
+      tfp_eye_damp_step(&d, a, 5000, 250, 300, out);
+      CHECK(tfp_eye_damp_release(&d, 5001, 250, behind) == 0 && !d.known); /* a still head: nothing carried either */
+      tfp_eye_damp_step(&d, a, 5000, 250, 300, out);
+      CHECK(fabsf(tfp_eye_damp_step(&d, b, 5010, 250, 300, out)-TFP_EYE_DAMP_LAG_M) < 1e-5f); /* 0.10 m behind */
+      const float first[3] = {out[0]-b[0], out[1]-b[1], out[2]-b[2]};
+      float last = TFP_EYE_DAMP_LAG_M, at150 = 9; bool gone = false;
+      CHECK(tfp_eye_damp_release(&d, 5010, 250, behind) == last && same(behind, first)); /* the same instant: not dropped */
+      for (int i = 1; i*1000.0/rates[r] <= 400; ++i) {
+        const double ms = i*1000.0/rates[r];
+        const float lag = tfp_eye_damp_release(&d, 5010+ms, 250, behind);
+        CHECK(lag <= last && fabsf(lag-sqrtf(behind[0]*behind[0]+behind[1]*behind[1]+behind[2]*behind[2])) < 1e-6f);
+        if (!gone && lag > 0) CHECK(fabsf(lag-TFP_EYE_DAMP_LAG_M*expf(-(float)ms/TFP_EYE_DAMP_RELEASE_MS)) < 1e-4f
+            && fabsf(behind[0]*first[1]-behind[1]*first[0]) < 1e-6f); /* on the time constant, along the same line */
+        if (lag == 0) { gone = true; CHECK(!d.known); }
+        if (ms <= 150) at150 = lag;
+        last = lag;
+      }
+      CHECK(gone && at150 < .01f);
+    }
+    /* Damping that begins again while the lag is let go starts from where the eye was shown. */
+    TfpEyeDamp d; tfp_eye_damp_reset(&d);
+    float a[3] = {0, .2f, 1.5f}, b[3] = {0, .28f, 1.5f}, c[3] = {.5f, .28f, 1.2f}, out[3], behind[3];
+    tfp_eye_damp_step(&d, a, 5000, 250, 300, out); tfp_eye_damp_step(&d, b, 5010, 250, 300, out);
+    const float lag = tfp_eye_damp_release(&d, 5020, 250, behind);
+    CHECK(lag > .05f && lag < .08f);
+    CHECK(fabsf(tfp_eye_damp_step(&d, c, 5020, 250, 300, out)-lag) < 1e-6f && fabsf(out[0]-(c[0]+behind[0])) < 1e-6f
+        && fabsf(out[1]-(c[1]+behind[1])) < 1e-6f && fabsf(out[2]-(c[2]+behind[2])) < 1e-6f);
+    /* A pause, or a clock that went back, while letting go: forgotten at once. */
+    tfp_eye_damp_step(&d, a, 6000, 250, 300, out); tfp_eye_damp_step(&d, b, 6010, 250, 300, out);
+    CHECK(tfp_eye_damp_release(&d, 6010+251, 250, behind) == 0 && behind[1] == 0 && !d.known);
+    tfp_eye_damp_step(&d, a, 7000, 250, 300, out); tfp_eye_damp_step(&d, b, 7010, 250, 300, out);
+    CHECK(tfp_eye_damp_release(&d, 7000, 250, behind) == 0 && behind[1] == 0 && !d.known);
+    tfp_eye_damp_step(&d, a, 8000, 250, 300, out); tfp_eye_damp_step(&d, b, 8010, 250, 300, out);
+    CHECK(tfp_eye_damp_release(&d, (double)NAN, 250, behind) == 0 && behind[1] == 0 && !d.known);
+  }
   printf("camera damp: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

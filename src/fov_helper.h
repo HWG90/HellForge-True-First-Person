@@ -116,7 +116,9 @@ uint32_t tfp_fov_read_stats(uint64_t generation, TfpFovStats *stats);
 uint32_t tfp_fov_error(void);
 /* Beyond retail: the field-of-view lock (docs/design/specs/2026-11-22-locked-view-design.md part 3). `radians` is
  * what the game's own setter takes; 0 switches the lock off. With `zoom_when_aiming` full aim keeps its own lens. */
-void tfp_fov_set_lock(float radians, bool zoom_when_aiming, double now_ms); /* called every tick: now_ms drives the glide */
+/* Called every tick. The glide runs on the host's `seconds` clock, read in every rendered frame; `now_ms` (any
+ * millisecond clock that keeps going) is only what it falls back on while that clock cannot be read. */
+void tfp_fov_set_lock(float radians, bool zoom_when_aiming, double now_ms);
 typedef struct TfpFovLockStats { uint64_t applied; float game_radians, shown_radians; } TfpFovLockStats;
 void tfp_fov_lock_stats(TfpFovLockStats *out);
 #endif
