@@ -618,3 +618,35 @@ at F11 off; a grenade and a stim while turning the view 0.014 and 0.029 m.
 Not done: in the same dive the presented eye fell up to 1.13 m behind the rig's eye over the next 330 ms (no step
 over 0.2 m): the dive's own acceleration, inside the 600 ms after the entry, read as a run of jumps. With the root in
 the `Trace:` rows the next soak can tell the root's part from the eye's there.
+
+#### After the check of these fixes (2026-11-22, same branch; offline)
+
+An independent check found three gaps; each has tests now (`tests/camera_continuity_test.c`,
+`tests/test_harness_trace.py`).
+
+1. **The middle of a run's frames is itself a flip with two or three flips in the run** (35 to 70 ms a frame: 0.16 m
+   in a frame while the wanted eye stood, 0.35 to 0.64 m carried, as before the fix). The speed believed is now what
+   the run's last frames agree on (`tfp_continuity_believed`, each axis by itself): the newest frame and those before
+   it for as long as none goes the other way from the one after it; one frame alone is no speed, of two the slower,
+   of three or four the middle. The run's way divided by its time was tried and is wrong twice: an odd number of
+   flips ends 0.19 m from where it began (2.7 m/s), and a re-seat in the frame a motion begins counts as speed.
+   Measured, 2 to 12 flips of 0.19 m at 4 to 100 ms a frame: 0.19 m carried at most; at most 0.053 m in a frame
+   while the wanted eye stands up to 40 ms a frame, 0.066 m at 50 ms and 0.088 m at 66 ms. The last two are the
+   catch-up of the 0.19 m itself (1.3 m/s at its fastest, `ease_accel`), not a believed speed, and were left.
+   A start at 3 m/s where jumps are looked for is believed as 3 m/s when the run's 70 ms are over, at every frame
+   time; 300 ms after the start the presented eye is 0.22 to 0.43 m behind (16.7 to 66 ms a frame): the 70 ms held
+   back and a catch-up of 400 ms, as before.
+2. **The root branch of item 1 above misfired on a genuine rig re-seat in a fast turn.** It compared with the eye's
+   speed in the world averaged over 50 ms; that speed turns with the body, and the average's lag passed for the
+   root's part (0.26 m of step change for 0.17 m, the eye 0.8 m ahead of a root turning at 12 rad/s). The root's part
+   is now how far the root itself is off its own even course, seen at the eye: the root follows from the eye in the
+   world and in the root's frame; its course is its turning (last frame's) and its speed (50 ms average), kept in the
+   world or along its own axes, whichever fits the frame better. A root off its course keeps the course for that
+   frame, and what it did is looked at once more in the next: kept, it was a new speed (a throw), not a re-seat.
+   A 0.15 m re-seat in a turn (864 cases: 4 to 100 ms, 0 to 6 m/s, 0 to 12 rad/s, each way) and a body thrown in a
+   turn (72 cases) are now to the millimetre what they are without the root; item 1's tests pass unchanged.
+   That the body root turns with the view is still an assumption; the `root=` in `Trace:` will show it.
+3. **`trace.windows` above 200 frames a second**: every row was under 5 ms after the row just kept, so a window
+   became one row. A row is the same frame again only under 5 ms after that frame's first row and with another kind
+   or the same eye (0.002 m). Left: a change of kind with a moved eye under 5 ms after a frame's first row still
+   reads as that frame set twice.
