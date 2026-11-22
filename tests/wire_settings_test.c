@@ -536,6 +536,19 @@ static int compat_part(void) {
     CHECK(disk_writes[0] == 1 && !disk_writes[1] && disk_copies == 1 && !disk_text("locked_view.json.replaced") && !strcmp(disk_text("locked_view.json"), locked_same));
     CHECK(!strcmp(disk_text("settings.json" TFP_SETTINGS_BEFORE_SPLIT "-2"), partial) && !strcmp(disk_text("settings.json" TFP_SETTINGS_BEFORE_SPLIT), "the first backup"));
     tfp_wire_settings_free(&wire);
+    /* the member and locked_view.json differ in one boolean option and in no number: the member is still the newer
+     * one, the file as it was is kept and written again, and the next start reads the member's value */
+    static const char member_flag[] = "{\"format\":1,\"first_person\":{\"motion_scale\":0.5},\"locked_view\":{\"animated_arms\":true,\"fov_degrees\":77,\"kick_strength\":33}}";
+    static const char locked_flag[] = "{\"format\":1,\"locked_view\":{\"animated_arms\":false,\"fov_degrees\":77,\"kick_strength\":33}}";
+    disk_clear();
+    disk_put("settings.json", member_flag, sizeof member_flag - 1);
+    disk_put("locked_view.json", locked_flag, sizeof locked_flag - 1);
+    CHECK(start_on_disk() && logged("Converted") && !logged("Refused") && logged("newer") && tfp_locked_view_animated_arms(&wire));
+    CHECK(disk_text("locked_view.json.replaced") && !strcmp(disk_text("locked_view.json.replaced"), locked_flag));
+    CHECK(strstr(disk_text("locked_view.json"), "\"animated_arms\": true") && !strstr(disk_text("settings.json"), "locked_view"));
+    tfp_wire_settings_free(&wire);
+    CHECK(start_on_disk() && !logged("Converted") && !logged("Refused") && tfp_locked_view_animated_arms(&wire) && tfp_locked_view_fov_degrees(&wire) == 77);
+    tfp_wire_settings_free(&wire);
     /* .before-feel25 and -2 are taken: -3. A taken name is never written over */
     disk_clear();
     disk_put("settings.json", partial, sizeof partial - 1);
@@ -630,6 +643,19 @@ static int compat_part(void) {
       disk_put("locked_view.json", pending, strlen(pending));
       CHECK(start_on_disk() && logged("Converted") && logged("newer") && tfp_locked_view_fov_degrees(&wire) == 99);
       CHECK(!strcmp(disk_text("locked_view.json.replaced"), pending) && !strstr(disk_text("locked_view.json"), "taken_from_settings"));
+      tfp_wire_settings_free(&wire);
+      /* the older build changed one boolean option and no number: not the member taken either, and it wins */
+      const char *flag = strstr(feel24_text, "\"animated_arms\": false");
+      CHECK(flag != NULL);
+      snprintf(later, sizeof later, "%.*s\"animated_arms\": true%s", (int)(flag - feel24_text), feel24_text, flag + strlen("\"animated_arms\": false"));
+      disk_clear();
+      disk_put("settings.json", later, strlen(later));
+      disk_put("locked_view.json", pending, strlen(pending));
+      CHECK(start_on_disk() && logged("Converted") && logged("newer") && tfp_locked_view_animated_arms(&wire) && tfp_locked_view_fov_degrees(&wire) == 104);
+      CHECK(disk_text("locked_view.json.replaced") && !strcmp(disk_text("locked_view.json.replaced"), pending) &&
+            strstr(disk_text("locked_view.json"), "\"animated_arms\": true") && !strstr(disk_text("locked_view.json"), "taken_from_settings"));
+      tfp_wire_settings_free(&wire);
+      CHECK(start_on_disk() && !logged("Converted") && tfp_locked_view_animated_arms(&wire));
       tfp_wire_settings_free(&wire);
       /* and when that older build wrote the member as it was (nothing changed there): still the one taken */
       disk_clear();
