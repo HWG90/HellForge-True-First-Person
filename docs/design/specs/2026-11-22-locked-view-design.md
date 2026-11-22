@@ -464,3 +464,22 @@ the right hand, as in third person. At a level view the pad sits at the lower ed
 when looking down or walking. Nothing is hidden that should show. A glance down at the pad on opening the list was
 considered and left out: it would move the view against the player's hand.
 
+
+### feel.32 and feel.33 (2026-11-22)
+
+A third review, of the feel.31 fixes themselves (four areas, each finding checked twice): fixed in feel.32 were a
+binding begun again inside a hold never arming the retake of its mid-action alignment, identical numbered settings
+copies at every start of a failing write, and a later build's `locked_view.json` written over without a copy (now
+`locked_view.json.newer`); four test gaps closed. Left as documented: one start of feel.20 to feel.24 resets the
+Locked view options to that build's defaults at the next conversion.
+
+In the game on feel.32: matrix 33 of 35 (ragdoll and death did not run: the stratagem phase left the list open, a
+fault of the phase, now a tap to open and a tap to close); stim while aiming 0.037 m.
+
+Found there and fixed in feel.33: with the view pitched down, the return to the weapon after a swap or after closing
+the stratagem list stepped 0.09 to 0.13 m over two frames. The game re-seats the rig over three frames (0.08 m each)
+about 270 ms after the entry; jumps were looked for during 300 ms only, so the first frame was taken up and the next
+two shown. A run of jumps that begins inside the time is now looked at to its end (bounded by the run's 70 ms).
+In the game on feel.33: level swap and list 0.027 to 0.038 m, pitched down 0.030 to 0.070 m (ten runs); a forced
+death held at the head until the replacement (one frame missed when the avatar is replaced, as before).
+

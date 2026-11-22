@@ -1,4 +1,4 @@
-# True First Person for HellForge: test build 0.6.0-feel.32
+# True First Person for HellForge: test build 0.6.0-feel.33
 
 For HellForge on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
@@ -24,6 +24,12 @@ DBF-MCM is no longer needed. The mod has its own panel.
 - **F10** opens the settings panel "True First Person" (also in NEST's list, Page Down). Three tabs:
   First person, Bob and sway, Locked view.
 - **Page Up** opens the weapon placement editor.
+
+## Fixed in 0.6.0-feel.33
+
+- **Looking down while swapping or closing the stratagem list.** Coming back to the weapon moved the camera 9 to
+  13 cm over two moments when you were looking down. It is now eased: 3 to 7 cm looking down, 3 to 4 cm looking
+  level. Tested in the game.
 
 ## Fixed in 0.6.0-feel.32
 
