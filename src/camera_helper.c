@@ -859,8 +859,7 @@ static bool smooth_parent(Policy *p, float *position, float *parent_basis) {
  * retail sample refuses: a stim). Nothing is read without the lock. */
 static bool smooth_native(Policy *p, const NativeSample *sample, const float *given, uint32_t kind, uint32_t source, double tick, float *adjusted) {
   float local[4] = {0}, root[16] = {0}, position[3] = {0}, parent_basis[9] = {0}, root_basis[9] = {0}, wanted[3] = {0}, shown[3] = {0}; uint64_t matrices = 0;
-  memcpy(local, given, 16);
-  if (!finite3(local)) return false;
+  if (!read((uint64_t)(uintptr_t)given, local, 16) || !finite3(local)) return false;
   if (sample && sample->valid) { memcpy(root, sample->root, 64); memcpy(position, sample->parent_position, 12); memcpy(parent_basis, sample->parent_basis, 36); }
   else if (!pointer(p->body_object + L_UNIT_WORLDS, &matrices) || !read(matrices, root, 64) || !orthonormal(root, root + 4, root + 8) || !finite3(root + 12)
       || !smooth_parent(p, position, parent_basis)) return false;
@@ -1426,12 +1425,14 @@ uint64_t tfp_camera_lock_frames(void) { return atomic_load(&lock_frames); }
 void tfp_camera_set_continuity(bool on, bool trace_frames) { atomic_store(&smooth_on, on ? 1u : 0u); atomic_store(&trace_on, trace_frames ? 1u : 0u); }
 void tfp_camera_continuity_stats(TfpCameraContinuityStats *out) {
   if (!out) return;
+  memset(out, 0, sizeof *out);
+  if (!host.lock_exclusive) return; /* before the host is supplied there is nothing to report */
   policy_acquire();
   out->jumps = smooth.jumps; out->edges = smooth.edges; out->restarts = smooth.restarts; out->largest_m = smooth.largest; smooth.largest = 0;
   policy_release();
 }
 void tfp_camera_trace_edge(void) {
-  if (!atomic_load(&trace_on)) return;
+  if (!atomic_load(&trace_on) || !host.lock_exclusive || !host.now) return;
   policy_acquire();
   const double tick = now();
   trace.edge = tick; trace.until = tick+TRACE_MS; trace.open = true;
@@ -1440,7 +1441,7 @@ void tfp_camera_trace_edge(void) {
 }
 uint32_t tfp_camera_trace_read(TfpCameraTraceRow *rows, uint32_t capacity) {
   uint32_t count = 0;
-  if (!rows || !atomic_load(&trace_on)) return 0;
+  if (!rows || !atomic_load(&trace_on) || !host.lock_exclusive) return 0;
   policy_acquire();
   /* Without an open window nothing is handed out; the frames stay in the ring as the next edge's "before". */
   while (trace.open && count < capacity && trace.sent < trace.head) {

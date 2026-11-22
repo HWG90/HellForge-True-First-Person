@@ -59,6 +59,9 @@ static DWORD tick_thread; /* the game thread, as the tick last saw it */
 static TfpWireFeel feel;
 static TfpFxPlatform fx_platform;
 static bool lock_wanted = true;
+/* Under the camera lock: the eye's continuity (src/camera_continuity.h) and the per-frame "Trace:" lines after each
+ * State edge. Files smooth_off.txt and trace_off.txt beside the DLL switch each off; neither does anything without the lock. */
+static bool smooth_wanted = true, trace_wanted = true;
 static bool mcm_wanted; /* test switch mcm_on.txt: the settings menu in DBF-MCM instead of the mod's own panel */
 /* Test switches of the arm drive (src/arm_drive.h), files beside the DLL read once at the start: arms_live.txt
  * switches it on; arms_live_restore.txt makes it put the game's joint values back after every draw instead of
@@ -275,15 +278,53 @@ static void entry_note(void) {
   if (!countdown || --countdown) return;
   TfpCameraEntryTraceData trace;
   memset(&trace, 0, sizeof trace);
-  if (!tfp_camera_entry_trace(&trace) || trace.count < 2 || trace.rows[0].frame != 0) return;
-  const TfpCameraEntryTraceRow *last = &trace.rows[0], *first = &trace.rows[1];
-  if (!memcmp(told, last->head_world, sizeof told)) return; /* this return came from no head-camera frame: an old record */
-  memcpy(told, last->head_world, sizeof told);
-  const double x = first->camera_world[0] - last->head_world[0], y = first->camera_world[1] - last->head_world[1],
-               z = first->camera_world[2] - last->head_world[2];
-  say("Entry: the eye moved %.3f m (%.3f level, %+.3f up) from the head camera's last frame to the native view's first; "
+  if (!tfp_camera_entry_trace(&trace) || trace.count < 1 || trace.rows[0].frame != 0) return;
+  /* Both points are in the world: the head camera's last eye, and the rig eye the camera becomes a child of on the
+   * native view's first frame (the game's own argument there is within a few centimetres of that node). The camera
+   * unit's own world matrix is not used: on the frames after the link it still holds a world-valued local position
+   * under the rig's transform, which printed the player's distance from the world origin (9 to 36 m, until feel.22). */
+  const TfpCameraEntryTraceRow *first = &trace.rows[0];
+  if (!first->rig_known || !memcmp(told, first->head_world, sizeof told)) return; /* this return came from no head-camera frame: an old record */
+  memcpy(told, first->head_world, sizeof told);
+  const double x = first->rig_world[0] - first->head_world[0], y = first->rig_world[1] - first->head_world[1],
+               z = first->rig_world[2] - first->head_world[2];
+  say("Entry: the native view's eye was %.3f m (%.3f level, %+.3f up) from the head camera's last eye on its first frame; "
       "camera %s the rig on that frame",
-      sqrt(x * x + y * y + z * z), sqrt(x * x + y * y), z, last->linked ? "linked to" : "not yet linked to");
+      sqrt(x * x + y * y + z * z), sqrt(x * x + y * y), z, first->linked ? "linked to" : "not yet linked to");
+}
+#endif
+
+#ifdef TFP_FEEL
+/* The per-frame trace (docs/design/ACTION-CAMERA.md "Trace"): written for the 0.5 s after each State edge (the native
+ * view entered or left, a hold begun or ended) and the six frames before it, from the camera helper's own record of
+ * what it presented. Nothing outside those windows, nothing with trace_off.txt or without the lock.
+ *   t            ms from the edge to the frame's camera call (negative: before it)
+ *   kind         the game's top camera request on that frame
+ *   eye_world    the eye as presented; step: its distance from the frame before
+ *   wanted       the eye before the continuity correction; correction: the length of what is carried
+ *   lease        the controller's native request record (0: none) when the line is written, pose_armed likewise
+ *   entry_ease   the eased entry's progress (1: not easing)
+ *   source       head (the head camera), native (the game's first-person camera), repeat (its last argument repeated) */
+static void trace_note(void) {
+  static bool was_leased, was_holding;
+  if (!lock_wanted || !trace_wanted) return;
+  const bool leased = wire.log.has_lease, holding = wire.controller.holding;
+  if (leased != was_leased || holding != was_holding) tfp_camera_trace_edge();
+  was_leased = leased, was_holding = holding;
+  TfpCameraTraceRow rows[48];
+  const uint32_t count = tfp_camera_trace_read(rows, 48);
+  if (!count) return;
+  TfpPoseHoldProbe pose;
+  memset(&pose, 0, sizeof pose);
+  tfp_pose_hold_probe(&pose);
+  const unsigned long long lease = wire.controller.lease ? (unsigned long long)wire.controller.lease->request : 0;
+  static const char *const sources[] = {"-", "head", "native", "repeat"};
+  for (uint32_t i = 0; i < count; i++) {
+    const TfpCameraTraceRow *r = &rows[i];
+    say("Trace: t=%.1f kind=%u eye_world=(%.4f %.4f %.4f) step=%.4f wanted=(%.4f %.4f %.4f) correction=%.4f lease=0x%llx pose_armed=%d entry_ease=%.2f source=%s",
+        (double)r->ms, r->kind, (double)r->eye[0], (double)r->eye[1], (double)r->eye[2], (double)r->step, (double)r->wanted[0], (double)r->wanted[1],
+        (double)r->wanted[2], (double)r->correction, lease, (int)(pose.armed != 0), (double)r->entry_ease, sources[r->source < 4 ? r->source : 0]);
+  }
 }
 #endif
 
@@ -421,6 +462,14 @@ static void start(void) {
         FILE *lock_file = fopen(parts_path, "r");
         if (lock_file) fclose(lock_file);
         lock_wanted = lock_file == NULL;
+        strcpy(slash + 1, "smooth_off.txt");
+        FILE *smooth_file = fopen(parts_path, "r");
+        if (smooth_file) fclose(smooth_file);
+        smooth_wanted = smooth_file == NULL;
+        strcpy(slash + 1, "trace_off.txt");
+        FILE *trace_file = fopen(parts_path, "r");
+        if (trace_file) fclose(trace_file);
+        trace_wanted = trace_file == NULL;
         strcpy(slash + 1, "mcm_on.txt");
         FILE *mcm_file = fopen(parts_path, "r");
         if (mcm_file) fclose(mcm_file);
@@ -454,6 +503,13 @@ static void start(void) {
   say(lock_wanted ? "Ready: camera lock: the view stays first person through every action and camera of your own character, death included; "
                     "body movement kicks the view (35 %% up to 8 degrees on foot, 70 %% up to 35 when thrown; a file lock_off.txt beside the DLL switches it off)"
                   : "Test: lock_off.txt: the camera lock is off");
+  tfp_camera_set_continuity(lock_wanted && smooth_wanted, lock_wanted && trace_wanted);
+  if (lock_wanted)
+    say(smooth_wanted ? "Ready: eye continuity: while the lock holds the view, a change of camera (head camera, native view) and a one-frame move of the "
+                        "first-person rig are carried as a correction of at most 1 m and eased out over 100 to 400 ms; farther than 1.5 m is shown at "
+                        "once; nothing is taken up in full aim (a file smooth_off.txt beside the DLL switches it off)"
+                      : "Test: smooth_off.txt: eye continuity is off: changes of camera and rig moves are shown as they are");
+  if (lock_wanted && !trace_wanted) say("Test: trace_off.txt: no \"Trace:\" lines after State edges");
   say("Ready: action camera: the head camera also takes the pick-up action (mask 0x%x); the eye is held through %u ms without an action "
       "(a stim) and glides back before the weapon returns; the aim button is read from Windows, again as the script update begins",
       TFP_ACTION_PICKUP_MASK, TFP_ACTION_EYE_IDLE_MS);
@@ -581,6 +637,14 @@ static void lock_note(void) { /* once a second while the view is on: frames by c
       (unsigned long long)(s.frames - told_frames), (unsigned long long)(s.foreign_frames - told_foreign), s.last_kind,
       (unsigned long long)(s.missed - told_missed), s.missed_kind, s.missed_error, (double)s.peak_kick_degrees);
   told_frames = s.frames; told_foreign = s.foreign_frames; told_missed = s.missed;
+  if (smooth_wanted) {
+    static uint64_t told_jumps, told_edges;
+    TfpCameraContinuityStats c; tfp_camera_continuity_stats(&c);
+    if (c.jumps != told_jumps || c.edges != told_edges)
+      say("Smooth: +%llu changes of camera and +%llu rig moves taken up, largest correction %.3f m (%llu restarts so far)",
+          (unsigned long long)(c.edges - told_edges), (unsigned long long)(c.jumps - told_jumps), (double)c.largest_m, (unsigned long long)c.restarts);
+    told_jumps = c.jumps; told_edges = c.edges;
+  }
   static uint64_t told_fov; TfpFovLockStats f; tfp_fov_lock_stats(&f);
   if (f.applied != told_fov) say("Fov: +%llu frames locked; the game asked for %.1f degrees, shown %.1f", (unsigned long long)(f.applied - told_fov),
                                 (double)f.game_radians*57.29578, (double)f.shown_radians*57.29578);
@@ -653,6 +717,7 @@ static void tick_body(void) {
   if (tfp_mod_editor_settled()) tfp_mod_panel_tick(hf, owner, &wire, mcm_wanted, menu_unavailable(), tfp_wire_editor_toggle);
   tfp_wire_frame(&wire, extra);
   entry_note();
+  trace_note();
   tfp_wire_panel_frame(&wire);         /* what the user did in the mod's own panel since the last tick */
   tfp_wire_menu_frame(&wire);          /* the menu's queued buttons and toggles, and the two status rows */
   tfp_wire_settings_save_frame(&wire); /* writes only when the store changed since the last write */
