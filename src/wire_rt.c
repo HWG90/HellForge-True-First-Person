@@ -346,7 +346,15 @@ static void api_hold_view(void *u, const TfpLease *lease, TfpHoldView *out) {
   out->camera_kind = h.player.camera_kind, out->record = h.player.record;
   out->safe = h.player.safe, out->seated = h.player.seated, out->ragdoll = h.ragdoll;
   out->full_aim = h.player.controller_active, out->foreign_camera = h.foreign_camera;
-  out->gun_off_rig = w->hold.gun_off_rig;
+  /* The gun on the rig as it is on this tick, while a hold is on (a hold may begin with the gun already away, as
+   * before). The line's probe runs after the decision and was a tick late: the game moves its camera two frames
+   * after the gun leaves the rig, and the exit has to be out before that. */
+  if (w->controller.holding && w->hold.probe) {
+    TfpWireHoldProbe probe;
+    memset(&probe, 0, sizeof probe);
+    w->hold.probe(w, &h, l ? l->ops.origin.weapon_unit : 0, &probe);
+    out->gun_off_rig = probe.gun_parent && strcmp(probe.gun_parent, "rig") != 0;
+  } else out->gun_off_rig = w->hold.gun_off_rig;
   out->weapon = !h.wielded ? TFP_HOLD_WEAPON_NONE : l && h.wielded == l->ops.origin.weapon ? TFP_HOLD_WEAPON_SAME : TFP_HOLD_WEAPON_OTHER;
 }
 static void api_presentation_transition(void *u, TfpPhasePacket *out) {
@@ -1265,7 +1273,7 @@ void tfp_wire_hold_frame(TfpWire *w) {
   memset(&probe, 0, sizeof probe);
   const TfpWireLease *lease = held(w);
   if (hold->probe) hold->probe(w, proven ? &view : NULL, lease ? lease->ops.origin.weapon_unit : 0, &probe);
-  /* What the controller's next hold view sees: the gun is on the rig, or it is not (one tick behind). */
+  /* What the controller's hold view falls back to when it has no probe of its own (api_hold_view asks the probe on its own tick). */
   hold->gun_off_rig = holding && probe.gun_parent && strcmp(probe.gun_parent, "rig") != 0;
   char line[640];
   tfp_wire_hold_line(w, proven ? &view : NULL, why.present ? why.text : NULL, &probe, probe.node5_calls - hold->node5_calls, line, sizeof line);

@@ -1800,12 +1800,15 @@ static bool still_ours(const TfpOpsSnapshot *after, uint64_t context, uint32_t a
   return after->context == context && after->camera_kind == 6 && after->request_avatar == avatar && after->request_weapon == weapon;
 }
 /* Not in retail (backend_ops.h tfp_ops_set_hold). The top request is the lease's own record, kind 6, for the lease's
- * avatar; only its weapon field is no longer the lease's. A full snapshot cannot be had for it (it refuses a
- * request that names another weapon than the lease's), so the proof is the orphan path's: the player's snapshot,
+ * avatar; a full snapshot cannot be had for it. renamed: its weapon field is no longer the lease's (the full
+ * snapshot refuses a request that names another weapon). Not renamed: the request still names the lease's weapon,
+ * but an action flag is set and the wield row has moved on, so neither the full nor the retiring snapshot is there
+ * (a swap whose hold ended when the gun left the rig); retail's orphan path waits ORPHAN_POLLS polls for this and
+ * the game moves its camera 0.6 m in them (2026-11-22). The proof is the orphan path's: the player's snapshot,
  * the same player and context, and the game's own exit, which takes the context alone. A request the player's own
  * aim took is left to the game, as in retail. A player that cannot be proven is asked again ORPHAN_POLLS times
  * and then given up, with a line, so that a cleanup cannot wait for ever on an avatar that is gone. */
-static TfpOpsResult release_held(TfpOps *b, TfpOpsLease *lease, TfpOpsText *why) {
+static TfpOpsResult release_held(TfpOps *b, TfpOpsLease *lease, bool renamed, TfpOpsText *why) {
   const TfpOpsSnapshot *origin = &lease->origin;
   TfpOpsSnapshot player, after;
   uint32_t mask = 0;
@@ -1837,7 +1840,9 @@ static TfpOpsResult release_held(TfpOps *b, TfpOpsLease *lease, TfpOpsText *why)
   if (after.context == player.context && after.camera_kind == 6 && after.request_avatar == origin->avatar && after.record == lease->request)
     return say(why, TFP_OPS_FALSE, "Native ADS request still present");
   lease->done = true;
-  if (b->host->log) b->host->log(b->host->user, "Hold: owned native camera exit acknowledged; the game had put another weapon into the request");
+  if (b->host->log)
+    b->host->log(b->host->user, renamed ? "Hold: owned native camera exit acknowledged; the game had put another weapon into the request"
+                                        : "Hold: owned native camera exit acknowledged at once, on the player's snapshot (no full snapshot during the action)");
   return say(why, TFP_OPS_TRUE, "Native camera exited");
 }
 TfpOpsResult tfp_ops_release(TfpOps *b, TfpOpsLease *lease, TfpOpsText *why) {
@@ -1861,7 +1866,7 @@ TfpOpsResult tfp_ops_release(TfpOps *b, TfpOpsLease *lease, TfpOpsText *why) {
       top_now.record != lease->request) {
     if (b->hold) { /* not in retail; b->hold false: the three lines below, as they were */
       if (top_now.camera_kind == 6 && top_now.request_avatar == origin->avatar && top_now.record == lease->request)
-        return release_held(b, lease, why);
+        return release_held(b, lease, true, why);
       if (b->host->log) b->host->log(b->host->user, "Hold: lease ended without a native exit: the top camera request is no longer the lease's");
     }
     lease->done = true;
@@ -1872,6 +1877,7 @@ TfpOpsResult tfp_ops_release(TfpOps *b, TfpOpsLease *lease, TfpOpsText *why) {
     have = snapshot(b, false, origin, false, &s);
     if (!have) memcpy(problem, b->why, sizeof problem);
   }
+  if (!have && b->hold) return release_held(b, lease, false, why); /* not in retail; b->hold false: the orphan path below, as it was */
   if (!have) { /* the orphan path, :1420 */
     TfpOpsSnapshot player;
     uint32_t mask = 0;

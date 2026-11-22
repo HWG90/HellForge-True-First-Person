@@ -237,7 +237,9 @@ TfpOpsResult tfp_ops_hold_snapshot(TfpOps *b, TfpOpsHold *out, TfpOpsText *why);
  * also ends a request retail never meets: the lease's own record, still the top request, kind 6, for the lease's
  * avatar, whose weapon field the game rewrote while an action was held. Retail's release calls that "replaced" and
  * is done without an exit, which is right when the mod exits on an action's first tick and wrong after a hold: the
- * request would stay on top with no owner. */
+ * request would stay on top with no owner. And a lease whose own request is still on top with the lease's weapon in
+ * it, for which neither the full nor the retiring snapshot can be had (an action flag is set and the wield row has
+ * moved on), gets the game's exit on the first poll, proven by the player's snapshot, where retail waits four. */
 void tfp_ops_set_hold(TfpOps *b, bool on);
 TfpOpsResult tfp_ops_backpack(TfpOps *b, const TfpOpsSnapshot *s, TfpOpsBackpack *out, TfpOpsText *why); /* TRUE, NIL (none), RAISED */
 TfpOpsResult tfp_ops_camera_only_weapon(TfpOps *b, const TfpOpsSnapshot *s, TfpOpsText *why);
