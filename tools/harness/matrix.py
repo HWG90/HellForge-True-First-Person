@@ -60,6 +60,7 @@ PHASES = {
 }
 LOCK = re.compile(r"Lock: \+(\d+) frames held \(\+(\d+) in another camera, kind now (\d+)\), \+(\d+) missed \(kind (\d+), helper error (\d+)\), largest kick ([\d.]+)")
 CUT = re.compile(r"Cut: largest camera jump ([\d.]+) m")
+POP_M = 0.06   # the presented eye's step may change by this much between two frames (30 a second in the harness)
 
 
 def log_path():
@@ -83,9 +84,18 @@ def judge(lines, toggles=False):
         if "Refused" in line or "State: left" in line or "waiting:" in line:
             notes.append(line.split(" ", 1)[-1].strip()[:140])
     refused = any("Refused" in n for n in notes)
-    ok = held > 0 and missed == 0 and (jump < LIMIT_M or toggles) and not refused   # F11 itself is a cut by design
+    # With the Trace lines (0.6.0-feel.23 on) the judge is the presented eye itself, frame by frame: the Cut line
+    # measures before the eye continuity and calls an eased 0.7 m a jump.
+    import trace as trace_reader
+    pop, traced = 0.0, False
+    for _, rows in trace_reader.windows(lines):
+        steps = [sum((x - y) ** 2 for x, y in zip(a[2], b[2])) ** 0.5 for a, b in zip(rows, rows[1:])]
+        pop = max([pop] + [abs(q - s) for s, q in zip(steps, steps[1:])]); traced = True
+    if traced:
+        jump = pop
+    ok = held > 0 and missed == 0 and (jump < (POP_M if traced else LIMIT_M) or toggles) and not refused   # F11 itself is a cut by design
     return {"pass": ok, "frames": held, "other_camera_frames": other, "missed": missed, "kinds": sorted(kinds),
-            "largest_jump_m": jump, "largest_kick_deg": kick, "notes": sorted(set(notes))[:6]}
+            "largest_jump_m": jump, "from_trace": traced, "largest_kick_deg": kick, "notes": sorted(set(notes))[:6]}
 
 
 def main(argv):
