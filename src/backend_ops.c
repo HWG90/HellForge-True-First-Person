@@ -500,6 +500,7 @@ TfpOpsResult tfp_ops_pin_player_snapshot(TfpOps *b, TfpOpsSnapshot *out, TfpOpsT
 
 /* ---- the action hold's view (not in retail; backend_ops.h) --------------------------------- */
 #define B_AVATAR_PHYSICS UINT32_C(0x547844) /* src/arm_drive.c B_AVATAR_PHYSICS: a byte per avatar, stride 0x78, bit 0x10 = ragdoll */
+void tfp_ops_set_hold(TfpOps *b, bool on) { b->hold = on; }
 TfpOpsResult tfp_ops_hold_snapshot(TfpOps *b, TfpOpsHold *out, TfpOpsText *why) {
   TfpOpsHold h;
   uint8_t physics = 0, entry[20];
@@ -1798,6 +1799,47 @@ TfpOpsResult tfp_ops_detach_seated_camera(TfpOps *b, TfpOpsText *why) {
 static bool still_ours(const TfpOpsSnapshot *after, uint64_t context, uint32_t avatar, uint32_t weapon) {
   return after->context == context && after->camera_kind == 6 && after->request_avatar == avatar && after->request_weapon == weapon;
 }
+/* Not in retail (backend_ops.h tfp_ops_set_hold). The top request is the lease's own record, kind 6, for the lease's
+ * avatar; only its weapon field is no longer the lease's. A full snapshot cannot be had for it (it refuses a
+ * request that names another weapon than the lease's), so the proof is the orphan path's: the player's snapshot,
+ * the same player and context, and the game's own exit, which takes the context alone. A request the player's own
+ * aim took is left to the game, as in retail. A player that cannot be proven is asked again ORPHAN_POLLS times
+ * and then given up, with a line, so that a cleanup cannot wait for ever on an avatar that is gone. */
+static TfpOpsResult release_held(TfpOps *b, TfpOpsLease *lease, TfpOpsText *why) {
+  const TfpOpsSnapshot *origin = &lease->origin;
+  TfpOpsSnapshot player, after;
+  uint32_t mask = 0;
+  bool proven = take(b, TAKE_PLAYER, &player) && tfp_ops_same_player(&player, origin) && player.base == origin->base &&
+                player.context == origin->context && player.camera_kind == 6 && player.record == lease->request;
+  if (proven) memcpy(&mask, player.controller_bytes, 4);
+  if (!proven || mask == 64) {
+    char problem[sizeof b->why];
+    snprintf(problem, sizeof problem, "%s", proven ? "the action does not allow the exit yet" : b->why[0] ? b->why : "the local player changed");
+    if (!proven && ++lease->orphan_polls >= ORPHAN_POLLS) {
+      lease->done = true;
+      if (b->host->log) b->host->log(b->host->user, "Hold: lease ended without a native exit: its request is still on top but the local player is not proven");
+      return say(why, TFP_OPS_TRUE, "Native camera request was replaced");
+    }
+    put(why, "Waiting for the held native request: %s", problem);
+    return TFP_OPS_FALSE;
+  }
+  lease->orphan_polls = 0;
+  if ((player.aiming || player.controller_active) && lease->entry_aim_changed != 1 && lease->entry_controller_changed != 1 &&
+      lease->body_event_aim_changed != 1 && lease->body_event_controller_changed != 1) {
+    lease->done = true;
+    return say(why, TFP_OPS_TRUE, "Player aiming took ownership");
+  }
+  if (!invoke(b, TFP_OPS_EXIT, &player, false, NULL)) {
+    put(why, "Native exit pending: %s", b->why);
+    return TFP_OPS_FALSE;
+  }
+  if (!top_of(b, SCOPE_FULL, &after)) return say(why, TFP_OPS_FALSE, "Native exit readback pending");
+  if (after.context == player.context && after.camera_kind == 6 && after.request_avatar == origin->avatar && after.record == lease->request)
+    return say(why, TFP_OPS_FALSE, "Native ADS request still present");
+  lease->done = true;
+  if (b->host->log) b->host->log(b->host->user, "Hold: owned native camera exit acknowledged; the game had put another weapon into the request");
+  return say(why, TFP_OPS_TRUE, "Native camera exited");
+}
 TfpOpsResult tfp_ops_release(TfpOps *b, TfpOpsLease *lease, TfpOpsText *why) {
   TfpOpsSnapshot top_now, s, after;
   char problem[sizeof b->why];
@@ -1817,6 +1859,11 @@ TfpOpsResult tfp_ops_release(TfpOps *b, TfpOpsLease *lease, TfpOpsText *why) {
   }
   if (top_now.camera_kind != 6 || top_now.request_avatar != origin->avatar || top_now.request_weapon != origin->weapon ||
       top_now.record != lease->request) {
+    if (b->hold) { /* not in retail; b->hold false: the three lines below, as they were */
+      if (top_now.camera_kind == 6 && top_now.request_avatar == origin->avatar && top_now.record == lease->request)
+        return release_held(b, lease, why);
+      if (b->host->log) b->host->log(b->host->user, "Hold: lease ended without a native exit: the top camera request is no longer the lease's");
+    }
     lease->done = true;
     return say(why, TFP_OPS_TRUE, "Native camera request was replaced");
   }

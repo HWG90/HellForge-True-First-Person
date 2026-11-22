@@ -920,6 +920,31 @@ static bool uses_presentation(const OpsRun *r) {
   return false;
 }
 #endif
+/* ---- the held release's host: an exit call that takes the top request off (or not), and its lines ---- */
+static struct { uint64_t queue, exit_context; uint32_t tail; unsigned exits, logs; bool pop, exit_logged, replaced_logged; } held;
+static void poke_bytes(uint64_t at, const void *bytes, size_t size) {
+  for (size_t i = 0; i < size; i++) poke(at + i, ((const uint8_t *)bytes)[i]);
+}
+static void held_push(unsigned above) { /* the ring's tail: `above` records above where the lease began (0: the lease's row is free again) */
+  const uint32_t tail = (held.tail + above) % 32;
+  poke_bytes(held.queue + 4, &tail, 4);
+}
+static bool held_call(void *user, TfpOpsNative which, uint64_t address, const uint64_t args[4], uint64_t *result, TfpOpsText *raised) {
+  (void)user; (void)address; (void)raised;
+  if (which == TFP_OPS_EXIT) {
+    held.exits++, held.exit_context = args[0];
+    if (held.pop) held_push(0);
+  }
+  *result = 1;
+  return true;
+}
+static void held_log(void *user, const char *text) {
+  (void)user;
+  held.logs++;
+  if (strstr(text, "Hold: owned native camera exit acknowledged")) held.exit_logged = true;
+  if (strstr(text, "Hold: lease ended without a native exit")) held.replaced_logged = true;
+}
+
 int main(int argc, char **argv) {
   const char *commit = argc > 1 ? argv[1] : "1d0d453";
   if (strcmp(BACKEND_OPS_VECTOR_COMMIT, commit) || strlen(BACKEND_OPS_VECTOR_SHA256) != 64) {
@@ -1058,6 +1083,82 @@ int main(int argc, char **argv) {
       failures++;
     }
   }
+  unsigned held_releases = 0;
+  { /* the release of a held lease (not in retail): the lease's own record is still the top request, kind 6, for the
+     * lease's avatar, but the game put another weapon into it. Off: retail's answer. On: the game's own exit. */
+    static TfpOpsHost popping;
+    popping = host;
+    popping.log = held_log, popping.call = held_call;
+    popping.foreign_camera = NULL, popping.camera_before_entry = NULL, popping.placement_resolver = NULL, popping.presentation_transition = NULL;
+    for (unsigned n = 0; n < run_count && !failures; n++) {
+      TfpOpsSnapshot full, native_view;
+      static TfpOpsLease lease;
+      TfpOpsText why;
+      const char *wrong = NULL;
+      run = ops_runs + n;
+      memset(&state, 0, sizeof state);
+      state.region.state = 0x1000, state.region.kind = 0x1000000, state.region.protect = 0x20, state.region.allocation = 1;
+      state.region.answered = true;
+      armed_count = 0;
+      first_image();
+      tfp_ops_init(&backend, &popping, NULL, NULL);
+      if (tfp_ops_snapshot(&backend, &full, &why) != TFP_OPS_TRUE || !full.safe || full.camera_kind != 4) continue;
+      /* the lease as enter makes it, and the game's native request in its row */
+      memset(&lease, 0, sizeof lease);
+      lease.origin = full;
+      lease.request = full.context + 0x200 + (uint64_t)full.tail * 0xe8;
+      lease.pose_blend_entry = lease.entry_aim_changed = lease.entry_controller_changed = -1;
+      lease.body_event_aim_changed = lease.body_event_controller_changed = -1;
+      held.queue = full.context + 0x1f8, held.tail = full.tail;
+      const uint32_t header[5] = {6, full.avatar, full.weapon, full.body, 0};
+      poke_bytes(lease.request, header, sizeof header);
+      held_push(1);
+      if (tfp_ops_snapshot(&backend, &native_view, &why) != TFP_OPS_TRUE || native_view.camera_kind != 6 || native_view.record != lease.request)
+        wrong = "the test's native view";
+      const uint32_t other = full.weapon + 1;
+      poke_bytes(lease.request + 8, &other, 4); /* the game renamed the request's weapon during the held action */
+      /* off: retail's branch, no exit */
+      held.exits = held.logs = 0, held.pop = true;
+      if (!wrong && (tfp_ops_release(&backend, &lease, &why) != TFP_OPS_TRUE || strcmp(why.text, "Native camera request was replaced") || !lease.done ||
+                     held.exits || held.logs))
+        wrong = "off: retail's answer, no exit, no line";
+      /* on, the exit does not take: not done, asked again on the next poll */
+      lease.done = false;
+      tfp_ops_set_hold(&backend, true);
+      held.pop = false;
+      if (!wrong && (tfp_ops_release(&backend, &lease, &why) != TFP_OPS_FALSE || lease.done || held.exits != 1 || held.exit_context != full.context))
+        wrong = "on: the game's exit is called and an exit that did not take is not done";
+      /* on, the exit takes */
+      held.pop = true;
+      if (!wrong && (tfp_ops_release(&backend, &lease, &why) != TFP_OPS_TRUE || strcmp(why.text, "Native camera exited") || !lease.done || held.exits != 2 ||
+                     !held.exit_logged))
+        wrong = "on: the game's exit ends the request and the lease is done";
+      /* on, full aim owns the request: the player's, as retail leaves it */
+      lease.done = false, held.exits = 0;
+      held_push(1);
+      poke(full.controller + 4, 1);
+      if (!wrong && (tfp_ops_release(&backend, &lease, &why) != TFP_OPS_TRUE || strcmp(why.text, "Player aiming took ownership") || !lease.done || held.exits))
+        wrong = "on: a request the player's aim took is left alone";
+      poke(full.controller + 4, 0);
+      /* on, the record really is another one: done without an exit, and the line that says so */
+      lease.done = false, held.exits = held.logs = 0, held.replaced_logged = false;
+      const uint32_t another[5] = {6, full.avatar, full.weapon, full.body, 0};
+      poke_bytes(full.context + 0x200 + (uint64_t)((full.tail + 1) % 32) * 0xe8, another, sizeof another);
+      held_push(2);
+      if (!wrong && (tfp_ops_release(&backend, &lease, &why) != TFP_OPS_TRUE || strcmp(why.text, "Native camera request was replaced") || !lease.done ||
+                     held.exits || !held.replaced_logged))
+        wrong = "on: a replaced record ends the lease without an exit and says so";
+      if (wrong) {
+        fprintf(stderr, "held release, run %s: %s (\"%s\")\n", run->name, wrong, why.present ? why.text : "");
+        failures++;
+      }
+      held_releases++;
+    }
+    if (!held_releases && !failures) {
+      fprintf(stderr, "held release: no run starts with a safe full snapshot of the normal camera\n");
+      failures++;
+    }
+  }
   if (failures) {
     fprintf(stderr, "%u runs differ from retail\n", failures);
     return 1;
@@ -1072,5 +1173,7 @@ int main(int argc, char **argv) {
          object, run_count - skipped, steps, calls, BACKEND_OPS_VECTOR_COMMIT, natives, writes, skipped, presentation);
   printf("Backend operations, hold view (not in retail): on %u first images: the player with a firearm, in an action, with empty hands, as a ragdoll\n",
          hold_worlds);
+  printf("Backend operations, held release (not in retail): on %u first images: off as retail; on, the game's exit for the lease's own record "
+         "whose weapon the game renamed, an exit that did not take, the player's aim, a replaced record\n", held_releases);
   return 0;
 }

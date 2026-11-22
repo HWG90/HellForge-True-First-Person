@@ -481,6 +481,7 @@ int main(void) {
     tfp_wire_init(&off, &memory, &platform, &helpers);
     off.hold.apply = hold_apply, off.hold.probe = hold_probe;
     CHECK(tfp_wire_call(&off, TFP_RT_E_on_enable, NULL, r) == TFP_RT_OK && !off.controller.hold_enabled && !tfp_wire_hold_on(&off));
+    CHECK(!off.ops.hold); /* the backend's release is retail's */
     line_count = 0, hold_applies = hold_probes = 0;
     off.controller.enabled = true, off.controller.holding = true;
     tfp_wire_frame(&off, NULL);
@@ -493,6 +494,7 @@ int main(void) {
     tfp_wire_hold_set(&on, true);
     on.hold.apply = hold_apply, on.hold.probe = hold_probe;
     CHECK(tfp_wire_call(&on, TFP_RT_E_on_enable, NULL, r) == TFP_RT_OK && on.controller.hold_enabled && tfp_wire_hold_on(&on));
+    CHECK(on.ops.hold); /* the backend made by on_enable ends a held request whose weapon the game renamed */
     line_count = 0;
     tfp_wire_frame(&on, NULL);
     CHECK(hold_applies == 1 && !hold_armed && !hold_holding && !logged("Hold:")); /* the view is off: the hooks hear "no", nothing is written */

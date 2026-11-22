@@ -492,6 +492,7 @@ static bool near_clock(void *u, double *seconds, const char **error) {
 static bool rt_backend_new(TfpRtHost *h) {
   TfpWire *w = W(h);
   tfp_ops_init(&w->ops, &w->ops_host, NULL, w->pose_helper ? w->pose_helper : &w->null_pose);
+  if (w->hold.on) tfp_ops_set_hold(&w->ops, true); /* the action hold probe; off without its switch file */
   return true;
 }
 static bool rt_backend_begin_frame(TfpRtHost *h) { tfp_ops_begin_frame(&W(h)->ops); return true; }
@@ -1208,6 +1209,7 @@ void tfp_wire_init(TfpWire *w, const TfpOpsHost *memory, const TfpWirePlatform *
 void tfp_wire_hold_set(TfpWire *w, bool on) {
   w->hold.on = on;
   tfp_controller_set_hold(&w->controller, on); /* a controller made later takes it in rt_controller_new */
+  tfp_ops_set_hold(&w->ops, on);               /* and a backend made later in rt_backend_new */
 }
 bool tfp_wire_hold_on(const TfpWire *w) { return w->hold.on; }
 void tfp_wire_hold_line(const TfpWire *w, const TfpOpsHold *view, const char *unproven, const TfpWireHoldProbe *probe, uint64_t node5_delta,
