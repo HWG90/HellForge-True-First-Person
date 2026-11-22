@@ -114,6 +114,13 @@ typedef struct TfpSettings {
   bool locked_in_settings;                      /* the settings.json last loaded had a "locked_view" member (feel.20 to feel.24) */
   uint32_t locked_named;                        /* bit per TfpSettingsLockedId: the option that member named and gave a value this build took */
   char locked_skipped[160];                     /* what the last load of either file skipped in the locked view's options; "": nothing */
+  /* locked_view.json's "taken_from_settings" member: the options settings.json's own "locked_view" member named, with
+   * the values they had when locked_view.json was written from it and settings.json could not yet be written without
+   * it. tfp_settings_load_locked reads it (locked_taken: the file had one), tfp_settings_write_locked writes it while
+   * locked_taken is set. Whoever owns the store decides when (src/wire_settings.c). */
+  bool locked_taken;
+  uint32_t locked_taken_named;                  /* bit per TfpSettingsLockedId */
+  TfpSettingsMenuValue locked_taken_values[TFP_LOCKED_COUNT];
 } TfpSettings;
 
 const char *tfp_settings_field_name(TfpSettingsField field);
@@ -132,7 +139,8 @@ bool tfp_settings_defaults(TfpSettings *s);
 bool tfp_settings_load(TfpSettings *s, const char *json, size_t n, char *why, size_t why_size);
 void tfp_settings_free(TfpSettings *s);
 /* The text of locked_view.json, {"format": 1, "locked_view": {option: value, ...}}, over what *s holds (a loaded
- * store or the defaults). An option the text does not name keeps its value; a name this build does not know is
+ * store or the defaults). A "taken_from_settings" object beside it is read into s->locked_taken* (see there; what it
+ * holds that this build cannot read is skipped without a note, and it changes no option). An option the text does not name keeps its value; a name this build does not know is
  * skipped (s->locked_skipped lists them). false: `why` says what was wrong (not JSON, no "locked_view" object, a
  * known option of the wrong type) and no option changed. settings.json's own "locked_view" member is read with the
  * same rules, except that nothing in it refuses settings.json: a wrong type is skipped as well. */

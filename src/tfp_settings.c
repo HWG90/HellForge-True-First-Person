@@ -825,6 +825,14 @@ bool tfp_settings_load_locked(TfpSettings *s, const char *json, size_t n, char *
     if (!options || options->type != J_OBJECT) snprintf(problem, sizeof problem, "locked_view: expected an object");
     else ok = load_locked_options(&d, options, s, true, NULL, problem, sizeof problem);
     /* Any other member (a later build's) is left alone: "format" is written for such a build to tell by. */
+    const JNode *taken = ok ? jmember(&d, &d.nodes[0], "taken_from_settings") : NULL;
+    s->locked_taken = false, s->locked_taken_named = 0;
+    if (taken && taken->type == J_OBJECT) {
+      TfpSettings scratch = *s; /* only its locked options and its notes are written, and neither is kept */
+      load_locked_options(&d, taken, &scratch, false, &s->locked_taken_named, NULL, 0);
+      memcpy(s->locked_taken_values, scratch.locked, sizeof s->locked_taken_values);
+      s->locked_taken = true;
+    }
   }
   jfree(&d);
   if (!ok && why && why_size) snprintf(why, why_size, "%s", problem);
@@ -955,18 +963,30 @@ size_t tfp_settings_write(const TfpSettings *s, char *out, size_t size) {
   if (out && size) out[w.used < size ? w.used : size - 1] = 0;
   return w.used;
 }
-size_t tfp_settings_write_locked(const TfpSettings *s, char *out, size_t size) {
-  Writer w = {out, size, 0};
+/* The members of one object of locked options, sorted by name: those `named` has a bit for. */
+static void put_locked_options(Writer *w, const TfpSettingsMenuValue *values, uint32_t named) {
   const char *names[TFP_LOCKED_COUNT];
-  put(&w, "{\n \"format\": 1,\n \"locked_view\": {");
+  bool first = true;
   for (int i = 0; i < TFP_LOCKED_COUNT; i++) names[i] = locked_info[i].name;
   qsort(names, TFP_LOCKED_COUNT, sizeof *names, compare_names);
   for (int i = 0; i < TFP_LOCKED_COUNT; i++) {
-    const TfpSettingsMenuValue *v = &s->locked[tfp_settings_locked(names[i])];
-    put(&w, i ? ",\n  " : "\n  ");
-    put_string(&w, names[i]);
-    put(&w, ": ");
-    if (v->is_bool) put(&w, v->boolean ? "true" : "false"); else put_number(&w, v->number);
+    const int id = tfp_settings_locked(names[i]);
+    const TfpSettingsMenuValue *v = &values[id];
+    if (!(named >> id & 1)) continue;
+    put(w, first ? "\n  " : ",\n  ");
+    first = false;
+    put_string(w, names[i]);
+    put(w, ": ");
+    if (v->is_bool) put(w, v->boolean ? "true" : "false"); else put_number(w, v->number);
+  }
+}
+size_t tfp_settings_write_locked(const TfpSettings *s, char *out, size_t size) {
+  Writer w = {out, size, 0};
+  put(&w, "{\n \"format\": 1,\n \"locked_view\": {");
+  put_locked_options(&w, s->locked, ~UINT32_C(0));
+  if (s->locked_taken) {
+    put(&w, "\n },\n \"taken_from_settings\": {");
+    put_locked_options(&w, s->locked_taken_values, s->locked_taken_named);
   }
   put(&w, "\n }\n}\n");
   if (out && size) out[w.used < size ? w.used : size - 1] = 0;

@@ -458,13 +458,13 @@ static int compat_part(void) {
     disk_put("settings.json", feel24_text, strlen(feel24_text));
     CHECK(start_on_disk() && !logged("Refused") && logged("Converted: settings.json was written by 0.6.0-feel.20 to feel.24"));
     CHECK(locked_as_feel24() && !tfp_wire_settings_unsaved(&wire));
-    CHECK(disk_writes[0] == 1 && disk_writes[1] == 1 && disk_copies == 1 && disk_count() == 3);
+    CHECK(disk_writes[0] == 1 && disk_writes[1] == 2 && disk_copies == 1 && disk_count() == 3); /* locked_view.json twice: with the member it was taken from until settings.json is written, then without */
     CHECK(!strcmp(disk_text("settings.json" TFP_SETTINGS_BEFORE_SPLIT), feel24_text));   /* the backup: the file as it was */
     CHECK(!strcmp(disk_text("settings.json"), feel19_text));                             /* byte for byte the old file without the member */
     CHECK(strstr(disk_text("locked_view.json"), "\"fov_degrees\": 104") && strstr(disk_text("locked_view.json"), "\"animated_arms\": false") &&
           strstr(disk_text("locked_view.json"), "\"kick_strength\": 55"));
     for (int i = 0; i < 3; i++) tfp_wire_settings_save_frame(&wire);
-    CHECK(disk_writes[0] == 1 && disk_writes[1] == 1 && disk_copies == 1);               /* once, and not again by the save frame */
+    CHECK(disk_writes[0] == 1 && disk_writes[1] == 2 && disk_copies == 1);               /* once, and not again by the save frame */
     /* the placements: every saved table of the converted file is the one of the file as it was */
     TfpSettings before, after;
     memset(&before, 0, sizeof before), memset(&after, 0, sizeof after);
@@ -486,7 +486,7 @@ static int compat_part(void) {
     tfp_wire_settings_free(&wire);
     /* the next start: nothing to convert, the options come from locked_view.json */
     CHECK(start_on_disk() && !logged("Converted") && !logged("Refused") && locked_as_feel24());
-    CHECK(disk_writes[0] == 1 && disk_writes[1] == 1 && disk_copies == 1 && disk_count() == 3);
+    CHECK(disk_writes[0] == 1 && disk_writes[1] == 2 && disk_copies == 1 && disk_count() == 3);
     tfp_wire_settings_free(&wire);
     /* 0.6.0-feel.24 is run once more and writes its member back (with other values); then this build again: the
      * member is the newer one and wins for what it names, locked_view.json takes those values (the file as it was is
@@ -500,12 +500,12 @@ static int compat_part(void) {
     CHECK(start_on_disk() && logged("Converted") && !logged("Refused"));
     CHECK(locked_as_feel24());                                                            /* 104 and the rest as the older build just wrote them */
     CHECK(logged("kept as settings.json" TFP_SETTINGS_BEFORE_SPLIT "-2") && logged("locked_view.json.replaced"));
-    CHECK(disk_writes[0] == 1 && disk_writes[1] == 1 && disk_copies == 2 && !strcmp(disk_text("settings.json" TFP_SETTINGS_BEFORE_SPLIT), "the first backup"));
+    CHECK(disk_writes[0] == 1 && disk_writes[1] == 2 && disk_copies == 2 && !strcmp(disk_text("settings.json" TFP_SETTINGS_BEFORE_SPLIT), "the first backup"));
     CHECK(disk_text("settings.json" TFP_SETTINGS_BEFORE_SPLIT "-2") && !strcmp(disk_text("settings.json" TFP_SETTINGS_BEFORE_SPLIT "-2"), feel24_text));
     CHECK(disk_text("locked_view.json.replaced") && !strcmp(disk_text("locked_view.json.replaced"), older_locked));
     CHECK(!strcmp(disk_text("settings.json"), feel19_text) && strstr(disk_text("locked_view.json"), "\"fov_degrees\": 104") && !tfp_wire_settings_unsaved(&wire));
     for (int i = 0; i < 3; i++) tfp_wire_settings_save_frame(&wire);
-    CHECK(disk_writes[0] == 1 && disk_writes[1] == 1 && disk_copies == 2);
+    CHECK(disk_writes[0] == 1 && disk_writes[1] == 2 && disk_copies == 2);
     tfp_wire_settings_free(&wire);
     /* the next start: nothing to convert, and the values the older build wrote are the ones in use */
     CHECK(start_on_disk() && !logged("Converted") && !logged("Refused") && locked_as_feel24() && disk_copies == 2);
@@ -592,10 +592,100 @@ static int compat_part(void) {
     CHECK(!strcmp(disk_text("locked_view.json.replaced"), "an earlier one") && !strcmp(disk_text("locked_view.json.replaced-2"), locked_two));
     tfp_wire_settings_free(&wire);
   }
+  { /* ---- a conversion that did not finish, a locked option changed in that session, the next start: the member in
+     * settings.json is then the one this build already took, not a newer one, and the change stays ---- */
+    static const char partial[] = "{\"format\":1,\"first_person\":{\"motion_scale\":0.5},\"locked_view\":{\"fov_degrees\":104}}";
+    static const char locked_two[] = "{\"format\":1,\"locked_view\":{\"fov_degrees\":77,\"kick_strength\":33}}";
+    char name[64], pending[2000];
+    /* settings.json cannot be written at the conversion */
+    disk_clear();
+    disk_put("settings.json", feel24_text, strlen(feel24_text));
+    disk_fail_write = TFP_SETTINGS_FILE;
+    CHECK(start_on_disk() && logged("Refused: settings.json still holds") && strstr(disk_text("locked_view.json"), "\"fov_degrees\": 104"));
+    CHECK(tfp_wire_settings_locked_set(&wire, TFP_LOCKED_fov_degrees, false, false, 90.5));
+    tfp_wire_settings_save_frame(&wire);
+    CHECK(logged("Saved: locked view options") && strstr(disk_text("locked_view.json"), "\"fov_degrees\": 90.5"));
+    /* the file says which member it was taken from, beside "locked_view" where 0.6.0-feel.25 to feel.30 leave it alone */
+    CHECK(strstr(disk_text("locked_view.json"), "\n \"taken_from_settings\": {") && strstr(strstr(disk_text("locked_view.json"), "taken_from_settings"), "\"fov_degrees\": 104"));
+    snprintf(pending, sizeof pending, "%s", disk_text("locked_view.json"));
+    tfp_wire_settings_free(&wire);
+    disk_fail_write = -1;
+    disk_writes[0] = disk_writes[1] = 0;
+    CHECK(start_on_disk() && logged("Converted") && !logged("Refused") && !logged("Note") && !logged("newer"));
+    CHECK(tfp_locked_view_fov_degrees(&wire) == 90.5 && tfp_locked_view_kick_strength(&wire) == 55);
+    CHECK(!disk_text("locked_view.json.replaced") && !strcmp(disk_text("settings.json"), feel19_text) && disk_writes[0] == 1);
+    CHECK(strstr(disk_text("locked_view.json"), "\"fov_degrees\": 90.5") && !strstr(disk_text("locked_view.json"), "taken_from_settings"));
+    tfp_wire_settings_free(&wire);
+    CHECK(start_on_disk() && !logged("Converted") && tfp_locked_view_fov_degrees(&wire) == 90.5 && disk_writes[0] == 1);
+    tfp_wire_settings_free(&wire);
+    /* the same unfinished state, and an older build runs before the next start and writes the member with another
+     * value: that member is not the one taken, it is the newer one and wins, and the file it replaces is kept */
+    {
+      char later[TFP_SETTINGS_MAX];
+      const char *at = strstr(feel24_text, "\"fov_degrees\": 104");
+      CHECK(at != NULL);
+      snprintf(later, sizeof later, "%.*s\"fov_degrees\": 99%s", (int)(at - feel24_text), feel24_text, at + strlen("\"fov_degrees\": 104"));
+      disk_clear();
+      disk_put("settings.json", later, strlen(later));
+      disk_put("locked_view.json", pending, strlen(pending));
+      CHECK(start_on_disk() && logged("Converted") && logged("newer") && tfp_locked_view_fov_degrees(&wire) == 99);
+      CHECK(!strcmp(disk_text("locked_view.json.replaced"), pending) && !strstr(disk_text("locked_view.json"), "taken_from_settings"));
+      tfp_wire_settings_free(&wire);
+      /* and when that older build wrote the member as it was (nothing changed there): still the one taken */
+      disk_clear();
+      disk_put("settings.json", feel24_text, strlen(feel24_text));
+      disk_put("locked_view.json", pending, strlen(pending));
+      CHECK(start_on_disk() && logged("Converted") && !logged("newer") && tfp_locked_view_fov_degrees(&wire) == 90.5 && !disk_text("locked_view.json.replaced"));
+      tfp_wire_settings_free(&wire);
+    }
+    /* the conversion finishes and the record cannot be taken out of locked_view.json: one note, and the next save of
+     * the locked options takes it out */
+    disk_clear();
+    disk_put("settings.json", feel24_text, strlen(feel24_text));
+    disk_put("locked_view.json", pending, strlen(pending));
+    disk_fail_write = TFP_LOCKED_FILE;
+    CHECK(start_on_disk() && logged("Converted") && logged("Note: locked_view.json still names the settings.json member it was taken from (disk full)"));
+    CHECK(!strcmp(disk_text("locked_view.json"), pending) && !strcmp(disk_text("settings.json"), feel19_text) && tfp_locked_view_fov_degrees(&wire) == 90.5);
+    disk_fail_write = -1;
+    for (int k = 0; k < 3; k++) tfp_wire_settings_save_frame(&wire);
+    CHECK(!disk_writes[1]);
+    CHECK(tfp_wire_settings_locked_set(&wire, TFP_LOCKED_fov_degrees, false, false, 92));
+    tfp_wire_settings_save_frame(&wire);
+    CHECK(disk_writes[1] == 1 && strstr(disk_text("locked_view.json"), "\"fov_degrees\": 92") && !strstr(disk_text("locked_view.json"), "taken_from_settings"));
+    tfp_wire_settings_free(&wire);
+    /* all nine copy names taken, the member differs from locked_view.json: refused with nothing written, start after start */
+    disk_clear();
+    disk_put("settings.json", partial, sizeof partial - 1);
+    disk_put("settings.json" TFP_SETTINGS_BEFORE_SPLIT, "1", 1);
+    for (int n = 2; n <= 9; n++) { snprintf(name, sizeof name, "settings.json" TFP_SETTINGS_BEFORE_SPLIT "-%d", n); disk_put(name, "n", 1); }
+    disk_put("locked_view.json", locked_two, sizeof locked_two - 1);
+    const unsigned files = disk_count();
+    CHECK(start_on_disk() && logged("are all taken; move them away") && tfp_locked_view_fov_degrees(&wire) == 104);
+    CHECK(!disk_writes[0] && !disk_writes[1] && !disk_copies && disk_count() == files && !strcmp(disk_text("locked_view.json"), locked_two));
+    CHECK(tfp_wire_settings_locked_set(&wire, TFP_LOCKED_fov_degrees, false, false, 90));
+    tfp_wire_settings_save_frame(&wire);
+    CHECK(disk_writes[1] == 1 && !strcmp(disk_text("locked_view.json.replaced"), locked_two) && strstr(disk_text("locked_view.json"), "\"fov_degrees\": 90"));
+    tfp_wire_settings_free(&wire);
+    for (int start = 0; start < 3; start++) { /* the change stays, no further copy is made, and each session's change is kept */
+      disk_writes[0] = disk_writes[1] = disk_copies = 0;
+      CHECK(start_on_disk() && logged("are all taken; move them away") && tfp_locked_view_fov_degrees(&wire) == 90 + start);
+      CHECK(tfp_locked_view_kick_strength(&wire) == 33 && !disk_writes[0] && !disk_writes[1] && !disk_copies && disk_count() == files + 1);
+      CHECK(tfp_wire_settings_locked_set(&wire, TFP_LOCKED_fov_degrees, false, false, 91 + start));
+      tfp_wire_settings_save_frame(&wire);
+      CHECK(disk_writes[1] == 1 && !disk_copies && disk_count() == files + 1 && !strcmp(disk_text("settings.json"), partial));
+      tfp_wire_settings_free(&wire);
+    }
+    /* the names are moved away: converted, the last change in use, the record gone */
+    for (int n = 2; n <= 9; n++) { snprintf(name, sizeof name, "settings.json" TFP_SETTINGS_BEFORE_SPLIT "-%d", n); struct DiskFile *f = disk_find(name); free(f->text), f->text = NULL; }
+    CHECK(start_on_disk() && logged("Converted") && !logged("newer") && tfp_locked_view_fov_degrees(&wire) == 93);
+    CHECK(!strcmp(disk_text("settings.json" TFP_SETTINGS_BEFORE_SPLIT "-2"), partial) && !strstr(disk_text("settings.json"), "locked_view") &&
+          !strstr(disk_text("locked_view.json"), "taken_from_settings") && !disk_text("locked_view.json.replaced-2"));
+    tfp_wire_settings_free(&wire);
+  }
   { /* ---- a step of the conversion fails: one line, the session runs on the loaded values, settings.json is not touched ---- */
     static const struct { int fail_write; int fail_copy; const char *why; bool locked_written, backup; } failures[] = {
-      {TFP_LOCKED_FILE, 0, "locked_view.json could not be written: disk full", false, false},
-      {-1, 1, "settings.json could not be copied to settings.json.before-feel25: access denied", true, false},
+      {TFP_LOCKED_FILE, 0, "locked_view.json could not be written: disk full", false, true},
+      {-1, 1, "settings.json could not be copied to settings.json.before-feel25: access denied", false, false}, /* the copy comes first: nothing written */
       {TFP_SETTINGS_FILE, 0, "which 0.6.0-feel.19 and older cannot read: disk full", true, true},
     };
     for (size_t i = 0; i < COUNT(failures); i++) {
@@ -618,7 +708,7 @@ static int compat_part(void) {
         disk_fail_copy = 0;
         CHECK(tfp_wire_settings_menu_set(&wire, TFP_MENU_motion_strength, false, false, 140));
         tfp_wire_settings_save_frame(&wire);
-        CHECK(disk_writes[0] == 1 && disk_writes[1] == 1 && !strcmp(disk_text("settings.json" TFP_SETTINGS_BEFORE_SPLIT), feel24_text));
+        CHECK(disk_writes[0] == 1 && disk_writes[1] == 2 && !strcmp(disk_text("settings.json" TFP_SETTINGS_BEFORE_SPLIT), feel24_text));
         CHECK(!strstr(disk_text("settings.json"), "locked_view") && strstr(disk_text("settings.json"), "\"motion_strength\": 140") &&
               strstr(disk_text("locked_view.json"), "\"fov_degrees\": 104") && !tfp_wire_settings_unsaved(&wire));
         tfp_wire_settings_free(&wire);
