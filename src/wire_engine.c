@@ -1172,13 +1172,30 @@ static int io_backpack(void *user, const TfpVisSnapshot *s, TfpHeadBackpack *out
   out->identity.len += 20;
   return 1;
 }
+/* Beyond retail (the camera lock; tfp_wire_engine_set_held_body). Head hiding wants the on-foot animation state in
+ * the ordinary camera. While the camera helper holds the head camera on this snapshot's body off foot (thrown,
+ * dead), the eye is inside the helmet all the same: the helper's own proof of the body, made in the frame it
+ * replaced, stands in for the action state's owner and the on-foot answer. */
+static uint32_t (*held_body)(void);
+void tfp_wire_engine_set_held_body(uint32_t (*body)(void)) { held_body = body; }
+static bool held_off_foot(const TfpOpsSnapshot *ops) {
+  const uint32_t body = held_body ? held_body() : 0;
+  return body && ops && ops->body == body;
+}
 static bool io_action_state(void *user, const TfpVisSnapshot *s, TfpHeadActionState *out) {
   St *st = user;
   const TfpOpsSnapshot *ops = recalled(st, s);
   TfpOpsAction *action = &st->actions[st->action_next++ % 4];
   TfpOpsText text;
   TfpOpsSnapshot owner;
-  if (!ops || tfp_ops_action_state(&st->w->ops, ops, action, &text) != TFP_OPS_TRUE) return false;
+  if (!ops) return false;
+  if (tfp_ops_action_state(&st->w->ops, ops, action, &text) != TFP_OPS_TRUE) {
+    if (!held_off_foot(ops)) return false;
+    identity_of(&out->owner, 'P', tfp_ops_player_key(ops)); /* an action state that cannot be read on a body in physics */
+    out->body = ops->body;
+    out->native = NULL;
+    return true;
+  }
   /* action.owner is the player identity it was read for (action_state.lua:110): the same key from the same fields. */
   memset(&owner, 0, sizeof owner);
   owner.base = action->owner_base, owner.context = action->owner_context, owner.camera = action->owner_camera, owner.world = action->owner_world;
@@ -1194,6 +1211,7 @@ static bool io_action_state(void *user, const TfpVisSnapshot *s, TfpHeadActionSt
 static int io_on_foot(void *user, const TfpVisSnapshot *s, const TfpHeadActionState *state) {
   St *st = user;
   const TfpOpsSnapshot *ops = recalled(st, s);
+  if (held_off_foot(ops)) return 1;
   return ops && state->native && tfp_ops_on_foot(&st->w->ops, ops, state->native) ? 1 : 0;
 }
 /* A closure runtime.lua gave the module (rt:687-696): 1 true, 0 any other answer, -1 it raised. */

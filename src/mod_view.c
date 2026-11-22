@@ -33,7 +33,7 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "render_slot.h"
 #include "arm_drive.h"
 #include "wire_options.h"
-#define TFP_VIEW_VERSION "0.6.0-feel.23"
+#define TFP_VIEW_VERSION "0.6.0-feel.24"
 #else
 #include "wire_win.h"
 #include "wire_action.h"
@@ -545,6 +545,9 @@ static void start(void) {
   tfp_camera_set_action_tuning(TFP_ACTION_PICKUP_MASK, TFP_ACTION_EYE_IDLE_MS, TFP_ACTION_EYE_RETURN);
   /* The camera lock (docs/design/specs/2026-11-22-locked-view-design.md): first person through every action and camera. */
   tfp_camera_set_lock(lock_wanted, .35f, 8.0f, 300.0f, .7f, 35.0f);
+#ifdef TFP_FEEL
+  tfp_wire_engine_set_held_body(tfp_camera_lock_off_foot_body); /* head hiding stays on while the lock holds a body that is off foot */
+#endif
   say(lock_wanted ? "Ready: camera lock: the view stays first person through every action and camera of your own character, death included; "
                     "body movement kicks the view (35 %% up to 8 degrees on foot, 70 %% up to 35 when thrown; a file lock_off.txt beside the DLL switches it off)"
                   : "Test: lock_off.txt: the camera lock is off");
@@ -682,10 +685,27 @@ static void lock_note(void) { /* once a second while the view is on: frames by c
                       (float)tfp_locked_view_kick_max_degrees(&wire), 300.0f, (float)(tfp_locked_view_thrown_kick_strength(&wire)/100), 35.0f);
   TfpCameraLockStats s; tfp_camera_lock_stats(&s);
   if (s.frames == told_frames && s.missed == told_missed) return;
+  /* The kind and error are the last missed frame's: 0 in a second without one. tools/harness/matrix.py reads this line. */
+  const bool missed = s.missed != told_missed;
   say("Lock: +%llu frames held (+%llu in another camera, kind now %u), +%llu missed (kind %u, helper error %u), largest kick %.1f degrees",
       (unsigned long long)(s.frames - told_frames), (unsigned long long)(s.foreign_frames - told_foreign), s.last_kind,
-      (unsigned long long)(s.missed - told_missed), s.missed_kind, s.missed_error, (double)s.peak_kick_degrees);
+      (unsigned long long)(s.missed - told_missed), missed ? s.missed_kind : 0, missed ? s.missed_error : 0, (double)s.peak_kick_degrees);
+  if (s.last_kind != 6 && (s.off_foot || s.ragdoll) && s.frames != told_frames)
+    say("Body: off foot %u, ragdoll flag %u, head %.2f m from its root (the last head-camera frame the lock held)", s.off_foot, s.ragdoll, (double)s.head_distance);
+  if (missed) say("Missed: kind %u, helper error %u (%s); the body on the last frame held: off foot %u, ragdoll flag %u, head %.2f m from its root",
+                  s.missed_kind, s.missed_error, tfp_camera_why_text(s.missed_why), s.off_foot, s.ragdoll, (double)s.head_distance);
   told_frames = s.frames; told_foreign = s.foreign_frames; told_missed = s.missed;
+  /* While the body is down under the lock (physics has it: thrown or dead; camera_helper.h TfpCameraDownStats). */
+  static uint64_t told_down, told_refused; TfpCameraDownStats d; tfp_camera_down_stats(&d);
+  if (d.frames != told_down || d.refused != told_refused) {
+    char reason[200];
+    if (d.refused != told_refused) snprintf(reason, sizeof reason, "helper error %u: %s", d.error,
+                                            d.kind == 0xffff ? "the camera record is not the player's" : tfp_camera_why_text(d.why));
+    else snprintf(reason, sizeof reason, "none; ragdoll flag %u, off foot %u, head %.2f m from its root", d.ragdoll, d.off_foot, (double)d.head_distance);
+    say("Dead: kind=%u head=(%.3f %.3f %.3f) frames=+%llu refused=+%llu (%s)", d.kind, (double)d.head[0], (double)d.head[1], (double)d.head[2],
+        (unsigned long long)(d.frames - told_down), (unsigned long long)(d.refused - told_refused), reason);
+    told_down = d.frames; told_refused = d.refused;
+  }
   if (smooth_wanted) {
     static uint64_t told_jumps, told_edges;
     TfpCameraContinuityStats c; tfp_camera_continuity_stats(&c);

@@ -89,6 +89,11 @@ size_t tfp_wire_engine_second(TfpWire *w, char *out, size_t size);
  * has written bones or hidden a hand. Reads only. */
 unsigned tfp_wire_engine_held(const TfpWire *w);
 TfpWireEngineState tfp_wire_engine_state(const TfpWire *w, TfpWireEngineModule module);
+/* Beyond retail (the camera lock). `body` answers the reference of the body whose head the camera helper is
+ * holding the head camera at while it is off foot (thrown, dead), or 0 (tfp_camera_lock_off_foot_body). For that
+ * body head hiding takes the on-foot answer as yes, so the helmet, torso and shoulders stay hidden around the eye.
+ * NULL (the default): retail's answers. Process-wide. */
+void tfp_wire_engine_set_held_body(uint32_t (*body)(void));
 
 /* The 27 Vector3 / Quaternion / Matrix4x4 value functions, computed here on 32-bit floats with the
  * engine's conventions (Quaternion.multiply(second, first); Matrix4x4.multiply(a, b) is a, then b).
