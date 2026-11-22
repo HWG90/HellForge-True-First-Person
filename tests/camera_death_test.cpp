@@ -276,6 +276,37 @@ int main() {
     if (!armed) CHECK(tfp_camera_error() == 16);
     else g.end();
   }
+  // ---- 8. A death that does not set the ragdoll flag: off foot, the head still in walking range (1.7 m) while the
+  // game's camera circles the corpse, then beyond 3 m (4.3 m at rest). While the head is in range the direction is
+  // the game's (a dive looks the same); once the body is down it is the last first-person one, not the direction
+  // the game's corpse camera happened to have, and it gets there without a step. ----
+  {
+    fresh(true);
+    Game g; g.stand(3, -2, .5f); g.alive(first);
+    g.s.state = 50; // no ragdoll flag
+    float orbit = first;
+    for (int i = 0; i < 15; ++i) { // 0.5 s: the head 1.7 m from the root, the game's camera turning 4 degrees a frame
+      orbit += .07f; g.head(3.4f, -1.6f, 2.0f); g.look(orbit); g.hip(3.7f); g.frame();
+      CHECK(g.own && g.error == 0);
+    }
+    CHECK(degrees(g.out, yaw_q(orbit)) < .5f && degrees(yaw_q(orbit), yaw_q(first)) > 55);
+    TfpCameraDownStats down0{}; tfp_camera_down_stats(&down0); CHECK(down0.frames == 0);
+    Q last = g.out; float worst = 0;
+    for (int i = 0; i < 45; ++i) {
+      const float t = i < 10 ? (i + 1) / 10.0f : 1;
+      orbit += .07f; g.head(3.4f + 3.8f * t, -1.6f + .2f * t, 2.0f - 1.3f * t); g.look(orbit); g.hip(3.7f); g.frame();
+      CHECK(g.own && g.error == 0);
+      if (degrees(g.out, last) > worst) worst = degrees(g.out, last);
+      last = g.out;
+    }
+    CHECK(degrees(g.out, yaw_q(first)) < .5f); // the direction before death
+    CHECK(g.from_head(first) < .07f);          // and the eye placed along it
+    CHECK(worst < 30);                         // 88 degrees apart when the body is down: never in one frame
+    TfpCameraLockStats lock{}; tfp_camera_lock_stats(&lock);
+    CHECK(lock.ragdoll == 0 && lock.off_foot == 1 && lock.head_distance > 4.0f);
+    TfpCameraDownStats down{}; tfp_camera_down_stats(&down); CHECK(down.frames > 30 && down.refused == 0);
+    g.end();
+  }
   std::printf("camera death: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

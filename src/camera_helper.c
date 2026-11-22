@@ -191,6 +191,10 @@ static TfpKick lock_kick; static TfpQ lock_view = {0, 0, 0, 1}, lock_last_kick =
 #define LOCK_DOWN_MS 1000.0   /* a refused frame this long after a down frame still counts as the down body's */
 #define LOCK_OFF_FOOT_MS 250.0
 static TfpQ lock_carry = {0, 0, 0, 1}; static bool lock_was_held; static double lock_down_until;
+/* lock_first: the last first-person direction: the view of the last native (kind 6) frame or ordinary (kind 4) frame
+ * on foot. Not lock_view, which is the view last shown and follows the game's camera on a body that is off foot but
+ * not yet known to be down (a death that does not set the ragdoll flag, until the head is 3 m away). Policy lock. */
+static TfpQ lock_first = {0, 0, 0, 1}; static bool lock_first_known;
 static _Atomic uint64_t lock_down_frames, lock_down_refused, lock_off_foot_at;
 static _Atomic uint32_t lock_missed_why, lock_down_kind, lock_down_error, lock_down_why, lock_body_ragdoll, lock_body_off_foot, lock_off_foot_body;
 static _Atomic uint32_t lock_body_distance, lock_down_distance, lock_down_head[3]; /* floats as their bits */
@@ -854,8 +858,13 @@ static bool commit_current(Policy *p, uint32_t expected_kind, uint32_t *failure)
  * that is not the game's first-person or ordinary one (a death camera) the direction is the last first-person one.
  * `native` + L_ARGUMENT_ROTATION is the rotation the game passes next: world for an unparented camera, parent-local
  * in the native view (kind 6), where a rotation in the view's own frame is applied the same way. */
+static TfpQ lock_carry_step(float passed_ms) {
+  if (lock_carry.w == 1 && lock_carry.x == 0 && lock_carry.y == 0 && lock_carry.z == 0) return lock_carry;
+  const TfpQ next = tfp_slerp(lock_carry, tfp_q_identity(), 1-expf(-passed_ms/LOCK_CARRY_MS));
+  return tfp_q_valid(next) && tfp_degrees_between(next, tfp_q_identity()) > .05f ? tfp_q_normalised(next) : tfp_q_identity();
+}
 static void lock_rotation(Policy *p, const float *native, uint32_t kind, double tick) {
-  if (!p->lock_now) { lock_view_known = false; tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity(); lock_carry = tfp_q_identity(); lock_was_held = false; return; }
+  if (!p->lock_now) { lock_view_known = false; tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity(); lock_carry = tfp_q_identity(); lock_was_held = false; lock_first_known = false; return; }
   float *argument = (float *)(uintptr_t)native + L_ARGUMENT_ROTATION/4;
   TfpQ given = tfp_q_identity(), view = tfp_q_identity(), head = tfp_q_identity(); float matrix[16] = {0}; uint64_t matrices = 0;
   const bool foreign = kind != 4 && kind != 6;
@@ -872,7 +881,14 @@ static void lock_rotation(Policy *p, const float *native, uint32_t kind, double 
     view = tfp_q_normalised(tfp_q_mul(tfp_q_normalised(rendered), tfp_q_inv(lock_last_kick)));
     lock_carry = tfp_q_identity(); lock_was_held = false;
   } else if (held) {
-    if (lock_view_known) view = lock_view;
+    const float passed = lock_tick > 0 && tick > lock_tick ? (float)(tick-lock_tick) : 0;
+    if (lock_first_known) {
+      /* Coming from frames that showed the game's direction off foot, the difference is carried and eased out. */
+      if (!lock_was_held) lock_carry = lock_view_known ? tfp_q_normalised(tfp_q_mul(tfp_q_inv(lock_first), lock_view)) : tfp_q_identity();
+      else lock_carry = lock_carry_step(passed);
+      view = tfp_q_normalised(tfp_q_mul(lock_first, lock_carry));
+    }
+    else if (lock_view_known) view = lock_view;
     else if (foreign) return;
     else view = given;
     lock_was_held = true;
@@ -883,13 +899,12 @@ static void lock_rotation(Policy *p, const float *native, uint32_t kind, double 
     lock_was_held = false;
     view = given;
     if (lock_carry.w != 1 || lock_carry.x != 0 || lock_carry.y != 0 || lock_carry.z != 0) {
-      const float passed = lock_tick > 0 && tick > lock_tick ? (float)(tick-lock_tick) : 0;
-      const TfpQ next = tfp_slerp(lock_carry, tfp_q_identity(), 1-expf(-passed/LOCK_CARRY_MS));
-      lock_carry = tfp_q_valid(next) && tfp_degrees_between(next, tfp_q_identity()) > .05f ? tfp_q_normalised(next) : tfp_q_identity();
+      lock_carry = lock_carry_step(lock_tick > 0 && tick > lock_tick ? (float)(tick-lock_tick) : 0);
       view = tfp_q_normalised(tfp_q_mul(given, lock_carry));
     }
   }
   lock_view = view; lock_view_known = true;
+  if (kind == 6 || (kind == 4 && !held && !p->lock_off_foot)) { lock_first = view; lock_first_known = true; }
   const float dt = lock_tick > 0 && tick > lock_tick ? (float)(tick-lock_tick)/1000 : 0; lock_tick = tick;
   TfpQ kick = tfp_q_identity();
   if (pointer(p->body_object + L_UNIT_WORLDS, &matrices) && read(matrices + (uint64_t)p->head_node*L_MATRIX, matrix, 64) && tfp_matrix_q(matrix, &head)) {
@@ -1627,7 +1642,7 @@ void tfp_camera_reset_for_tests(void) {
   atomic_store(&lock_missed_why, 0); atomic_store(&lock_down_frames, 0); atomic_store(&lock_down_refused, 0); atomic_store(&lock_down_kind, 0);
   atomic_store(&lock_down_error, 0); atomic_store(&lock_down_why, 0); atomic_store(&lock_body_ragdoll, 0); atomic_store(&lock_body_off_foot, 0);
   atomic_store(&lock_off_foot_body, 0); atomic_store(&lock_off_foot_at, 0); atomic_store(&lock_body_distance, 0); atomic_store(&lock_down_distance, 0);
-  lock_carry = tfp_q_identity(); lock_was_held = false; lock_down_until = 0; lock_view_known = false; lock_tick = 0; tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity();
+  lock_carry = tfp_q_identity(); lock_was_held = false; lock_down_until = 0; lock_view_known = false; lock_first_known = false; lock_tick = 0; tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity();
   memset(&smooth, 0, sizeof smooth); memset(&trace, 0, sizeof trace); eye_watch_known = false; eye_unsettled_until = 0;
   memset(&smooth_watch, 0, sizeof smooth_watch); atomic_store(&smooth_event, 0);
   atomic_store(&original, 0);

@@ -225,6 +225,11 @@ Built, all of it only in frames the lock holds (`src/camera_helper.c`; lock off:
 - Head hiding (`src/wire_engine.c`): while the helper holds the head camera on the snapshot's body off foot, the
   on-foot answer is yes, and an action state that cannot be read is replaced by the snapshot's own owner. The
   helmet, torso and shoulders stay hidden around the eye.
+- The held direction is kept apart from the view last shown (`lock_first`): it is taken only from native (kind 6)
+  frames and ordinary (kind 4) frames on foot. Off foot with the head in walking range and no ragdoll flag (a dive,
+  or the start of a death that does not set the flag) the game's direction is shown but not remembered; when the
+  body then counts as down the view turns to the remembered direction over 120 ms, the same ease as the turn back
+  after a survived ragdoll.
 - Log: `Dead: kind=4 head=(x y z) frames=+N refused=+M (reason)` once a second while the body is down;
   `Body:` (off foot, ragdoll flag, head distance) while the lock holds an off-foot body; `Missed:` with the proof
   that refused (`tfp_camera_why_text`) in any second with a missed frame; `Lock:` shows kind 0, error 0 with
@@ -234,13 +239,19 @@ Built, all of it only in frames the lock holds (`src/camera_helper.c`; lock off:
 
 Offline: `tests/run-camera-death.sh` (through the helper on the fake game memory: a death thrown 4.3 m, held
 direction, at-rest eye, the same without the lock, a head away from its neck, off foot in walking range, an
-unreadable animation instance, a survived ragdoll, the thrown kick, arming on a thrown body).
+unreadable animation instance, a survived ragdoll, the thrown kick, arming on a thrown body, a death without the
+ragdoll flag whose head leaves walking range only later while the game's camera circles).
 
 **The first death in the game must check:**
 
 1. `Dead:` lines from the first second: `frames=+30 refused=+0`. If there is no `Dead:` line but `Body: off foot 1,
    ragdoll flag 0`, death does not set the ragdoll flag and the head stayed within 3 m: the eye is at the head but
    the direction is the game's corpse camera; say so and the sign for "down" has to be another one.
+   `Dead:` lines alone do not show the direction. If the `Body:` lines before the first `Dead:` line say
+   `ragdoll flag 0` (the body was off foot for a stretch before it counted as down: the first log had the head at
+   1.70 m at 10:10:50.276 and at 4.28 m only later), compare what is on screen once the body lies with the
+   direction before death: it must be that one, reached by a short turn (120 ms) from wherever the game's corpse
+   camera was, not the corpse camera's.
 2. Any `Missed:` line during the death, and its reason. "the animation state changed during the frame" would mean
    the chain moves between sampling and the final proof; "not at its neck" a head that left the body.
 3. What is on screen: the helmet, torso or shoulders around the eye (`Feel:` `head=active:N` or `head=idle:0`);
