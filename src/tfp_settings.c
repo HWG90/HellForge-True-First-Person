@@ -29,6 +29,20 @@ static const TfpSettingsMenuValue menu_defaults[TFP_MENU_COUNT] = {
   TFP_SETTINGS_MENU(VALUE)
 #undef VALUE
 };
+static const TfpSettingsLockedInfo locked_info[TFP_LOCKED_COUNT] = {
+#define INFO(name, is_bool, value, least, most, step) {#name, is_bool, value, least, most, step},
+  TFP_SETTINGS_LOCKED(INFO)
+#undef INFO
+};
+const TfpSettingsLockedInfo *tfp_settings_locked_info(TfpSettingsLockedId id) { return (unsigned)id < TFP_LOCKED_COUNT ? &locked_info[id] : NULL; }
+int tfp_settings_locked(const char *name) {
+  for (int i = 0; name && i < TFP_LOCKED_COUNT; i++) if (!strcmp(name, locked_info[i].name)) return i;
+  return -1;
+}
+static void locked_defaults(TfpSettings *s) {
+  for (int i = 0; i < TFP_LOCKED_COUNT; i++)
+    s->locked[i] = (TfpSettingsMenuValue){locked_info[i].is_bool, locked_info[i].is_bool && locked_info[i].value != 0, locked_info[i].is_bool ? 0 : locked_info[i].value};
+}
 const char *tfp_settings_field_name(TfpSettingsField field) { return (unsigned)field < TFP_SET_COUNT ? field_names[field] : NULL; }
 TfpSettingsKind tfp_settings_field_kind(TfpSettingsField field) { return field_kinds[field]; }
 int tfp_settings_field(const char *name) {
@@ -435,6 +449,7 @@ static const bool has_default[TFP_SET_COUNT] = {
 bool tfp_settings_defaults(TfpSettings *s) {
   memset(s, 0, sizeof *s);
   memcpy(s->menu, menu_defaults, sizeof s->menu);
+  locked_defaults(s);
   for (int field = 0; field < TFP_SET_COUNT; field++) {
     if (!has_default[field]) continue;
     s->field[field] = default_value(s, (TfpSettingsField)field);
@@ -469,6 +484,16 @@ bool tfp_settings_set_menu(TfpSettings *s, TfpSettingsMenuId id, bool is_bool, b
   s->menu[id] = next;
   return true;
 }
+bool tfp_settings_set_locked(TfpSettings *s, TfpSettingsLockedId id, bool is_bool, bool boolean, double number) {
+  if ((unsigned)id >= TFP_LOCKED_COUNT || locked_info[id].is_bool != is_bool || (!is_bool && number != number)) return false;
+  if (!is_bool) number = number < locked_info[id].min ? locked_info[id].min : number > locked_info[id].max ? locked_info[id].max : number;
+  TfpSettingsMenuValue next = {is_bool, is_bool && boolean, is_bool ? 0 : number};
+  if (s->locked[id].boolean != next.boolean || s->locked[id].number != next.number) s->locked_writes++;
+  s->locked[id] = next;
+  return true;
+}
+bool tfp_settings_locked_flag(const TfpSettings *s, TfpSettingsLockedId id) { return (unsigned)id < TFP_LOCKED_COUNT && s->locked[id].is_bool && s->locked[id].boolean; }
+double tfp_settings_locked_number(const TfpSettings *s, TfpSettingsLockedId id) { return (unsigned)id < TFP_LOCKED_COUNT ? s->locked[id].number : 0; }
 void tfp_settings_action_config(const TfpSettings *s, TfpActionConfig *out) {
   const TfpSettingsValue *profiles = s->field[TFP_SET_action_placements], *legacy = s->field[TFP_SET_weapon_placements],
                          *placement = s->field[TFP_SET_placement], *family = s->field[TFP_SET_family_placement_defaults];
@@ -689,7 +714,8 @@ static bool load_document(Loader *l) {
   if (root->type != J_OBJECT) return refuse(l, "settings", NULL, "the document must be an object");
   for (int at = root->child; at >= 0; at = d->nodes[at].next) {
     const char *key = d->nodes[at].key;
-    if (strcmp(key, "format") && strcmp(key, "source") && strcmp(key, "first_person") && strcmp(key, "menu") && strcmp(key, "unread"))
+    if (strcmp(key, "format") && strcmp(key, "source") && strcmp(key, "first_person") && strcmp(key, "menu") && strcmp(key, "unread") &&
+        strcmp(key, "locked_view"))
       return refuse(l, "settings", key, "an unknown member");
   }
   const JNode *format = jmember(d, root, "format"), *fields = jmember(d, root, "first_person"), *menu = jmember(d, root, "menu");
@@ -714,6 +740,19 @@ static bool load_document(Loader *l) {
       if ((!is_bool && leaf->type != J_NUMBER) || !tfp_settings_set_menu(l->s, (TfpSettingsMenuId)id, is_bool, leaf->type == J_TRUE, leaf->number))
         return refuse(l, "menu", leaf->key, menu_defaults[id].is_bool ? "expected true or false" : "expected a number");
     }
+  }
+  const JNode *locked = jmember(d, root, "locked_view"); /* absent in files from before the locked view: the defaults stay */
+  if (locked) {
+    if (locked->type != J_OBJECT) return refuse(l, "locked_view", NULL, "expected an object");
+    for (int at = locked->child; at >= 0; at = d->nodes[at].next) {
+      const JNode *leaf = &d->nodes[at];
+      int id = tfp_settings_locked(leaf->key);
+      if (id < 0) return refuse(l, "locked_view", leaf->key, "an unknown option");
+      bool is_bool = leaf->type == J_TRUE || leaf->type == J_FALSE;
+      if ((!is_bool && leaf->type != J_NUMBER) || !tfp_settings_set_locked(l->s, (TfpSettingsLockedId)id, is_bool, leaf->type == J_TRUE, leaf->number))
+        return refuse(l, "locked_view", leaf->key, locked_info[id].is_bool ? "expected true or false" : "expected a number");
+    }
+    l->s->locked_writes = 0; /* what was read is what the file holds */
   }
   return true;
 }
@@ -835,7 +874,7 @@ static void put_value(Writer *w, const TfpSettingsValue *v) {
 static int compare_names(const void *a, const void *b) { return strcmp(*(const char *const *)a, *(const char *const *)b); }
 size_t tfp_settings_write(const TfpSettings *s, char *out, size_t size) {
   Writer w = {out, size, 0};
-  const char *names[(int)TFP_SET_COUNT + (int)TFP_MENU_COUNT];
+  const char *names[(int)TFP_SET_COUNT + (int)TFP_MENU_COUNT + (int)TFP_LOCKED_COUNT];
   bool first = true;
   put(&w, "{\n \"first_person\": {");
   memcpy(names, field_names, sizeof field_names);
@@ -849,7 +888,17 @@ size_t tfp_settings_write(const TfpSettings *s, char *out, size_t size) {
     put(&w, ": ");
     put_value(&w, v);
   }
-  put(&w, "\n },\n \"format\": 1,\n \"menu\": {");
+  put(&w, "\n },\n \"format\": 1,\n \"locked_view\": {");
+  for (int i = 0; i < TFP_LOCKED_COUNT; i++) names[i] = locked_info[i].name;
+  qsort(names, TFP_LOCKED_COUNT, sizeof *names, compare_names);
+  for (int i = 0; i < TFP_LOCKED_COUNT; i++) {
+    const TfpSettingsMenuValue *v = &s->locked[tfp_settings_locked(names[i])];
+    put(&w, i ? ",\n  " : "\n  ");
+    put_string(&w, names[i]);
+    put(&w, ": ");
+    if (v->is_bool) put(&w, v->boolean ? "true" : "false"); else put_number(&w, v->number);
+  }
+  put(&w, "\n },\n \"menu\": {");
   memcpy(names, menu_names, sizeof menu_names);
   qsort(names, TFP_MENU_COUNT, sizeof *names, compare_names);
   for (int i = 0; i < TFP_MENU_COUNT; i++) {

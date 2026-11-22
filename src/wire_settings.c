@@ -425,7 +425,7 @@ bool tfp_wire_settings_bind(TfpWire *w, const char *json, size_t length, const c
   return true;
 }
 /* ---- saving ---- */
-static uint64_t revision(const Settings *st) { return st->store.writes + st->store.menu_writes; }
+static uint64_t revision(const Settings *st) { return st->store.writes + st->store.menu_writes + st->store.locked_writes; }
 void tfp_wire_settings_saver(TfpWire *w, TfpSettingsSaveFn save, void *user) {
   Settings *st = state(w);
   if (!st) return;
@@ -437,6 +437,19 @@ bool tfp_wire_settings_menu_set(TfpWire *w, TfpSettingsMenuId id, bool is_bool, 
   Settings *st = state(w);
   return st && tfp_settings_set_menu(&st->store, id, is_bool, boolean, number);
 }
+bool tfp_wire_settings_locked_set(TfpWire *w, TfpSettingsLockedId id, bool is_bool, bool boolean, double number) {
+  Settings *st = state(w);
+  return st && tfp_settings_set_locked(&st->store, id, is_bool, boolean, number);
+}
+#define LOCKED_GETTER_1(name, value) \
+  bool tfp_locked_view_##name(TfpWire *w) { Settings *st = state(w); return st ? tfp_settings_locked_flag(&st->store, TFP_LOCKED_##name) : (value) != 0; }
+#define LOCKED_GETTER_0(name, value) \
+  double tfp_locked_view_##name(TfpWire *w) { Settings *st = state(w); return st ? tfp_settings_locked_number(&st->store, TFP_LOCKED_##name) : (value); }
+#define LOCKED_GETTER(name, is_bool, value, least, most, step) LOCKED_GETTER_##is_bool(name, value)
+TFP_SETTINGS_LOCKED(LOCKED_GETTER)
+#undef LOCKED_GETTER
+#undef LOCKED_GETTER_0
+#undef LOCKED_GETTER_1
 void tfp_wire_settings_save_frame(TfpWire *w) {
   Settings *st = state(w);
   if (!st || !st->save) return;
