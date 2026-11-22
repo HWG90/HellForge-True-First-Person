@@ -77,8 +77,10 @@ jumped more than 5 cm.
 
 - **Grenade and stim with empty hands.** After the put-away the view is from your character's head and
   the arms are the character's own, so you see them when they pass in front of the eyes.
-- **Dying.** Seen once, produced on purpose: the view falls with the body and stays at the head until the game
-  sends the replacement. A death by explosion, and one while aiming, have not been seen.
+- **Dying.** The view falls with the body and stays at the head until the game sends the replacement. Seen
+  four times, produced on purpose: standing, aiming, sprinting and in the middle of a swap. On the ground you
+  see whatever lies in front of the face, which can be your own dropped rifle or arm. A death by explosion has
+  not been seen.
 - **Holding aim raises the weapon to the shoulder.** Looking through the sight is a separate option
   ("true native ADS") and was not part of these checks.
 - **The settings panel:** all three tabs were opened in the game, and Camera lock, Animated arms, Weapon

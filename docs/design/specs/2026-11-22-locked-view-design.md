@@ -390,3 +390,9 @@ over. The log: `Body: off foot 1, ragdoll flag 0, head 1.62 m from its root`, th
 missed, at the handover (kind 65535). The view came back by itself on the new character.
 
 Not seen: a death that tears the body (the relaxed head rule of feel.24), and a death while aiming or in a hold.
+
+Three more on 0.6.0-feel.28 (`work/captures/feel28-deaths-aim-sprint-swap-2026-11-23.jpg`): a death while aiming, while
+sprinting and 0.25 s into a weapon swap. Each stayed at the head as the body fell (`Body:` head 1.24 to 0.72 m, 1.39 to
+1.09 m, 1.66 to 0.98 m), with the one handover frame missed. The eye's step changed by 0.02 m, 0.19 m and 0.04 m at
+most between two frames; the 0.19 m is the sprint's body going down. On the ground the lens shows what lies in front
+of the face: the dropped rifle after the aiming death, the character's arm after the sprint, grass after the swap.
