@@ -1143,6 +1143,38 @@ static void test_binding_while_aiming(void) {
   shown = socket_shown();
   CHECK(stats().align.count == 2 && stats().binds == 1 && apart_m(&shown, rest) < .0001f);
   tfp_arm_drive_set_hold_ready(false);
+
+  /* the same, and the gun that comes back has a kept rest alignment: the kept one replaces the provisional one on that
+   * frame. Nothing is taken again first: one record, and what it moved is measured from the alignment that was shown. */
+  rest_start();
+  CHECK(!frame());
+  kept_by_stillness();
+  const uint64_t kept_count = stats().align.count;
+  request(4);
+  for (unsigned n = 0; n < 12; n++) CHECK(!frame());
+  request(6);
+  stance = TFP_ARM_REST_NONE;
+  tfp_arm_drive_set_hold_ready(true);
+  break_gun_parent();
+  body_is(body_crouch);
+  for (unsigned n = 0; n < 10; n++) { CHECK(frame()); tfp_arm_drive_after_render(); }
+  s = stats();
+  CHECK(s.binds == 2 && s.align.count == kept_count + 1 && s.align.how == TFP_ARM_ALIGN_PROVISIONAL && !s.align.weapon);
+  mend_gun_parent();
+  body_is(body_now);
+  CHECK(!frame());
+  s = stats();
+  shown = socket_shown(); /* this frame shows the mid-action alignment still: the ease begins from it */
+  const float kept_off = apart_m(&shown, rest), kept_turned = apart_degrees(&shown, rest);
+  CHECK(kept_off > .05f && kept_turned > 5);
+  CHECK(s.binds == 2 && s.align.count == kept_count + 2 && s.align.how == TFP_ARM_ALIGN_KEPT && s.align.weapon == GUN && s.align.eased && !s.align.retake);
+  CHECK(fabsf(s.align.moved_m - kept_off) < .001f && fabsf(s.align.moved_degrees - kept_turned) < .1f);
+  CHECK(!strstr(tfp_arm_drive_align_line(&s.align), "taken again"));
+  eases(kept_off);
+  for (unsigned n = 0; n < 60; n++) CHECK(!frame());
+  shown = socket_shown();
+  CHECK(stats().align.count == kept_count + 2 && stats().binds == 2 && apart_m(&shown, rest) < .0001f);
+  tfp_arm_drive_set_hold_ready(false);
 }
 
 /* What is not a rest: an action (the tick says so), a hold, a gun that is away, a body that keeps moving, layer states

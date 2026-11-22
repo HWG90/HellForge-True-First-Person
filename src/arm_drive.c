@@ -516,7 +516,12 @@ static bool align(const Units *u, const TfpGraftMatrix *body, const TfpGraftLoca
   const uint32_t weapon = u->gun_away ? 0 : u->weapon_ref;
   float m = 0, degrees = 0;
   bool retaken = false;
-  if (d.aligned && d.retake && d.weight >= 1 && !d.hold && !u->gun_away) {
+  /* The gun is back on this frame and a rest alignment is kept for it: the branch for another gun below takes the kept
+   * one, which replaces the provisional one. Nothing is taken again first: what the kept one moved is measured from
+   * the alignment that was shown, and the frame has one record. (That branch ends what the binding owed.) */
+  const unsigned to_stance = d.rest ? d.rest : d.cur_stance;
+  const bool kept_now = d.aligned && weapon && (weapon != d.cur_weapon || to_stance != d.cur_stance) && kept_find(u, weapon, to_stance, weapon != d.cur_weapon);
+  if (d.aligned && d.retake && d.weight >= 1 && !d.hold && !u->gun_away && !kept_now) {
     /* The first driven frame the copy is fully shown again and no action holds it (in a hold, or with the gun away,
      * the frame is mid-action and no better than the aim pose: the retake stays armed for the frame after). The
      * provisional alignment was taken in the aim pose, where body and rig differ most (src/arm_weight.h), or in the
@@ -573,6 +578,7 @@ static bool align(const Units *u, const TfpGraftMatrix *body, const TfpGraftLoca
       apart(&after, &before, &m, &degrees);
       use(&k->grip, &k->alignment, true);
       d.used = index;
+      d.retake = TFP_ARM_RETAKE_NONE; /* the provisional alignment is replaced: nothing is owed for it */
       aligned(TFP_ARM_ALIGN_KEPT, weapon, stance, 0, m, degrees);
     } else if (!k && other_gun) {
       d.used = 0;
