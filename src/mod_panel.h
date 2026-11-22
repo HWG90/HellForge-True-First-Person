@@ -1,5 +1,6 @@
 /* The feel build's Windows half of the mod's own settings panel (src/wire_panel.c): the lock between the game
- * thread and the overlay host's render thread, the clock, and ov_connect. With the switch on, the menu goes to
+ * thread and the overlay host's render thread, the clock, and the
+ * host's export asked for the API the panel needs. With the switch on, the menu goes to
  * DBF-MCM instead (src/mod_menu.c) and no panel is made. docs/guides/POSER-AND-MENU.md. */
 #ifndef TFP_MOD_PANEL_H
 #define TFP_MOD_PANEL_H

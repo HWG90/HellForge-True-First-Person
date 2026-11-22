@@ -47,9 +47,12 @@ static const HfApi *hf;
 static HfMod *owner;
 static TfpWire wire;
 static enum { WAIT_MODULES, WAIT_PINS, RUNNING, REFUSED } stage;
-static bool key_held, told_waiting, told_tick_thread, hook_told[TFP_WIN_HOOKS];
+static bool told_waiting, told_tick_thread, hook_told[TFP_WIN_HOOKS];
 #ifdef TFP_FEEL
-static bool editor_key_held;
+/* The two bound keys' presses. A key bound in the menu is still down at the next tick: it acts only once it has been let go. */
+static TfpKeyEdge toggle_edge, editor_edge;
+#else
+static bool key_held;
 #endif
 static uint64_t next_pin_check;
 /* Live replace (docs/guides/LIVE-REPLACE.md). closing: hellforge_mod_unload has taken over, the tick does
@@ -920,11 +923,12 @@ static void tick_body(void) {
   /* The toggle key is the menu's (default F11; 0: unbound). Polled as before: the SDK has no key event. */
   int toggle_key = stage == RUNNING ? tfp_wire_menu_toggle_key(&wire) : VK_F11;
   bool down = toggle_key && tfp_win_focused() && tfp_win_key_down(toggle_key);
+  bool pressed = tfp_wire_menu_key_edge(&toggle_edge, toggle_key, down);
 #else
   bool down = tfp_win_focused() && tfp_win_key_down(VK_F11);
-#endif
   bool pressed = down && !key_held;
   key_held = down;
+#endif
   if (stage == WAIT_PINS) {
     uint64_t now = GetTickCount64();
     if (pressed) say("Refused: F11 before the game's code pages could be read; try again once a mission or the ship is loaded");
@@ -953,11 +957,10 @@ static void tick_body(void) {
   int editor_key = tfp_wire_menu_editor_key(&wire, TFP_EDITOR_KEY);
   tfp_mod_editor_tick(hf, owner, editor_key);
   bool editor_down = editor_key && tfp_win_focused() && tfp_win_key_down(editor_key);
-  if (editor_down && !editor_key_held) {
+  if (tfp_wire_menu_key_edge(&editor_edge, editor_key, editor_down)) {
     const char *refused = tfp_wire_editor_toggle(&wire);
     if (refused) say("Placement editor: %s", refused);
   }
-  editor_key_held = editor_down;
   if (tfp_mod_editor_settled()) tfp_mod_panel_tick(hf, owner, &wire, mcm_wanted, menu_unavailable(), tfp_wire_editor_toggle);
   tfp_wire_frame(&wire, extra);
   entry_note();

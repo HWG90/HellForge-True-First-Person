@@ -265,6 +265,8 @@ static struct {
   bool hover, active;
   char last[200];
   int disabled, disabled_depth, tab_bars, tab_items, bad_colours, locks, lock_depth, connects;
+  const char *taken;          /* an id the host already holds (a replaced build's panel): refused */
+  uint32_t asked;             /* the API version the panel last asked the host's export for */
   bool no_host;
 } ov;
 static OvPanel *const HANDLE = (OvPanel *)&ov;
@@ -283,7 +285,7 @@ static const char *drawn_part(const char *part) {
 static bool is(const char *a, const char *b) { return a && b && !strcmp(a, b); }
 static OvPanel *o_register(const OvPanelDef *def) {
   ov.registered++;
-  if (ov.refuse_panel) return NULL;
+  if (ov.refuse_panel || is(ov.taken, def->id)) return NULL;
   ov.def = *def; snprintf(ov.id, sizeof ov.id, "%s", def->id); snprintf(ov.title, sizeof ov.title, "%s", def->title);
   return HANDLE;
 }
@@ -360,14 +362,22 @@ static void new_host(uint32_t version) {
   api.begin_disabled = o_begin_disabled, api.end_disabled = o_end_disabled, api.theme = o_theme;
   if (version < 6) { api.size = offsetof(OvApi, button_primary); return; }
   api.button_primary = o_primary, api.key_cap = o_key_cap, api.heading = o_heading;
+  /* a host's table ends where its own API version does */
+  if (version == 6) api.size = offsetof(OvApi, passive_wheel_total);
+  if (version == 7) api.size = offsetof(OvApi, input_captured);
 }
 static void p_lock(void *u) { (void)u; ov.locks++; ov.lock_depth++; }
 static void p_unlock(void *u) { (void)u; ov.lock_depth--; }
-static const OvApi *p_connect(void *u) { (void)u; ov.connects++; return ov.no_host ? NULL : &api; }
+/* As the host's export (overlay-host src/host.cpp ov_api): its table, or NULL when asked for a newer API than its own. */
+static const OvApi *p_connect(void *u, uint32_t version) {
+  (void)u;
+  ov.connects++, ov.asked = version;
+  return ov.no_host || version > api.version ? NULL : &api;
+}
 static unsigned mcm_ticks, edits;
 static void p_mcm(void *u, TfpWire *w, unsigned unavailable, TfpMenuEditFn edit) { (void)u; (void)w; (void)unavailable; (void)edit; mcm_ticks++; }
 static const char *test_edit(TfpWire *w) { (void)w; edits++; return NULL; }
-static const TfpPanelPlatform platform = {NULL, p_lock, p_unlock, p_connect, p_mcm, false, "goose.true-first-person/settings@test", 33};
+static const TfpPanelPlatform platform = {NULL, p_lock, p_unlock, p_connect, p_mcm, false, "goose.true-first-person/settings", "goose.true-first-person/settings@test", 33};
 static int log_count(const char *part) {
   int n = 0;
   for (int i = 0; i < line_count; i++) if (strstr(lines[i], part)) n++;
@@ -416,7 +426,8 @@ static int panel_part(void) {
   for (uint64_t ms = 1000; ms < 16000; ms += 100) tfp_wire_panel_tick(&wire, &platform, ms, 0, test_edit);
   CHECK(ov.connects == 15 && !log_count("Settings panel:") && !tfp_wire_panel_bound(&wire));
   for (uint64_t ms = 16000; ms < 30000; ms += 100) tfp_wire_panel_tick(&wire, &platform, ms, 0, test_edit);
-  CHECK(ov.connects == 16 && log_count("Settings panel:") == 1 && logged("is not loaded") && !tfp_wire_panel_bound(&wire));
+  CHECK(ov.connects == 16 && log_count("Settings panel:") == 1 && logged("is not loaded") && logged("older than API 6") && !tfp_wire_panel_bound(&wire));
+  CHECK(ov.asked == TFP_PANEL_API && TFP_PANEL_API == 6);        /* the API the panel draws with, not the header's newest */
   CHECK(!ov.registered && !mcm_ticks && !tfp_wire_menu_bound(&wire) && ov.lock_depth == 0);
   tfp_wire_panel_frame(&wire);                                   /* nothing bound: nothing happens */
   CHECK(!tfp_wire_panel_is_open(&wire));
@@ -426,15 +437,35 @@ static int panel_part(void) {
 
   /* ---- a host older than the panel needs: refused in one line, no panel, the mod carries on ---- */
   CHECK(start_wire());
-  new_host(5);
-  for (uint64_t ms = 0; ms < 5000; ms += 100) tfp_wire_panel_tick(&wire, &platform, ms, 0, test_edit);
-  CHECK(ov.connects == 1 && log_count("Refused: settings panel") == 1 && logged("API 5") && !ov.registered && !tfp_wire_panel_bound(&wire));
+  new_host(5);                                                   /* the host's export answers NULL to a request for API 6: as no host */
+  for (uint64_t ms = 0; ms < 20000; ms += 100) tfp_wire_panel_tick(&wire, &platform, ms, 0, test_edit);
+  CHECK(ov.connects == 16 && ov.asked == 6 && log_count("Settings panel:") == 1 && logged("older than API 6") && !ov.registered && !tfp_wire_panel_bound(&wire));
   CHECK(!tfp_wire_menu_bound(&wire) && !mcm_ticks);
   tfp_wire_panel_free(&wire);
+  CHECK(!tfp_wire_panel_bind(&wire, &api, &platform, 0, test_edit));   /* handed such a host all the same: refused by name */
+  CHECK(log_count("Refused: settings panel") == 1 && logged("API 5") && logged("it needs API 6 or newer") && !ov.registered && !tfp_wire_panel_bound(&wire));
+  tfp_wire_panel_free(&wire);
+  tfp_wire_settings_free(&wire);
+  /* ---- hosts 0.4.0 (API 6) and 0.5.0 (API 7), older than the header (API 8): the panel is there, and it is drawn
+   * with nothing past the end of such a host's table ---- */
+  for (uint32_t version = 6; version <= 7; version++) {
+    CHECK(start_wire());
+    new_host(version);
+    CHECK(api.size < sizeof api && OV_API_VERSION > version);
+    for (uint64_t ms = 0; ms < 3000; ms += 100) tfp_wire_panel_tick(&wire, &platform, ms, 0, test_edit);
+    CHECK(ov.connects == 1 && ov.asked == 6 && ov.registered == 1 && tfp_wire_panel_bound(&wire) && !logged("Refused") && !log_count("Settings panel:"));
+    ov.hover = true;
+    draw_frame(); game_update();
+    CHECK(drawn("tab:Locked view") && drawn("primary:Enable True First Person") && drawn_part("cap:") && ov.lock_depth == 0);
+    tfp_wire_menu_unbind(&wire);
+    tfp_wire_panel_free(&wire);
+    tfp_wire_settings_free(&wire);
+  }
+  CHECK(start_wire());
   new_host(8); api.key_cap = NULL;                               /* the right version with a function missing */
-  CHECK(!tfp_wire_panel_bind(&wire, &api, &platform, 0, test_edit) && log_count("Refused: settings panel") == 2 && !ov.registered);
+  CHECK(!tfp_wire_panel_bind(&wire, &api, &platform, 0, test_edit) && log_count("Refused: settings panel") == 1 && !ov.registered);
   new_host(8); ov.refuse_panel = true;                           /* the host does not take the panel */
-  CHECK(!tfp_wire_panel_bind(&wire, &api, &platform, 0, test_edit) && ov.registered == 1 && logged("did not take the panel"));
+  CHECK(!tfp_wire_panel_bind(&wire, &api, &platform, 0, test_edit) && ov.registered == 2 && logged("did not take the panel"));
   CHECK(!tfp_wire_panel_bound(&wire) && !tfp_wire_menu_bound(&wire));
   CHECK(!tfp_wire_panel_bind(&wire, NULL, &platform, 0, test_edit));
   tfp_wire_panel_free(&wire);
@@ -450,6 +481,8 @@ static int panel_part(void) {
   new_host(8);
   for (uint64_t ms = 0; ms < 5000; ms += 100) tfp_wire_panel_tick(&wire, &platform, ms, 0, test_edit);
   CHECK(ov.connects == 1 && ov.registered == 1 && tfp_wire_panel_bound(&wire) && tfp_wire_menu_bound(&wire) && !mcm_ticks);
+  /* the same id at every game start: the host keeps the window's place and size by it, and its config can name it */
+  CHECK(!strcmp(ov.id, "goose.true-first-person/settings") && !logged("replaced build"));
   CHECK(!strcmp(ov.title, "True First Person") && !strcmp(ov.id, platform.panel_id) && ov.def.kind == OV_PANEL_WINDOW && ov.def.size == sizeof ov.def);
   CHECK(ov.def.hotkey == 0x79 && TFP_PANEL_KEY == 0x79 && ov.def.draw && !(ov.def.window_flags & OV_WINDOW_NO_TITLE));
   CHECK(logged("Ready: settings panel") && logged("F10") && logged("Ready: menu: registered with the mod's own panel") && !logged("DBF-MCM as"));
@@ -818,8 +851,98 @@ static int untouched_part(void) {
   return 0;
 }
 
+/* A key bound in the panel is still down when the game thread first polls it (src/mod_view.c): it must not act
+ * until it has been let go once. */
+static int rebind_part(void) {
+  TfpKeyEdge toggle = {0}, editor = {0};
+  CHECK(bind_panel());
+  /* the keys as they were at the start: an ordinary press acts once, and not again while held */
+  CHECK(tfp_wire_menu_toggle_key(&wire) == 122 && tfp_wire_menu_editor_key(&wire, 33) == 33);
+  CHECK(!tfp_wire_menu_key_edge(&toggle, 122, false) && tfp_wire_menu_key_edge(&toggle, 122, true) && !tfp_wire_menu_key_edge(&toggle, 122, true));
+  CHECK(!tfp_wire_menu_key_edge(&toggle, 122, false) && tfp_wire_menu_key_edge(&toggle, 122, true) && !tfp_wire_menu_key_edge(&toggle, 122, false));
+  CHECK(!tfp_wire_menu_key_edge(&editor, 33, false));
+  /* the toggle key is bound to T: the panel takes the key on its way down, the game thread stores it ... */
+  ov.click = "Change##toggle_key"; draw_frame(); game_update();
+  ov.key = 'T'; draw_frame(); game_update(); ov.key = 0;
+  CHECK(tfp_wire_menu_toggle_key(&wire) == 'T');
+  /* ... and T is still down at the next polls: no toggle. Let go, then pressed: one toggle. */
+  CHECK(!tfp_wire_menu_key_edge(&toggle, tfp_wire_menu_toggle_key(&wire), true));
+  CHECK(!tfp_wire_menu_key_edge(&toggle, 'T', true) && !tfp_wire_menu_key_edge(&toggle, 'T', false));
+  CHECK(tfp_wire_menu_key_edge(&toggle, 'T', true) && !tfp_wire_menu_key_edge(&toggle, 'T', true));
+  /* the editor's key likewise */
+  ov.click = "Change##editor_key"; draw_frame(); game_update();
+  ov.key = 'P'; draw_frame(); game_update(); ov.key = 0;
+  CHECK(tfp_wire_menu_editor_key(&wire, 33) == 'P');
+  CHECK(!tfp_wire_menu_key_edge(&editor, 'P', true) && !tfp_wire_menu_key_edge(&editor, 'P', false) && tfp_wire_menu_key_edge(&editor, 'P', true));
+  /* cleared (0) and bound again while the new key is held: still nothing until it is let go */
+  CHECK(!tfp_wire_menu_key_edge(&editor, 0, false) && !tfp_wire_menu_key_edge(&editor, 'K', true) && !tfp_wire_menu_key_edge(&editor, 'K', false) &&
+        tfp_wire_menu_key_edge(&editor, 'K', true));
+  end_panel();
+
+  /* ---- after a live replace the old build's panel still holds the id (the host cannot take a panel out and refuses
+   * a second one with the same id): this load registers under its own id, and says so ---- */
+  CHECK(start_wire());
+  new_host(8); ov.taken = platform.panel_id;
+  for (uint64_t ms = 0; ms < 3000; ms += 100) tfp_wire_panel_tick(&wire, &platform, ms, 0, test_edit);
+  CHECK(ov.connects == 1 && ov.registered == 2 && tfp_wire_panel_bound(&wire) && tfp_wire_menu_bound(&wire) && !logged("Refused"));
+  CHECK(!strcmp(ov.id, "goose.true-first-person/settings@test") && !strcmp(ov.id, platform.panel_id_reload) && ov.def.hotkey == TFP_PANEL_KEY);
+  CHECK(log_count("replaced build") == 1 && logged("Ready: settings panel"));
+  ov.hover = true;
+  draw_frame(); game_update();
+  CHECK(drawn("tab:Locked view"));
+  end_panel();
+  /* no second id to offer: refused as before, and the menu is free again */
+  CHECK(start_wire());
+  new_host(8); ov.taken = platform.panel_id;
+  TfpPanelPlatform one_id = platform;
+  one_id.panel_id_reload = NULL;
+  CHECK(!tfp_wire_panel_bind(&wire, &api, &one_id, 0, test_edit) && ov.registered == 1 && logged("did not take the panel"));
+  CHECK(!tfp_wire_panel_bound(&wire) && !tfp_wire_menu_bound(&wire));
+  tfp_wire_panel_free(&wire);
+  tfp_wire_settings_free(&wire);
+
+  /* ---- F8 for the placement editor: a stored 119 means "the default" (Page Up here), so the row would show F8 while
+   * Page Up stayed the key. The panel does not take it, says why in the row, and goes on asking. ---- */
+  CHECK(bind_panel());
+  ov.click = "Change##editor_key"; draw_frame(); game_update();
+  draw_frame();
+  CHECK(drawn_part("Press a key") && !drawn_part("F8 is HellForge's own editor key"));
+  ov.key = 119; draw_frame(); game_update(); ov.key = 0;
+  CHECK(tfp_settings_menu_number(tfp_wire_settings(&wire), TFP_MENU_editor_key) == 33 && tfp_wire_menu_editor_key(&wire, 33) == 33 && !saves);
+  draw_frame();
+  CHECK(drawn("cap:PAGE UP") && !drawn("cap:F8") && drawn_part("F8 is HellForge's own editor key") && drawn_part("Press a key") && !ov.bad_colours);
+  ov.key = 0x76; draw_frame(); game_update(); ov.key = 0;         /* F7: taken */
+  draw_frame();
+  CHECK(tfp_wire_menu_editor_key(&wire, 33) == 0x76 && drawn("cap:F7") && !drawn_part("HellForge's own editor key") && !drawn_part("Press a") && saves == 1);
+  ov.click = "Change##editor_key"; draw_frame();                   /* asked again: the plain question, not the refusal */
+  draw_frame();
+  CHECK(drawn_part("Press a key") && !drawn_part("HellForge's own editor key"));
+  ov.key = 27; draw_frame(); ov.key = 0;
+  /* the toggle key may be F8 */
+  ov.click = "Change##toggle_key"; draw_frame();
+  ov.key = 119; draw_frame(); game_update(); ov.key = 0;
+  draw_frame();
+  CHECK(tfp_wire_menu_toggle_key(&wire) == 119 && drawn("cap:F8") && !drawn_part("Press a"));
+  end_panel();
+  /* where F8 is the editor's own key (the platform says a stored 119 means 119), the row takes it */
+  CHECK(start_wire());
+  new_host(8);
+  TfpPanelPlatform retail = platform;
+  retail.editor_key = 119;
+  CHECK(tfp_wire_panel_bind(&wire, &api, &retail, 0, test_edit));
+  game_update();
+  ov.click = "Change##editor_key"; draw_frame();
+  ov.key = 0x76; draw_frame(); game_update(); ov.key = 0;
+  ov.click = "Change##editor_key"; draw_frame();
+  ov.key = 119; draw_frame(); game_update(); ov.key = 0;
+  draw_frame();
+  CHECK(tfp_wire_menu_editor_key(&wire, 119) == 119 && drawn("cap:F8") && !drawn_part("Press a"));
+  end_panel();
+  return 0;
+}
+
 int main(void) {
-  if (store_part() || panel_part() || options_part() || untouched_part()) return 1;
+  if (store_part() || panel_part() || options_part() || untouched_part() || rebind_part()) return 1;
   printf("wire panel: %u checks passed\n", checks);
   return 0;
 }
