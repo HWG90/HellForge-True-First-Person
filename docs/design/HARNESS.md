@@ -91,3 +91,7 @@ which carry the same joint names (`r_hand`, `r_elbow`, `r_shoulder`, fingers, `a
 With True First Person on, the view dropped to the head camera only for swaps, the grenade and the stim
 (action mask 2) and returned 0.3 to 1.5 s later; reload, aim, crouch, sprint and dive kept camera kind 6.
 The return still logs a camera cut of 0.08 to 0.40 m.
+- 2026-11-23: a real pointer through `/dev/uinput` (which works again after a reboot) reaches the compositor, but the
+  harness has no reliable way to know where the game window is on a multi-monitor desktop: a first try clicked in
+  another application's window. Not kept. The NEST panel's rows, and stratagem codes, stay checks for a person; do not
+  drive the desktop pointer blind.
