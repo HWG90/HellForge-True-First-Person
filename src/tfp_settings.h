@@ -80,7 +80,8 @@ typedef enum TfpSettingsMenuId {
 typedef struct TfpSettingsMenuValue { bool is_bool, boolean; double number; } TfpSettingsMenuValue;
 
 /* The locked view's options (docs/design/specs/2026-11-22-locked-view-design.md), which retail does not have:
- * X(id, 1 Boolean / 0 number, default, least, most, step). The two strengths are percentages. They are stored
+ * X(id, 1 Boolean / 0 number, default, least, most, step). The two strengths and camera_damping are percentages
+ * (camera_damping: src/camera_damp.h; a file from before it was an option reads as its default). They are stored
  * in their own file, locked_view.json beside settings.json (tfp_settings_write_locked / tfp_settings_load_locked):
  * 0.6.0-feel.19 and older refuse a settings.json with a member they do not know, and their saver then writes
  * their defaults over it. 0.6.0-feel.20 to feel.24 kept them under "locked_view" in settings.json; that member is
@@ -90,7 +91,7 @@ typedef struct TfpSettingsMenuValue { bool is_bool, boolean; double number; } Tf
 #define TFP_SETTINGS_LOCKED(X) \
   X(camera_lock, 1, 1, 0, 1, 1) X(fov_lock, 1, 1, 0, 1, 1) X(fov_degrees, 0, 80, 50, 120, 1) X(fov_zoom_when_aiming, 1, 1, 0, 1, 1) \
   X(kick_strength, 0, 35, 0, 100, 5) X(kick_max_degrees, 0, 8, 0, 20, 1) X(thrown_kick_strength, 0, 70, 0, 100, 5) \
-  X(animated_arms, 1, 1, 0, 1, 1) X(one_handed_pistols, 1, 1, 0, 1, 1) X(put_away, 1, 1, 0, 1, 1) X(smooth_eye, 1, 1, 0, 1, 1)
+  X(camera_damping, 0, 60, 0, 100, 5) X(animated_arms, 1, 1, 0, 1, 1) X(one_handed_pistols, 1, 1, 0, 1, 1) X(put_away, 1, 1, 0, 1, 1) X(smooth_eye, 1, 1, 0, 1, 1)
 /* "holster_animation" (an option until 0.6.0-feel.23 that did nothing) is read as put_away when the file has no
  * put_away of its own, and is never written: the next save holds put_away only. */
 #define TFP_SETTINGS_LOCKED_OLD_PUT_AWAY "holster_animation"

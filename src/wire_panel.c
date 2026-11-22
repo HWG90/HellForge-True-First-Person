@@ -16,6 +16,8 @@ static const struct { const char *label, *description, *note; } LOCKED[TFP_LOCKE
   {"View kick strength (%)", "How much of your body's movement reaches the view while on foot. Default 35.", NULL},
   {"View kick limit (degrees)", "The most the view is turned by a kick while on foot. Default 8.", NULL},
   {"View kick when thrown (%)", "How much of your body's movement reaches the view while you are thrown or ragdolled. Default 70.", NULL},
+  {"Camera damping (%)", "How much the view is steadied against your body's movement. 0 is the raw movement; higher is calmer and slower. "
+                        "Default 60.", NULL},
   {"Animated arms", "The first-person arms follow your character's own animation.", NULL},
   {"One-handed pistols", "One-handed weapons are held as your character holds them. This comes from the character's own animation while "
                          "Animated arms is on; there is nothing to set here.",
@@ -23,8 +25,8 @@ static const struct { const char *label, *description, *note; } LOCKED[TFP_LOCKE
   {"Weapon put-away", "Keep first person while the weapon is put away for a swap, grenade or stim.", NULL},
   {"Smooth eye", "No camera pops when the game changes its camera.", NULL},
 };
-_Static_assert(TFP_LOCKED_COUNT == 11 && TFP_LOCKED_animated_arms == 7 && TFP_LOCKED_one_handed_pistols == 8 && TFP_LOCKED_put_away == 9 &&
-               TFP_LOCKED_smooth_eye == 10, "LOCKED names the options of TFP_SETTINGS_LOCKED in its order");
+_Static_assert(TFP_LOCKED_COUNT == 12 && TFP_LOCKED_camera_damping == 7 && TFP_LOCKED_animated_arms == 8 && TFP_LOCKED_one_handed_pistols == 9 &&
+               TFP_LOCKED_put_away == 10 && TFP_LOCKED_smooth_eye == 11, "LOCKED names the options of TFP_SETTINGS_LOCKED in its order");
 
 typedef struct Row { TfpMenuValue value; bool disabled; char label[300]; } Row;
 typedef struct Event { int index; bool locked, activate; TfpMenuValue value, previous; } Event;

@@ -110,12 +110,13 @@ static int store_part(void) {
   TfpSettings s;
   memset(&s, 0, sizeof s);
   CHECK(tfp_settings_defaults(&s));
-  /* the eleven options and their defaults */
-  CHECK(TFP_LOCKED_COUNT == 11);
+  /* the twelve options and their defaults */
+  CHECK(TFP_LOCKED_COUNT == 12);
   CHECK(tfp_settings_locked_flag(&s, TFP_LOCKED_camera_lock) && tfp_settings_locked_flag(&s, TFP_LOCKED_fov_lock) &&
         tfp_settings_locked_number(&s, TFP_LOCKED_fov_degrees) == 80 && tfp_settings_locked_flag(&s, TFP_LOCKED_fov_zoom_when_aiming) &&
         tfp_settings_locked_number(&s, TFP_LOCKED_kick_strength) == 35 && tfp_settings_locked_number(&s, TFP_LOCKED_kick_max_degrees) == 8 &&
-        tfp_settings_locked_number(&s, TFP_LOCKED_thrown_kick_strength) == 70 && tfp_settings_locked_flag(&s, TFP_LOCKED_one_handed_pistols) &&
+        tfp_settings_locked_number(&s, TFP_LOCKED_thrown_kick_strength) == 70 && tfp_settings_locked_number(&s, TFP_LOCKED_camera_damping) == 60 &&
+        tfp_settings_locked_flag(&s, TFP_LOCKED_one_handed_pistols) &&
         tfp_settings_locked_flag(&s, TFP_LOCKED_animated_arms) && tfp_settings_locked_flag(&s, TFP_LOCKED_put_away) &&
         tfp_settings_locked_flag(&s, TFP_LOCKED_smooth_eye));
   const TfpSettingsLockedInfo *info = tfp_settings_locked_info(TFP_LOCKED_fov_degrees);
@@ -126,6 +127,9 @@ static int store_part(void) {
   CHECK(info && info->min == 0 && info->max == 20 && info->step == 1);
   info = tfp_settings_locked_info(TFP_LOCKED_thrown_kick_strength);
   CHECK(info && info->min == 0 && info->max == 100 && info->step == 5 && info->value == 70);
+  info = tfp_settings_locked_info(TFP_LOCKED_camera_damping);
+  CHECK(info && !strcmp(info->name, "camera_damping") && !info->is_bool && info->min == 0 && info->max == 100 && info->step == 5 && info->value == 60);
+  CHECK(TFP_LOCKED_camera_damping == TFP_LOCKED_thrown_kick_strength + 1 && tfp_settings_locked("camera_damping") == TFP_LOCKED_camera_damping);
   CHECK(tfp_settings_locked_info(TFP_LOCKED_camera_lock)->is_bool && !tfp_settings_locked_info(TFP_LOCKED_COUNT));
   CHECK(tfp_settings_locked("put_away") == TFP_LOCKED_put_away && tfp_settings_locked("near_clip_cm") < 0 && tfp_settings_locked(NULL) < 0);
   CHECK(tfp_settings_locked("animated_arms") == TFP_LOCKED_animated_arms && tfp_settings_locked("smooth_eye") == TFP_LOCKED_smooth_eye);
@@ -148,6 +152,7 @@ static int store_part(void) {
   CHECK(n && n < sizeof text && tfp_settings_write_locked(&s, NULL, 0) == n && strstr(text, "{\n \"format\": 1,\n \"locked_view\": {") == text &&
         strstr(text, "\"camera_lock\": false") && strstr(text, "\"fov_degrees\": 120") &&
         strstr(text, "\"kick_max_degrees\": 0") && strstr(text, "\"put_away\": true") && strstr(text, "\"thrown_kick_strength\": 70") &&
+        strstr(text, " \"locked_view\": {\n  \"animated_arms\": true,\n  \"camera_damping\": 60,\n  \"camera_lock\": false,") &&
         strstr(text, "\"animated_arms\": true") && strstr(text, "\"smooth_eye\": true") && !strstr(text, "holster_animation"));
   TfpSettings back;
   memset(&back, 0, sizeof back);
@@ -155,6 +160,19 @@ static int store_part(void) {
   for (int i = 0; i < TFP_LOCKED_COUNT; i++)
     CHECK(back.locked[i].is_bool == s.locked[i].is_bool && back.locked[i].boolean == s.locked[i].boolean && back.locked[i].number == s.locked[i].number);
   tfp_settings_free(&back);
+  tfp_settings_free(&s);
+  /* a locked_view.json from before camera_damping was an option (0.6.0-feel.25 and older): its default, and nothing
+   * in the file counts as skipped; a value outside the range is stored as the nearest end, the wrong type refuses */
+  static const char before[] = "{\"format\":1,\"locked_view\":{\"animated_arms\":true,\"camera_lock\":true,\"fov_degrees\":95,\"fov_lock\":true,"
+    "\"fov_zoom_when_aiming\":true,\"kick_max_degrees\":8,\"kick_strength\":35,\"one_handed_pistols\":true,\"put_away\":true,\"smooth_eye\":true,"
+    "\"thrown_kick_strength\":70}}";
+  static const char calm[] = "{\"format\":1,\"locked_view\":{\"camera_damping\":250}}", wrong[] = "{\"format\":1,\"locked_view\":{\"camera_damping\":true}}";
+  memset(&s, 0, sizeof s);
+  CHECK(tfp_settings_defaults(&s) && tfp_settings_load_locked(&s, before, sizeof before - 1, why, sizeof why) && !s.locked_skipped[0] &&
+        tfp_settings_locked_number(&s, TFP_LOCKED_camera_damping) == 60 && tfp_settings_locked_number(&s, TFP_LOCKED_fov_degrees) == 95 && s.locked_writes == 0);
+  CHECK(tfp_settings_load_locked(&s, calm, sizeof calm - 1, why, sizeof why) && tfp_settings_locked_number(&s, TFP_LOCKED_camera_damping) == 100);
+  CHECK(!tfp_settings_load_locked(&s, wrong, sizeof wrong - 1, why, sizeof why) && tfp_settings_locked_number(&s, TFP_LOCKED_camera_damping) == 100);
+  CHECK(tfp_settings_set_locked(&s, TFP_LOCKED_camera_damping, false, false, 0) && tfp_settings_locked_number(&s, TFP_LOCKED_camera_damping) == 0);
   tfp_settings_free(&s);
   /* a settings.json without the member (0.6.0-feel.19 and older, and this build): the defaults */
   static const char old[] = "{\"format\":1,\"first_person\":{}}";
@@ -232,7 +250,8 @@ static int store_part(void) {
   new_wire();
   CHECK(tfp_locked_view_camera_lock(&wire) && tfp_locked_view_fov_lock(&wire) && tfp_locked_view_fov_degrees(&wire) == 80 &&
         tfp_locked_view_fov_zoom_when_aiming(&wire) && tfp_locked_view_kick_strength(&wire) == 35 && tfp_locked_view_kick_max_degrees(&wire) == 8 &&
-        tfp_locked_view_thrown_kick_strength(&wire) == 70 && tfp_locked_view_one_handed_pistols(&wire) && tfp_locked_view_animated_arms(&wire) &&
+        tfp_locked_view_thrown_kick_strength(&wire) == 70 && tfp_locked_view_camera_damping(&wire) == 60 && tfp_locked_view_one_handed_pistols(&wire) &&
+        tfp_locked_view_animated_arms(&wire) &&
         tfp_locked_view_put_away(&wire) && tfp_locked_view_smooth_eye(&wire));
   CHECK(!tfp_wire_settings_locked_set(&wire, TFP_LOCKED_fov_degrees, false, false, 90)); /* no store bound: the defaults answer */
   CHECK(tfp_wire_settings_bind(&wire, part, sizeof part - 1, "test") && logged("Ready: settings") && !logged("Refused"));
@@ -535,7 +554,7 @@ static int panel_part(void) {
   CHECK(drawn("slider:This weapon: hip clearance (cm)=15[5..40] (disabled)") && drawn("button:Save clipping for this weapon (disabled)"));
   CHECK(drawn("check:Camera lock=on") && drawn("check:Field of view lock=on") && drawn("slider:Field of view (degrees)=80[50..120]") &&
         drawn("check:Zoom when aiming=on") && drawn("slider:View kick strength (%)=35[0..100]") && drawn("slider:View kick limit (degrees)=8[0..20]") &&
-        drawn("slider:View kick when thrown (%)=70[0..100]") && drawn("check:Animated arms=on") && drawn("check:Weapon put-away=on") && drawn("check:Smooth eye=on"));
+        drawn("slider:View kick when thrown (%)=70[0..100]") && drawn("slider:Camera damping (%)=60[0..100]") && drawn("check:Animated arms=on") && drawn("check:Weapon put-away=on") && drawn("check:Smooth eye=on"));
   CHECK(drawn("tip:The first-person arms follow your character's own animation.") &&
         drawn("tip:Keep first person while the weapon is put away for a swap, grenade or stim.") &&
         drawn("tip:No camera pops when the game changes its camera."));
@@ -631,14 +650,15 @@ static int panel_part(void) {
   ov.flip = NULL;
   static const struct { const char *label; int to; double (*get)(TfpWire *); } numbers[] = {
     {"Field of view (degrees)", 103, tfp_locked_view_fov_degrees}, {"View kick limit (degrees)", 12, tfp_locked_view_kick_max_degrees},
-    {"View kick when thrown (%)", 85, tfp_locked_view_thrown_kick_strength}};
+    {"View kick when thrown (%)", 85, tfp_locked_view_thrown_kick_strength}, {"Camera damping (%)", 25, tfp_locked_view_camera_damping}};
   for (size_t i = 0; i < COUNT(numbers); i++) {
     ov.slide = ov.release = numbers[i].label; ov.slide_to = numbers[i].to; draw_frame(); game_update();
     CHECK(numbers[i].get(&wire) == numbers[i].to);
   }
-  CHECK(saves == 16);
+  CHECK(saves == 17);
   draw_frame();
-  CHECK(drawn("check:Camera lock=off") && drawn("slider:View kick strength (%)=50[0..100]") && drawn("slider:Field of view (degrees)=103[50..120]"));
+  CHECK(drawn("check:Camera lock=off") && drawn("slider:View kick strength (%)=50[0..100]") && drawn("slider:Field of view (degrees)=103[50..120]") &&
+        drawn("slider:Camera damping (%)=25[0..100]") && strstr(saved_text, "\"camera_damping\": 25"));
   /* a button: done at the next update, through the menu's own queue */
   ov.click = "Edit arms and weapon placement";
   draw_frame();
