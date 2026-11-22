@@ -46,6 +46,20 @@ typedef struct TfpLease {
    * acknowledged (:165). has_pose_stats false: neither is there. */
   bool has_pose_stats; TfpPoseStats pose_stats;
 } TfpLease;
+/* ---- the action hold (a probe; docs/design/ACTION-CAMERA.md, "Action hold") ----
+ * What the controller asks when the snapshot no longer allows the native view while a lease runs: is
+ * the game's own first-person request still this lease's, so that only an action took `safe` away?
+ * Unlike a full snapshot this view also answers with empty hands. */
+typedef enum TfpHoldWeapon { TFP_HOLD_WEAPON_NONE, TFP_HOLD_WEAPON_SAME, TFP_HOLD_WEAPON_OTHER } TfpHoldWeapon;
+typedef struct TfpHoldView {
+  bool available;                 /* false: the local player or its camera request is not proven (the camera off the avatar included) */
+  uint64_t player_identity;
+  uint32_t camera_kind;
+  uint64_t record;                /* the top camera request */
+  bool safe;                      /* the player-level snapshot's own `safe` */
+  bool seated, ragdoll, full_aim, foreign_camera;
+  TfpHoldWeapon weapon;           /* what is in the hands, against the lease's weapon */
+} TfpHoldView;
 typedef struct TfpPhasePacket { bool available; uint64_t identity, player_identity, epoch; double progress; } TfpPhasePacket;
 
 /* why buffers: a refusal's text, empty when the backend gives none. */
@@ -61,6 +75,8 @@ typedef struct TfpBackendApi {
   void (*presentation_transition)(void *user, TfpPhasePacket *out);   /* may be NULL */
   bool (*set_pose_transition)(void *user, TfpLease *lease, const TfpPhasePacket *packet, char *why, size_t size); /* may be NULL */
   double (*clock)(void *user);    /* monotonic seconds */
+  /* The action hold's view for this lease. May be NULL (and is never called while the hold is off). */
+  void (*hold_view)(void *user, const TfpLease *lease, TfpHoldView *out);
 } TfpBackendApi;
 
 /* ---- arms / weapon placement (:23, :102-135) ----
@@ -98,11 +114,17 @@ typedef struct TfpController {
   /* summary.weapon_updates, .zero_restores, .blend, .target_weight and pose_seen (:81-95) */
   double weapon_updates, zero_restores, seen_weapon_updates, seen_zero_restores, blend, target_weight;
   bool has_blend;                    /* false: summary.blend is nil (no statistics since the session began) */
+  /* The action hold. Not in retail; all false / 0 unless tfp_controller_set_hold switched it on. */
+  bool hold_enabled, holding;
+  double hold_started;
+  unsigned holds, hold_resumes, hold_exits;
+  char hold_why[160];                /* holding: the exit that is held back; else why the last hold ended or was not taken */
 } TfpController;
 
 #define TFP_GUARD_HOLD 0.75          /* controller.lua:19 */
 #define TFP_FIRST_ENTRY_DELAY 0.1    /* controller.lua:210 */
 #define TFP_ENTRY_SPACING 0.25       /* controller.lua:456 */
+#define TFP_HOLD_CAP 4.0             /* seconds a hold may last; not in retail */
 
 void tfp_controller_init(TfpController *c, const TfpBackendApi *backend);
 bool tfp_controller_start(TfpController *c);                       /* F11 on */
@@ -121,5 +143,17 @@ bool tfp_controller_placement_target(const TfpController *c, const TfpPlacementA
 bool tfp_controller_set_placement(TfpController *c, const TfpPlacementApi *api, const TfpPlacementValue *value, char *why, size_t size);
 /* self:status(): the status line, cut to size. Answers the length it wanted (as snprintf). */
 int tfp_controller_status(const TfpController *c, char *out, size_t size);
+/* The action hold (not in retail; off after tfp_controller_init, and then nothing below differs from retail).
+ * On: while a lease runs, an exit whose only reason is an action is held back for as long as
+ *   - the hold view is available and names the lease's own player,
+ *   - the top camera request is kind 6 and is the lease's own record,
+ *   - the avatar is not a ragdoll, not seated, not in full aim, and no other camera owns the view,
+ *   - it is not the case that the player-level view is safe again with another weapon in the hands,
+ *   - the hold is younger than TFP_HOLD_CAP.
+ * The lease resumes, with no exit and no entry, on the first update whose full snapshot is safe with the
+ * lease's weapon identity, kind 6 and the lease's record. Anything else takes the exit of today. */
+void tfp_controller_set_hold(TfpController *c, bool enabled);
+/* The switch is on and a lease runs: an action would be held (the pose helper has to tolerate its first frame). */
+static inline bool tfp_controller_hold_armed(const TfpController *c) { return c->hold_enabled && c->lease && c->phase == TFP_PHASE_RUNNING; }
 static inline bool tfp_controller_is_clean(const TfpController *c) { return !c->lease && !c->enabled; }
 #endif

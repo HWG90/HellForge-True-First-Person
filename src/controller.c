@@ -63,6 +63,38 @@ void tfp_controller_init(TfpController *c, const TfpBackendApi *backend) {
   c->placement.v[TFP_AXIS_X] = 0.15, c->placement.v[TFP_AXIS_Y] = 0, c->placement.v[TFP_AXIS_Z] = -0.12;
 }
 
+/* ---- the action hold (not in retail; see controller.h). Nothing here runs while it is off:
+ * `holding` is then never set, and hold_refusal answers before it asks the backend anything. ---- */
+void tfp_controller_set_hold(TfpController *c, bool enabled) { c->hold_enabled = enabled; }
+static void hold_over(TfpController *c, const char *why) {
+  if (!c->holding) return;
+  c->holding = false;
+  c->hold_exits++;
+  snprintf(c->hold_why, sizeof c->hold_why, "%s", why);
+}
+/* NULL: the exit is held back. Otherwise why not (the switch being off answers "", and writes nothing). */
+static const char *hold_refusal(TfpController *c, double timestamp) {
+  const TfpBackendApi *b = c->backend;
+  TfpHoldView v;
+  if (!c->hold_enabled) return "";
+  if (!b->hold_view) return "the backend has no hold view";
+  if (!c->lease || c->phase != TFP_PHASE_RUNNING || c->lease->cleanup_only) return "no running lease";
+  memset(&v, 0, sizeof v);
+  b->hold_view(b->user, c->lease, &v);
+  if (!v.available) return "the local player or its camera request is not proven";
+  if (v.player_identity != c->initial.player_identity) return "another local player";
+  if (v.camera_kind != 6) return "the camera request is no longer kind 6";
+  if (!c->lease->request || v.record != c->lease->request) return "the camera request record is not the lease's";
+  if (v.ragdoll) return "ragdoll";
+  if (v.seated) return "seated";
+  if (v.full_aim) return "full aim";
+  if (v.foreign_camera) return "another camera owns the view";
+  /* The action's own flags are gone and another weapon is in the hands: this lease's view is not coming back. */
+  if (v.safe && v.weapon == TFP_HOLD_WEAPON_OTHER) return "another weapon is in the hands";
+  if (c->holding && timestamp - c->hold_started >= TFP_HOLD_CAP) return "the cap was reached (4000 ms)";
+  return NULL;
+}
+
 void tfp_controller_get_placement(const TfpController *c, const TfpPlacementApi *api, TfpPlacementValue *out) { /* :102 */
   TfpPlacementValue backend;
   const TfpPlacementValue *value = api->pose_placement(api->user, &backend) ? &backend : &c->placement;
@@ -140,6 +172,7 @@ bool tfp_controller_retry_cleanup(TfpController *c) { /* :156 */
 }
 
 bool tfp_controller_stop(TfpController *c, const char *reason) { /* :182 */
+  hold_over(c, first(reason, "manual stop"));
   c->enabled = false;
   c->has_ads_return = c->has_pose = false;
   if (c->lease) {
@@ -187,11 +220,30 @@ static void begin_session(TfpController *c, const TfpView *current, double times
 
 /* A gameplay or camera owner change yields only our exact former lease. :333 */
 static bool manual_wait(TfpController *c, const char *reason) {
+  hold_over(c, first(reason, "the lease was given up"));
   snprintf(c->wait_reason, sizeof c->wait_reason, "%s", first(reason, "Waiting for a safe released firearm camera"));
   if (c->lease) {
     if (!tfp_controller_retry_cleanup(c)) return false;
   } else c->phase = TFP_PHASE_WAITING;
   reportf(c, "First person enabled; waiting: ", c->wait_reason);
+  return true;
+}
+
+/* An exit of manual_update that an action alone can cause: held back when the hold allows it, taken as before otherwise. */
+static bool hold_or_wait(TfpController *c, double timestamp, const char *reason) {
+  const char *refusal = hold_refusal(c, timestamp);
+  if (refusal) {
+    if (c->holding) hold_over(c, refusal);
+    else if (*refusal) snprintf(c->hold_why, sizeof c->hold_why, "not held: %s", refusal);
+    return manual_wait(c, reason);
+  }
+  if (!c->holding) {
+    c->holding = true;
+    c->hold_started = timestamp;
+    c->holds++;
+    report(c, "First person enabled; holding the native view through an action");
+  }
+  snprintf(c->hold_why, sizeof c->hold_why, "%s", first(reason, "Gameplay action or camera owns the view"));
   return true;
 }
 
@@ -242,7 +294,7 @@ static bool manual_update(TfpController *c, double timestamp) { /* :364 */
     return manual_wait(c, "Local player or camera context changed");
   if (player->guard) c->guard_until = timestamp + TFP_GUARD_HOLD;
   if (!player->safe || (player->camera_kind != 4 && player->camera_kind != 6))
-    return manual_wait(c, first(player->reason, "Gameplay action or camera owns the view"));
+    return hold_or_wait(c, timestamp, first(player->reason, "Gameplay action or camera owns the view"));
   if (current.available) {
     observe(c, &current);
     if (!publish_transition(c, &current, why, sizeof why)) return manual_wait(c, why);
@@ -258,6 +310,12 @@ static bool manual_update(TfpController *c, double timestamp) { /* :364 */
   if (c->phase == TFP_PHASE_RUNNING && current.available && current.safe && current.identity == c->initial.identity &&
       current.camera_kind == 6 && (!current.record || !c->lease->request || current.record == c->lease->request)) {
     if (c->lease->cleanup_only) return tfp_controller_stop(c, "Pose helper entry requires cleanup");
+    if (c->holding) { /* the same weapon, the same request, safe again: the lease simply goes on */
+      c->holding = false;
+      c->hold_resumes++;
+      snprintf(c->hold_why, sizeof c->hold_why, "resumed: safe again with the same weapon and request");
+      report(c, "First person enabled; native view kept through an action");
+    }
     TfpPoseStats stats = {0};
     char problem[160] = "";
     bool have = pose_stats(c, &stats, problem, sizeof problem);
@@ -285,7 +343,7 @@ static bool manual_update(TfpController *c, double timestamp) { /* :364 */
     if (!current.controller_active && stats.target_weight == 1 && stats.blend == 1) c->has_ads_return = false;
     return true;
   }
-  if (c->lease) return manual_wait(c, "Native camera request or firearm changed");
+  if (c->lease) return hold_or_wait(c, timestamp, "Native camera request or firearm changed");
   c->phase = TFP_PHASE_WAITING;
   if (!current.available || !current.safe || current.camera_kind != 4 || current.aiming || current.controller_active ||
       timestamp < c->next_manual_entry || timestamp < c->guard_until) return true;
