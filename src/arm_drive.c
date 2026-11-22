@@ -75,12 +75,14 @@ typedef struct Tree { Part units[TREE_UNITS]; unsigned count; } Tree;
 typedef struct Units {
   uintptr_t world, body, rig, weapon, avatar_owner;
   uint32_t body_ref, rig_ref, weapon_ref, avatar_index;
+  bool gun_away; /* only ever true in a hold: no live gun on the rig's socket (weapon may then be 0) */
 } Units;
 typedef struct Api { uint64_t set_local, update_unit; } Api;
 
 static struct {
   TfpArmDriveHost host;
   bool has_host, on, restore_after, bend;
+  bool hold; /* tfp_arm_drive_set_hold */
   float weight;
   TfpArmDriveStats stats;
   /* the binding: only while `bound`, and only for exactly these units */
@@ -264,7 +266,9 @@ static bool restore(void) {
 }
 
 /* ---- proofs ---- */
-static uint32_t prove(uintptr_t world, const TfpSnapshot *s, Units *out) {
+/* hold false: the proof as it always was. hold true (arm_drive.h): the gun's own conditions do not refuse;
+ * they set gun_away instead. s may then be a player snapshot, whose weapon_unit is 0. */
+static uint32_t prove(uintptr_t world, const TfpSnapshot *s, bool hold, Units *out) {
   Units u = {.world = world, .body_ref = s->body, .rig_ref = s->viewmodel, .weapon_ref = s->weapon_unit,
              .avatar_owner = s->avatar_owner, .avatar_index = s->avatar_index};
   uintptr_t unit_world, names, links, parent, external, rig_worlds, camera, context = s->context;
@@ -276,18 +280,24 @@ static uint32_t prove(uintptr_t world, const TfpSnapshot *s, Units *out) {
   if (physics & 0x10) return TFP_ARM_RAGDOLL;
   /* view:493-509 resolve_rig, :520-531 */
   u.body = unit(u.body_ref), u.rig = unit(u.rig_ref), u.weapon = unit(u.weapon_ref);
-  if (!u.body || !u.rig || !u.weapon || u.body == u.rig) return TFP_ARM_UNITS;
+  if (!u.body || !u.rig || (!u.weapon && !hold) || u.body == u.rig) return TFP_ARM_UNITS;
   if (!rd(u.rig + L_UNIT_RESOURCE, &resource, 8) || resource != B_RIG_RESOURCE || !u32(u.rig + L_UNIT_NODES, &count) || count != TFP_GRAFT_RIG_NODES ||
       !ptr(u.rig + L_UNIT_NAMES, &names) || !u32(names + TFP_GRAFT_RIG_SOCKET * 4, &socket) || socket != TFP_GRAFT_NAME_SOCKET ||
       !u32(names + TFP_GRAFT_RIG_EYE * 4, &eye) || eye != TFP_GRAFT_NAME_RIG_EYE || !ptr(u.rig + L_UNIT_WORLDS, &rig_worlds))
     return TFP_ARM_UNITS;
-  if (!ptr(u.rig + L_UNIT_WORLD, &unit_world) || unit_world != world || !ptr(u.body + L_UNIT_WORLD, &unit_world) || unit_world != world ||
-      !ptr(u.weapon + L_UNIT_WORLD, &unit_world) || unit_world != world)
+  if (!ptr(u.rig + L_UNIT_WORLD, &unit_world) || unit_world != world || !ptr(u.body + L_UNIT_WORLD, &unit_world) || unit_world != world)
     return TFP_ARM_WORLD;
+  if (!u.weapon) u.gun_away = true; /* hold only (see above) */
+  else if (!ptr(u.weapon + L_UNIT_WORLD, &unit_world) || unit_world != world) {
+    if (!hold) return TFP_ARM_WORLD;
+    u.gun_away = true;
+  }
   /* view:758-766: the gun's root is linked to the rig's socket, the camera's to the rig's eye */
-  if (!ptr(u.weapon + L_UNIT_PARENT, &parent) || parent != u.rig || !ptr(u.weapon + L_UNIT_LINKS, &links) || !u32(links, &link) ||
-      link != (((uint32_t)TFP_GRAFT_RIG_SOCKET << 16) | 2u) || !ptr(u.weapon + L_UNIT_EXTERNAL, &external) || external != rig_worlds)
-    return TFP_ARM_WEAPON;
+  else if (!ptr(u.weapon + L_UNIT_PARENT, &parent) || parent != u.rig || !ptr(u.weapon + L_UNIT_LINKS, &links) || !u32(links, &link) ||
+           link != (((uint32_t)TFP_GRAFT_RIG_SOCKET << 16) | 2u) || !ptr(u.weapon + L_UNIT_EXTERNAL, &external) || external != rig_worlds) {
+    if (!hold) return TFP_ARM_WEAPON;
+    u.gun_away = true;
+  }
   if (!u32(context + L_CONTEXT_CAMERA_UNIT, &camera_ref) || !(camera = unit(camera_ref)) || camera == u.rig || !ptr(camera + L_UNIT_PARENT, &parent) ||
       parent != u.rig || !ptr(camera + L_UNIT_LINKS, &links) || !u32(links, &link) || link != (((uint32_t)TFP_GRAFT_RIG_EYE << 16) | 2u))
     return TFP_ARM_CAMERA;
@@ -295,8 +305,11 @@ static uint32_t prove(uintptr_t world, const TfpSnapshot *s, Units *out) {
   return TFP_ARM_NONE;
 }
 static bool same_units(const Units *a, const Units *b) {
-  return a->world == b->world && a->body == b->body && a->rig == b->rig && a->weapon == b->weapon && a->body_ref == b->body_ref &&
-         a->rig_ref == b->rig_ref && a->weapon_ref == b->weapon_ref && a->avatar_owner == b->avatar_owner && a->avatar_index == b->avatar_index;
+  /* In a hold the gun is not part of what a binding is for: the map joins the body and the rig, and the entry
+   * alignment is the rig's own socket. So the gun leaving, returning or being another does not unbind. */
+  return a->world == b->world && a->body == b->body && a->rig == b->rig && (d.hold || a->weapon == b->weapon) && a->body_ref == b->body_ref &&
+         a->rig_ref == b->rig_ref && (d.hold || a->weapon_ref == b->weapon_ref) && a->avatar_owner == b->avatar_owner &&
+         a->avatar_index == b->avatar_index;
 }
 static bool body_matrices(uintptr_t body, TfpGraftMatrix *out) { /* graft:92-96 */
   uintptr_t p;
@@ -377,7 +390,8 @@ static uint32_t drive(const Units *u) {
     unsigned node = d.map.fp[i];
     if (!memcmp(&current[node], &target[i], 48)) continue;
     if (!changed) {
-      if (!collect(u->world, u->rig, u->weapon, u->weapon_ref, 0, &tree)) return TFP_ARM_TREE;
+      /* gun_away (a hold): the gun is not this rig's to refresh; the tree stays empty, here and when the values go back */
+      if (!u->gun_away && !collect(u->world, u->rig, u->weapon, u->weapon_ref, 0, &tree)) return TFP_ARM_TREE;
       d.attachments = tree;
       d.own_world = u->world, d.own_rig = u->rig, d.own_locals = locals, d.own_worlds = rig_worlds, d.own_ref = u->rig_ref;
       memcpy(d.own_arms, d.arms, sizeof d.own_arms), d.own_arm_count = d.arm_count;
@@ -389,7 +403,7 @@ static uint32_t drive(const Units *u) {
   }
   if (changed) {
     if (!update(&a, u->world, u->rig_ref) || !refresh_arms(&a, u->world, u->rig, rig_worlds, d.arms, d.arm_count)) return TFP_ARM_FAULT;
-    int weapon = update_weapon(&a, u->world, &tree);
+    int weapon = u->gun_away ? 1 : update_weapon(&a, u->world, &tree);
     if (weapon <= 0) return weapon ? TFP_ARM_FAULT : TFP_ARM_TREE;
   }
   return TFP_ARM_NONE;
@@ -402,6 +416,7 @@ void tfp_arm_drive_set(bool on, bool restore_after_draw, float weight) {
   d.weight = weight >= 0 && weight <= 1 ? weight : weight > 1 ? 1 : 0; /* a NaN: 0, the game's own pose */
 }
 void tfp_arm_drive_set_bend(bool on) { d.bend = on; }
+void tfp_arm_drive_set_hold(bool on) { d.hold = on; }
 static void refused(uint32_t reason) { d.stats.refused++, d.stats.reason = reason; }
 
 bool tfp_arm_drive_render(uint64_t world, bool game_thread) {
@@ -417,16 +432,28 @@ bool tfp_arm_drive_render(uint64_t world, bool game_thread) {
     Units u;
     if (tfp_snapshot(mem(), TFP_SNAPSHOT_FULL, &s, NULL, 0)) {
       native_view = s.camera_kind == 6;
-      if (native_view) reason = prove((uintptr_t)world, &s, &u);
+      if (native_view) reason = prove((uintptr_t)world, &s, d.hold, &u);
     } else {
       /* Not provable in full (no weapon, a request for another weapon): a refusal only in the native view of the local avatar. */
       native_view = tfp_snapshot(mem(), TFP_SNAPSHOT_PLAYER, &s, NULL, 0) && s.camera_kind == 6;
       reason = TFP_ARM_SNAPSHOT;
+      /* In a hold that is the expected state (a stow, a throw, an injection): the player's snapshot has the body,
+       * the rig and the camera request; it names no weapon unit, so the gun counts as away. */
+      if (native_view && d.hold) reason = prove((uintptr_t)world, &s, true, &u);
     }
     if (native_view && reason == TFP_ARM_NONE) reason = drive(&u);
     if (native_view && reason == TFP_ARM_NONE) {
       d.stats.frames++;
-      return d.restore_after && d.owned != 0;
+      /* In a hold the game's values go back after every draw, the retired mod's path for weapon draws and holsters
+       * (0.3.46, graft:186-209), not the accepted leave-written path. Why: the leave-written path recovers the
+       * game's value of a joint on the next frame from the record it finds there, which is right only while the
+       * game keeps animating the same rig with the same gun on it. During a stow, a draw, a throw or an injection
+       * the game re-parents the gun and may stop writing some joints or replace the rig unit between two frames;
+       * a value of this mod left in the rig would then be taken for the game's, and the gun's units would be
+       * evaluated against it by the game's own update. Put back at once, the rig holds only the game's values
+       * whenever the game looks at it. (That path's acceptance in the game was still pending when the mod it
+       * comes from was retired: this is a probe.) */
+      return (d.restore_after || d.hold) && d.owned != 0;
     }
     if (native_view) refused(reason);
     else d.stats.idle++;
@@ -457,3 +484,26 @@ const char *tfp_arm_drive_reason_name(uint32_t reason) {
   return reason < TFP_ARM_REASONS ? names[reason] : "?";
 }
 void tfp_arm_drive_reset_for_tests(void) { memset(&d, 0, sizeof d); }
+
+/* ---- the hold's log line (arm_drive.h); reads only ---- */
+void tfp_arm_drive_probe(uint32_t gun, TfpArmDriveProbe *out) {
+  static TfpSnapshot s;
+  uintptr_t body, rig, weapon, parent = 0, camera, links, worlds;
+  uint32_t camera_ref, link;
+  TfpGraftMatrix m;
+  memset(out, 0, sizeof *out);
+  if (!d.has_host || !tfp_snapshot(mem(), TFP_SNAPSHOT_PLAYER, &s, NULL, 0)) return;
+  out->proven = true;
+  body = unit(s.body), rig = unit(s.viewmodel), weapon = gun ? unit(gun) : 0;
+  if (!weapon || !rd(weapon + L_UNIT_PARENT, &parent, sizeof parent) || !parent) out->gun_parent = "none";
+  else out->gun_parent = parent == rig ? "rig" : parent == body ? "body" : "other";
+  if (u32(s.context + L_CONTEXT_CAMERA_UNIT, &camera_ref) && (camera = unit(camera_ref)) != 0) {
+    out->has_camera = true;
+    out->camera_parent_is_rig_eye = rig && rd(camera + L_UNIT_PARENT, &parent, sizeof parent) && parent == rig && ptr(camera + L_UNIT_LINKS, &links) &&
+                                    u32(links, &link) && link == (((uint32_t)TFP_GRAFT_RIG_EYE << 16) | 2u);
+    if (ptr(camera + L_UNIT_WORLDS, &worlds) && rd(worlds, &m, sizeof m))
+      out->has_eye = true, out->eye[0] = m.values[12], out->eye[1] = m.values[13], out->eye[2] = m.values[14];
+  }
+  if (rig && ptr(rig + L_UNIT_WORLDS, &worlds) && rd(worlds + 64 * (uintptr_t)TFP_GRAFT_RIG_EYE, &m, sizeof m))
+    out->has_rig_eye = true, out->rig_eye[0] = m.values[12], out->rig_eye[1] = m.values[13], out->rig_eye[2] = m.values[14];
+}

@@ -552,6 +552,115 @@ static void test_rebind_on_new_units(void) {
   CHECK(updates == 4 && calls[sets].unit == NEW_RIG && calls[sets + 1].unit == SLEEVE && calls[sets + 2].unit == GUN);
 }
 
+/* The action hold (tfp_arm_drive_set_hold): the gun may leave the rig or be gone; the binding and its entry
+ * alignment stay; the gun's units are not refreshed while it is away; the game's values go back after every draw. */
+static void gun_dead(void) { const uint8_t generation = 1; put(REGISTRY + 0x1000 + GUN, &generation, 1); }
+static void gun_alive(void) { const uint8_t generation = 0; put(REGISTRY + 0x1000 + GUN, &generation, 1); }
+static void test_hold(void) {
+  TfpGraftLocal now[TFP_GRAFT_RIG_NODES], want[TFP_GRAFT_RIG_NODES];
+  TfpArmDriveProbe probe;
+  fresh();
+  tfp_arm_drive_set(true, false, 1); /* the accepted path: values stay written */
+  const TfpGraft map = bound_map();  /* the entry alignment: the socket as it was on the first driven frame */
+  CHECK(!tfp_arm_drive_render(WORLD, true) && stats().frames == 1 && stats().binds == 1 && stats().owned > 30);
+  tfp_arm_drive_probe(GUN, &probe);
+  CHECK(probe.proven && !strcmp(probe.gun_parent, "rig") && probe.has_camera && probe.camera_parent_is_rig_eye && probe.has_eye && probe.has_rig_eye);
+  CHECK(probe.rig_eye[0] == rig_world[50].values[12] && probe.rig_eye[2] == rig_world[50].values[14] && probe.eye[0] == 0);
+
+  /* the hold begins with the gun still on the rig: driven as before, but the game's values go back after the draw */
+  tfp_arm_drive_set_hold(true);
+  move_body();
+  wanted(&map, body_later, game_locals, 1, want);
+  forget_calls();
+  CHECK(tfp_arm_drive_render(WORLD, true));
+  rig_locals(now);
+  CHECK(!memcmp(now, want, sizeof now) && stats().frames == 2 && stats().binds == 1);
+  tfp_arm_drive_after_render();
+  rig_locals(now);
+  CHECK(!memcmp(now, game_locals, sizeof now) && stats().owned == 0 && !tfp_arm_drive_held());
+
+  /* the gun goes to the body (a stow): not a refusal, the same binding, the gun's units are left alone */
+  break_gun_parent();
+  forget_calls();
+  CHECK(tfp_arm_drive_render(WORLD, true));
+  rig_locals(now);
+  TfpArmDriveStats s = stats();
+  CHECK(!memcmp(now, want, sizeof now) && s.frames == 3 && s.binds == 1 && !s.refused);
+  CHECK(updates == 3 && calls[sets].unit == RIG && calls[sets + 1].unit == SLEEVE && calls[sets + 2].unit == GLOVE);
+  tfp_arm_drive_probe(GUN, &probe);
+  CHECK(!strcmp(probe.gun_parent, "body"));
+  forget_calls();
+  tfp_arm_drive_after_render();
+  rig_locals(now);
+  CHECK(!memcmp(now, game_locals, sizeof now) && updates == 3 && stats().owned == 0);
+  for (unsigned i = 0; i < call_count; i++) CHECK(calls[i].unit != GUN && calls[i].unit != OPTIC);
+
+  /* the full snapshot fails (the request names another weapon than the hands hold): the player's serves */
+  break_snapshot();
+  CHECK(tfp_arm_drive_render(WORLD, true) && stats().frames == 4 && stats().binds == 1 && !stats().refused);
+  tfp_arm_drive_after_render();
+  mend_snapshot();
+  /* the gun's unit is gone altogether */
+  gun_dead();
+  CHECK(tfp_arm_drive_render(WORLD, true) && stats().frames == 5 && stats().binds == 1 && !stats().refused);
+  tfp_arm_drive_after_render();
+  tfp_arm_drive_probe(GUN, &probe);
+  CHECK(!strcmp(probe.gun_parent, "none"));
+  gun_alive();
+  /* its links say another socket: away as well */
+  mend_gun_parent();
+  break_weapon();
+  CHECK(tfp_arm_drive_render(WORLD, true) && stats().frames == 6 && stats().binds == 1 && !stats().refused);
+  tfp_arm_drive_after_render();
+  mend_weapon();
+
+  /* the gun is back on the rig: its units are refreshed again; the alignment is still the entry's */
+  forget_calls();
+  CHECK(tfp_arm_drive_render(WORLD, true));
+  rig_locals(now);
+  CHECK(!memcmp(now, want, sizeof now) && stats().frames == 7 && stats().binds == 1 && updates == 5 && calls[sets + 3].unit == GUN);
+  tfp_arm_drive_after_render();
+  /* the hold ends: the accepted path again, on the same binding */
+  tfp_arm_drive_set_hold(false);
+  CHECK(!tfp_arm_drive_render(WORLD, true) && stats().frames == 8 && stats().binds == 1 && stats().owned > 30 && !stats().refused);
+  rig_locals(now);
+  CHECK(!memcmp(now, want, sizeof now));
+  /* and without the hold a gun off the rig is the refusal it always was */
+  break_gun_parent();
+  CHECK(!tfp_arm_drive_render(WORLD, true) && stats().refused == 1 && stats().reason == TFP_ARM_WEAPON && stats().owned == 0);
+  mend_gun_parent();
+
+  /* what a hold does not excuse: a ragdoll, a camera that is not on the rig's eye, a rig in another world */
+  static const struct { void (*break_it)(void), (*mend_it)(void); uint32_t reason; } still[] = {
+    {break_ragdoll, mend_ragdoll, TFP_ARM_RAGDOLL}, {break_camera, mend_camera, TFP_ARM_CAMERA}, {break_world, mend_world, TFP_ARM_WORLD}};
+  for (unsigned i = 0; i < sizeof still / sizeof *still; i++) {
+    fresh();
+    tfp_arm_drive_set(true, false, 1);
+    tfp_arm_drive_set_hold(true);
+    break_gun_parent();
+    CHECK(tfp_arm_drive_render(WORLD, true) && stats().frames == 1 && stats().binds == 1); /* bound without the gun */
+    tfp_arm_drive_after_render();
+    still[i].break_it();
+    CHECK(!tfp_arm_drive_render(WORLD, true) && stats().refused == 1 && stats().reason == still[i].reason && stats().owned == 0);
+    still[i].mend_it();
+  }
+  /* empty hands from the start of a binding: the player's snapshot, no gun at all */
+  fresh();
+  tfp_arm_drive_set(true, false, 1);
+  tfp_arm_drive_set_hold(true);
+  break_snapshot();
+  gun_dead();
+  CHECK(tfp_arm_drive_render(WORLD, true) && stats().frames == 1 && stats().binds == 1 && !stats().refused);
+  tfp_arm_drive_after_render();
+  rig_locals(now);
+  CHECK(!memcmp(now, game_locals, sizeof now) && !tfp_arm_drive_held());
+  /* switched off entirely, the probe reads nothing it should not: no player, no answer */
+  request(4);
+  n32(CTX + 0x200 + 4, 999); /* the camera is not the local avatar's */
+  tfp_arm_drive_probe(GUN, &probe);
+  CHECK(!probe.proven && !probe.gun_parent && !probe.has_camera && !probe.has_eye);
+}
+
 int main(int argc, char **argv) {
   if (argc != 2) { fprintf(stderr, "usage: arm_drive_test FIXTURE\n"); return 2; }
   load(argv[1]);
@@ -566,6 +675,7 @@ int main(int argc, char **argv) {
   test_bend();
   test_refusals();
   test_rebind_on_new_units();
+  test_hold();
   printf("arm drive: %u checks passed\n", checks);
   return 0;
 }

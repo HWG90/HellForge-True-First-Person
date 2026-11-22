@@ -66,6 +66,26 @@ void tfp_arm_drive_set(bool on, bool restore_after_draw, float weight);
  * own Z, through the same writer and refresh. */
 void tfp_arm_drive_set_bend(bool on);
 
+/* The action hold (a probe; docs/design/ACTION-CAMERA.md "Action hold"). Off at the start and for good
+ * unless this is called with true; off, nothing below differs from before. While on (the controller is
+ * holding the native view through an action):
+ *   - a gun that is absent, or no longer on the rig's socket, is not a refusal;
+ *   - when the full snapshot fails (empty hands, a request that names another weapon than the hands hold)
+ *     the player's snapshot gives the body, the rig and the camera;
+ *   - the binding and its entry alignment are kept while only the gun differs;
+ *   - the gun's units are collected and refreshed only while the gun is on the rig;
+ *   - the game's joint values are put back after every primary render (tfp_arm_drive_render answers true),
+ *     whatever restore_after_draw says. */
+void tfp_arm_drive_set_hold(bool on);
+/* For the hold's log line; reads only, game thread. gun: the unit the lease was entered with (0: none).
+ * proven false: the local player's snapshot failed and nothing else is filled. */
+typedef struct TfpArmDriveProbe {
+  bool proven, has_camera, camera_parent_is_rig_eye, has_eye, has_rig_eye;
+  const char *gun_parent;      /* "rig", "body", "other" (another unit), "none" (no live gun unit, or no parent) */
+  float eye[3], rig_eye[3];    /* world positions: the game's camera unit, the rig's eye node (50) */
+} TfpArmDriveProbe;
+void tfp_arm_drive_probe(uint32_t gun, TfpArmDriveProbe *out);
+
 /* The primary world render is about to be forwarded. `world` is its first argument. game_thread: the
  * call is on the thread of the mod's tick and a tick ran shortly before (src/render_slot.c).
  * Returns true when tfp_arm_drive_after_render must be called once the render call has returned. */
