@@ -163,6 +163,28 @@ int main(void) {
     const TfpKickTuning odd = {.gain = 1.0f, .max_degrees = 8.0f, .settle_ms = 300.0f, .damp_ms = NAN};
     for (int i = 0; i < 6; ++i) { out = tfp_kick_step(&k, view, i & 1 ? dipped : view, .016f, &odd); CHECK(tfp_q_valid(out) && fabsf(sqrtf(tfp_q_dot(out, out))-1) < 1e-4f); }
   }
+  /* A head that turns sideways against the view (the body twisting in a strafe or a walk backwards) reaches the view
+   * by a fifth of what a nod or a tilt does: a kick about the view's up axis turns the aim. Seen in the game
+   * 2026-11-22: 5 to 8 degrees of kick from walking backwards and strafing, most of it sideways. */
+  {
+    const TfpKickTuning tune = {1.0f, 20.0f, 300.0f, 0};
+    const TfpQ steady = about(0, 0, 1, 37);
+    float size[3];
+    const TfpQ turns[3] = {about(0, 0, 1, 10), about(1, 0, 0, 10), about(0, 1, 0, 10)}; /* sideways, a nod, a tilt */
+    for (int i = 0; i < 3; ++i) {
+      TfpKick kick; tfp_kick_reset(&kick);
+      for (int n = 0; n < 10; ++n) tfp_kick_step(&kick, steady, steady, .016f, &tune);
+      size[i] = tfp_degrees_between(tfp_kick_step(&kick, steady, tfp_q_mul(steady, turns[i]), .016f, &tune), tfp_q_identity());
+    }
+    CHECK(size[1] > 9 && size[1] < 10 && size[2] > 9 && size[2] < 10);
+    CHECK(size[0] > 1.6f && size[0] < 2.0f);
+    /* a mixed turn keeps its nod whole and loses four fifths of its sideways part */
+    TfpKick kick; tfp_kick_reset(&kick);
+    for (int n = 0; n < 10; ++n) tfp_kick_step(&kick, steady, steady, .016f, &tune);
+    const TfpQ out = tfp_kick_step(&kick, steady, tfp_q_mul(steady, tfp_q_mul(about(0, 0, 1, 10), about(1, 0, 0, 6))), .016f, &tune);
+    const TfpQ want = tfp_q_mul(about(0, 0, 1, 2), about(1, 0, 0, 6));
+    CHECK(tfp_degrees_between(out, want) < 1.0f);
+  }
   printf("camera lock: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

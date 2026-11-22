@@ -12,6 +12,7 @@ typedef struct TfpKickTuning { float gain, max_degrees, settle_ms, damp_ms; } Tf
 /* rest: the slowly following head rotation, in the view's frame; view: last frame's view, for its own turning speed;
  * shown: the kick last returned (what the damping goes on from) */
 typedef struct TfpKick { TfpQ rest, view, shown; bool known; } TfpKick;
+#define TFP_KICK_YAW_SHARE .2f /* how much of the head's sideways turn against the view counts; a nod and a tilt count whole */
 #define TFP_KICK_VIEW_STILL 60.0f /* degrees a second of the view's own turning at which nothing is added any more */
 
 static inline void tfp_kick_reset(TfpKick *k) { k->rest = k->view = k->shown = tfp_q_identity(); k->known = false; }
@@ -37,7 +38,24 @@ static inline TfpQ tfp_kick_raw(TfpKick *k, TfpQ view, TfpQ head, float dt, cons
   k->rest = tfp_slerp(k->rest, relative, 1-expf(-dt/settle));
   if (!tfp_q_valid(k->rest)) { k->known = false; return tfp_q_identity(); }
   if (!(t->gain > 0) || !(t->max_degrees > 0)) return tfp_q_identity();
-  const TfpQ moved = tfp_q_normalised(tfp_q_mul(relative, tfp_q_inv(k->rest)));
+  TfpQ moved = tfp_q_normalised(tfp_q_mul(relative, tfp_q_inv(k->rest)));
+  {
+    /* The sideways part (about the view's up axis, Z) is the body twisting under the head in a strafe or a walk
+     * backwards, and in the view it turns the aim: it counts for TFP_KICK_YAW_SHARE. A nod and a tilt count whole.
+     * Worked on the rotation vector (axis times angle), where the three parts are separate for the small angles
+     * a kick is made of. */
+    if (moved.w < 0) moved.x = -moved.x, moved.y = -moved.y, moved.z = -moved.z, moved.w = -moved.w;
+    const float sine = sqrtf(moved.x*moved.x+moved.y*moved.y+moved.z*moved.z);
+    if (sine > 1e-6f) {
+      const float angle = 2*atan2f(sine, moved.w), scale = angle/sine;
+      const float rx = moved.x*scale, ry = moved.y*scale, rz = moved.z*scale*TFP_KICK_YAW_SHARE;
+      const float turned_by = sqrtf(rx*rx+ry*ry+rz*rz);
+      if (turned_by > 1e-6f) {
+        const float half_sine = sinf(turned_by/2)/turned_by;
+        moved.x = rx*half_sine, moved.y = ry*half_sine, moved.z = rz*half_sine, moved.w = cosf(turned_by/2);
+      } else moved = tfp_q_identity();
+    }
+  }
   const float degrees = tfp_degrees_between(moved, tfp_q_identity());
   if (!(degrees > .0001f)) return tfp_q_identity();
   float share = (t->gain < 1 ? t->gain : 1)*still;
