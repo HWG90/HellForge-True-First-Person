@@ -123,3 +123,23 @@ on build 25480438, and what it does not:
 - Input is refused when the game window does not have focus (`drive.py`), which is what happens when someone uses
   the desktop meanwhile. That is the wanted behaviour; do not work around it.
 
+## The HD2 runtime in a test session (2026-11-22)
+
+`require('mods/skyeshade/hd2runtime')` loads the shared HD2Runtime (0.50.1) in a harness session; the user pointed
+at it and at LLtM as test levers. What was tried on build 25480438, through `tools/harness/game_lua.py`:
+
+- `hd2.local_player()`: `loadout()` names the weapons in hand (`LAS-5 Scythe`, `LAS-58 Talon`, the throwable and its
+  count), `health()`, `max_health()`, `is_alive()`, `heal`, `injure`, `add_velocity`.
+- **`player:injure(limb, damage)` works** (limbs head, chest, l_hand, r_hand, l_knee, r_knee; from a runtime timer:
+  `hd2.after(seconds, function() ... end)`). Three injuries of 40 killed the player: a death from real damage. With
+  the view on it stayed at the head until the replacement, and first person came back after the respawn.
+- **`player:add_velocity({x=, y=, z=})` is accepted and does nothing visible**, standing or in a dive (the runtime
+  calls its effect on ground movement unproven). Actions are refused outside the game update: call them from
+  `hd2.after`.
+- `hd2.pickups()` and `hd2.entities.list()` are catalogues of definitions, not of things in the world; no call that
+  spawns a pick-up or moves the player was found in the runtime on HellForge (`hd2.hellforge.unavailable` lists
+  `custom_stratagem` and `enemies`).
+- LLtM 0.5.1 is loaded (`LinksLinkToMemory.status`): a memory workbench driven by `commands.txt` in
+  `%LOCALAPPDATA%/LinksLinkToMemory`. That folder, and with it the `hd2_*` script kit with the spawner, does not
+  exist in the HellForge prefix; the kit's addresses are retail's.
+
