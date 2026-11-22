@@ -320,6 +320,17 @@ int main() {
     CHECK(g.from_rig_eye() < 1e-4f && !g.forwarded_own);
     g.end();
   }
+  // ---- 9c. Frames the view is shown are counted with the camera lock off too: the field-of-view lock is its own
+  // toggle and follows "the view is shown", not "the camera lock held a frame". ----
+  for (int lock = 0; lock < 2; ++lock) {
+    fresh(lock != 0, true);
+    Game g; g.pose(0, 0, 0, .3f); g.look(.3f, -.2f); g.hip(); g.begin();
+    const uint64_t before = tfp_camera_view_frames(), held = tfp_camera_lock_frames();
+    standing(g, 12, 33.3, false); standing(g, 12, 33.3, true);
+    CHECK(tfp_camera_view_frames() - before == 24);
+    CHECK(lock ? tfp_camera_lock_frames() - held == 24 : tfp_camera_lock_frames() == held);
+    g.end();
+  }
   // ---- 10. The entry under the lock is one mechanism. With continuity on the 140 ms eased entry does not run and
   // the change of camera is carried whole: 0.3 m and 0.6 m at 30 frames a second change no step by 0.035 m, and no
   // frame of it is read as a jump. With continuity off the eased entry runs as before (and is the rougher one). ----

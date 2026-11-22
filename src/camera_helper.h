@@ -177,6 +177,9 @@ void tfp_camera_down_stats(TfpCameraDownStats *out);
  * head hiding asks in place of the on-foot answer (src/head_visibility.h held_off_foot). */
 uint32_t tfp_camera_lock_off_foot_body(void);
 uint64_t tfp_camera_lock_frames(void); /* frames the lock has held so far: rising while the view is shown */
+/* Frames the view was shown so far (the head camera or the native view, or any camera the lock holds), with the
+ * camera lock on or off. What the field-of-view lock follows. */
+uint64_t tfp_camera_view_frames(void);
 /* Beyond retail, and only in frames the camera lock holds: the presented eye is kept continuous in the body's frame
  * across every change of camera (head camera, native view, the repeated native argument) and one-frame moves of the
  * first-person rig around an action (tfp_camera_continuity_event); the difference is carried as a correction and

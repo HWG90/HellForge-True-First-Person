@@ -844,7 +844,8 @@ static void quit_guard(void) {
 
 static void fov_lock_tick(void) { /* every tick: the field of view is locked while the view is being shown */
   static uint64_t frames, shown_at;
-  const uint64_t now = GetTickCount64(), held = tfp_camera_lock_frames();
+  /* (frames the view is shown, not frames the camera lock held: the two are separate toggles in the panel) */
+  const uint64_t now = GetTickCount64(), held = tfp_camera_view_frames();
   if (held != frames) { frames = held; shown_at = now; }
   const bool shown = shown_at && now - shown_at < 250 && lock_wanted && tfp_locked_view_fov_lock(&wire);
   tfp_fov_set_lock(shown ? (float)(tfp_locked_view_fov_degrees(&wire)*3.14159265358979/180) : 0, tfp_locked_view_fov_zoom_when_aiming(&wire), (double)now);

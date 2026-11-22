@@ -182,7 +182,7 @@ typedef struct Policy {
 static _Atomic uint32_t tuning_extra_mask, tuning_eye_idle_ms = 300, tuning_eye_return;
 /* Beyond retail (tfp_camera_set_lock): the camera lock. Off by default, and then nothing here runs. */
 static _Atomic uint32_t lock_on, lock_last_kind;
-static _Atomic uint64_t lock_frames, lock_foreign_frames, lock_missed; static _Atomic uint32_t lock_missed_kind, lock_missed_error;
+static _Atomic uint64_t lock_frames, view_frames, lock_foreign_frames, lock_missed; static _Atomic uint32_t lock_missed_kind, lock_missed_error;
 static volatile float lock_entry_ms = 140; /* the eased entry into the native view while the lock is on (retail: none) */
 static volatile float lock_gain, lock_max, lock_settle = 300, lock_thrown_gain, lock_thrown_max, lock_peak;
 static TfpKick lock_kick; static TfpQ lock_view = {0, 0, 0, 1}, lock_last_kick = {0, 0, 0, 1}; static bool lock_view_known; static double lock_tick;
@@ -1088,6 +1088,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
     lock_asked = policy.presentation_enabled && atomic_load_explicit(&lock_on, memory_order_relaxed); lock_kind = known_kind ? kind : 0xffff;
     if (!lock_asked && smooth.known) smooth_forget();
     const bool supported = known_kind && (kind == 4 || kind == 6 || policy.lock_now);
+    if (supported && policy.presentation_enabled) atomic_fetch_add_explicit(&view_frames, 1, memory_order_relaxed);
     if (supported && kind == 6) {
       /* Read-only sampling can precede the terminal lease proof because
        * this branch ALWAYS forwards the game's entire native frame. */
@@ -1632,6 +1633,7 @@ void tfp_camera_set_lock(bool on, float gain, float max_degrees, float settle_ms
   atomic_store(&lock_on, on ? 1u : 0u);
 }
 uint64_t tfp_camera_lock_frames(void) { return atomic_load(&lock_frames); }
+uint64_t tfp_camera_view_frames(void) { return atomic_load(&view_frames); }
 void tfp_camera_set_continuity(bool on, bool trace_frames) { atomic_store(&smooth_on, on ? 1u : 0u); atomic_store(&trace_on, trace_frames ? 1u : 0u); }
 void tfp_camera_continuity_event(void) { atomic_store(&smooth_event, 1u); }
 void tfp_camera_set_orphan(bool on) { atomic_store(&orphan_on, on ? 1u : 0u); }
@@ -1707,7 +1709,7 @@ const char *tfp_camera_why_text(uint32_t why) {
 void tfp_camera_reset_for_tests(void) {
   atomic_store(&lock_on, 0); atomic_store(&smooth_on, 0); atomic_store(&trace_on, 0);
   atomic_store(&orphan_on, 0); atomic_store(&orphan_behind, 0); atomic_store(&orphan_frames, 0); atomic_store(&orphan_refused, 0);
-  atomic_store(&lock_frames, 0); atomic_store(&lock_foreign_frames, 0); atomic_store(&lock_missed, 0); atomic_store(&lock_missed_kind, 0); atomic_store(&lock_missed_error, 0);
+  atomic_store(&lock_frames, 0); atomic_store(&view_frames, 0); atomic_store(&lock_foreign_frames, 0); atomic_store(&lock_missed, 0); atomic_store(&lock_missed_kind, 0); atomic_store(&lock_missed_error, 0);
   atomic_store(&lock_missed_why, 0); atomic_store(&lock_down_frames, 0); atomic_store(&lock_down_refused, 0); atomic_store(&lock_down_kind, 0);
   atomic_store(&lock_down_error, 0); atomic_store(&lock_down_why, 0); atomic_store(&lock_body_ragdoll, 0); atomic_store(&lock_body_off_foot, 0);
   atomic_store(&lock_off_foot_body, 0); atomic_store(&lock_off_foot_at, 0); atomic_store(&lock_body_distance, 0); atomic_store(&lock_down_distance, 0);
