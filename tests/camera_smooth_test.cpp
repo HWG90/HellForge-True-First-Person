@@ -276,11 +276,11 @@ int main() {
   }
   // ---- 9. Away from any event the rig eye's own motion is not a jump: a crouch (the eye 2.5 m/s down from one
   // frame to the next), a fast turn of the rig about the body, a one-frame move. Shown as the game put it. After
-  // the binder's word (a lease or a hold begun or ended) a one-frame move is taken up, for 300 ms. ----
+  // the binder's word (a lease or a hold begun or ended) a one-frame move is taken up, for 600 ms. ----
   {
     fresh(true, true);
     Game g; g.pose(0, 0, 0, .3f); g.look(.3f, -.2f); g.hip(); g.begin();
-    standing(g, 12, 33.3, false); standing(g, 40, 33.3, true); // the entry and its 300 ms are over
+    standing(g, 12, 33.3, false); standing(g, 40, 33.3, true); // the entry and its 600 ms are over
     for (int i = 0; i < 8; ++i) { g.eye[2] -= 2.5f * .0333f; g.native(); g.frame(33.3); CHECK(g.from_rig_eye() < 1e-4f && !g.forwarded_own); }
     for (int i = 0; i < 8; ++i) { g.look(.3f + .5f * (i + 1), -.2f); g.native(); g.frame(33.3); CHECK(g.from_rig_eye() < 1e-4f && !g.forwarded_own); }
     g.eye[1] -= .2f; g.native(); g.frame(33.3);
@@ -295,14 +295,26 @@ int main() {
     standing(g, 15, 33.3, true);
     CHECK(g.from_rig_eye() < 1e-4f);
     tfp_camera_continuity_event();
-    standing(g, 11, 33.3, true);
-    g.eye[1] -= .2f; g.native(); g.frame(33.3); // 400 ms after the word: the game's own again
+    standing(g, 20, 33.3, true);
+    g.eye[1] -= .2f; g.native(); g.frame(33.3); // 700 ms after the word: the game's own again
     CHECK(g.from_rig_eye() < 1e-4f && !g.forwarded_own);
     tfp_camera_continuity_stats(&stats);
     CHECK(stats.jumps == 1);
     g.end();
   }
-  // ---- 9b. A re-seat that takes three frames and begins on the last frame of the 300 ms (seen in the game
+  // ---- 9a. 500 ms after the word a one-frame move is still taken up (seen in the game 2026-11-22: walking out of
+  // an emote, the rig re-seated 0.10 m in one frame half a second after the view came back). ----
+  {
+    fresh(true, true);
+    Game g; g.pose(0, 0, 0, .3f); g.look(.3f, -.2f); g.hip(); g.begin();
+    standing(g, 12, 33.3, false); standing(g, 40, 33.3, true);
+    tfp_camera_continuity_event();
+    standing(g, 15, 33.3, true);
+    g.eye[1] += .1f; g.native(); g.frame(33.3);
+    CHECK(g.step < .01f && g.forwarded_own);
+    g.end();
+  }
+  // ---- 9b. A re-seat that takes three frames and begins on the last frame of the 600 ms (seen in the game
   // 2026-11-22: closing the stratagem list or a swap with the view pitched down, 0.08 m a frame for three frames,
   // 270 ms after the entry). The run that began inside the time is taken up to its end, not shown from its second
   // frame on. ----
@@ -311,7 +323,7 @@ int main() {
     Game g; g.pose(0, 0, 0, .3f); g.look(.3f, -.2f); g.hip(); g.begin();
     standing(g, 12, 33.3, false); standing(g, 40, 33.3, true);
     tfp_camera_continuity_event();
-    standing(g, 9, 33.3, true);
+    standing(g, 18, 33.3, true);
     float worst = 0;
     for (int i = 0; i < 3; ++i) { g.eye[1] -= .05f; g.eye[2] += .065f; g.native(); g.frame(33.3); if (g.step > worst) worst = g.step; }
     CHECK(worst < .04f);

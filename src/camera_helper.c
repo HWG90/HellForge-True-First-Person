@@ -216,7 +216,7 @@ static TfpContinuity smooth; static const TfpContinuityTuning smooth_tuning = TF
  * With continuity on, the eased entry (lock_entry_ms) does not run: the change of camera is taken up here, whole, on
  * a curve that keeps the eye's speed and whose length follows from the distance. Two eases on top of each other
  * read each other's steps as jumps. */
-#define SMOOTH_EVENT_MS 300.0
+#define SMOOTH_EVENT_MS 600.0 /* 300 until 0.6.0-feel.35: the rig was seen re-seating half a second after the view came back */
 static _Atomic uint32_t smooth_event;
 /* Beyond retail, and only in a frame the lock holds (tfp_camera_set_orphan): the binder says that the game still
  * presents the first-person request although the mod has asked for its exit and the gun is off the rig (a stim: the
