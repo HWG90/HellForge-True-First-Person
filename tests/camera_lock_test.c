@@ -38,6 +38,21 @@ int main(void) {
   tfp_kick_reset(&k); tfp_kick_step(&k, camera, head0, .016f, &t);
   CHECK(tfp_degrees_between(tfp_kick_step(&k, camera, tfp_q_mul(camera, about(0, 1, 0, 60)), 0, &t), tfp_q_identity()) < .001f);
   CHECK(tfp_degrees_between(tfp_kick_step(&k, camera, tfp_q(NAN, 0, 0, 1), .016f, &t), tfp_q_identity()) < .001f);
+  /* Seen in the game (2026-11-22): the head does not follow the view rigidly, so a turn of the mouse or the recoil
+   * of a shot moved the view against the head and came back as a kick. While the view itself turns fast
+   * (60 degrees a second and more) nothing is added, and nothing is left over when it stops. */
+  tfp_kick_reset(&k); tfp_kick_step(&k, camera, head0, .016f, &t);
+  float worst = 0;
+  for (int i = 1; i <= 40; ++i) { /* 2 degrees a frame = 125 degrees a second; the head stays where it was */
+    const float size = tfp_degrees_between(tfp_kick_step(&k, tfp_q_mul(camera, about(1, 0, 0, 2.0f*i)), head0, .016f, &t), tfp_q_identity());
+    if (size > worst) worst = size;
+  }
+  CHECK(worst < .01f);
+  for (int i = 0; i < 20; ++i) { /* the view stops: no kick appears afterwards */
+    const float size = tfp_degrees_between(tfp_kick_step(&k, tfp_q_mul(camera, about(1, 0, 0, 80)), head0, .016f, &t), tfp_q_identity());
+    if (size > worst) worst = size;
+  }
+  CHECK(worst < .01f);
   /* Applying: the view is the game's rotation turned by the kick in its own frame. */
   const TfpQ applied = tfp_kick_apply(camera, about(1, 0, 0, 4));
   CHECK(tfp_degrees_between(applied, tfp_q_mul(camera, about(1, 0, 0, 4))) < .001f);

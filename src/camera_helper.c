@@ -897,7 +897,8 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
       } else if (!supported) { reset(&policy, false); }
       else if (!policy.fallback_safe && !policy.lock_now && !(policy.guard_grace = policy.guard_only && policy.last_view_tick > 0
               && tick >= policy.last_view_tick && tick-policy.last_view_tick <= 250.0)) { reset(&policy, false); }
-      else if (!policy.lock_now && !on_foot(&policy)) { reset(&policy, false); error(ON_FOOT_REQUIRED); }
+      /* on_foot also samples what the final proof compares, so it runs under the lock too; only its answer is set aside. */
+      else if (!on_foot(&policy) && !policy.lock_now) { reset(&policy, false); error(ON_FOOT_REQUIRED); }
       else {
         float root[3] = {0}, head[3] = {0}, forward[3] = {0}, up[3] = {0}, root_basis[9] = {0};
         /* A seated interaction (turning a valve): with cut-hold bit 3 the view stays at the head. */
