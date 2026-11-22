@@ -146,4 +146,19 @@ typedef struct TfpCameraLockStats { uint64_t frames, foreign_frames, missed; uin
 /* Counts since the start; the peak is the largest kick since the last call. */
 void tfp_camera_lock_stats(TfpCameraLockStats *out);
 uint64_t tfp_camera_lock_frames(void); /* frames the lock has held so far: rising while the view is shown */
+/* Beyond retail, and only in frames the camera lock holds: the presented eye is kept continuous in the body's frame
+ * across every change of camera (head camera, native view, the repeated native argument) and every one-frame move
+ * of the first-person rig; the difference is carried as a correction and eased out (src/camera_continuity.h). In the
+ * native view the argument is parent-local and is converted through the rig eye's world transform. `trace_frames`:
+ * every presented frame is kept in a ring for tfp_camera_trace_read. Both off: nothing is reached or read. */
+void tfp_camera_set_continuity(bool on, bool trace_frames);
+typedef struct TfpCameraContinuityStats { uint64_t jumps, edges, restarts; float largest_m; } TfpCameraContinuityStats;
+/* Counts since the start; the largest correction carried since the last call. */
+void tfp_camera_continuity_stats(TfpCameraContinuityStats *out);
+/* The trace: a State edge was just written. The presented frames of the next 500 ms, and the six before it that
+ * were not yet handed out, are given to tfp_camera_trace_read (oldest first, each once). `ms` counts from the edge.
+ * source: 1 head camera, 2 native view, 3 the last native argument repeated. */
+typedef struct TfpCameraTraceRow { float ms; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; } TfpCameraTraceRow;
+void tfp_camera_trace_edge(void);
+uint32_t tfp_camera_trace_read(TfpCameraTraceRow *rows, uint32_t capacity);
 #endif

@@ -1,0 +1,284 @@
+// Continuity of the presented eye through the camera helper itself (src/camera_helper.c, beyond retail, only in
+// frames the camera lock holds), on the fake game memory of the differential test (this build's layout). Every
+// frame is one call of the hook as the game's call site makes it; what is judged is the eye the game would draw:
+// the forwarded position for the ordinary camera, and the rig eye's transform applied to the forwarded
+// parent-local position for the native view. Also: the edge trace, and that nothing is read or changed without
+// the lock. No retail source needed. Linux (process_vm_readv).
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <sys/uio.h>
+#include <unistd.h>
+#define _Static_assert static_assert
+extern "C" {
+#include "camera_helper.h"
+}
+#include "diff_camera_helper_world.h"
+using namespace dt;
+
+static int checks, failed;
+#define CHECK(c) do { ++checks; if (!(c)) { ++failed; std::printf("FAILED line %d: %s\n", __LINE__, #c); } } while (0)
+
+static World W;
+static double clock_ms = 1000;
+static uint64_t reads;
+static struct { float position[4]; bool own_buffer, seen; } sent;
+static void hook_marker() {}
+static bool host_read(void *, uint64_t at, void *out, size_t length) {
+  ++reads;
+  struct iovec local = {out, length}, remote = {reinterpret_cast<void *>(at), length};
+  return process_vm_readv(getpid(), &local, 1, &remote, 1, 0) == static_cast<ssize_t>(length);
+}
+static bool host_readable_span(void *, uint64_t, size_t) { return true; }
+static double host_now(void *) { return clock_ms; }
+static bool host_true_slot(void *, uint64_t, uint64_t) { return true; }
+static bool host_executable(void *, uint64_t) { return true; }
+static bool host_cas(void *, uint64_t slot, uint64_t expected, uint64_t desired, uint64_t *observed) {
+  *observed = __sync_val_compare_and_swap(reinterpret_cast<uint64_t *>(slot), expected, desired); return true;
+}
+static bool host_write(void *, void *out, const void *data, size_t length) { std::memcpy(out, data, length); return true; }
+static bool host_pin(void *, uint64_t) { return true; }
+static void host_lock(void *, int) {}
+static void host_forward(void *, uint64_t, void *camera, uint32_t, const float *point) {
+  sent.seen = true; sent.own_buffer = reinterpret_cast<uint64_t>(point) != W.native();
+  std::memcpy(sent.position, point, 16);
+  if (reinterpret_cast<uint64_t>(camera) == W.a[A_CAMERA]) { // the camera node takes the position
+    std::memcpy(reinterpret_cast<void *>(W.a[A_CAM_LOCALS] + 0x24), point, 12);
+    std::memcpy(reinterpret_cast<void *>(W.a[A_CAM_WORLDS] + 0x30), point, 12);
+  }
+}
+
+struct Game {
+  Scene s;
+  float right[3] = {1, 0, 0}, ahead[3] = {0, 1, 0}, above[3] = {0, 0, 1};
+  float eye[3] = {0, .1f, .05f};      // the rig eye from the head: right, ahead, above
+  uint64_t gen = 0;
+  float shown[3] = {}, body[3] = {}, step = 0, change = 0, travel = 0; bool have = false; // the drawn eye, in the body's frame
+  bool forwarded_own = false;
+  void pose(float x, float y, float z, float yaw, float head_height = 1.5f) {
+    const float c = std::cos(yaw), n = std::sin(yaw);
+    const float m[16] = {c, n, 0, 0, -n, c, 0, 0, 0, 0, 1, 0, x, y, z, 1};
+    std::memcpy(s.root, m, sizeof m);
+    s.head[0] = x + .03f * c - .06f * n; s.head[1] = y + .03f * n + .06f * c; s.head[2] = z + head_height;
+  }
+  void look(float yaw, float pitch) {
+    const float c = std::cos(yaw), n = std::sin(yaw), cp = std::cos(pitch), sp = std::sin(pitch);
+    right[0] = c; right[1] = n; right[2] = 0; ahead[0] = -n * cp; ahead[1] = c * cp; ahead[2] = sp; above[0] = n * sp; above[1] = -c * sp; above[2] = cp;
+    for (int i = 0; i < 3; ++i) { s.context[i] = right[i]; s.context[4 + i] = ahead[i]; s.context[8 + i] = above[i]; s.camera_rotation[i] = right[i]; s.camera_rotation[4 + i] = ahead[i]; s.camera_rotation[8 + i] = above[i]; }
+  }
+  void rotation_from_look() { // yaw only in these scripts
+    const float yaw = std::atan2(right[1], right[0]);
+    s.argument_rotation[0] = 0; s.argument_rotation[1] = 0; s.argument_rotation[2] = std::sin(yaw / 2); s.argument_rotation[3] = std::cos(yaw / 2);
+  }
+  void hip(uint32_t mask = 0) {
+    s.request[0] = 4; s.linked = false; s.mask = mask; s.aim = 0; s.camera_rotation_given = false;
+    for (int i = 0; i < 3; ++i) s.argument[i] = s.head[i] - ahead[i] * 2.0f + above[i] * .4f;
+    s.argument[3] = 0; rotation_from_look();
+  }
+  void rig_at_head() {
+    for (int i = 0; i < 3; ++i) { s.rig[i] = right[i]; s.rig[4 + i] = ahead[i]; s.rig[8 + i] = above[i]; s.rig[12 + i] = s.head[i] + right[i] * eye[0] + ahead[i] * eye[1] + above[i] * eye[2]; }
+    s.rig[3] = s.rig[7] = s.rig[11] = 0; s.rig[15] = 1;
+  }
+  void native(uint32_t mask = 0, bool aim = false) {
+    s.request[0] = 6; s.linked = true; s.mask = mask; s.aim = aim ? 1 : 0; s.camera_rotation_given = true;
+    rig_at_head();
+    s.argument[0] = .02f; s.argument[1] = .01f; s.argument[2] = .03f; s.argument[3] = 0; rotation_from_look();
+  }
+  // The request is the ordinary one again but the camera is still a child of the rig, which the game did not move.
+  void gap() { const bool given = s.camera_rotation_given; hip(); s.linked = true; s.camera_rotation_given = given; }
+  void begin() {
+    TfpCameraConfig c{};
+    c.size = sizeof c; c.abi = 1; c.game = W.a[A_GAME]; c.exe = W.a[A_EXE]; c.context = W.a[A_CONTEXT]; c.camera = W.a[A_CAMERA]; c.avatar_owner = W.a[A_OWNER];
+    c.avatar_index = 0; c.avatar = 0x333; c.body = 0x400003; c.camera_unit = 0x400004; c.forward = .18f; c.up = .04f; c.smoothing_ms = 100; c.blend_ms = 120; c.max_gap_ms = 250;
+    World::put<uint64_t>(W.slot(), W.native_value);
+    W.apply(s, 0);
+    if (tfp_camera_begin(&c, &gen) != 1 || tfp_camera_set_presentation(gen) != 1 || tfp_camera_set_cut_hold(gen, 15) != 1) {
+      std::printf("the helper did not arm (error %u)\n", tfp_camera_error()); std::exit(2);
+    }
+  }
+  void end() { tfp_camera_end(gen); have = false; step = change = travel = 0; }
+  void measure_from_here() { change = travel = 0; }
+  void frame(double dt) {
+    clock_ms += dt; W.apply(s, 0); sent.seen = false;
+    tfp_camera_setter_from(W.a[A_GAME] + HERE.call + 4, reinterpret_cast<void *>(W.a[A_CAMERA]), 0x400004, reinterpret_cast<const float *>(W.native()));
+    if (!sent.seen) { std::printf("the hook did not forward\n"); std::exit(2); }
+    forwarded_own = sent.own_buffer;
+    float world[3];
+    if (s.linked) for (int i = 0; i < 3; ++i) world[i] = s.rig[12 + i] + sent.position[0] * s.rig[i] + sent.position[1] * s.rig[4 + i] + sent.position[2] * s.rig[8 + i];
+    else std::memcpy(world, sent.position, 12);
+    float relative[3] = {};
+    for (int axis = 0; axis < 3; ++axis) for (int i = 0; i < 3; ++i) relative[axis] += (world[i] - s.root[12 + i]) * s.root[axis * 4 + i];
+    if (have) {
+      const float d[3] = {relative[0] - body[0], relative[1] - body[1], relative[2] - body[2]};
+      const float now_step = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+      if (std::fabs(now_step - step) > change) change = std::fabs(now_step - step);
+      if (now_step > travel) travel = now_step;
+      step = now_step;
+    }
+    have = true; std::memcpy(shown, world, 12); std::memcpy(body, relative, 12);
+  }
+  float from_rig_eye() const { // how far the drawn eye is from where the game put it
+    float d = 0;
+    for (int i = 0; i < 3; ++i) { const float wanted = s.rig[12 + i] + .02f * s.rig[i] + .01f * s.rig[4 + i] + .03f * s.rig[8 + i]; d += (shown[i] - wanted) * (shown[i] - wanted); }
+    return std::sqrt(d);
+  }
+};
+
+static void fresh(bool lock, bool smooth, bool trace = false) {
+  tfp_camera_reset_for_tests();
+  TfpCameraHost host{};
+  host.hook = reinterpret_cast<uint64_t>(&hook_marker); host.read = host_read; host.readable_span = host_readable_span; host.now = host_now;
+  host.writable_slot = host_true_slot; host.executable = host_executable; host.cas = host_cas; host.write = host_write; host.pin = host_pin;
+  host.lock_exclusive = host_lock; host.unlock_exclusive = host_lock; host.lock_shared = host_lock; host.unlock_shared = host_lock; host.forward = host_forward;
+  tfp_camera_set_host(&host);
+  tfp_camera_set_lock(lock, 0, 0, 300, 0, 0); // no kick: the rotation is not the subject
+  tfp_camera_set_continuity(smooth, trace);
+  clock_ms += 5000;
+}
+static void standing(Game &g, int frames, double dt, bool native_view, uint32_t mask = 0) {
+  for (int i = 0; i < frames; ++i) { if (native_view) g.native(mask); else g.hip(mask); g.frame(dt); }
+}
+
+int main() {
+  W.build(HERE);
+  W.native_value = W.a[A_EXE] + HERE.setter; W.hook_value = reinterpret_cast<uint64_t>(&hook_marker);
+
+  // ---- 1. The rig re-seated in one frame during a swap (mask 2): 0.218 m back, as in the game. ----
+  for (int smooth = 1; smooth >= 0; --smooth) {
+    fresh(true, smooth != 0);
+    Game g; g.pose(3, -2, .5f, .2f); g.look(.2f, 0); g.hip(); g.begin();
+    standing(g, 12, 33.3, false); standing(g, 20, 33.3, true);
+    CHECK(g.from_rig_eye() < 1e-4f); // the eased entry is over: the drawn eye is the game's
+    g.measure_from_here();
+    g.eye[1] -= .218f; g.native(2); g.frame(33.3);
+    if (smooth) {
+      CHECK(g.step < .01f && g.forwarded_own && std::fabs(g.from_rig_eye() - .218f) < .01f);
+      standing(g, 14, 33.3, true, 2);
+      CHECK(g.from_rig_eye() < 1e-4f && g.change < .03f && g.travel < .06f);
+      TfpCameraContinuityStats stats{}; tfp_camera_continuity_stats(&stats);
+      CHECK(stats.jumps == 1 && stats.largest_m > .2f && stats.largest_m < .23f);
+    } else {
+      CHECK(std::fabs(g.step - .218f) < .001f && !g.forwarded_own && g.from_rig_eye() < 1e-4f); // the switch off: the jump is shown
+    }
+    g.end();
+  }
+  // ---- 2. A stim (mask 0x40, which the retail sample refuses): 0.1 m then 0.216 m in two frames. ----
+  {
+    fresh(true, true);
+    Game g; g.pose(0, 0, 0, 0); g.look(0, 0); g.hip(); g.begin();
+    standing(g, 12, 16.7, false); standing(g, 30, 16.7, true);
+    g.measure_from_here();
+    g.eye[2] -= .1f; g.native(0x40); g.frame(16.7);
+    CHECK(g.step < .01f);
+    g.eye[1] -= .216f; g.native(0x40); g.frame(16.7);
+    CHECK(g.step < .01f);
+    standing(g, 30, 16.7, true, 0x40);
+    CHECK(g.from_rig_eye() < 1e-4f && g.change < .008f);
+    // ---- 3. Its end: the ordinary camera for one frame (no held eye: the native eye was not recorded under
+    // the mask), then the native view again with the rig back at the weapon. One glide, no jump. ----
+    g.measure_from_here();
+    g.hip(); g.frame(16.7);
+    CHECK(g.step < .01f && g.forwarded_own);
+    g.eye[2] += .1f; g.eye[1] += .216f; g.native(); g.frame(16.7);
+    CHECK(g.step < .02f);
+    standing(g, 40, 16.7, true);
+    CHECK(g.from_rig_eye() < 1e-4f && g.change < .01f);
+    g.end();
+  }
+  // ---- 4. Leaving the native view and coming back (head camera for 12 frames): continuous both ways. ----
+  {
+    fresh(true, true);
+    Game g; g.pose(1, 1, 0, .4f); g.look(.4f, 0); g.hip(); g.begin();
+    standing(g, 12, 33.3, false); standing(g, 20, 33.3, true);
+    g.measure_from_here();
+    standing(g, 12, 33.3, false, 2);
+    g.eye[0] += .05f; standing(g, 20, 33.3, true);
+    CHECK(g.from_rig_eye() < 1e-4f && g.change < .03f);
+    g.end();
+  }
+  // ---- 5. The game's request replaced for one frame while the body moves at 6 m/s: the rig stands still for
+  // that frame and comes back 0.3 m further on. Judged in the body's frame. ----
+  for (int smooth = 1; smooth >= 0; --smooth) {
+    fresh(true, smooth != 0);
+    Game g; float x = 0; g.pose(x, 0, 0, 0); g.look(0, 0); g.hip(); g.begin();
+    for (int i = 0; i < 12; ++i) { x += .2f; g.pose(x, 0, 0, 0); g.hip(); g.frame(33.3); }
+    for (int i = 0; i < 20; ++i) { x += .2f; g.pose(x, 0, 0, 0); g.native(); g.frame(33.3); }
+    g.measure_from_here();
+    x += .2f; g.pose(x, 0, 0, 0); g.gap(); g.frame(33.3);       // the rig is where it was
+    const float gap_step = g.step;
+    x += .2f; g.pose(x, 0, 0, 0); g.eye[1] += .3f; g.native(); g.frame(33.3);
+    const float back_step = g.step;
+    for (int i = 0; i < 16; ++i) { x += .2f; g.pose(x, 0, 0, 0); g.native(); g.frame(33.3); }
+    if (smooth) CHECK(gap_step < .01f && back_step < .02f && g.change < .03f && g.from_rig_eye() < 1e-4f);
+    else CHECK(std::fabs(gap_step - .2f) < .001f && back_step > .3f); // the switch off: 0.2 m behind, then 0.36 m in one frame
+    g.end();
+  }
+  // ---- 6. A real teleport (5 m in a frame) and full aim: nothing is carried. ----
+  {
+    fresh(true, true);
+    Game g; g.pose(0, 0, 0, 0); g.look(0, 0); g.hip(); g.begin();
+    standing(g, 12, 33.3, false); standing(g, 20, 33.3, true);
+    g.eye[1] += 5; g.native(); g.frame(33.3);
+    CHECK(g.from_rig_eye() < 1e-4f && !g.forwarded_own);
+    g.eye[1] -= 5; standing(g, 3, 33.3, true);
+    g.eye[1] += .3f; g.native(0, true); g.frame(33.3);
+    CHECK(g.from_rig_eye() < 1e-4f && !g.forwarded_own);
+    g.end();
+  }
+  // ---- 7. The trace: the frames before an edge and the 500 ms after it, each once. ----
+  {
+    fresh(true, true, true);
+    Game g; g.pose(0, 0, 0, 0); g.look(0, 0); g.hip(); g.begin();
+    TfpCameraTraceRow rows[64];
+    standing(g, 12, 33.3, false);
+    CHECK(tfp_camera_trace_read(rows, 64) == 0); // no edge: nothing
+    standing(g, 10, 33.3, true);
+    tfp_camera_trace_edge();
+    uint32_t count = tfp_camera_trace_read(rows, 64);
+    CHECK(count == 6 && rows[0].ms < -160 && rows[5].ms <= 0 && rows[5].kind == 6 && rows[5].source == 2);
+    g.eye[1] -= .2f; g.native(2); g.frame(33.3);
+    count = tfp_camera_trace_read(rows, 64);
+    CHECK(count == 1 && rows[0].ms > 30 && rows[0].ms < 36 && std::fabs(rows[0].correction - .2f) < .01f && rows[0].step < .01f);
+    float eye_distance = 0; for (int i = 0; i < 3; ++i) eye_distance += (rows[0].eye[i] - g.shown[i]) * (rows[0].eye[i] - g.shown[i]);
+    CHECK(std::sqrt(eye_distance) < 1e-4f && std::fabs(rows[0].wanted[1] - rows[0].eye[1]) > .15f && rows[0].entry_ease == 1);
+    standing(g, 30, 33.3, true, 2);
+    count = tfp_camera_trace_read(rows, 64);
+    CHECK(count == 14 && rows[count - 1].ms <= 500 && rows[count - 1].ms > 466); // 500 ms after the edge, no more
+    CHECK(tfp_camera_trace_read(rows, 64) == 0);
+    standing(g, 3, 33.3, false, 2); // a change of camera: its first frame says kind 4, source 1, and a correction
+    tfp_camera_trace_edge();
+    count = tfp_camera_trace_read(rows, 64);
+    CHECK(count == 6 && rows[5].kind == 4 && rows[5].source == 1 && rows[2].kind == 6);
+    g.end();
+    fresh(true, true, false); // the trace switched off: nothing kept
+    Game h; h.pose(0, 0, 0, 0); h.look(0, 0); h.hip(); h.begin();
+    standing(h, 5, 33.3, false); tfp_camera_trace_edge(); standing(h, 5, 33.3, false);
+    CHECK(tfp_camera_trace_read(rows, 64) == 0);
+    h.end();
+  }
+  // ---- 8. Without the lock the switches change nothing: the same forwarded bytes and the same number of
+  // memory reads, frame for frame, with continuity and trace on or off. ----
+  {
+    struct Record { float position[4]; bool own; uint64_t reads; } record[2][120];
+    int frames[2] = {0, 0};
+    for (int on = 0; on < 2; ++on) {
+      fresh(false, on != 0, on != 0);
+      clock_ms = 500000; // the same instants in both runs
+      Game g; g.pose(0, 0, 0, 0); g.look(0, 0); g.hip(); g.begin();
+      auto keep = [&](uint64_t before) { Record &r = record[on][frames[on]++]; std::memcpy(r.position, sent.position, 16); r.own = sent.own_buffer; r.reads = reads - before; };
+      auto run = [&](int count, bool native_view, uint32_t mask) { for (int i = 0; i < count; ++i) { if (native_view) g.native(mask); else g.hip(mask); const uint64_t before = reads; g.frame(16.7); keep(before); } };
+      run(20, false, 0); run(20, true, 0); g.eye[1] -= .218f; run(20, true, 2); run(10, false, 2); g.eye[1] += .218f; run(20, true, 0);
+      { g.gap(); const uint64_t before = reads; g.frame(16.7); keep(before); }
+      run(10, true, 0);
+      g.end();
+    }
+    CHECK(frames[0] == frames[1] && frames[0] == 101);
+    int different = 0;
+    for (int i = 0; i < frames[0]; ++i) if (std::memcmp(record[0][i].position, record[1][i].position, 16) || record[0][i].own != record[1][i].own || record[0][i].reads != record[1][i].reads) ++different;
+    CHECK(different == 0);
+  }
+  std::printf("camera smooth: %d checks, %d failed\n", checks, failed);
+  return failed != 0;
+}

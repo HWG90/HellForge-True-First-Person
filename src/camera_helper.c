@@ -7,6 +7,7 @@
  * the retail file. What differs is in docs/translation/CAMERA-HELPER-TRANSLATION.md. */
 #include "camera_helper.h"
 #include "camera_lock.h"
+#include "camera_continuity.h"
 #include "camera_math.h"
 #include <stdatomic.h>
 
@@ -178,6 +179,20 @@ static _Atomic uint64_t lock_frames, lock_foreign_frames, lock_missed; static _A
 static volatile float lock_entry_ms = 140; /* the eased entry into the native view while the lock is on (retail: none) */
 static volatile float lock_gain, lock_max, lock_settle = 300, lock_thrown_gain, lock_thrown_max, lock_peak;
 static TfpKick lock_kick; static TfpQ lock_view = {0, 0, 0, 1}, lock_last_kick = {0, 0, 0, 1}; static bool lock_view_known; static double lock_tick;
+/* Beyond retail, and only in a frame the lock holds (policy.lock_now): the presented eye is kept continuous across
+ * every change of camera and every one-frame move of the rig (camera_continuity.h; tfp_camera_set_continuity), and
+ * the frames around a State edge are kept for the binder's "Trace:" lines (tfp_camera_trace_edge). All under the
+ * policy lock. Off, or without the lock: none of it is reached and no memory is read for it. */
+enum { SMOOTH_HEAD = 1, SMOOTH_NATIVE = 2, SMOOTH_REPEAT = 3 };
+static _Atomic uint32_t smooth_on, trace_on;
+static TfpContinuity smooth; static const TfpContinuityTuning smooth_tuning = TFP_CONTINUITY_DEFAULT;
+#define TRACE_RING 128u
+#define TRACE_BEFORE 6u   /* frames before the edge that are written with it */
+#define TRACE_MS 500.0
+typedef struct TraceFrame { double tick; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; } TraceFrame;
+static struct { TraceFrame frames[TRACE_RING]; uint64_t head, sent; double edge, until; float last[3]; double last_tick; bool last_known, open; } trace;
+/* The native eye is not remembered for its weapon while it is being moved about (set in the native view). */
+static float eye_watch[3]; static bool eye_watch_known; static double eye_unsettled_until;
 static void policy_init(Policy *p) {
   memset(p, 0, sizeof *p);
   tfp_correction_reset(&p->correction);
@@ -803,6 +818,63 @@ static void lock_rotation(Policy *p, const float *native, uint32_t kind, double 
   if (tfp_q_valid(out)) memcpy(argument, &out, 16);
 }
 
+/* ---- beyond retail: continuity of the presented eye, and the trace (lock frames only) ---- */
+static void smooth_forget(void) { tfp_continuity_reset(&smooth); trace.last_known = false; eye_watch_known = false; eye_unsettled_until = 0; }
+/* The eye about to be presented, in the world; `root`/`root_basis` are the body root's position and axis rows.
+ * True: `shown` differs from `wanted` and is what to present. Always records the frame for the trace. */
+static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const float *root, const float *root_basis, const float *wanted, double tick, float *shown) {
+  float wanted_relative[3] = {0}, relative[3] = {0}, correction = 0;
+  for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
+    wanted_relative[axis] += (wanted[component]-root[component])*root_basis[axis*3+component];
+  memcpy(shown, wanted, 12);
+  if (atomic_load_explicit(&smooth_on, memory_order_relaxed)) {
+    /* Within the head camera only a change of camera is taken up: its eye turns about the head with the view. */
+    correction = tfp_continuity_step(&smooth, wanted_relative, source == SMOOTH_REPEAT ? SMOOTH_NATIVE : source, source != SMOOTH_HEAD, p->full_ads, tick, p->c.max_gap_ms, &smooth_tuning, relative);
+    if (correction > 1e-6f && tfp_finite3(relative)) for (unsigned component = 0; component < 3; ++component) { shown[component] = root[component];
+      for (unsigned axis = 0; axis < 3; ++axis) shown[component] += relative[axis]*root_basis[axis*3+component]; }
+    else correction = 0;
+  }
+  if (atomic_load_explicit(&trace_on, memory_order_relaxed)) {
+    TraceFrame *row = &trace.frames[trace.head++ % TRACE_RING];
+    row->tick = tick; row->kind = kind; row->source = source; memcpy(row->eye, shown, 12); memcpy(row->wanted, wanted, 12);
+    row->step = trace.last_known && tick >= trace.last_tick && tick-trace.last_tick <= p->c.max_gap_ms ? distance(shown, trace.last) : 0;
+    row->correction = correction;
+    row->entry_ease = p->entry.ease.active && p->entry.ease.duration > 0 ? (float)fmin(1.0, fmax(0.0, (tick-p->entry.ease.started)/p->entry.ease.duration)) : 1;
+    if (trace.head-trace.sent > TRACE_RING) trace.sent = trace.head-TRACE_RING;
+  }
+  memcpy(trace.last, shown, 12); trace.last_tick = tick; trace.last_known = true;
+  return correction > 0;
+}
+/* The rig eye the camera is (or is about to be) a child of, read and closed as remember_native does. */
+static bool smooth_parent(Policy *p, float *position, float *parent_basis) {
+  TfpQ ignored = tfp_q_identity(); ParentProof proof; memset(&proof, 0, sizeof proof);
+  if (direct_camera_parent(p, &ignored, position, &proof, parent_basis)) return parent_current(p, &proof);
+  PendingParent first = pending_parent_default(), closing = pending_parent_default(); float again[3] = {0}, again_basis[9] = {0};
+  return pending_camera_parent(p, position, parent_basis, &first) && pending_camera_parent(p, again, again_basis, &closing)
+      && closing.parent == first.parent && closing.poses == first.poses;
+}
+/* A frame whose position argument is parent-local (the native view, or its last argument repeated). `given` is the
+ * 16-byte argument about to be forwarded; true: `adjusted` holds the argument to forward instead. `sample`, when
+ * valid, already holds this frame's proven body root and rig eye; otherwise they are read here (an action mask the
+ * retail sample refuses: a stim). Nothing is read without the lock. */
+static bool smooth_native(Policy *p, const NativeSample *sample, const float *given, uint32_t kind, uint32_t source, double tick, float *adjusted) {
+  float local[4] = {0}, root[16] = {0}, position[3] = {0}, parent_basis[9] = {0}, root_basis[9] = {0}, wanted[3] = {0}, shown[3] = {0}; uint64_t matrices = 0;
+  memcpy(local, given, 16);
+  if (!finite3(local)) return false;
+  if (sample && sample->valid) { memcpy(root, sample->root, 64); memcpy(position, sample->parent_position, 12); memcpy(parent_basis, sample->parent_basis, 36); }
+  else if (!pointer(p->body_object + L_UNIT_WORLDS, &matrices) || !read(matrices, root, 64) || !orthonormal(root, root + 4, root + 8) || !finite3(root + 12)
+      || !smooth_parent(p, position, parent_basis)) return false;
+  for (unsigned axis = 0; axis < 3; ++axis) memcpy(root_basis + axis*3, root + axis*4, 12);
+  for (unsigned component = 0; component < 3; ++component) { wanted[component] = position[component];
+    for (unsigned axis = 0; axis < 3; ++axis) wanted[component] += local[axis]*parent_basis[axis*3+component]; }
+  if (!finite3(wanted) || !smooth_present(p, kind, source, root + 12, root_basis, wanted, tick, shown)) return false;
+  float moved[3] = {0};
+  for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
+    moved[axis] += (shown[component]-position[component])*parent_basis[axis*3+component];
+  if (!finite3(moved)) return false;
+  memcpy(local, moved, 12); memcpy(adjusted, local, 16); return true;
+}
+
 /* The original setter, called as retail calls it (cpp:751, 1020). */
 static void call_original(void *camera, uint32_t unit, const float *output) {
   const uintptr_t target = atomic_load_explicit(&original, memory_order_acquire);
@@ -828,6 +900,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
     policy.lock_now = known_kind && policy.presentation_enabled && atomic_load_explicit(&lock_on, memory_order_relaxed);
     if (policy.lock_now && lock_entry_ms > 0 && policy.handoff_entry_ms <= 0) policy.handoff_entry_ms = lock_entry_ms;
     lock_asked = policy.presentation_enabled && atomic_load_explicit(&lock_on, memory_order_relaxed); lock_kind = known_kind ? kind : 0xffff;
+    if (!lock_asked && smooth.known) smooth_forget();
     const bool supported = known_kind && (kind == 4 || kind == 6 || policy.lock_now);
     if (supported && kind == 6) {
       /* Read-only sampling can precede the terminal lease proof because
@@ -889,6 +962,15 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
           if (policy.handoff_rotation_ms > 0) track_native_rotation(&policy, tick);
           if (policy.handoff_entry_ms > 0 && ease_native_entry(&policy, &sample, native, tick, from_head, head_relative, adjusted)) output = adjusted;
         }
+        if (policy.lock_now) {
+          /* Beyond retail. A native eye that moved 5 cm in a frame is being re-seated by the game (its gun left the
+           * hands): for 200 ms it is not what is remembered as this weapon's eye. */
+          if (policy.native_eye_valid && policy.native_eye_tick == tick) {
+            if (eye_watch_known && distance(policy.native_eye, eye_watch) > .05f) eye_unsettled_until = tick+200.0;
+            memcpy(eye_watch, policy.native_eye, 12); eye_watch_known = true;
+          }
+          if (smooth_native(&policy, handoff ? &sample : NULL, output, kind, SMOOTH_NATIVE, tick, adjusted)) output = adjusted;
+        }
         /* cpp:823 observe_camera_parent(policy,tick): retired, dropped. */
         lock_rotation(&policy, native, kind, tick); lock_shown = true;
         error(OK); }
@@ -921,6 +1003,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
               && read((uint64_t)(uintptr_t)native, adjusted, 16)) {
             memcpy(adjusted, policy.last_native, 12); output = adjusted; ++policy.exit_holds; lock_shown = true; /* the last native view repeated: still first person */
             policy.last_native_tick = tick;
+            if (policy.lock_now) smooth_native(&policy, NULL, adjusted, kind, SMOOTH_REPEAT, tick, adjusted); /* the rig may stand still while the body moves on */
           }
           reset(&policy, true); error(SPACE_INVALID);
         }
@@ -987,7 +1070,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
                   /* More than a metre apart is a different view, not the same eye. */
                   if (isfinite(square) && square <= 1.0f) {
                     policy.eye_delta_active = true; policy.eye_hold_started = tick; policy.eye_swap_tick = tick;
-                    eye_memory_store(policy.native_weapon_key, policy.eye_delta);
+                    if (!(policy.lock_now && tick < eye_unsettled_until)) eye_memory_store(policy.native_weapon_key, policy.eye_delta);
                   }
                 }
               }
@@ -1074,6 +1157,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
             uint32_t commit_error = OWNER_MISMATCH;
             if (!commit_current(&policy, kind, &commit_error)) { reset(&policy, false); if (commit_error == READ_FAILED) atomic_store_explicit(&armed, 0, memory_order_release); error(commit_error); }
             else { memcpy(policy.last_relative, relative, 12); policy.last_relative_tick = tick; policy.relative_valid = true;
+              if (policy.lock_now) { float shown[3] = {0}; if (smooth_present(&policy, kind, SMOOTH_HEAD, root, root_basis, adjusted, tick, shown)) memcpy(adjusted, shown, 12); }
               memcpy(policy.last_head_world, adjusted, 12);
               if (policy.fallback_safe) policy.last_view_tick = tick; else ++policy.guard_grace_frames;
               if (held_view) {
@@ -1194,6 +1278,7 @@ static uint32_t begin_locked(const TfpCameraConfig *input, uint64_t *output) {
   const bool stable = current == OK && top(&next, &kind) && (kind == 4 || kind == 6) && next.safe && graph(&next, false) && dispatch_owned(&next)
       && (kind != 4 || unparented(&next));
   if (stable) {
+    smooth_forget();
     policy = next; atomic_store(&seen, 0); atomic_store(&forwarded, 0); atomic_store(&replaced, 0); atomic_store(&native6_forwarded, 0); atomic_store(&resets, 0);
     publish_diagnostics(&policy);
     atomic_store_explicit(&return_address, c.game + B_GAME_CALL + 4, memory_order_relaxed);
@@ -1210,7 +1295,7 @@ static uint32_t end_locked(uint64_t generation) {
   if (!generation) return reject(TOKEN_MISMATCH);
   if (!atomic_load(&reserved)) { if (generation != retired_generation) return reject(TOKEN_MISMATCH); error(OK); return 1; }
   if (generation != owned_generation) return reject(TOKEN_MISMATCH);
-  atomic_store_explicit(&armed, 0, memory_order_release); atomic_store_explicit(&callback_generation, 0, memory_order_release); policy_acquire(); reset(&policy, false); publish_diagnostics(&policy); policy_release();
+  atomic_store_explicit(&armed, 0, memory_order_release); atomic_store_explicit(&callback_generation, 0, memory_order_release); policy_acquire(); reset(&policy, false); smooth_forget(); publish_diagnostics(&policy); policy_release();
   if (!restore_slot()) return reject(CLEANUP_PENDING);
   error(OK); return 1;
 }
@@ -1338,6 +1423,38 @@ void tfp_camera_set_lock(bool on, float gain, float max_degrees, float settle_ms
   atomic_store(&lock_on, on ? 1u : 0u);
 }
 uint64_t tfp_camera_lock_frames(void) { return atomic_load(&lock_frames); }
+void tfp_camera_set_continuity(bool on, bool trace_frames) { atomic_store(&smooth_on, on ? 1u : 0u); atomic_store(&trace_on, trace_frames ? 1u : 0u); }
+void tfp_camera_continuity_stats(TfpCameraContinuityStats *out) {
+  if (!out) return;
+  policy_acquire();
+  out->jumps = smooth.jumps; out->edges = smooth.edges; out->restarts = smooth.restarts; out->largest_m = smooth.largest; smooth.largest = 0;
+  policy_release();
+}
+void tfp_camera_trace_edge(void) {
+  if (!atomic_load(&trace_on)) return;
+  policy_acquire();
+  const double tick = now();
+  trace.edge = tick; trace.until = tick+TRACE_MS; trace.open = true;
+  if (trace.head-trace.sent > TRACE_BEFORE) trace.sent = trace.head-TRACE_BEFORE; /* the frames just before the edge, once */
+  policy_release();
+}
+uint32_t tfp_camera_trace_read(TfpCameraTraceRow *rows, uint32_t capacity) {
+  uint32_t count = 0;
+  if (!rows || !atomic_load(&trace_on)) return 0;
+  policy_acquire();
+  /* Without an open window nothing is handed out; the frames stay in the ring as the next edge's "before". */
+  while (trace.open && count < capacity && trace.sent < trace.head) {
+    const TraceFrame *frame = &trace.frames[trace.sent % TRACE_RING];
+    if (frame->tick > trace.until) { trace.open = false; break; }
+    ++trace.sent;
+    TfpCameraTraceRow *row = &rows[count++];
+    row->ms = (float)(frame->tick-trace.edge); row->kind = frame->kind; row->source = frame->source;
+    memcpy(row->eye, frame->eye, 12); memcpy(row->wanted, frame->wanted, 12);
+    row->step = frame->step; row->correction = frame->correction; row->entry_ease = frame->entry_ease;
+  }
+  policy_release();
+  return count;
+}
 void tfp_camera_lock_stats(TfpCameraLockStats *out) {
   if (!out) return;
   out->frames = atomic_load(&lock_frames); out->foreign_frames = atomic_load(&lock_foreign_frames); out->last_kind = atomic_load(&lock_last_kind);
@@ -1345,7 +1462,8 @@ void tfp_camera_lock_stats(TfpCameraLockStats *out) {
   out->missed = atomic_load(&lock_missed); out->missed_kind = atomic_load(&lock_missed_kind); out->missed_error = atomic_load(&lock_missed_error);
 }
 void tfp_camera_reset_for_tests(void) {
-  atomic_store(&lock_on, 0);
+  atomic_store(&lock_on, 0); atomic_store(&smooth_on, 0); atomic_store(&trace_on, 0);
+  memset(&smooth, 0, sizeof smooth); memset(&trace, 0, sizeof trace); eye_watch_known = false; eye_unsettled_until = 0;
   atomic_store(&original, 0);
   atomic_store(&installed, 0); atomic_store(&armed, 0); atomic_store(&reserved, 0); atomic_store(&last_error, 0);
   atomic_store(&callback_generation, 0);
