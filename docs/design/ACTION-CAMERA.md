@@ -203,6 +203,6 @@ The backend adds, once each: `Hold: owned native camera exit acknowledged; the g
 7. The stim: is its 0.21 to 0.25 m jump gone, and what do the hands show with nothing in them?
 8. Does anything hang on: after an action, `holding=0` and the `View:` line's `phase=running` with the placement in place.
 9. After a swap that ended a hold: which of the two backend lines above follows, and does `kind` go back to 4 before the new entry? `Hold: lease ended without a native exit` with `kind=6` staying would be a request left without an owner.
-10. The `Arms:` line's `binds=` across an action: it should not go up on the first frame of a swap or a throw.
+10. The `Arms:` line's `binds N` across an action: it should not go up on the first frame of a swap or a throw.
 11. `not held:` reasons on a grenade and a stim. `the full snapshot is unsafe with no action flag` there would mean the action leaves the on-foot lifecycle while its flag is clear, and that rule cuts the hold short.
 12. A dropped weapon: `State: hold ended: empty hands with no action flag for 1000 ms`, one second after the drop.
