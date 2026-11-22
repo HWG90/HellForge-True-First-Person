@@ -138,6 +138,7 @@ bool tfp_locked_view_camera_lock(TfpWire *w);
 bool tfp_locked_view_fov_lock(TfpWire *w);
 double tfp_locked_view_fov_degrees(TfpWire *w);
 bool tfp_locked_view_fov_zoom_when_aiming(TfpWire *w);
+bool tfp_locked_view_bodycam(TfpWire *w); /* the camera style: false Stable, true Bodycam (src/camera_damp.h) */
 double tfp_locked_view_kick_strength(TfpWire *w);
 double tfp_locked_view_kick_max_degrees(TfpWire *w);
 double tfp_locked_view_thrown_kick_strength(TfpWire *w);

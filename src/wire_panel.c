@@ -13,6 +13,8 @@ static const struct { const char *label, *description, *note; } LOCKED[TFP_LOCKE
   {"Field of view lock", "Hold one field of view whatever the weapon or the camera asks for.", NULL},
   {"Field of view (degrees)", "The field of view the lock holds. Default 80.", NULL},
   {"Zoom when aiming", "Let aiming zoom in from the locked field of view. Off keeps the locked value while aiming too.", NULL},
+  {"Bodycam", "Off: a steady, traditional first-person camera. On: the view moves with your head, like a body camera: it takes kicks from "
+              "your body's movement and follows the head through actions.", NULL},
   {"View kick strength (%)", "How much of your body's movement reaches the view while on foot. Default 35.", NULL},
   {"View kick limit (degrees)", "The most the view is turned by a kick while on foot. Default 8.", NULL},
   {"View kick when thrown (%)", "How much of your body's movement reaches the view while you are thrown or ragdolled. Default 70.", NULL},
@@ -25,8 +27,8 @@ static const struct { const char *label, *description, *note; } LOCKED[TFP_LOCKE
   {"Weapon put-away", "Keep first person while the weapon is put away for a swap, grenade or stim.", NULL},
   {"Smooth eye", "No camera pops when the game changes its camera.", NULL},
 };
-_Static_assert(TFP_LOCKED_COUNT == 12 && TFP_LOCKED_camera_damping == 7 && TFP_LOCKED_animated_arms == 8 && TFP_LOCKED_one_handed_pistols == 9 &&
-               TFP_LOCKED_put_away == 10 && TFP_LOCKED_smooth_eye == 11, "LOCKED names the options of TFP_SETTINGS_LOCKED in its order");
+_Static_assert(TFP_LOCKED_COUNT == 13 && TFP_LOCKED_bodycam == 4 && TFP_LOCKED_kick_strength == 5 && TFP_LOCKED_camera_damping == 8 &&
+               TFP_LOCKED_animated_arms == 9 && TFP_LOCKED_one_handed_pistols == 10 && TFP_LOCKED_put_away == 11 && TFP_LOCKED_smooth_eye == 12, "LOCKED names the options of TFP_SETTINGS_LOCKED in its order");
 
 typedef struct Row { TfpMenuValue value; bool disabled; char label[300]; } Row;
 typedef struct Event { int index; bool locked, activate; TfpMenuValue value, previous; } Event;

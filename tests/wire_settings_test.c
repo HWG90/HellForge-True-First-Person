@@ -846,6 +846,29 @@ static int compat_part(void) {
     CHECK(start_on_disk() && !logged("Note") && tfp_locked_view_camera_damping(&wire) == 80);
     tfp_wire_settings_free(&wire);
   }
+  { /* ---- the same for bodycam (0.6.0-feel.39 and older have no such member): off, which is the Stable camera, with
+     * no note and no ".newer" copy; switched on, it is saved and read back ---- */
+    static const char before[] = "{\"format\":1,\"locked_view\":{\"camera_damping\":40,\"fov_degrees\":95,\"kick_strength\":40,\"thrown_kick_strength\":70,\"smooth_eye\":true}}";
+    disk_clear();
+    disk_put("settings.json", feel19_text, strlen(feel19_text));
+    disk_put("locked_view.json", before, sizeof before - 1);
+    CHECK(start_on_disk() && !logged("Refused") && !logged("Note") && !logged("skipped") && !tfp_locked_view_bodycam(&wire) &&
+          tfp_locked_view_camera_damping(&wire) == 40 && tfp_locked_view_kick_strength(&wire) == 40);
+    for (int k = 0; k < 3; k++) tfp_wire_settings_save_frame(&wire);
+    CHECK(!disk_writes[0] && !disk_writes[1] && !disk_copies && disk_count() == 2);       /* no change: nothing touched */
+    CHECK(tfp_wire_settings_locked_set(&wire, TFP_LOCKED_bodycam, true, true, 0) && tfp_locked_view_bodycam(&wire));
+    tfp_wire_settings_save_frame(&wire);
+    CHECK(disk_writes[1] == 1 && !disk_copies && disk_count() == 2 && strstr(disk_text("locked_view.json"), "\"bodycam\": true") &&
+          strstr(disk_text("locked_view.json"), "\"camera_damping\": 40") && !logged("Note"));
+    tfp_wire_settings_free(&wire);
+    CHECK(start_on_disk() && !logged("Note") && !logged("skipped") && tfp_locked_view_bodycam(&wire));
+    CHECK(tfp_wire_settings_locked_set(&wire, TFP_LOCKED_bodycam, true, false, 0));
+    tfp_wire_settings_save_frame(&wire);
+    CHECK(disk_writes[1] == 2 && !disk_copies && strstr(disk_text("locked_view.json"), "\"bodycam\": false"));
+    tfp_wire_settings_free(&wire);
+    CHECK(start_on_disk() && !tfp_locked_view_bodycam(&wire));
+    tfp_wire_settings_free(&wire);
+  }
   { /* ---- locked_view.json of a later build (names or members this build skips): the first write of it by this build
      * would drop them, so the file as it is is copied to locked_view.json.newer first, once ---- */
     static const char unknown[] = "{\"format\":1,\"locked_view\":{\"fov_degrees\":95,\"future_option\":3,\"camera_lock\":false,\"another\":\"x\"}}";

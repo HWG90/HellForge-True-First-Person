@@ -110,8 +110,8 @@ static int store_part(void) {
   TfpSettings s;
   memset(&s, 0, sizeof s);
   CHECK(tfp_settings_defaults(&s));
-  /* the twelve options and their defaults */
-  CHECK(TFP_LOCKED_COUNT == 12);
+  /* the thirteen options and their defaults */
+  CHECK(TFP_LOCKED_COUNT == 13);
   CHECK(tfp_settings_locked_flag(&s, TFP_LOCKED_camera_lock) && tfp_settings_locked_flag(&s, TFP_LOCKED_fov_lock) &&
         tfp_settings_locked_number(&s, TFP_LOCKED_fov_degrees) == 80 && tfp_settings_locked_flag(&s, TFP_LOCKED_fov_zoom_when_aiming) &&
         tfp_settings_locked_number(&s, TFP_LOCKED_kick_strength) == 35 && tfp_settings_locked_number(&s, TFP_LOCKED_kick_max_degrees) == 8 &&
@@ -119,7 +119,12 @@ static int store_part(void) {
         tfp_settings_locked_flag(&s, TFP_LOCKED_one_handed_pistols) &&
         tfp_settings_locked_flag(&s, TFP_LOCKED_animated_arms) && tfp_settings_locked_flag(&s, TFP_LOCKED_put_away) &&
         tfp_settings_locked_flag(&s, TFP_LOCKED_smooth_eye));
-  const TfpSettingsLockedInfo *info = tfp_settings_locked_info(TFP_LOCKED_fov_degrees);
+  /* the camera style: Stable unless Bodycam is switched on; first among the kick options */
+  CHECK(!tfp_settings_locked_flag(&s, TFP_LOCKED_bodycam) && s.locked[TFP_LOCKED_bodycam].is_bool && TFP_LOCKED_bodycam + 1 == TFP_LOCKED_kick_strength &&
+        TFP_LOCKED_bodycam == TFP_LOCKED_fov_zoom_when_aiming + 1 && tfp_settings_locked("bodycam") == TFP_LOCKED_bodycam);
+  const TfpSettingsLockedInfo *info = tfp_settings_locked_info(TFP_LOCKED_bodycam);
+  CHECK(info && !strcmp(info->name, "bodycam") && info->is_bool && info->value == 0 && info->min == 0 && info->max == 1);
+  info = tfp_settings_locked_info(TFP_LOCKED_fov_degrees);
   CHECK(info && !strcmp(info->name, "fov_degrees") && !info->is_bool && info->value == 80 && info->min == 50 && info->max == 120 && info->step == 1);
   info = tfp_settings_locked_info(TFP_LOCKED_kick_strength);
   CHECK(info && info->min == 0 && info->max == 100 && info->step == 5 && info->value == 35);
@@ -152,7 +157,7 @@ static int store_part(void) {
   CHECK(n && n < sizeof text && tfp_settings_write_locked(&s, NULL, 0) == n && strstr(text, "{\n \"format\": 1,\n \"locked_view\": {") == text &&
         strstr(text, "\"camera_lock\": false") && strstr(text, "\"fov_degrees\": 120") &&
         strstr(text, "\"kick_max_degrees\": 0") && strstr(text, "\"put_away\": true") && strstr(text, "\"thrown_kick_strength\": 70") &&
-        strstr(text, " \"locked_view\": {\n  \"animated_arms\": true,\n  \"camera_damping\": 60,\n  \"camera_lock\": false,") &&
+        strstr(text, " \"locked_view\": {\n  \"animated_arms\": true,\n  \"bodycam\": false,\n  \"camera_damping\": 60,\n  \"camera_lock\": false,") &&
         strstr(text, "\"animated_arms\": true") && strstr(text, "\"smooth_eye\": true") && !strstr(text, "holster_animation"));
   TfpSettings back;
   memset(&back, 0, sizeof back);
@@ -173,6 +178,19 @@ static int store_part(void) {
   CHECK(tfp_settings_load_locked(&s, calm, sizeof calm - 1, why, sizeof why) && tfp_settings_locked_number(&s, TFP_LOCKED_camera_damping) == 100);
   CHECK(!tfp_settings_load_locked(&s, wrong, sizeof wrong - 1, why, sizeof why) && tfp_settings_locked_number(&s, TFP_LOCKED_camera_damping) == 100);
   CHECK(tfp_settings_set_locked(&s, TFP_LOCKED_camera_damping, false, false, 0) && tfp_settings_locked_number(&s, TFP_LOCKED_camera_damping) == 0);
+  tfp_settings_free(&s);
+  /* the same for a locked_view.json from before bodycam was an option (0.6.0-feel.39 and older): off, nothing skipped;
+   * a file that has it is read, written back, and the wrong type refuses */
+  static const char body[] = "{\"format\":1,\"locked_view\":{\"bodycam\":true}}", body_wrong[] = "{\"format\":1,\"locked_view\":{\"bodycam\":1}}";
+  memset(&s, 0, sizeof s);
+  CHECK(tfp_settings_defaults(&s) && tfp_settings_load_locked(&s, before, sizeof before - 1, why, sizeof why) && !s.locked_skipped[0] &&
+        !tfp_settings_locked_flag(&s, TFP_LOCKED_bodycam) && s.locked_writes == 0);
+  CHECK(tfp_settings_load_locked(&s, body, sizeof body - 1, why, sizeof why) && !s.locked_skipped[0] && tfp_settings_locked_flag(&s, TFP_LOCKED_bodycam));
+  CHECK(tfp_settings_write_locked(&s, text, sizeof text) < sizeof text && strstr(text, "\"bodycam\": true"));
+  CHECK(!tfp_settings_load_locked(&s, body_wrong, sizeof body_wrong - 1, why, sizeof why) && strstr(why, "locked_view.bodycam: expected true or false") &&
+        tfp_settings_locked_flag(&s, TFP_LOCKED_bodycam));
+  CHECK(tfp_settings_set_locked(&s, TFP_LOCKED_bodycam, true, false, 0) && !tfp_settings_locked_flag(&s, TFP_LOCKED_bodycam) && s.locked_writes == 1 &&
+        !tfp_settings_set_locked(&s, TFP_LOCKED_bodycam, false, false, 1));
   tfp_settings_free(&s);
   /* a settings.json without the member (0.6.0-feel.19 and older, and this build): the defaults */
   static const char old[] = "{\"format\":1,\"first_person\":{}}";
@@ -251,7 +269,7 @@ static int store_part(void) {
   CHECK(tfp_locked_view_camera_lock(&wire) && tfp_locked_view_fov_lock(&wire) && tfp_locked_view_fov_degrees(&wire) == 80 &&
         tfp_locked_view_fov_zoom_when_aiming(&wire) && tfp_locked_view_kick_strength(&wire) == 35 && tfp_locked_view_kick_max_degrees(&wire) == 8 &&
         tfp_locked_view_thrown_kick_strength(&wire) == 70 && tfp_locked_view_camera_damping(&wire) == 60 && tfp_locked_view_one_handed_pistols(&wire) &&
-        tfp_locked_view_animated_arms(&wire) &&
+        tfp_locked_view_animated_arms(&wire) && !tfp_locked_view_bodycam(&wire) &&
         tfp_locked_view_put_away(&wire) && tfp_locked_view_smooth_eye(&wire));
   CHECK(!tfp_wire_settings_locked_set(&wire, TFP_LOCKED_fov_degrees, false, false, 90)); /* no store bound: the defaults answer */
   CHECK(tfp_wire_settings_bind(&wire, part, sizeof part - 1, "test") && logged("Ready: settings") && !logged("Refused"));
