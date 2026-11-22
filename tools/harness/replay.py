@@ -19,7 +19,8 @@ the wanted change is over 1.2 of it, and otherwise the filter's.
 
 What this leaves out:
  - Only the frames in the Trace windows are there (0.5 s after each State edge and six frames before it). The filter
-   starts from nothing at each window; what it carried into one is not known.
+   starts from nothing at each window; what it carried into one is not known. So the replays are judged only where
+   the logged filter, replayed, shows the eye the log shows (within 0.02 m, in all three frames of a step).
  - The fitted axes are a guess: where nothing is carried and nothing taken up no turn can be seen and the axes stay
    as they were, so a root that turns evenly there and is caught turning later looks as if it began to turn then.
  - Full aim (quiet) is not in the Trace lines; it is taken as off.
@@ -39,6 +40,8 @@ ROOT = Path(__file__).resolve().parents[2]
 SAME_FRAME_MS = 5.0
 SAME_EYE_M = 0.002
 STEP_M = 0.06
+NEAR_M = 0.02
+BEYOND_M = 0.05
 TRACE = re.compile(r"^(\d+):(\d+):(\d+)\.(\d+) Trace: t=(-?[\d.]+) kind=(\d+) eye_world=\(([-\d. ]+)\) step=[-\d.]+ wanted=\(([-\d. ]+)\) "
                    r"correction=([-\d.]+).*?source=(\S+) root=\(([-\d. ]+)\)(?: axes=\(([-\d. ]+)\))? looked=(\d) taken=(\S+)")
 SOURCES = {"head": 1, "native": 2, "repeat": 2}
@@ -84,11 +87,14 @@ def frames(lines):
     return out
 
 
-def judge(rows, eye="eye", carried="carried"):
-    """[(whose, shown change, wanted change, a, b, c)] for every step of STEP_M or more."""
+def judge(rows, eye="eye", carried="carried", known=False):
+    """[(whose, shown change, wanted change, a, b, c)] for every step of STEP_M or more. `known`: only where the
+    logged filter, replayed, is within NEAR_M of the log in all three frames."""
     found = []
     for a, b, c in zip(rows, rows[1:], rows[2:]):
         if not (5 <= b["tick"] - a["tick"] <= 80 and 5 <= c["tick"] - b["tick"] <= 80):
+            continue
+        if known and max(a["misfit"], b["misfit"], c["misfit"]) >= NEAR_M:
             continue
         shown = abs(math.dist(c[eye], b[eye]) - math.dist(b[eye], a[eye]))
         wanted = abs(math.dist(c["wanted"], b["wanted"]) - math.dist(b["wanted"], a["wanted"]))
@@ -176,17 +182,26 @@ def main(argv):
                       f"{math.dist(row['new_eye'], before['new_eye']):.3f} carried {row['new_carried']:.3f} {row['new_taken']}")
             before = row
         return 0
-    close = sum(row["misfit"] < 0.01 for row in rows)
-    print(f"{len(rows)} frames; the logged filter with the {'given' if given else 'fitted'} axes is within 0.01 m of the log in {close} of them")
-    for title, eye, carried in (("the log", "eye", "carried"), ("the logged filter, replayed", "old_eye", "old_carried"),
-                                ("the present filter, replayed", "new_eye", "new_carried")):
-        found = judge(rows, eye, carried)
+    close = sum(row["misfit"] < NEAR_M for row in rows)
+    print(f"{len(rows)} frames; the logged filter with the {'given' if given else 'fitted'} axes is within {NEAR_M} m of the log in {close} of them")
+    for title, eye, carried, known in (("the log, all frames", "eye", "carried", False),
+                                       ("the logged filter, replayed, all frames", "old_eye", "old_carried", False),
+                                       ("the present filter, replayed, all frames", "new_eye", "new_carried", False),
+                                       ("the log, where the replay follows it", "eye", "carried", True),
+                                       ("the logged filter, replayed, there", "old_eye", "old_carried", True),
+                                       ("the present filter, replayed, there", "new_eye", "new_carried", True)):
+        found = judge(rows, eye, carried, known)
         counts = {whose: sum(1 for f in found if f[0] == whose) for whose in ("filter", "game", "reduced")}
-        print(f"{title}: {counts['filter']} steps of {STEP_M} m or more are the filter's, {counts['game']} the game's own, {counts['reduced']} reduced")
+
+        def root_change(a, b, c):
+            return abs(math.dist(c["root"], b["root"]) - math.dist(b["root"], a["root"]))
+        beyond = sum(1 for f in found if f[0] == "filter" and f[1] - root_change(*f[3:]) > BEYOND_M)
+        print(f"{title}: {counts['filter']} steps of {STEP_M} m or more are the filter's ({beyond} of them more than {BEYOND_M} m beyond the "
+              f"root's own change of step), {counts['game']} the game's own, {counts['reduced']} reduced")
         for whose, shown, wanted, a, b, c in found:
             if whose == "filter":
-                root = abs(math.dist(c["root"], b["root"]) - math.dist(b["root"], a["root"]))
-                print(f"  {c['at']} kind {c['kind']}: shown change {shown:.3f} m, wanted {wanted:.3f} m, root {root:.3f} m, carried {c[carried]:.3f} m")
+                print(f"  {c['at']} kind {c['kind']}: shown change {shown:.3f} m, wanted {wanted:.3f} m, root {root_change(a, b, c):.3f} m, "
+                      f"carried {c[carried]:.3f} m")
     return 0
 
 
