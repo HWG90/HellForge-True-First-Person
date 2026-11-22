@@ -215,6 +215,14 @@ static TfpContinuity smooth; static const TfpContinuityTuning smooth_tuning = TF
  * read each other's steps as jumps. */
 #define SMOOTH_EVENT_MS 300.0
 static _Atomic uint32_t smooth_event;
+/* Beyond retail, and only in a frame the lock holds (tfp_camera_set_orphan): the binder says that the game still
+ * presents the first-person request although the mod has asked for its exit and the gun is off the rig (a stim: the
+ * game keeps the request for about 0.85 s under mask 0x40). The rig's eye then goes to the body's head (seen in the
+ * game 2026-11-23: 0.48 m in two frames, to 0.21 m behind the head camera's eye, inside the helmet). In those frames
+ * the eye presented is the head camera's own point, handed to the continuity as the head source, and converted to
+ * the rig eye's frame for the game's parent-local argument. Off (the default): nothing here is reached. */
+static _Atomic uint32_t orphan_on, orphan_behind; /* orphan_behind: a float's bits */
+static _Atomic uint64_t orphan_frames, orphan_refused;
 static struct { bool known; uint32_t mask, kind, weapon, key; double until; } smooth_watch;
 #define TRACE_RING 128u
 #define TRACE_BEFORE 6u   /* frames before the edge that are written with it */
@@ -1010,6 +1018,40 @@ static bool smooth_native(Policy *p, const NativeSample *sample, const float *gi
   memcpy(local, moved, 12); memcpy(adjusted, local, 16); return true;
 }
 
+/* A native frame the binder called orphaned (orphan_on): the head camera's eye in place of the rig's. `given` is the
+ * 16-byte parent-local argument about to be forwarded; true: `adjusted` holds the argument to forward instead. The
+ * point is the head camera's (the kind 4 branch below: the head, c.forward along the level view direction, c.up),
+ * with the direction of the view last shown, so the first head-camera frame after the game's exit wants the same
+ * point and the continuity sees no change of camera there. Any read or proof that fails: false, and the frame goes
+ * the way of every other native frame (smooth_native). */
+static bool orphan_head(Policy *p, const float *given, uint32_t kind, double tick, float *adjusted) {
+  float local[4] = {0}, root[3] = {0}, head[3] = {0}, root_basis[9] = {0}, forward[3] = {0}, up[3] = {0}, position[3] = {0}, parent_basis[9] = {0};
+  const uint32_t why = p->why; const bool far = p->head_far;
+  const bool pointed = points(p, root, head, root_basis, false);
+  p->why = why; p->head_far = far; /* the head camera's own diagnostics are not this frame's */
+  if (!pointed || !lock_view_known || !held_axes(lock_view, forward, up) || !read((uint64_t)(uintptr_t)given, local, 16) || !finite3(local)
+      || !smooth_parent(p, position, parent_basis)) return false;
+  float horizontal[3] = {forward[0], forward[1], 0};
+  float length = sqrtf(horizontal[0]*horizontal[0]+horizontal[1]*horizontal[1]);
+  if (length < .0001f) { horizontal[0] = root_basis[3]; horizontal[1] = root_basis[4]; length = sqrtf(horizontal[0]*horizontal[0]+horizontal[1]*horizontal[1]); }
+  if (!(length >= .0001f)) return false;
+  horizontal[0] /= length; horizontal[1] /= length;
+  float wanted[3] = {0}, shown[3] = {0}, moved[3] = {0}, behind = 0;
+  for (unsigned i = 0; i < 3; ++i) {
+    wanted[i] = head[i]+horizontal[i]*p->c.forward+(i == 0 ? horizontal[1]*p->side : i == 1 ? -horizontal[0]*p->side : p->c.up);
+    float game = position[i]; for (unsigned axis = 0; axis < 3; ++axis) game += local[axis]*parent_basis[axis*3+i];
+    behind += (wanted[i]-game)*horizontal[i]; /* how far behind the head camera's eye the game put its own */
+  }
+  if (!finite3(wanted) || !isfinite(behind)) return false;
+  smooth_present(p, kind, SMOOTH_HEAD, root, root_basis, wanted, tick, shown);
+  for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
+    moved[axis] += (shown[component]-position[component])*parent_basis[axis*3+component];
+  if (!finite3(moved)) return false;
+  memcpy(local, moved, 12); memcpy(adjusted, local, 16);
+  atomic_store_explicit(&orphan_behind, float_bits(behind), memory_order_relaxed);
+  return true;
+}
+
 /* The original setter, called as retail calls it (cpp:751, 1020). */
 static void call_original(void *camera, uint32_t unit, const float *output) {
   const uintptr_t target = atomic_load_explicit(&original, memory_order_acquire);
@@ -1107,7 +1149,15 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
             if (eye_watch_known && distance(policy.native_eye, eye_watch) > .05f) eye_unsettled_until = tick+200.0;
             memcpy(eye_watch, policy.native_eye, 12); eye_watch_known = true;
           }
-          if (smooth_native(&policy, handoff ? &sample : NULL, output, kind, SMOOTH_NATIVE, tick, adjusted)) output = adjusted;
+          const bool orphan = atomic_load_explicit(&orphan_on, memory_order_relaxed) != 0 && !policy.full_ads;
+          if (orphan && orphan_head(&policy, output, kind, tick, adjusted)) {
+            /* Not the weapon's eye: nothing of it is held or repeated once the game's exit arrives. */
+            output = adjusted; policy.native_eye_valid = false; memcpy(policy.last_native, adjusted, 12);
+            atomic_fetch_add_explicit(&orphan_frames, 1, memory_order_relaxed);
+          } else {
+            if (orphan) atomic_fetch_add_explicit(&orphan_refused, 1, memory_order_relaxed);
+            if (smooth_native(&policy, handoff ? &sample : NULL, output, kind, SMOOTH_NATIVE, tick, adjusted)) output = adjusted;
+          }
         }
         /* cpp:823 observe_camera_parent(policy,tick): retired, dropped. */
         lock_rotation(&policy, native, kind, tick); lock_shown = true;
@@ -1576,6 +1626,11 @@ void tfp_camera_set_lock(bool on, float gain, float max_degrees, float settle_ms
 uint64_t tfp_camera_lock_frames(void) { return atomic_load(&lock_frames); }
 void tfp_camera_set_continuity(bool on, bool trace_frames) { atomic_store(&smooth_on, on ? 1u : 0u); atomic_store(&trace_on, trace_frames ? 1u : 0u); }
 void tfp_camera_continuity_event(void) { atomic_store(&smooth_event, 1u); }
+void tfp_camera_set_orphan(bool on) { atomic_store(&orphan_on, on ? 1u : 0u); }
+void tfp_camera_orphan_stats(TfpCameraOrphanStats *out) {
+  if (!out) return;
+  out->frames = atomic_load(&orphan_frames); out->refused = atomic_load(&orphan_refused); out->behind_m = bits_float(atomic_load(&orphan_behind));
+}
 void tfp_camera_continuity_stats(TfpCameraContinuityStats *out) {
   if (!out) return;
   memset(out, 0, sizeof *out);
@@ -1643,6 +1698,7 @@ const char *tfp_camera_why_text(uint32_t why) {
 }
 void tfp_camera_reset_for_tests(void) {
   atomic_store(&lock_on, 0); atomic_store(&smooth_on, 0); atomic_store(&trace_on, 0);
+  atomic_store(&orphan_on, 0); atomic_store(&orphan_behind, 0); atomic_store(&orphan_frames, 0); atomic_store(&orphan_refused, 0);
   atomic_store(&lock_frames, 0); atomic_store(&lock_foreign_frames, 0); atomic_store(&lock_missed, 0); atomic_store(&lock_missed_kind, 0); atomic_store(&lock_missed_error, 0);
   atomic_store(&lock_missed_why, 0); atomic_store(&lock_down_frames, 0); atomic_store(&lock_down_refused, 0); atomic_store(&lock_down_kind, 0);
   atomic_store(&lock_down_error, 0); atomic_store(&lock_down_why, 0); atomic_store(&lock_body_ragdoll, 0); atomic_store(&lock_body_off_foot, 0);

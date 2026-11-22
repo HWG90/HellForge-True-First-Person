@@ -119,6 +119,16 @@ struct Game {
     }
     have = true; std::memcpy(shown, world, 12); std::memcpy(body, relative, 12);
   }
+  // The head camera's eye (c.forward 0.18 m along the level view direction, c.up 0.04 m), and the drawn eye against it.
+  void head_eye(float *out) const {
+    const float n = std::sqrt(ahead[0] * ahead[0] + ahead[1] * ahead[1]);
+    out[0] = s.head[0] + ahead[0] / n * .18f; out[1] = s.head[1] + ahead[1] / n * .18f; out[2] = s.head[2] + .04f;
+  }
+  float from_head_eye() const { float t[3]; head_eye(t); return std::sqrt((shown[0] - t[0]) * (shown[0] - t[0]) + (shown[1] - t[1]) * (shown[1] - t[1]) + (shown[2] - t[2]) * (shown[2] - t[2])); }
+  float ahead_of_head() const { // metres in front of the head node along the level view direction (negative: behind it)
+    const float n = std::sqrt(ahead[0] * ahead[0] + ahead[1] * ahead[1]);
+    return ((shown[0] - s.head[0]) * ahead[0] + (shown[1] - s.head[1]) * ahead[1]) / n;
+  }
   float from_rig_eye() const { // how far the drawn eye is from where the game put it
     float d = 0;
     for (int i = 0; i < 3; ++i) { const float wanted = s.rig[12 + i] + .02f * s.rig[i] + .01f * s.rig[4 + i] + .03f * s.rig[8 + i]; d += (shown[i] - wanted) * (shown[i] - wanted); }
@@ -352,6 +362,103 @@ int main() {
     for (int i = 0; i < 3; ++i) { to_wanted += (g.body[i] - wanted[i]) * (g.body[i] - wanted[i]); to_other += (g.body[i] - other[i]) * (g.body[i] - other[i]); }
     CHECK(std::sqrt(to_wanted) < .01f && std::sqrt(to_other) > .25f);
     g.end();
+  }
+  // ---- 12. A stim (seen in the game 2026-11-23, 0.6.0-feel.25). Mask 0x40: the game keeps its first-person request
+  // for about 0.85 s after the mod asked for the exit, the gun goes to the body, and the rig's eye goes to the head in
+  // two frames (0.28 m, then 0.19 m: to 0.21 m behind the head camera's eye, inside the helmet). The binder says so
+  // (tfp_camera_set_orphan) on the tick the gun has left. Then: the eye presented goes to the head camera's point and
+  // never back behind the head, no frame's step changes by more than the continuity allows, the game's exit (the
+  // ordinary camera) finds the eye already there, and the native view's return is taken up as before.
+  // stand_in 0: the binder never says so (0.6.0-feel.25): the eye follows the rig behind the head. ----
+  for (int stand_in = 1; stand_in >= 0; --stand_in) {
+    fresh(true, true, true);
+    Game g; g.eye[1] = -.5f; g.eye[2] = .13f; // the weapon's eye: behind and above the head, as logged
+    g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+    standing(g, 12, 33.3, false); standing(g, 40, 33.3, true);
+    g.native(0x40); g.frame(33.3); // the put-away's frame: the gun on the rig, the game's own view
+    CHECK(g.from_rig_eye() < 1e-4f && !g.forwarded_own);
+    TfpCameraOrphanStats before{}; tfp_camera_orphan_stats(&before);
+    CHECK(before.frames == 0 && before.refused == 0);
+    if (stand_in) tfp_camera_set_orphan(true);
+    tfp_camera_continuity_event(); tfp_camera_trace_edge();
+    g.measure_from_here();
+    float nearest = g.from_head_eye(), least_ahead = g.ahead_of_head(); bool retreat = false;
+    CHECK(nearest > .6f && least_ahead < -.4f);
+    for (int i = 0; i < 26; ++i) {
+      if (i == 0) g.eye[1] += .28f;
+      if (i == 1) { g.eye[1] += .19f; g.eye[2] -= .09f; }
+      g.native(0x40); g.frame(33.3);
+      if (g.from_head_eye() > nearest + 1e-4f || g.ahead_of_head() < least_ahead - 1e-4f) retreat = true;
+      nearest = std::fmin(nearest, g.from_head_eye()); least_ahead = std::fmax(least_ahead, g.ahead_of_head());
+      if (stand_in) CHECK(g.forwarded_own);
+      if (stand_in && i >= 13) CHECK(g.from_head_eye() < 1e-3f); // there within 0.45 s
+    }
+    TfpCameraOrphanStats stats{}; tfp_camera_orphan_stats(&stats);
+    TfpCameraTraceRow rows[64]; const uint32_t count = tfp_camera_trace_read(rows, 64);
+    if (stand_in) {
+      CHECK(!retreat && g.change < .035f && g.from_head_eye() < 1e-4f && std::fabs(g.ahead_of_head() - .18f) < 1e-3f);
+      CHECK(stats.frames == 26 && stats.refused == 0 && std::fabs(stats.behind_m - .20f) < .01f);
+      CHECK(count >= 10 && rows[count - 1].kind == 6 && rows[count - 1].source == 1); // the native request, the head's eye
+    } else {
+      CHECK(g.from_rig_eye() < 1e-4f && g.ahead_of_head() < 0 && stats.frames == 0 && stats.refused == 0); // in the helmet
+      CHECK(count >= 10 && rows[count - 1].kind == 6 && rows[count - 1].source == 2);
+    }
+    if (stand_in) {
+      g.measure_from_here();
+      standing(g, 10, 33.3, false); // the game's exit: the ordinary camera, the head camera's own frames: the eye is there
+      CHECK(g.travel < 1e-3f && g.from_head_eye() < 1e-3f);
+      g.measure_from_here();
+      tfp_camera_set_orphan(false);
+      g.eye[1] = -.25f; g.eye[2] = .12f; standing(g, 20, 33.3, true); // the weapon is back
+      CHECK(g.change < .035f && g.from_rig_eye() < 1e-4f);
+    }
+    g.end();
+  }
+  // The binder's word alone does not move a view that is the weapon's own: full aim is left to the game.
+  {
+    fresh(true, true);
+    Game g; g.eye[1] = -.5f; g.eye[2] = .13f; g.pose(0, 0, 0, 0); g.look(0, 0); g.hip(); g.begin();
+    standing(g, 12, 33.3, false); standing(g, 40, 33.3, true);
+    tfp_camera_set_orphan(true);
+    for (int i = 0; i < 20; ++i) { g.native(0, true); g.frame(33.3); }
+    TfpCameraOrphanStats stats{}; tfp_camera_orphan_stats(&stats);
+    CHECK(stats.frames == 0 && g.from_rig_eye() < 1e-4f);
+    // A head that is not where a head can be (beyond 3 m from the unit root): refused, the frame is the native one.
+    for (int i = 0; i < 20; ++i) { g.native(0x40); g.s.head[2] = 5; g.frame(33.3); }
+    tfp_camera_orphan_stats(&stats);
+    CHECK(stats.frames == 0 && stats.refused == 20 && g.from_rig_eye() < 1e-4f);
+    g.end();
+  }
+  // Smooth eye off: the head's point at once (a change of camera is then shown as it is, as everywhere else).
+  {
+    fresh(true, false);
+    Game g; g.eye[1] = -.5f; g.eye[2] = .13f; g.pose(0, 0, 0, 0); g.look(0, 0); g.hip(); g.begin();
+    standing(g, 12, 33.3, false); standing(g, 40, 33.3, true);
+    tfp_camera_set_orphan(true);
+    g.native(0x40); g.frame(33.3);
+    CHECK(g.from_head_eye() < 1e-4f);
+    g.end();
+  }
+  // Without the lock the binder's word changes nothing: the same forwarded bytes and the same number of reads.
+  {
+    struct Record { float position[4]; bool own; uint64_t reads; } record[2][80];
+    int frames[2] = {0, 0};
+    for (int on = 0; on < 2; ++on) {
+      fresh(false, true, true);
+      clock_ms = 700000;
+      Game g; g.eye[1] = -.5f; g.eye[2] = .13f; g.pose(0, 0, 0, 0); g.look(0, 0); g.hip(); g.begin();
+      tfp_camera_set_orphan(on != 0);
+      auto run = [&](int count, bool native_view, uint32_t mask) { for (int i = 0; i < count; ++i) { if (native_view) g.native(mask); else g.hip(mask); const uint64_t before = reads; g.frame(16.7);
+        Record &r = record[on][frames[on]++]; std::memcpy(r.position, sent.position, 16); r.own = sent.own_buffer; r.reads = reads - before; } };
+      run(15, false, 0); run(20, true, 0); g.eye[1] += .47f; run(25, true, 0x40); run(10, false, 0);
+      TfpCameraOrphanStats stats{}; tfp_camera_orphan_stats(&stats);
+      CHECK(stats.frames == 0 && stats.refused == 0);
+      g.end();
+    }
+    CHECK(frames[0] == frames[1] && frames[0] == 70);
+    int different = 0;
+    for (int i = 0; i < frames[0]; ++i) if (std::memcmp(record[0][i].position, record[1][i].position, 16) || record[0][i].own != record[1][i].own || record[0][i].reads != record[1][i].reads) ++different;
+    CHECK(different == 0);
   }
   // ---- 8. Without the lock the switches change nothing: the same forwarded bytes and the same number of
   // memory reads, frame for frame, with continuity and trace on or off. ----

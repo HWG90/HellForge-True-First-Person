@@ -190,6 +190,18 @@ void tfp_camera_set_continuity(bool on, bool trace_frames);
  * when the control mask, the top request's kind or weapon, or the weapon key changes. Outside those windows the rig
  * eye's motion is the game's own and is shown as it is; a change of camera is always taken up. */
 void tfp_camera_continuity_event(void);
+/* Beyond retail, and only in frames the camera lock holds. `on`: the game still presents the first-person request
+ * (kind 6) although its exit has been asked for and the gun has left the first-person rig (a stim keeps the request
+ * for about 0.85 s). The rig's eye then sits at the body's head; while this is on, a native frame presents the head
+ * camera's eye instead (the head, `forward` along the level view direction, `up`), as the head source of the
+ * continuity, so the way there and the head camera's first frame afterwards have no step. Not in full aim; a frame
+ * whose head or rig eye cannot be proven is presented as any other native frame and counted as refused. Off (the
+ * default) and without the lock: nothing is reached or read. */
+void tfp_camera_set_orphan(bool on);
+/* Counts since the start; behind_m: on the last such frame, how far behind the presented point the game's own eye
+ * was, along the level view direction. */
+typedef struct TfpCameraOrphanStats { uint64_t frames, refused; float behind_m; } TfpCameraOrphanStats;
+void tfp_camera_orphan_stats(TfpCameraOrphanStats *out);
 typedef struct TfpCameraContinuityStats { uint64_t jumps, edges, restarts; float largest_m; } TfpCameraContinuityStats;
 /* Counts since the start; the largest correction carried since the last call. */
 void tfp_camera_continuity_stats(TfpCameraContinuityStats *out);
