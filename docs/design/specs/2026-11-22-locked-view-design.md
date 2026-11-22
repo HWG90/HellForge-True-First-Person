@@ -28,13 +28,16 @@ retail's behaviour, so the comparisons with retail's source keep holding.
 ### 1. Camera lock (`src/camera_lock.h`, `src/camera_helper.c` `tfp_camera_set_lock`)
 
 While the view is on, the head camera is kept for every frame of the player's own avatar: any action mask, off foot,
-any camera kind (the death cameras, kinds 10 and 11, included). The eye is the head, so it follows the body to the
-ground. In a camera that is not kind 4 or 6 the direction is the last first-person direction. No glide in from the
-game's camera: the lock never shows the way from third person. A spectator camera on another avatar is left alone
-(the camera record is not ours).
+any camera kind. The eye is the head, so it follows the body to the ground. In a camera that is not kind 4 or 6, and
+in kind 4 on a body that physics has (thrown or dead), the direction is the last first-person direction. No glide in
+from the game's camera: the lock never shows the way from third person. A camera whose record is not the player's
+own avatar is left alone: a spectator camera, and the reinforcement cameras (kinds 11 and 10) that follow a death.
 
-Open, to be settled in the game: what the controller above the helper does on death (it retires the lease today);
-which meshes are hidden then; respawn.
+Death, as the game does it on this build (session `b08c8327`, 2026-11-22): the camera on the corpse is the ordinary
+request, kind 4, still the avatar's, for about five seconds; the body unit, its node graph and the head node stay
+the same; the unit root stays where the character died and the skeleton leaves it. Then kinds 11 and 10 with another
+avatar's record for about six seconds, in which the game does not call the hooked camera setter at all; then a new
+avatar and body, on which the controller arms the helper again by itself. See "Death under the lock" below.
 
 ### 2. Kicks (same files)
 
@@ -191,3 +194,60 @@ letting go in the head camera); jumps are now looked for in head-camera frames t
 
 A death happened in that first run (enemies, by chance): the head camera refused with error 16 (the body's graph no
 longer matched) and the game's death camera was shown for about five seconds. Session `b08c8327`. Being worked on.
+
+## Death under the lock, 2026-11-23 (0.6.0-feel.24, branch `death-view`; offline, not yet run in the game)
+
+What the death in session `b08c8327` showed (10:10:50 to 10:11:07 in the mod's log):
+
+- **Error 16 was not the graph.** It was the last clause of the head proof: the head must be 0.05 to 3 m from the
+  unit root (`points()`), and the corpse's head was 4.28 m from it. Everything before that clause passed on those
+  frames (the distance is only computed after the graph, the tables and both matrices were proven), and the owner
+  proof passed on every frame for the five seconds. The first dead frame failed differently, with error 7 and the
+  head at 1.70 m: the final proof compared the animation chain with a sample that is only taken on foot.
+- **The view came back by itself**: new helper generation at 10:11:01.4 on the new body, the head camera on every
+  frame from there, the native view at 10:11:07. F11 was never involved. The later part of that run was first
+  person throughout (the `Lock:` lines kept printing the last missed frame's kind and error beside `+0 missed`,
+  which read like a failure); at 10:12:05 the avatar was gone (`Empty entity`, no camera calls for seven seconds), and
+  from 10:12:13 the head camera held every frame, with empty hands, until the session closed.
+
+Built, all of it only in frames the lock holds (`src/camera_helper.c`; lock off: retail's reads and answers):
+
+- A head beyond 3 m from the root is taken when it is 0.005 to 0.5 m from its neck, the parent node whose link and
+  name the graph proof has just checked, in the same world array (the retired controller's rule,
+  `native_view.c:803-814`). Also in the begin proof while the lock is on.
+- Off foot, the animation chain the final proof compares is read in the same frame; a chain that cannot be read is
+  not compared. The body, graph, request and camera-parent clauses stay.
+- The body is **down** when the head is beyond 3 m from the root, or it is off foot with the avatar's ragdoll flag
+  (`avatar_owner + 0x547844 + index * 0x78`, bit 0x10). Down: the eye is placed along, and the view holds, the last
+  first-person direction, with the thrown kick (70 % up to 35 degrees) on it; the head's own motion against the
+  root is not read as a camera jump. Up again (a ragdoll that was survived): the direction eases back to the
+  game's in about 0.3 s. Nothing but that direction is kept between frames.
+- Head hiding (`src/wire_engine.c`): while the helper holds the head camera on the snapshot's body off foot, the
+  on-foot answer is yes, and an action state that cannot be read is replaced by the snapshot's own owner. The
+  helmet, torso and shoulders stay hidden around the eye.
+- Log: `Dead: kind=4 head=(x y z) frames=+N refused=+M (reason)` once a second while the body is down;
+  `Body:` (off foot, ragdoll flag, head distance) while the lock holds an off-foot body; `Missed:` with the proof
+  that refused (`tfp_camera_why_text`) in any second with a missed frame; `Lock:` shows kind 0, error 0 with
+  `+0 missed`.
+- Not changed: kinds 11 and 10 after the corpse. The record is another avatar's and the setter is not called from
+  the hooked site; there is no body of the player's to put an eye on. About six seconds until the new body.
+
+Offline: `tests/run-camera-death.sh` (through the helper on the fake game memory: a death thrown 4.3 m, held
+direction, at-rest eye, the same without the lock, a head away from its neck, off foot in walking range, an
+unreadable animation instance, a survived ragdoll, the thrown kick, arming on a thrown body).
+
+**The first death in the game must check:**
+
+1. `Dead:` lines from the first second: `frames=+30 refused=+0`. If there is no `Dead:` line but `Body: off foot 1,
+   ragdoll flag 0`, death does not set the ragdoll flag and the head stayed within 3 m: the eye is at the head but
+   the direction is the game's corpse camera; say so and the sign for "down" has to be another one.
+2. Any `Missed:` line during the death, and its reason. "the animation state changed during the frame" would mean
+   the chain moves between sampling and the final proof; "not at its neck" a head that left the body.
+3. What is on screen: the helmet, torso or shoulders around the eye (`Feel:` `head=active:N` or `head=idle:0`);
+   the ground or the body clipping the near plane when lying; whether the held direction with the kick reads as
+   falling, or whether the game's own direction (mouse) would be better there.
+4. The first 0.3 s: `Cut:` after leaving the native view and the `Trace:` rows (`source=head`, `correction`).
+5. A ragdoll that is survived (an explosion nearby): the `Dead:` lines, and the turn back to the mouse direction.
+6. Respawn: `Lock:` holding from the first second on the new body, head hiding back, no key pressed.
+7. A death by explosion or a head shot, where the head may leave the neck: `refused` with the neck reason.
+

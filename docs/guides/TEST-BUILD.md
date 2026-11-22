@@ -57,7 +57,9 @@ the other two; you then have F11 and the default settings, but no menu and no ed
   per weapon plus recoil; the game has no first-person reload animation to show.
 - **Holding aim raises the weapon to the shoulder.** Looking through the sight is a separate option
   ("true native ADS" in the menu) and was not part of this check.
-- **Dying leaves first person.** The game's death camera takes over.
+- **Dying left first person in feel.23.** The game's own camera showed the body for about five seconds.
+  feel.24 keeps the view at the head of the falling body; this has not been seen in the game yet. The few
+  seconds between the body and the new drop pod stay the game's own camera.
 - **The crash while the game closes is guarded.** Build 25480438 has a fault in its own shutdown (it
   releases some of its tables through the wrong allocator) that crashed about half of my sessions, with or
   without first person in use. This build skips that faulty release. In 9 sessions since, none produced the
