@@ -298,6 +298,28 @@ int main() {
     CHECK(stats.jumps == 1);
     g.end();
   }
+  // ---- 9b. A re-seat that takes three frames and begins on the last frame of the 300 ms (seen in the game
+  // 2026-11-22: closing the stratagem list or a swap with the view pitched down, 0.08 m a frame for three frames,
+  // 270 ms after the entry). The run that began inside the time is taken up to its end, not shown from its second
+  // frame on. ----
+  {
+    fresh(true, true);
+    Game g; g.pose(0, 0, 0, .3f); g.look(.3f, -.2f); g.hip(); g.begin();
+    standing(g, 12, 33.3, false); standing(g, 40, 33.3, true);
+    tfp_camera_continuity_event();
+    standing(g, 9, 33.3, true);
+    float worst = 0;
+    for (int i = 0; i < 3; ++i) { g.eye[1] -= .05f; g.eye[2] += .065f; g.native(); g.frame(33.3); if (g.step > worst) worst = g.step; }
+    CHECK(worst < .04f);
+    TfpCameraContinuityStats stats{}; tfp_camera_continuity_stats(&stats);
+    CHECK(stats.jumps == 3);
+    for (int i = 0; i < 15; ++i) { g.native(); g.frame(33.3); if (g.step > worst) worst = g.step; }
+    CHECK(worst < .045f && g.from_rig_eye() < 1e-4f); // 0.245 m caught up in 230 ms, 0.040 m a frame at most
+    // and the time is not held open by it: a one-frame move after the run is the game's own again
+    g.eye[1] += .2f; g.native(); g.frame(33.3);
+    CHECK(g.from_rig_eye() < 1e-4f && !g.forwarded_own);
+    g.end();
+  }
   // ---- 10. The entry under the lock is one mechanism. With continuity on the 140 ms eased entry does not run and
   // the change of camera is carried whole: 0.3 m and 0.6 m at 30 frames a second change no step by 0.035 m, and no
   // frame of it is read as a jump. With continuity off the eased entry runs as before (and is the rougher one). ----

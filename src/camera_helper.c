@@ -960,7 +960,11 @@ static bool smooth_detect(const Policy *p, uint32_t kind, uint32_t source, doubl
   /* The head camera too (seen in the game 2026-11-22: 0.15 m in one frame inside a swap, when the held eye lets go
    * or starts for the incoming weapon's remembered eye). */
   (void)source;
-  return tick < smooth_watch.until;
+  /* A re-seat can take several frames, and begin on the last frame of the time (seen in the game 2026-11-22: 0.08 m
+   * a frame for three frames, 270 ms after the entry, with the view pitched down). A run of jumps that began inside
+   * the time is looked at to its end; the run itself is bounded (TFP_CONTINUITY_RUN_MS), so this holds nothing open. */
+  const bool in_run = smooth.run && tick >= smooth.run_started && tick-smooth.run_started <= TFP_CONTINUITY_RUN_MS;
+  return tick < smooth_watch.until || in_run;
 }
 /* The eye about to be presented, in the world; `root`/`root_basis` are the body root's position and axis rows.
  * True: `shown` differs from `wanted` and is what to present. Always records the frame for the trace. */

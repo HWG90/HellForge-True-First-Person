@@ -50,7 +50,7 @@ PHASES = {
     "grenade-held": ("hold g 1.5", 3.5),
     "stim": ("key v", 3.5),
     "melee": ("key f", 2.0),
-    "stratagem-menu": ("down ctrl; wait 0.3; key w; key s; key d; key a; key w; up ctrl", 2.0),
+    "stratagem-menu": ("key ctrl; wait 1.5; key ctrl", 3.0),   # a tap opens the list and a second tap closes it; holding does neither
     "emote": ("key b", 4.0),
     "jump-vault": ("hold w 0.4; key space; wait 0.2; hold w 0.6", 2.5),
     "toggle-off-on": ("key f11; wait 1.0; key f11", 1.5),
