@@ -22,7 +22,7 @@ static uintptr_t worlds_of(uint32_t ref) { return object_of(ref) + 0x20000; }
 static uintptr_t links_of(uint32_t ref) { return object_of(ref) + 0x30000; }
 static uintptr_t names_of(uint32_t ref) { return object_of(ref) + 0x40000; }
 static FpMemory memory;
-static uint64_t SET, UPDATE, FOREIGN_SET;
+static uint64_t SET, UPDATE, FOREIGN_SET, FOREIGN_UPDATE, not_executable;
 
 static const TfpGraftMatrix ID = {.values = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}};
 static const TfpGraftLocal REST = {.basis = {1, 0, 0, 0, 1, 0, 0, 0, 1}, .preserved = {1, 1, 1, 0}};
@@ -99,6 +99,8 @@ static void world_setup(void) {
   put(SET, set_code, sizeof set_code), put(UPDATE, update_code, sizeof update_code);
   FOREIGN_SET = memory.exe + 0x1fd000; /* another function that begins with the same bytes */
   put(FOREIGN_SET, set_code, sizeof set_code);
+  FOREIGN_UPDATE = memory.exe + 0x337000;
+  put(FOREIGN_UPDATE, update_code, sizeof update_code);
   /* the avatar's rows */
   { const uint8_t physics = 0; put(AVATAR + 0x547844, &physics, 1); }
   slots(SLEEVE, GLOVE);
@@ -125,7 +127,10 @@ static void world_setup(void) {
 enum { CALLS = 512 };
 static struct { uint32_t unit, node; bool update; } calls[CALLS];
 static unsigned call_count, sets, updates, fault_set_at;
-static bool is_executable(void *user, uint64_t at) { (void)user; return at == SET || at == UPDATE || at == FOREIGN_SET; }
+static bool is_executable(void *user, uint64_t at) {
+  (void)user;
+  return at != not_executable && (at == SET || at == UPDATE || at == FOREIGN_SET || at == FOREIGN_UPDATE);
+}
 static bool set_local(void *user, uint64_t function, uint32_t unit, uint32_t node, const TfpGraftLocal *local) {
   (void)user;
   CHECK(function == SET && node < TFP_GRAFT_RIG_NODES && node != TFP_GRAFT_RIG_ROOT && node != TFP_GRAFT_RIG_EYE && call_count < CALLS);
@@ -151,7 +156,7 @@ static void fresh(void) {
   const TfpArmDriveHost host = {NULL, memory, is_executable, set_local, update_unit};
   tfp_arm_drive_set_host(&host);
   forget_calls();
-  fault_set_at = 0;
+  fault_set_at = 0, not_executable = 0;
 }
 
 /* What the retired maths asks for: bound on the frame, the body's socket aligned to the rig's own socket
@@ -184,6 +189,67 @@ static void test_off_and_idle(void) {
   TfpArmDriveStats s = stats();
   CHECK(s.idle == 1 && !s.frames && !s.refused && !s.binds && !s.owned);
   CHECK(!tfp_arm_drive_held() && tfp_arm_drive_release());
+}
+
+/* Leaving the native view (the camera request is no longer kind 6) with joints written: the game's values go
+ * back on that primary render, everything is refreshed, nothing is held, and it is not a refusal. Back in the
+ * native view the map is bound again from nothing. */
+static void test_leave_native_view(void) {
+  TfpGraftLocal now[TFP_GRAFT_RIG_NODES];
+  fresh();
+  tfp_arm_drive_set(true, false, 1);
+  CHECK(!tfp_arm_drive_render(WORLD, true) && stats().frames == 1 && stats().owned > 30);
+  forget_calls();
+  request(4);
+  CHECK(!tfp_arm_drive_render(WORLD, true));
+  rig_locals(now);
+  TfpArmDriveStats s = stats();
+  CHECK(!memcmp(now, game_locals, sizeof now) && s.owned == 0 && s.restores == 1 && s.idle == 1 && !s.refused && s.frames == 1 && !tfp_arm_drive_held());
+  CHECK(sets > 30 && updates == 5 && calls[sets].unit == RIG && calls[sets + 1].unit == SLEEVE && calls[sets + 2].unit == GLOVE &&
+        calls[sets + 3].unit == GUN && calls[sets + 4].unit == OPTIC);
+  forget_calls();
+  CHECK(!tfp_arm_drive_render(WORLD, true) && !call_count && stats().idle == 2 && stats().restores == 1); /* still away: nothing more */
+  request(6);
+  CHECK(!tfp_arm_drive_render(WORLD, true));
+  s = stats();
+  CHECK(s.frames == 2 && s.binds == 2 && s.owned > 30 && !s.refused);
+}
+
+/* Putting back keeps what the game wrote after this mod's write: one joint's X position and another joint's
+ * whole basis, written by the game's animation between the driven frame and the put-back, stay; every other
+ * value is the one saved before the write. The three ways out: switched off, release, after the draw. */
+static void test_put_back_keeps_game_writes(void) {
+  for (int way = 0; way < 3; way++) {
+    TfpGraftLocal now[TFP_GRAFT_RIG_NODES], want[TFP_GRAFT_RIG_NODES], expected[TFP_GRAFT_RIG_NODES];
+    fresh();
+    tfp_arm_drive_set(true, way == 2, 1);
+    const TfpGraft map = bound_map();
+    wanted(&map, body_now, game_locals, 1, want);
+    CHECK(want[20].position[0] != game_locals[20].position[0] && memcmp(want[30].basis, game_locals[30].basis, 36));
+    CHECK(tfp_arm_drive_render(WORLD, true) == (way == 2));
+    rig_locals(now);
+    CHECK(!memcmp(now, want, sizeof now));
+    /* the game writes */
+    const float x = game_locals[20].position[0] + .25f;
+    const TfpGraftLocal turned = tfp_graft_bend_z(game_locals[30], 15);
+    CHECK(x != want[20].position[0] && memcmp(turned.basis, want[30].basis, 36) && memcmp(turned.basis, game_locals[30].basis, 36));
+    put(locals_of(RIG) + 20 * 64 + 36, &x, 4);
+    put(locals_of(RIG) + 30 * 64, turned.basis, 36);
+    memcpy(expected, game_locals, sizeof expected);
+    expected[20].position[0] = x;
+    memcpy(expected[30].basis, turned.basis, 36);
+    forget_calls();
+    if (way == 0) {
+      tfp_arm_drive_set(false, false, 1);
+      CHECK(!tfp_arm_drive_render(WORLD, true));
+    } else if (way == 1) {
+      CHECK(tfp_arm_drive_release());
+    } else {
+      tfp_arm_drive_after_render();
+    }
+    rig_locals(now);
+    CHECK(!memcmp(now, expected, sizeof now) && stats().owned == 0 && stats().restores == 1 && sets > 30 && updates == 5);
+  }
 }
 
 static void test_drive(void) {
@@ -369,6 +435,32 @@ static void mend_tree(void) { p64(object_of(OPTIC) + 0x1e0, 0); }
 static void break_api(void) { p64(memory.exe + 0x27c8f10 + 0x60, FOREIGN_SET); }  /* another mod holds UnitAPI+0x60 */
 static void mend_api(void) { p64(memory.exe + 0x27c8f10 + 0x60, SET); }
 static void break_setter_fault(void) { move_body(); fault_set_at = 3; }
+/* one condition of each proof at a time */
+static void break_camera_link(void) { n32(links_of(CAMERA), (49u << 16) | 2); } /* on the rig, but not on its eye */
+static void mend_camera_link(void) { n32(links_of(CAMERA), (50u << 16) | 2); }
+static void break_gun_parent(void) { p64(object_of(GUN) + 0x1d0, object_of(BODY)); } /* the link and the external array as before */
+static void mend_gun_parent(void) { p64(object_of(GUN) + 0x1d0, object_of(RIG)); }
+static void break_gun_external(void) { p64(object_of(GUN) + 0x78, worlds_of(BODY)); }
+static void mend_gun_external(void) { p64(object_of(GUN) + 0x78, worlds_of(RIG)); }
+static void break_rig_world(void) { p64(object_of(RIG) + 0x18, WORLD + 0x1000); }
+static void mend_rig_world(void) { p64(object_of(RIG) + 0x18, WORLD); }
+static void break_gun_world(void) { p64(object_of(GUN) + 0x18, WORLD + 0x1000); }
+static void mend_gun_world(void) { p64(object_of(GUN) + 0x18, WORLD); }
+static void break_rig_count(void) { n32(object_of(RIG) + 0x70, 62); }
+static void mend_rig_count(void) { n32(object_of(RIG) + 0x70, TFP_GRAFT_RIG_NODES); }
+static void break_socket_name(void) { n32(names_of(RIG) + 8 * 4, fn[8] ^ 1); }
+static void mend_socket_name(void) { n32(names_of(RIG) + 8 * 4, fn[8]); }
+static void break_eye_name(void) { n32(names_of(RIG) + 50 * 4, fn[50] ^ 1); }
+static void mend_eye_name(void) { n32(names_of(RIG) + 50 * 4, fn[50]); }
+static void break_set_code(void) { const uint8_t b = 0x49; put(SET + 20, &b, 1); }   /* the last pinned byte */
+static void mend_set_code(void) { const uint8_t b = 0xfa; put(SET + 20, &b, 1); }
+static void break_update_code(void) { const uint8_t b = 0xfe; put(UPDATE + 31, &b, 1); }
+static void mend_update_code(void) { const uint8_t b = 0xff; put(UPDATE + 31, &b, 1); }
+static void break_set_executable(void) { not_executable = SET; }
+static void break_update_executable(void) { not_executable = UPDATE; }
+static void mend_executable(void) { not_executable = 0; }
+static void break_world_api(void) { p64(memory.exe + 0x27cab40 + 0x100, FOREIGN_UPDATE); } /* another mod holds WorldAPI+0x100 */
+static void mend_world_api(void) { p64(memory.exe + 0x27cab40 + 0x100, UPDATE); }
 
 static void test_refusals(void) {
   refusal("snapshot", TFP_ARM_SNAPSHOT, break_snapshot, mend_snapshot, true);
@@ -381,6 +473,19 @@ static void test_refusals(void) {
   refusal("weapon tree", TFP_ARM_TREE, break_tree, mend_tree, true);
   refusal("api", TFP_ARM_API, break_api, mend_api, false); /* without the proven setter nothing can be written back yet */
   refusal("fault", TFP_ARM_FAULT, break_setter_fault, NULL, false);
+  refusal("camera link", TFP_ARM_CAMERA, break_camera_link, mend_camera_link, true);
+  refusal("gun parent", TFP_ARM_WEAPON, break_gun_parent, mend_gun_parent, true);
+  refusal("gun external array", TFP_ARM_WEAPON, break_gun_external, mend_gun_external, true);
+  refusal("rig world", TFP_ARM_WORLD, break_rig_world, mend_rig_world, false); /* a rig in another world is not written, not even back */
+  refusal("gun world", TFP_ARM_WORLD, break_gun_world, mend_gun_world, true);
+  refusal("rig node count", TFP_ARM_UNITS, break_rig_count, mend_rig_count, true);
+  refusal("socket name", TFP_ARM_UNITS, break_socket_name, mend_socket_name, true);
+  refusal("eye name", TFP_ARM_UNITS, break_eye_name, mend_eye_name, true);
+  refusal("setter bytes", TFP_ARM_API, break_set_code, mend_set_code, false);
+  refusal("update bytes", TFP_ARM_API, break_update_code, mend_update_code, false);
+  refusal("setter not executable", TFP_ARM_API, break_set_executable, mend_executable, false);
+  refusal("update not executable", TFP_ARM_API, break_update_executable, mend_executable, false);
+  refusal("world api", TFP_ARM_API, break_world_api, mend_world_api, false);
 
   /* not the game thread: nothing is read, nothing written, nothing released */
   fresh();
@@ -451,6 +556,8 @@ int main(int argc, char **argv) {
   if (argc != 2) { fprintf(stderr, "usage: arm_drive_test FIXTURE\n"); return 2; }
   load(argv[1]);
   test_off_and_idle();
+  test_leave_native_view();
+  test_put_back_keeps_game_writes();
   test_drive();
   test_current_optic();
   test_weight_zero_from_rest();
