@@ -210,9 +210,25 @@ bool tfp_wire_menu_bind(TfpWire *w, const TfpMenuHost *host, unsigned unavailabl
   memset(m, 0, sizeof *m);
   m->host = *host, m->edit = edit, m->unavailable = unavailable;
   w->ext[TFP_WIRE_EXT_MENU] = m;
+  /* The host's values into the store. A value that is the store's own, as this host was given it (the registration's
+   * default: a slider inside its range, the editor key's retail 119 as the host's key), is the bind's doing and not a
+   * change to save: on its own it must never write a file, least of all one that was refused or not opened at the
+   * start (src/wire_settings.h). Those go first, between the mirror marks; a value the host holds for itself (MCM's
+   * own file, set by the user there) is a change like any other and comes after. */
+  bool own[CONTROL_COUNT];
   for (int i = 0; i < CONTROL_COUNT; i++) {
-    TfpMenuValue v;
-    if (CONTROLS[i].menu >= 0 && host->get(host->user, CONTROLS[i].id, &v)) into_store(w, &CONTROLS[i], &v);
+    TfpMenuValue v, registered;
+    own[i] = CONTROLS[i].menu >= 0 && host->get(host->user, CONTROLS[i].id, &v) &&
+             tfp_wire_menu_default(w, &CONTROLS[i], host->editor_key ? host->editor_key : 119, &registered) && registered.kind == v.kind &&
+             (v.kind == TFP_MENU_VALUE_BOOL ? registered.boolean == v.boolean : registered.number == v.number);
+  }
+  const uint64_t mark = tfp_wire_settings_mirror_begin(w);
+  for (int pass = 0; pass < 2; pass++) {
+    for (int i = 0; i < CONTROL_COUNT; i++) {
+      TfpMenuValue v;
+      if (own[i] == !pass && CONTROLS[i].menu >= 0 && host->get(host->user, CONTROLS[i].id, &v)) into_store(w, &CONTROLS[i], &v);
+    }
+    if (!pass) tfp_wire_settings_mirror_end(w, mark);
   }
   host->set_disabled(host->user, "weapon_composition_status", true), host->set_disabled(host->user, "runtime_status", true);
   if (unavailable & TFP_MENU_NO_ARMS) {

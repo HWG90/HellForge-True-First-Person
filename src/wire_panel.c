@@ -265,7 +265,7 @@ bool tfp_wire_panel_bind(TfpWire *w, const OvApi *ov, const TfpPanelPlatform *pl
     memset(p->rows, 0, sizeof p->rows);
     for (int i = 0; i < count; i++) tfp_wire_menu_default(w, &controls[i], platform->editor_key, &p->rows[i].value);
     memcpy(p->locked, tfp_wire_settings(w)->locked, sizeof p->locked);
-    const TfpMenuHost host = {p, host_get, host_set, host_set_disabled, host_set_label, "the mod's own panel"};
+    const TfpMenuHost host = {p, host_get, host_set, host_set_disabled, host_set_label, "the mod's own panel", platform->editor_key};
     if (!tfp_wire_menu_bind(w, &host, unavailable, edit)) why = "the menu could not be set up";
   }
   if (!why) {

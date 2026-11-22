@@ -1182,7 +1182,7 @@ int main(int argc, char **argv) {
     mcm_put("toggle_key", TFP_MENU_VALUE_NUMBER, false, 121), mcm_put("editor_key", TFP_MENU_VALUE_NUMBER, false, 119);
     mcm_put("weapon_near_hip_cm", TFP_MENU_VALUE_NUMBER, false, 9), mcm_put("weapon_near_aim_cm", TFP_MENU_VALUE_NUMBER, false, 9);
     mcm_put("show_aim_markers", TFP_MENU_VALUE_BOOL, true, 0), mcm_put("family_placement_defaults", TFP_MENU_VALUE_BOOL, false, 0);
-    TfpMenuHost host = {NULL, mcm_get, mcm_set, mcm_set_disabled, mcm_set_label, NULL};
+    TfpMenuHost host = {NULL, mcm_get, mcm_set, mcm_set_disabled, mcm_set_label, NULL, 0};
     CHECK(!tfp_wire_menu_bound(&wire) && tfp_wire_menu_toggle_key(&wire) == 122);
     CHECK(tfp_wire_menu_bind(&wire, &host, TFP_MENU_NO_ARMS, NULL) && tfp_wire_menu_bound(&wire));
     CHECK(tfp_settings_menu_number(s, TFP_MENU_motion_strength) == 150 && tfp_settings_menu_flag(s, TFP_MENU_show_torso));
@@ -1230,6 +1230,42 @@ int main(int argc, char **argv) {
     tfp_wire_menu_unbind(&wire);
     CHECK(!tfp_wire_menu_bound(&wire) && tfp_wire_menu_activate(&wire, "stop_test"));
     tfp_wire_menu_frame(&wire);
+    tfp_wire_settings_free(&wire);
+  }
+  { /* ---- binding a menu is no change to save: a refused settings.json is not written over by it ---- */
+    static const char broken[] = "{\"format\":1,\"first_person\":{},\"menu\":{\"motion_strength\":120,";
+    /* MCM holds the registration's defaults (the store's values, the editor key's retail 119 as Page Up 33) */
+    disk_clear();
+    disk_put("settings.json", broken, sizeof broken - 1);
+    CHECK(start_on_disk() && logged("Refused: settings"));
+    mcm_count = mcm_sets = mcm_labels = mcm_disables = 0, mcm_disabled[0] = 0;
+    mcm_put("editor_key", TFP_MENU_VALUE_NUMBER, false, 33), mcm_put("motion_strength", TFP_MENU_VALUE_NUMBER, false, 100);
+    mcm_put("show_torso", TFP_MENU_VALUE_BOOL, false, 0);
+    TfpMenuHost host = {NULL, mcm_get, mcm_set, mcm_set_disabled, mcm_set_label, NULL, 33};
+    CHECK(tfp_settings_menu_number(tfp_wire_settings(&wire), TFP_MENU_motion_strength) == 100 && tfp_settings_menu_number(tfp_wire_settings(&wire), TFP_MENU_editor_key) == 119);
+    CHECK(tfp_wire_menu_bind(&wire, &host, 0, NULL) && tfp_settings_menu_number(tfp_wire_settings(&wire), TFP_MENU_editor_key) == 33);
+    CHECK(!tfp_wire_settings_unsaved(&wire));
+    for (int i = 0; i < 3; i++) tfp_wire_menu_frame(&wire), tfp_wire_settings_save_frame(&wire);
+    CHECK(!disk_writes[0] && !disk_copies && !strcmp(disk_text("settings.json"), broken) && disk_count() == 1);
+    tfp_wire_menu_unbind(&wire);
+    tfp_wire_settings_free(&wire);
+    /* MCM's own file holds a value the user set there: that one is a change, saved with the copy first */
+    CHECK(start_on_disk());
+    mcm_slot("motion_strength")->number = 150;
+    CHECK(tfp_wire_menu_bind(&wire, &host, 0, NULL) && tfp_wire_settings_unsaved(&wire));
+    tfp_wire_settings_save_frame(&wire);
+    CHECK(disk_writes[0] == 1 && disk_copies == 1 && !strcmp(disk_text("settings.json.refused"), broken));
+    CHECK(strstr(disk_text("settings.json"), "\"motion_strength\": 150") && strstr(disk_text("settings.json"), "\"editor_key\": 33"));
+    tfp_wire_menu_unbind(&wire);
+    tfp_wire_settings_free(&wire);
+    /* a host that does not say its editor key: another key than the store's is a value of its own */
+    disk_clear();
+    disk_put("settings.json", broken, sizeof broken - 1);
+    CHECK(start_on_disk());
+    mcm_slot("motion_strength")->number = 100;
+    host.editor_key = 0;
+    CHECK(tfp_wire_menu_bind(&wire, &host, 0, NULL) && tfp_wire_settings_unsaved(&wire));
+    tfp_wire_menu_unbind(&wire);
     tfp_wire_settings_free(&wire);
   }
   if (compat_part()) return 1;

@@ -74,7 +74,7 @@ void tfp_mod_menu_tick(const HfApi *hf, HfMod *mod, TfpWire *w, unsigned unavail
   registered = mcm->register_mod(definition, length, &callbacks);
   if (!registered) { gave_up = true; hf->log(mod, "Refused: menu: DBF-MCM did not take the settings (%s); the settings in settings.json apply", mcm->error()); return; }
   bound = w;
-  const TfpMenuHost host = {NULL, host_get, host_set, host_set_disabled, host_set_label, NULL};
+  const TfpMenuHost host = {NULL, host_get, host_set, host_set_disabled, host_set_label, NULL, TFP_EDITOR_KEY};
   if (!tfp_wire_menu_bind(w, &host, unavailable, edit)) {
     hf->log(mod, "Refused: menu: the binder could not be set up; taking the registration out again");
     tfp_mod_menu_release(hf, mod, w);

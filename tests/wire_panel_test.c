@@ -95,9 +95,14 @@ static bool test_save(void *user, TfpSettingsFile file, const char *text, size_t
   memcpy(saved_text, text, length); saved_text[length] = 0; saved_length = length;
   return true;
 }
-static TfpSettingsCopy test_copy(void *user, TfpSettingsFile file, const char *suffix, char *why, size_t why_size) { /* an empty folder */
-  (void)user; (void)file; (void)suffix; (void)why; (void)why_size;
-  return TFP_COPY_NONE;
+static unsigned copies;        /* copies made (the file is there: copy_there) */
+static bool copy_there;
+static char copy_suffix[32];
+static TfpSettingsCopy test_copy(void *user, TfpSettingsFile file, const char *suffix, char *why, size_t why_size) { /* an empty folder, unless copy_there */
+  (void)user; (void)file; (void)why; (void)why_size;
+  if (!copy_there) return TFP_COPY_NONE;
+  copies++, snprintf(copy_suffix, sizeof copy_suffix, "%s", suffix);
+  return TFP_COPY_DONE;
 }
 static const TfpSettingsDisk test_disk = {NULL, test_save, test_copy};
 #define STORE_PART
@@ -452,9 +457,9 @@ static int panel_part(void) {
 
   /* ---- every option of the MCM registration and the eleven of the Locked view tab is drawn ---- */
   game_update();
-  /* as with MCM: the editor key's retail default (F8, HellForge's own editor) is stored as Page Up once the menu is bound */
-  CHECK(saves == 1 && strstr(saved_text, "\"editor_key\": 33") && strstr(saved_text, "\"motion_strength\": 120"));
-  saves = 0;
+  /* the editor key's retail default (F8, HellForge's own editor) is Page Up in the store once the menu is bound; that is
+   * the bind's own doing and no change to save: no file is written until the user changes something */
+  CHECK(!saves && !tfp_wire_settings_unsaved(&wire) && tfp_settings_menu_number(s, TFP_MENU_editor_key) == 33);
   game_update();
   CHECK(!saves);
   ov.hover = true;
@@ -524,6 +529,7 @@ static int panel_part(void) {
   ov.release = "Weapon movement strength"; ov.active = false;
   draw_frame(); game_update();
   CHECK(tfp_settings_menu_number(s, TFP_MENU_motion_strength) == 135 && saves == 1 && strstr(saved_text, "\"motion_strength\": 135"));
+  CHECK(strstr(saved_text, "\"editor_key\": 33"));               /* the user's first change takes the Page Up along */
   CHECK(logged("Saved: settings"));
   draw_frame(); game_update();
   CHECK(drawn("slider:Weapon movement strength=135[0..200]") && saves == 1);
@@ -780,8 +786,40 @@ static int options_part(void) {
   return 0;
 }
 
+/* A settings.json that was refused at load (or one that could not be opened) is not replaced by anything the user did
+ * not do: binding the panel, whose rows hold the store's values normalised (119 -> Page Up, a slider inside its range),
+ * writes nothing and copies nothing. The user's first change does both. */
+static int untouched_part(void) {
+  static const char broken[] = "{\"format\":1,\"first_person\":{},\"menu\":{\"motion_strength\":120,";
+  static const char clamped[] = "{\"format\":1,\"first_person\":{},\"menu\":{\"motion_strength\":900,\"motion_preset\":7}}";
+  for (int round = 0; round < 3; round++) { /* 0: refused; 1: the user's file did not open; 2: read, with values outside the controls' ranges */
+    new_wire();
+    CHECK(tfp_wire_settings_bind(&wire, round == 2 ? clamped : broken, (round == 2 ? sizeof clamped : sizeof broken) - 1, "test") && (logged("Refused: settings") != 0) == (round != 2));
+    tfp_wire_settings_disk(&wire, &test_disk, round != 1);
+    saves = copies = 0, copy_there = true, mcm_ticks = 0, edits = 0;
+    new_options();
+    new_host(8);
+    for (uint64_t ms = 0; ms < 3000; ms += 100) tfp_wire_panel_tick(&wire, &platform, ms, 0, test_edit);
+    CHECK(tfp_wire_panel_bound(&wire) && tfp_wire_menu_bound(&wire));
+    for (int i = 0; i < 5; i++) { draw_frame(); game_update(); }
+    CHECK(!saves && !copies && !tfp_wire_settings_unsaved(&wire) && !logged("Saved") && !logged("Kept"));
+    CHECK(tfp_wire_menu_editor_key(&wire, 33) == 33);
+    /* the user's own change: now the copy, then the write */
+    ov.hover = true;
+    ov.slide = "Weapon movement strength"; ov.slide_to = 60; ov.active = true;
+    draw_frame(); game_update();
+    ov.release = "Weapon movement strength"; ov.active = false;
+    draw_frame(); game_update();
+    CHECK(saves == 1 && saved_file == TFP_SETTINGS_FILE && strstr(saved_text, "\"motion_strength\": 60") && strstr(saved_text, "\"editor_key\": 33"));
+    CHECK(copies == (round == 2 ? 0u : 1u) && (round == 2 || !strcmp(copy_suffix, round ? ".unread" : ".refused")));
+    end_panel();
+  }
+  copy_there = false;
+  return 0;
+}
+
 int main(void) {
-  if (store_part() || panel_part() || options_part()) return 1;
+  if (store_part() || panel_part() || options_part() || untouched_part()) return 1;
   printf("wire panel: %u checks passed\n", checks);
   return 0;
 }

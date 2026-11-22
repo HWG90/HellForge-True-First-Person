@@ -109,7 +109,8 @@ void tfp_wire_settings_disk(TfpWire *w, const TfpSettingsDisk *disk, bool user_f
 void tfp_wire_settings_save_frame(TfpWire *w);                                /* once per tick, after the runtime's update */
 bool tfp_wire_settings_unsaved(TfpWire *w);                                   /* a change a file does not hold */
 /* The menu mirroring a value into its own drafts (the per-weapon clipping following the weapon in the hands) is not
- * a change to save. Around such writes: begin answers a mark, end takes the mark; what was written in between leaves
+ * a change to save, and neither is what binding a menu normalises (tfp_wire_menu_bind: the editor key's retail 119
+ * as the host's key, a slider put inside its range): no file, refused and unread ones least of all, is written for it. Around such writes: begin answers a mark, end takes the mark; what was written in between leaves
  * nothing unsaved, unless something was already unsaved at the mark. */
 uint64_t tfp_wire_settings_mirror_begin(TfpWire *w);
 void tfp_wire_settings_mirror_end(TfpWire *w, uint64_t mark);

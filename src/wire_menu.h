@@ -22,6 +22,7 @@ typedef struct TfpMenuHost {
   bool (*set_disabled)(void *user, const char *id, bool disabled);
   bool (*set_label)(void *user, const char *id, const char *label);
   const char *name;         /* what the log calls this menu; NULL: DBF-MCM */
+  int editor_key;           /* the key this host's "editor_key" control was given for retail's 119 (tfp_wire_menu_default); 0: not said */
 } TfpMenuHost;
 /* Features this build cannot offer: their controls are shown disabled and one log line says why. */
 enum { TFP_MENU_NO_ARMS = 1u, TFP_MENU_NO_EDITOR = 2u };
