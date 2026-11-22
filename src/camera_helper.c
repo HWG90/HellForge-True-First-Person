@@ -919,7 +919,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
           if (policy.hold_exit && policy.native6_seen && policy.last_native_valid && tick >= policy.last_native_tick
               && tick-policy.last_native_tick <= policy.c.max_gap_ms && direct_camera_parent(&policy, &parent, NULL, NULL, NULL)
               && read((uint64_t)(uintptr_t)native, adjusted, 16)) {
-            memcpy(adjusted, policy.last_native, 12); output = adjusted; ++policy.exit_holds;
+            memcpy(adjusted, policy.last_native, 12); output = adjusted; ++policy.exit_holds; lock_shown = true; /* the last native view repeated: still first person */
             policy.last_native_tick = tick;
           }
           reset(&policy, true); error(SPACE_INVALID);

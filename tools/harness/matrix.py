@@ -67,7 +67,7 @@ def log_path():
     return sessions[-1] / "mod-goose.true-first-person.log"
 
 
-def judge(lines):
+def judge(lines, toggles=False):
     held = other = missed = 0
     kick = jump = 0.0
     kinds, notes = set(), []
@@ -83,7 +83,7 @@ def judge(lines):
         if "Refused" in line or "State: left" in line or "waiting:" in line:
             notes.append(line.split(" ", 1)[-1].strip()[:140])
     refused = any("Refused" in n for n in notes)
-    ok = held > 0 and missed == 0 and jump < LIMIT_M and not refused
+    ok = held > 0 and missed == 0 and (jump < LIMIT_M or toggles) and not refused   # F11 itself is a cut by design
     return {"pass": ok, "frames": held, "other_camera_frames": other, "missed": missed, "kinds": sorted(kinds),
             "largest_jump_m": jump, "largest_kick_deg": kick, "notes": sorted(set(notes))[:6]}
 
@@ -112,7 +112,7 @@ def main(argv):
             time.sleep(max(0.0, settle - 1.0) + 1.2)   # the Lock line is written once a second
             with open(log, errors="replace") as handle:
                 handle.seek(start); lines = handle.read().splitlines()
-            results[name] = judge(lines)
+            results[name] = judge(lines, name.startswith('toggle'))
             r = results[name]
             print(f"{'pass' if r['pass'] else 'FAIL':4} {name:16} frames {r['frames']:4} other-camera {r['other_camera_frames']:4} missed {r['missed']:3} "
                   f"jump {r['largest_jump_m']:.3f} m kick {r['largest_kick_deg']:.1f} deg kinds {r['kinds']}")

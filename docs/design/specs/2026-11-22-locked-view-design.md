@@ -92,3 +92,29 @@ logged no refusal. The matrix result is written beside the captures.
 
 1, 2 and 8 first (the lock is what every other part is seen through, and the matrix is how each is judged); then 3;
 then 7; then 4, 5, 6, which depend on the rig measurements.
+
+## Results in the game, 2026-11-22 (0.6.0-feel.20, solo missions, `tools/harness/matrix.py`)
+
+Three sessions. In the last, 32 phases:
+
+- **No frame left first person** in any phase but one: one frame at the start of a sprint (the camera still linked
+  to the rig on its way out; the last native view is repeated there, which the count now treats as first person).
+- **Passed (26):** idle, walk, back, look, crouch, prone, dive, dive back, stand up, fire, aim, aim and fire, aim and
+  walk, reload, ammo check, swap to secondary, pistol fire / aim / reload, swap to support, swap to primary, quick
+  swaps, grenade, held grenade, melee, emote.
+- **Camera jumps left:** stim 0.25 m (on leaving the native view; the stim keeps kind 6 for a moment with empty
+  hands), vault 0.12 m, and 0.52 m once when the game changed its camera request for a single frame at the start of
+  a strafe/sprint (the controller takes a new lease and the placement blends in again).
+- **The eased entry works on this build** (retail had it off): entering the native view after a swap or a grenade
+  went from 0.14-0.17 m to 0.01-0.03 m.
+- **Field of view:** the game asked for 60 degrees in the native view and 90 in the head camera; the screen showed
+  the locked 80 throughout (`Fov:` lines).
+- **Kicks:** up to the 8 degree limit in dives, sprints and stims; 1 degree in a pure mouse look and under 3 when
+  firing, after the view's own turning was excluded.
+- **Own panel:** F10 opened and closed it in the game; no option was changed there yet.
+- **Death and ragdoll are not tested.** The character survived its own grenades in every attempt (thrown at the
+  feet, and held for 7 s), so no death camera was ever produced. The code path for other camera kinds has not run.
+- **Arms:** copying the body's 32 arm joints onto the first-person rig from the script update has no visible effect:
+  94 % of the writes were gone by the next frame (the rig is re-posed before drawing). The names match on both rigs.
+  Joint writes have to happen where the pose helper already works (the game's own setter calls for the rig), or in
+  a hook after the rig's animation; that hook is not found yet. Parts 4 to 6 wait on it.
