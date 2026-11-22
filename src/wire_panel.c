@@ -49,6 +49,7 @@ typedef struct Panel {
   TfpSettingsMenuValue shown_locked[TFP_LOCKED_COUNT];
   int held, held_value;      /* the slider being dragged (locked options count on from `count`), -1: none; its value so far */
   int asking;                /* the key control waiting for a key, -1: none */
+  int refused;               /* the key control whose last key was not taken (F8 for the editor), -1: none; shown while it asks */
   double asked_at;
 } Panel;
 
@@ -166,12 +167,17 @@ static void draw_control(Panel *p, int i, const OvFrame *frame) {
       ov->text(c->label), ov->same_line();
       if (key >= 1 && key <= 255) key_name(key, name), ov->key_cap(name); else ov->text_disabled("not bound");
       ov->same_line();
-      if (ov->small_button(change)) p->asking = i, p->asked_at = frame->time;
+      /* A stored 119 (F8) for the editor means "the default", which here is another key (HellForge has F8): the row
+       * would show F8 while that other key stayed the real one. So this row does not take F8. */
+      const bool no_f8 = c->menu == TFP_MENU_editor_key && p->platform.editor_key != 119;
+      if (ov->small_button(change)) p->asking = i, p->refused = -1, p->asked_at = frame->time;
       else if (p->asking == i && (row->disabled || frame->time - p->asked_at > 10)) p->asking = -1;
       else if (p->asking == i) {
+        if (p->refused == i) ov->text_colored(ov->theme(OV_THEME_TEXT_DIM), "F8 is HellForge's own editor key, so it cannot open this one.");
         ov->text_colored(ov->theme(OV_THEME_TEXT_DIM), "Press a key. Esc keeps the current one, Delete clears it.");
         for (int pressed = 8; pressed < 255 && p->asking == i; pressed++) {
           if (pressed == TFP_PANEL_KEY || !ov->key_pressed(pressed)) continue;   /* the panel's own key closes the window */
+          if (pressed == 119 && no_f8) { p->refused = i, p->asked_at = frame->time; continue; }   /* said in the row; ten more seconds */
           p->asking = -1;
           if (pressed != 27) push(p, i, false, false, (TfpMenuValue){TFP_MENU_VALUE_NUMBER, false, pressed == 46 ? 0 : pressed});
         }
@@ -233,7 +239,7 @@ static void say(TfpWire *w, const char *format, unsigned number) {
 static Panel *make(TfpWire *w) {
   Panel *p = state(w);
   if (p || !(p = calloc(1, sizeof *p))) return p;
-  p->w = w, p->held = p->asking = -1;
+  p->w = w, p->held = p->asking = p->refused = -1;
   w->ext[TFP_WIRE_EXT_PANEL] = p;
   return p;
 }
@@ -261,7 +267,7 @@ bool tfp_wire_panel_bind(TfpWire *w, const OvApi *ov, const TfpPanelPlatform *pl
   if (!why && p->handle) return true;
   if (!why) {
     p->ov = ov, p->platform = *platform, p->controls = controls, p->count = count;
-    p->pending_count = 0, p->dropped = p->retired = false, p->held = p->asking = -1;
+    p->pending_count = 0, p->dropped = p->retired = false, p->held = p->asking = p->refused = -1;
     memset(p->rows, 0, sizeof p->rows);
     for (int i = 0; i < count; i++) tfp_wire_menu_default(w, &controls[i], platform->editor_key, &p->rows[i].value);
     memcpy(p->locked, tfp_wire_settings(w)->locked, sizeof p->locked);

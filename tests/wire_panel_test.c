@@ -875,6 +875,44 @@ static int rebind_part(void) {
   CHECK(!tfp_wire_menu_key_edge(&editor, 0, false) && !tfp_wire_menu_key_edge(&editor, 'K', true) && !tfp_wire_menu_key_edge(&editor, 'K', false) &&
         tfp_wire_menu_key_edge(&editor, 'K', true));
   end_panel();
+
+  /* ---- F8 for the placement editor: a stored 119 means "the default" (Page Up here), so the row would show F8 while
+   * Page Up stayed the key. The panel does not take it, says why in the row, and goes on asking. ---- */
+  CHECK(bind_panel());
+  ov.click = "Change##editor_key"; draw_frame(); game_update();
+  draw_frame();
+  CHECK(drawn_part("Press a key") && !drawn_part("F8 is HellForge's own editor key"));
+  ov.key = 119; draw_frame(); game_update(); ov.key = 0;
+  CHECK(tfp_settings_menu_number(tfp_wire_settings(&wire), TFP_MENU_editor_key) == 33 && tfp_wire_menu_editor_key(&wire, 33) == 33 && !saves);
+  draw_frame();
+  CHECK(drawn("cap:PAGE UP") && !drawn("cap:F8") && drawn_part("F8 is HellForge's own editor key") && drawn_part("Press a key") && !ov.bad_colours);
+  ov.key = 0x76; draw_frame(); game_update(); ov.key = 0;         /* F7: taken */
+  draw_frame();
+  CHECK(tfp_wire_menu_editor_key(&wire, 33) == 0x76 && drawn("cap:F7") && !drawn_part("HellForge's own editor key") && !drawn_part("Press a") && saves == 1);
+  ov.click = "Change##editor_key"; draw_frame();                   /* asked again: the plain question, not the refusal */
+  draw_frame();
+  CHECK(drawn_part("Press a key") && !drawn_part("HellForge's own editor key"));
+  ov.key = 27; draw_frame(); ov.key = 0;
+  /* the toggle key may be F8 */
+  ov.click = "Change##toggle_key"; draw_frame();
+  ov.key = 119; draw_frame(); game_update(); ov.key = 0;
+  draw_frame();
+  CHECK(tfp_wire_menu_toggle_key(&wire) == 119 && drawn("cap:F8") && !drawn_part("Press a"));
+  end_panel();
+  /* where F8 is the editor's own key (the platform says a stored 119 means 119), the row takes it */
+  CHECK(start_wire());
+  new_host(8);
+  TfpPanelPlatform retail = platform;
+  retail.editor_key = 119;
+  CHECK(tfp_wire_panel_bind(&wire, &api, &retail, 0, test_edit));
+  game_update();
+  ov.click = "Change##editor_key"; draw_frame();
+  ov.key = 0x76; draw_frame(); game_update(); ov.key = 0;
+  ov.click = "Change##editor_key"; draw_frame();
+  ov.key = 119; draw_frame(); game_update(); ov.key = 0;
+  draw_frame();
+  CHECK(tfp_wire_menu_editor_key(&wire, 119) == 119 && drawn("cap:F8") && !drawn_part("Press a"));
+  end_panel();
   return 0;
 }
 
