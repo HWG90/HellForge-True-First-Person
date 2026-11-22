@@ -28,8 +28,15 @@
  *
  * What is not lifted: the per-action state machine (160 ms blends in and out, per-action profiles, the
  * resting-hip cache), the weapon draw and holster paths, and the evaluated-transform test of the two
- * attachments (view:373-402). The drive runs through the whole native view instead of per action; its
- * entry alignment is 0.3.37's (graft:293-303) on the first driven frame of a binding.
+ * attachments (view:373-402). The drive runs through the whole native view instead of per action.
+ *
+ * The alignment (0.3.37's, graft:293-303: the body's weapon socket made to land on the socket the rig shows) was
+ * taken once, on the first driven frame of a binding. After a weapon swap that frame is in the middle of the draw,
+ * and the offset between a hand on its way and the rig's resting socket stayed for the whole binding: the rifle
+ * rested in another place after a swap than before it (0.6.0-feel.25, seen in the game). The retired mod never
+ * aligned on such a frame: it aligned at an action's start against the hip pose it had displayed, and kept a resting
+ * reference per gun that was sampled only after 350 ms of displayed hip (graft:267-290). Here the same condition is
+ * put on the alignment itself: "the resting weapon pose" below, and arm_drive.h tfp_arm_drive_set_rest.
  *
  * Threads: everything here runs on the game thread. The retired host established that the primary
  * world render (the application table's slot +0x28, called from game+0xab7ac7) is called on the same
@@ -70,6 +77,20 @@
 #define L_CONTEXT_CAMERA_UNIT 8   /* src/backend.c:158 */
 
 enum { TREE_UNITS = 32, ARM_UNITS = 6, BEND_DEGREES = 70 };
+/* The resting weapon pose: at rest for REST_MS (graft:269, the retired resting hip's 350 ms) with both hands within
+ * STILL_*; a kept alignment is measured again only when the socket shows more than OFF_* from the rig's own, and only
+ * after AGAIN_MS of rest (the retired mod sampled once per gun and never again: a reload, an ammo check or a melee
+ * is "idle" to the tick, and the gun hand can be still for a moment in the middle of one); a change is eased over
+ * EASE_MS. */
+enum { REST_MS = 350, AGAIN_MS = 2000, EASE_MS = 150, KEPT = 8 };
+static const float STILL_M = .015f, STILL_DEGREES = 2, OFF_M = .005f, OFF_DEGREES = 1;
+typedef struct Kept { /* one weapon's resting alignment in one stance, for this body in this world */
+  bool has;
+  uintptr_t world, body;
+  uint32_t body_ref, weapon;
+  unsigned stance;
+  TfpGraftMatrix grip, alignment;
+} Kept;
 typedef struct Part { uint32_t ref, depth; uintptr_t object, parent; } Part;   /* tree:4-7 */
 typedef struct Tree { Part units[TREE_UNITS]; unsigned count; } Tree;
 typedef struct Units {
@@ -101,6 +122,18 @@ static struct {
   unsigned own_arm_count;
   TfpGraftLocal original[TFP_GRAFT_JOINTS], applied[TFP_GRAFT_JOINTS];
   Tree attachments;
+  /* the resting weapon pose */
+  uint64_t now;  /* the tick's clock; 0: never told, and nothing below happens */
+  unsigned rest; /* TFP_ARM_REST_*: what the tick says of this frame */
+  Kept kept[KEPT];
+  unsigned kept_next;
+  /* of the binding: whose alignment is in use (used: 1 + its index in kept, 0: a provisional one), what it is
+   * going to (the map holds the eased value while easing), and how long the body's socket has been still */
+  uint32_t cur_weapon;
+  unsigned cur_stance, used;
+  bool easing, still;
+  uint64_t ease_at, still_since;
+  TfpGraftMatrix from_grip, from_alignment, to_grip, to_alignment, still_at[2]; /* the socket, the left hand */
 } d;
 
 static const FpMemory *mem(void) { return &d.host.memory; }
@@ -359,6 +392,126 @@ static bool bind(const Units *u) {
   return true;
 }
 
+/* ---- the resting weapon pose (arm_drive.h tfp_arm_drive_set_rest) ---- */
+static void apart(const TfpGraftMatrix *a, const TfpGraftMatrix *b, float *m, float *degrees) {
+  float distance = 0, trace = 0;
+  for (unsigned i = 0; i < 3; ++i) {
+    distance += (a->values[12 + i] - b->values[12 + i]) * (a->values[12 + i] - b->values[12 + i]);
+    for (unsigned j = 0; j < 3; ++j) trace += a->values[4 * i + j] * b->values[4 * i + j];
+  }
+  const float c = (trace - 1) / 2;
+  *m = sqrtf(distance), *degrees = acosf(c > 1 ? 1 : c < -1 ? -1 : c) * 57.29578f;
+}
+/* Rotation the shorter way round, position straight (tfp_graft_mix). false: not rigid. */
+static bool mix(const TfpGraftMatrix *from, const TfpGraftMatrix *to, float weight, TfpGraftMatrix *out) {
+  TfpGraftLocal a = {0}, b;
+  tfp_graft_set_local(&a, from);
+  if (!tfp_graft_mix(&a, to, weight, &b)) return false;
+  *out = tfp_graft_local_matrix(&b);
+  return true;
+}
+/* The rig's socket local an alignment shows for the body's socket `source` (tfp_graft_pose's three lines). */
+static TfpGraftMatrix socket_of(const TfpGraftMatrix *grip, const TfpGraftMatrix *alignment, const TfpGraftMatrix *source) {
+  TfpGraftMatrix m = tfp_graft_product(source, alignment);
+  return tfp_graft_product(grip, &m);
+}
+/* any: no alignment for this stance, then the weapon's standing one, then any of the weapon's. */
+static Kept *kept_find(const Units *u, uint32_t weapon, unsigned stance, bool any) {
+  Kept *other = NULL;
+  for (Kept *k = d.kept; k < d.kept + KEPT; ++k) {
+    if (!k->has || k->world != u->world || k->body != u->body || k->body_ref != u->body_ref || k->weapon != weapon) continue;
+    if (k->stance == stance) return k;
+    if (any && (!other || k->stance == TFP_ARM_REST_STAND)) other = k;
+  }
+  return other;
+}
+static void use(const TfpGraftMatrix *grip, const TfpGraftMatrix *alignment, bool eased) {
+  d.easing = eased && d.now;
+  if (d.easing) d.from_grip = d.map.grip, d.from_alignment = d.map.alignment, d.ease_at = d.now; /* from what is shown, an ease under way included */
+  else d.map.grip = *grip, d.map.alignment = *alignment;
+  d.to_grip = *grip, d.to_alignment = *alignment;
+}
+static void aligned(uint32_t how, uint32_t weapon, unsigned stance, uint64_t rest_ms, float m, float degrees) {
+  d.stats.align = (TfpArmDriveAlign){.count = d.stats.align.count + 1, .how = how, .weapon = weapon, .stance = stance,
+                                     .rest_ms = rest_ms > UINT32_MAX ? UINT32_MAX : (uint32_t)rest_ms, .moved_m = m, .moved_degrees = degrees, .eased = d.easing};
+}
+/* Each driven frame, before the pose: which alignment the map holds. base: the game's own values of the 42 joints. */
+static bool align(const Units *u, const TfpGraftMatrix *body, const TfpGraftLocal *base) {
+  const TfpGraftLocal *own = &base[TFP_GRAFT_JOINTS - 1];
+  const uint32_t weapon = u->gun_away ? 0 : u->weapon_ref;
+  float m = 0, degrees = 0;
+  if (!d.aligned) {
+    /* A new binding. This frame may be in the middle of a draw or of any action: what was measured at rest for this
+     * weapon is used from the start. With nothing kept, 0.3.37's entry alignment, until the weapon's first rest. */
+    Kept *k = weapon ? kept_find(u, weapon, d.rest, true) : NULL;
+    if (k) d.map.grip = k->grip, d.map.alignment = k->alignment;
+    else if (!tfp_graft_align(&d.map, body, own)) return false;
+    use(&d.map.grip, &d.map.alignment, false);
+    d.aligned = true, d.still = false, d.used = k ? (unsigned)(k - d.kept) + 1 : 0, d.cur_weapon = weapon, d.cur_stance = d.rest;
+    aligned(k ? TFP_ARM_ALIGN_KEPT : TFP_ARM_ALIGN_PROVISIONAL, weapon, d.rest, 0, 0, 0);
+  }
+  const TfpGraftMatrix anchor = tfp_graft_anchor(&d.map, body);
+  const TfpGraftMatrix source = tfp_graft_relative(&body[d.map.body[TFP_GRAFT_JOINTS - 1]], &anchor), shown = tfp_graft_local_matrix(own);
+  const TfpGraftMatrix left = tfp_graft_relative(&body[d.map.body[13 - 10]], &anchor); /* l_hand: it works while the gun hand waits */
+  if (!tfp_graft_rigid(&source) || !tfp_graft_rigid(&shown) || !tfp_graft_rigid(&left)) return false;
+  const unsigned stance = d.rest ? d.rest : d.cur_stance; /* an action between two rests keeps the stance it began in */
+  if (weapon && (weapon != d.cur_weapon || stance != d.cur_stance)) {
+    /* Another gun on a binding a lease keeps, or another stance: what is kept for it, eased from what is shown.
+     * With nothing kept the alignment in use stays; for another gun it then counts as provisional. */
+    const bool other_gun = weapon != d.cur_weapon;
+    Kept *k = kept_find(u, weapon, stance, other_gun);
+    const unsigned index = k ? (unsigned)(k - d.kept) + 1 : 0;
+    if (k && index != d.used) {
+      const TfpGraftMatrix before = socket_of(&d.to_grip, &d.to_alignment, &source), after = socket_of(&k->grip, &k->alignment, &source);
+      apart(&after, &before, &m, &degrees);
+      use(&k->grip, &k->alignment, true);
+      d.used = index;
+      aligned(TFP_ARM_ALIGN_KEPT, weapon, stance, 0, m, degrees);
+    } else if (!k && other_gun) {
+      d.used = 0;
+      aligned(TFP_ARM_ALIGN_PROVISIONAL, weapon, stance, 0, 0, 0);
+    }
+    d.cur_weapon = weapon, d.cur_stance = stance, d.still = false;
+  }
+  if (d.now && d.rest && weapon && !d.hold) {
+    float hand_m = 0, hand_degrees = 0;
+    if (d.still) apart(&source, &d.still_at[0], &m, &degrees), apart(&left, &d.still_at[1], &hand_m, &hand_degrees);
+    if (!d.still || m > STILL_M || degrees > STILL_DEGREES || hand_m > STILL_M || hand_degrees > STILL_DEGREES)
+      d.still = true, d.still_at[0] = source, d.still_at[1] = left, d.still_since = d.now;
+    else if (d.now - d.still_since >= REST_MS) {
+      /* At rest. Where the alignment in use (what an ease is going to) shows the socket, against the rig's own. */
+      Kept *k = kept_find(u, weapon, d.rest, false);
+      const bool kept_in_use = k && (unsigned)(k - d.kept) + 1 == d.used;
+      const TfpGraftMatrix in_use = socket_of(&d.to_grip, &d.to_alignment, &source);
+      apart(&in_use, &shown, &m, &degrees);
+      if (!kept_in_use || ((m > OFF_M || degrees > OFF_DEGREES) && d.now - d.still_since >= AGAIN_MS)) {
+        TfpGraft fresh = d.map;
+        fresh.grip = d.to_grip;
+        tfp_graft_grip(&fresh, body, base, &fresh.grip); /* not rigid: the grip in use stays */
+        if (tfp_graft_align(&fresh, body, own)) {
+          if (!k) {
+            for (k = d.kept; k < d.kept + KEPT && k->has; ++k) {}
+            if (k == d.kept + KEPT) k = &d.kept[d.kept_next++ % KEPT];
+          }
+          *k = (Kept){.has = true, .world = u->world, .body = u->body, .body_ref = u->body_ref, .weapon = weapon, .stance = d.rest,
+                      .grip = fresh.grip, .alignment = fresh.alignment};
+          use(&k->grip, &k->alignment, true);
+          d.used = (unsigned)(k - d.kept) + 1;
+          aligned(TFP_ARM_ALIGN_REST, weapon, d.rest, d.now - d.still_since, m, degrees);
+          d.still_since = d.now; /* at most one measurement per REST_MS */
+        }
+      }
+    }
+  } else d.still = false;
+  if (d.easing) {
+    const float t = (float)(d.now - d.ease_at) / EASE_MS;
+    if (!(t < 1) || !mix(&d.from_grip, &d.to_grip, t * t * (3 - 2 * t), &d.map.grip) ||
+        !mix(&d.from_alignment, &d.to_alignment, t * t * (3 - 2 * t), &d.map.alignment))
+      d.map.grip = d.to_grip, d.map.alignment = d.to_alignment, d.easing = false;
+  }
+  return true;
+}
+
 /* ---- one frame (graft:662-817 graft_present, its steady action path) ---- */
 static uint32_t drive(const Units *u) {
   static TfpGraftMatrix body[TFP_GRAFT_BODY_NODES], poses[TFP_GRAFT_JOINTS];
@@ -380,9 +533,7 @@ static uint32_t drive(const Units *u) {
   if (d.bend) {
     target[0] = tfp_graft_bend_z(base[0], BEND_DEGREES);
   } else {
-    /* 0.3.37: on entry the body's socket is aligned to the weapon socket being shown on this rig */
-    if (!d.aligned && !tfp_graft_align(&d.map, body, &base[TFP_GRAFT_JOINTS - 1])) return TFP_ARM_POSE;
-    d.aligned = true;
+    if (!align(u, body, base)) return TFP_ARM_POSE;
     if (!tfp_graft_pose(&d.map, body, poses)) return TFP_ARM_POSE;
     for (unsigned i = 0; i < d.joints; ++i)
       if (!tfp_graft_mix(&base[i], &poses[i], d.weight, &target[i])) return TFP_ARM_POSE;
@@ -421,6 +572,7 @@ void tfp_arm_drive_set(bool on, bool restore_after_draw, float weight) {
 void tfp_arm_drive_set_bend(bool on) { d.bend = on; }
 void tfp_arm_drive_set_hold(bool on) { d.hold = on; }
 void tfp_arm_drive_set_hold_ready(bool on) { d.ready = on; }
+void tfp_arm_drive_set_rest(uint64_t now_ms, unsigned rest) { d.now = now_ms, d.rest = rest < TFP_ARM_REST_KINDS ? rest : TFP_ARM_REST_NONE; }
 static void refused(uint32_t reason) { d.stats.refused++, d.stats.reason = reason; }
 
 bool tfp_arm_drive_render(uint64_t world, bool game_thread) {

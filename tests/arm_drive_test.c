@@ -124,7 +124,7 @@ static void world_setup(void) {
 }
 
 /* ---- the engine's two functions ---- */
-enum { CALLS = 512 };
+enum { CALLS = 1 << 17 };
 static struct { uint32_t unit, node; bool update; } calls[CALLS];
 static unsigned call_count, sets, updates, fault_set_at;
 static bool is_executable(void *user, uint64_t at) {
@@ -711,6 +711,349 @@ static void test_hold_edge(void) {
   mend_gun_parent();
 }
 
+/* ---- the resting weapon pose (tfp_arm_drive_set_rest) ---- */
+enum { GUN2 = 502 };
+static TfpGraftMatrix body_draw[TFP_GRAFT_BODY_NODES], body_crouch[TFP_GRAFT_BODY_NODES];
+/* The recorded body with its arms somewhere else relative to the head: the root's axes turned about their own Z and
+ * the head moved. Every joint below a shoulder keeps its relation to its parent. */
+static void displaced(float degrees, float x, float y, float z, TfpGraftMatrix *out) {
+  const float c = cosf(degrees * .01745329252f), s = sinf(degrees * .01745329252f);
+  unsigned head = 0;
+  memcpy(out, body_now, sizeof body_now);
+  for (unsigned k = 0; k < 3; k++) {
+    const float a = body_now[0].values[k], b = body_now[0].values[4 + k];
+    out[0].values[k] = c * a + s * b, out[0].values[4 + k] = c * b - s * a;
+  }
+  for (unsigned i = 0; i < TFP_GRAFT_BODY_NODES; i++)
+    if (bn[i] == TFP_GRAFT_NAME_HEAD) head = i;
+  CHECK(head);
+  out[head].values[12] += x, out[head].values[13] += y, out[head].values[14] += z;
+}
+static void body_is(const TfpGraftMatrix *body) { put(worlds_of(BODY), body, sizeof body_now); }
+static float apart_m(const TfpGraftLocal *a, const TfpGraftLocal *b) {
+  float d = 0;
+  for (unsigned i = 0; i < 3; i++) d += (a->position[i] - b->position[i]) * (a->position[i] - b->position[i]);
+  return sqrtf(d);
+}
+static float apart_degrees(const TfpGraftLocal *a, const TfpGraftLocal *b) {
+  float trace = 0;
+  for (unsigned i = 0; i < 9; i++) trace += a->basis[i] * b->basis[i];
+  const float c = (trace - 1) / 2;
+  return acosf(c > 1 ? 1 : c < -1 ? -1 : c) * 57.29578f;
+}
+static uint64_t clock_ms;
+static unsigned stance;
+/* One tick and one primary render, 33 ms after the one before. */
+static bool frame(void) {
+  clock_ms += 33;
+  tfp_arm_drive_set_rest(clock_ms, stance);
+  return tfp_arm_drive_render(WORLD, true);
+}
+static TfpGraftLocal socket_shown(void) {
+  TfpGraftLocal now[TFP_GRAFT_RIG_NODES];
+  rig_locals(now);
+  return now[TFP_GRAFT_RIG_SOCKET];
+}
+/* The alignment a rest gives: the grip from the rig's own locals, the body's socket on the rig's own socket local. */
+static TfpGraft rest_map(const TfpGraftMatrix *body) {
+  TfpGraft map;
+  TfpGraftLocal base[TFP_GRAFT_JOINTS];
+  CHECK(tfp_graft_bind(&map, bn, bl, fn, fl, body_now, rig_world));
+  for (unsigned i = 0; i < TFP_GRAFT_JOINTS; i++) base[i] = game_locals[map.fp[i]];
+  CHECK(tfp_graft_grip(&map, body, base, &map.grip));
+  CHECK(tfp_graft_align(&map, body, &game_locals[TFP_GRAFT_RIG_SOCKET]));
+  return map;
+}
+static void rest_start(void) {
+  fresh();
+  clock_ms = 100000, stance = TFP_ARM_REST_STAND;
+  displaced(25, .20f, .10f, -.15f, body_draw);
+  displaced(-12, -.05f, .08f, .12f, body_crouch);
+  tfp_arm_drive_set(true, false, 1);
+}
+/* Still frames until the alignment count moves; the frame it moves on shows what the frame before showed. */
+static unsigned settle(unsigned limit) {
+  const uint64_t count = stats().align.count;
+  TfpGraftLocal before[TFP_GRAFT_RIG_NODES], now[TFP_GRAFT_RIG_NODES];
+  for (unsigned n = 1; n <= limit; n++) {
+    rig_locals(before);
+    CHECK(!frame());
+    if (stats().align.count == count) continue;
+    rig_locals(now);
+    CHECK(!memcmp(before, now, sizeof now)); /* taken, not yet shown: no step */
+    return n;
+  }
+  return 0;
+}
+/* The 150 ms that follow: every frame nearer, none by more than half the way. */
+static void eases(float from_m) {
+  const TfpGraftLocal *rest = &game_locals[TFP_GRAFT_RIG_SOCKET];
+  float last = from_m;
+  for (unsigned n = 0; n < 5; n++) {
+    CHECK(!frame());
+    const TfpGraftLocal s = socket_shown();
+    const float left = apart_m(&s, rest);
+    CHECK((left < last || left < .0001f) && last - left < from_m * .5f); /* (already there: an ease begun a frame earlier) */
+    last = left;
+  }
+  CHECK(last < .0001f);
+}
+
+/* The grip from the rig's own locals is the grip the bind takes from the rig's world matrices, where the rig is at rest. */
+static void test_rest_grip(void) {
+  TfpGraft map;
+  TfpGraftLocal base[TFP_GRAFT_JOINTS];
+  TfpGraftMatrix grip;
+  CHECK(tfp_graft_bind(&map, bn, bl, fn, fl, body_now, rig_world));
+  for (unsigned i = 0; i < TFP_GRAFT_JOINTS; i++) base[i] = game_locals[map.fp[i]];
+  CHECK(tfp_graft_grip(&map, body_now, base, &grip));
+  for (unsigned i = 0; i < 16; i++) CHECK(fabsf(grip.values[i] - map.grip.values[i]) < .0002f);
+  base[24].basis[0] = 3; /* r_hand's record is not a rotation */
+  const TfpGraftMatrix kept = grip;
+  CHECK(!tfp_graft_grip(&map, body_now, base, &grip) && !memcmp(&kept, &grip, sizeof grip));
+}
+
+/* The defect of 0.6.0-feel.25 and its repair. A binding begins in the middle of a draw: the body's hand is not where it
+ * rests. The first driven frame's alignment puts the socket on the rig's own for that frame; once the body is at
+ * rest the gun is off by the rest of the draw. After 350 ms of rest the alignment is measured again and eased in, and
+ * the next binding of this weapon, again begun in the middle of a draw, ends on the rig's own socket by itself. */
+static void test_rest_after_a_draw(void) {
+  TfpGraftLocal now[TFP_GRAFT_RIG_NODES], want[TFP_GRAFT_RIG_NODES];
+  const TfpGraftLocal *rest = &game_locals[TFP_GRAFT_RIG_SOCKET];
+  rest_start();
+  body_is(body_draw);
+  CHECK(!frame());
+  TfpArmDriveStats s = stats();
+  TfpGraftLocal shown = socket_shown();
+  CHECK(s.binds == 1 && s.align.count == 1 && s.align.how == TFP_ARM_ALIGN_PROVISIONAL && s.align.weapon == GUN && !s.align.eased);
+  CHECK(apart_m(&shown, rest) < .0001f && apart_degrees(&shown, rest) < .2f);
+  /* the draw ends: the body is at rest, and the gun is not where the game's placement has it */
+  body_is(body_now);
+  CHECK(!frame());
+  shown = socket_shown();
+  const float off = apart_m(&shown, rest), turned = apart_degrees(&shown, rest);
+  CHECK(off > .05f && turned > 5);
+  /* 350 ms of rest, then measured again; nothing moves on that frame */
+  const unsigned frames = settle(30);
+  s = stats();
+  CHECK(frames == 11 && s.align.count == 2 && s.align.how == TFP_ARM_ALIGN_REST && s.align.weapon == GUN && s.align.stance == TFP_ARM_REST_STAND);
+  CHECK(s.align.rest_ms >= 350 && s.align.rest_ms < 400 && s.align.eased && fabsf(s.align.moved_m - off) < .001f && fabsf(s.align.moved_degrees - turned) < .1f);
+  eases(off);
+  /* at rest: the rig's own socket, and the whole pose is the rest alignment's, bit for bit */
+  const TfpGraft map = rest_map(body_now);
+  wanted(&map, body_now, game_locals, 1, want);
+  rig_locals(now);
+  shown = now[TFP_GRAFT_RIG_SOCKET];
+  CHECK(!memcmp(now, want, sizeof now) && apart_m(&shown, rest) < .0001f && apart_degrees(&shown, rest) < .2f);
+  /* resting on: nothing is taken again and nothing written */
+  forget_calls();
+  for (unsigned n = 0; n < 60; n++) CHECK(!frame());
+  CHECK(stats().align.count == 2 && !call_count && stats().binds == 1);
+  /* the body moves away and comes back (an action): around the same place, and back on it */
+  body_is(body_draw);
+  stance = TFP_ARM_REST_NONE;
+  for (unsigned n = 0; n < 20; n++) CHECK(!frame());
+  wanted(&map, body_draw, game_locals, 1, want);
+  rig_locals(now);
+  CHECK(!memcmp(now, want, sizeof now) && stats().align.count == 2);
+  body_is(body_now);
+  stance = TFP_ARM_REST_STAND;
+  for (unsigned n = 0; n < 30; n++) CHECK(!frame());
+  shown = socket_shown();
+  CHECK(apart_m(&shown, rest) < .0001f && stats().align.count == 2);
+
+  /* a swap and back: frames in another camera, then a new binding in the middle of the draw */
+  request(4);
+  for (unsigned n = 0; n < 12; n++) CHECK(!frame());
+  request(6);
+  body_is(body_draw);
+  CHECK(!frame());
+  s = stats();
+  CHECK(s.binds == 2 && s.align.count == 3 && s.align.how == TFP_ARM_ALIGN_KEPT && s.align.weapon == GUN && !s.align.eased);
+  wanted(&map, body_draw, game_locals, 1, want);
+  rig_locals(now);
+  CHECK(!memcmp(now, want, sizeof now));
+  body_is(body_now); /* the draw ends on the resting place, with no later correction */
+  CHECK(!frame());
+  shown = socket_shown();
+  CHECK(apart_m(&shown, rest) < .0001f && apart_degrees(&shown, rest) < .2f);
+  for (unsigned n = 0; n < 30; n++) CHECK(!frame());
+  CHECK(stats().align.count == 3 && stats().binds == 2);
+}
+
+/* What is not a rest: an action (the tick says so), a hold, a gun that is away, a body that keeps moving, less than 350 ms. */
+static void test_rest_gates(void) {
+  const TfpGraftLocal *rest = &game_locals[TFP_GRAFT_RIG_SOCKET];
+  rest_start();
+  tfp_arm_drive_set_hold_ready(true);
+  body_is(body_draw);
+  CHECK(!frame());
+  body_is(body_now);
+  stance = TFP_ARM_REST_NONE; /* a reload, an aim, a sprint: still for a second, never measured */
+  for (unsigned n = 0; n < 30; n++) CHECK(!frame());
+  CHECK(stats().align.count == 1);
+  stance = TFP_ARM_REST_STAND;
+  for (unsigned n = 0; n < 9; n++) CHECK(!frame()); /* 300 ms of rest */
+  CHECK(stats().align.count == 1);
+  tfp_arm_drive_set_hold(true); /* the controller holds through an action */
+  for (unsigned n = 0; n < 30; n++) { CHECK(frame()); tfp_arm_drive_after_render(); }
+  CHECK(stats().align.count == 1);
+  tfp_arm_drive_set_hold(false);
+  break_gun_parent(); /* the gun is on the body */
+  for (unsigned n = 0; n < 30; n++) { CHECK(frame()); tfp_arm_drive_after_render(); }
+  CHECK(stats().align.count == 1 && stats().binds == 1);
+  mend_gun_parent();
+  for (unsigned n = 0; n < 30; n++) { /* the body never stays */
+    body_is(n & 1 ? body_now : body_crouch);
+    CHECK(!frame());
+  }
+  CHECK(stats().align.count == 1);
+  { /* the gun hand waits while the left hand works (a reload: "idle" to the tick) */
+    const TfpGraft map = bound_map();
+    const unsigned l_hand = map.body[13 - 10];
+    CHECK(fn[13] == TFP_GRAFT_NAME_L_HAND);
+    for (unsigned n = 0; n < 30; n++) {
+      TfpGraftMatrix hand = body_now[l_hand];
+      hand.values[14] += n & 1 ? .05f : 0;
+      body_is(body_now);
+      put(worlds_of(BODY) + l_hand * 64, &hand, 64);
+      CHECK(!frame());
+    }
+    CHECK(stats().align.count == 1);
+    body_is(body_now);
+    CHECK(!frame()); /* the left hand is back: the first of the 350 ms */
+  }
+  body_is(body_now);
+  TfpGraftLocal shown = socket_shown();
+  CHECK(settle(30) == 11 && stats().align.how == TFP_ARM_ALIGN_REST); /* the 350 ms count from when it all holds */
+  CHECK(!frame());
+  shown = socket_shown();
+  eases(apart_m(&shown, rest) + .0001f);
+  CHECK(stats().binds == 1 && !stats().refused);
+  /* the clock never told (no tick-side caller): the first driven frame's alignment for good, as before */
+  fresh();
+  tfp_arm_drive_set(true, false, 1);
+  for (unsigned n = 0; n < 40; n++) CHECK(!tfp_arm_drive_render(WORLD, true));
+  CHECK(stats().align.count == 1 && stats().align.how == TFP_ARM_ALIGN_PROVISIONAL);
+}
+
+/* A kept alignment is not given up for a pause: the body held elsewhere for a second (an ammo check, the gun hand
+ * waiting in a reload) changes nothing; held there for two seconds, it is the rest, and the alignment is measured again. */
+static void test_rest_again(void) {
+  const TfpGraftLocal *rest = &game_locals[TFP_GRAFT_RIG_SOCKET];
+  rest_start();
+  CHECK(!frame() && settle(30) == 11);
+  for (unsigned n = 0; n < 6; n++) CHECK(!frame());
+  body_is(body_crouch);
+  for (unsigned n = 0; n < 45; n++) CHECK(!frame()); /* 1.5 s */
+  TfpGraftLocal shown = socket_shown();
+  CHECK(stats().align.count == 2 && apart_m(&shown, rest) > .03f);
+  body_is(body_now);
+  for (unsigned n = 0; n < 90; n++) CHECK(!frame()); /* back: on the resting place, nothing taken */
+  shown = socket_shown();
+  CHECK(stats().align.count == 2 && apart_m(&shown, rest) < .0001f);
+  body_is(body_crouch);
+  CHECK(!frame());
+  shown = socket_shown();
+  const float off = apart_m(&shown, rest);
+  CHECK(settle(90) == 61);
+  const TfpArmDriveStats s = stats();
+  CHECK(s.align.count == 3 && s.align.how == TFP_ARM_ALIGN_REST && s.align.rest_ms >= 2000 && s.align.eased && fabsf(s.align.moved_m - off) < .001f);
+  eases(off);
+  for (unsigned n = 0; n < 90; n++) CHECK(!frame());
+  CHECK(stats().align.count == 3 && stats().binds == 1);
+}
+
+/* Each stance has its own rest: crouched, the body holds the gun elsewhere; the alignment is measured there as well,
+ * and standing up again changes back to the standing one at once, eased, instead of waiting for a new rest. */
+static void test_rest_stances(void) {
+  TfpGraftLocal now[TFP_GRAFT_RIG_NODES], want[TFP_GRAFT_RIG_NODES];
+  const TfpGraftLocal *rest = &game_locals[TFP_GRAFT_RIG_SOCKET];
+  rest_start();
+  CHECK(!frame()); /* bound at rest: the first driven frame's alignment is already right */
+  CHECK(settle(30) == 11);
+  TfpArmDriveStats s = stats();
+  CHECK(s.align.count == 2 && s.align.how == TFP_ARM_ALIGN_REST && s.align.moved_m < .0001f && s.align.moved_degrees < .2f);
+  for (unsigned n = 0; n < 6; n++) CHECK(!frame());
+  const TfpGraft standing = rest_map(body_now), crouched = rest_map(body_crouch);
+  stance = TFP_ARM_REST_CROUCH;
+  body_is(body_crouch);
+  CHECK(!frame());
+  TfpGraftLocal shown = socket_shown();
+  const float off = apart_m(&shown, rest);
+  CHECK(off > .03f && stats().align.count == 2);
+  CHECK(settle(30) == 11); /* this frame was the first of the 350 ms */
+  s = stats();
+  CHECK(s.align.count == 3 && s.align.how == TFP_ARM_ALIGN_REST && s.align.stance == TFP_ARM_REST_CROUCH && s.align.eased);
+  eases(off);
+  /* up again: the standing alignment, from what is shown */
+  stance = TFP_ARM_REST_STAND;
+  body_is(body_now);
+  CHECK(!frame());
+  s = stats();
+  CHECK(s.align.count == 4 && s.align.how == TFP_ARM_ALIGN_KEPT && s.align.stance == TFP_ARM_REST_STAND && s.align.eased && s.align.moved_m > .03f);
+  wanted(&crouched, body_now, game_locals, 1, want);
+  rig_locals(now);
+  CHECK(!memcmp(now, want, sizeof now)); /* the frame of the change still shows the alignment that was in use */
+  shown = socket_shown();
+  eases(apart_m(&shown, rest));
+  wanted(&standing, body_now, game_locals, 1, want);
+  rig_locals(now);
+  CHECK(!memcmp(now, want, sizeof now));
+  /* an action between two stances (not at rest) keeps what is in use; crouching again changes to the crouched one */
+  stance = TFP_ARM_REST_NONE;
+  for (unsigned n = 0; n < 20; n++) CHECK(!frame());
+  CHECK(stats().align.count == 4);
+  stance = TFP_ARM_REST_CROUCH;
+  body_is(body_crouch);
+  for (unsigned n = 0; n < 6; n++) CHECK(!frame());
+  shown = socket_shown();
+  CHECK(stats().align.count == 5 && stats().align.how == TFP_ARM_ALIGN_KEPT && apart_m(&shown, rest) < .0001f);
+  for (unsigned n = 0; n < 30; n++) CHECK(!frame());
+  CHECK(stats().align.count == 5 && stats().binds == 1);
+}
+
+/* The wielded weapon's unit: its entity row and its weapon component (tests/fake_native.h). */
+static void gun_is(uint32_t ref) { n32(WORLD + FP_ENTITY_ROWS + 24 + 0xc, ref), n32(0xa00000000ULL + 0x400 + 0xc, ref); }
+/* Another gun on a binding that a lease keeps: the alignment is the weapon's, not the binding's. */
+static void test_rest_other_gun(void) {
+  const TfpGraftLocal *rest = &game_locals[TFP_GRAFT_RIG_SOCKET];
+  rest_start();
+  tfp_arm_drive_set_hold_ready(true);
+  CHECK(!frame() && settle(30) == 11);
+  for (unsigned n = 0; n < 6; n++) CHECK(!frame());
+  make_unit(GUN2, 4, object_of(RIG), (8u << 16) | 2);
+  gun_is(GUN2);
+  body_is(body_draw); /* the sidearm's hold, as far as this test goes */
+  CHECK(!frame());
+  TfpArmDriveStats s = stats();
+  CHECK(s.binds == 1 && s.align.count == 3 && s.align.how == TFP_ARM_ALIGN_PROVISIONAL && s.align.weapon == GUN2 && !s.refused);
+  TfpGraftLocal shown = socket_shown();
+  const float off = apart_m(&shown, rest);
+  CHECK(off > .05f && settle(30) == 11);
+  s = stats();
+  CHECK(s.align.count == 4 && s.align.how == TFP_ARM_ALIGN_REST && s.align.weapon == GUN2);
+  eases(off);
+  /* the first gun again, its draw still running: its own resting alignment, eased from what is shown */
+  gun_is(GUN);
+  body_is(body_crouch);
+  CHECK(!frame());
+  s = stats();
+  CHECK(s.binds == 1 && s.align.count == 5 && s.align.how == TFP_ARM_ALIGN_KEPT && s.align.weapon == GUN && s.align.eased);
+  body_is(body_now);
+  for (unsigned n = 0; n < 6; n++) CHECK(!frame());
+  shown = socket_shown();
+  CHECK(apart_m(&shown, rest) < .0001f);
+  for (unsigned n = 0; n < 30; n++) CHECK(!frame());
+  CHECK(stats().align.count == 5 && stats().binds == 1);
+  /* and the second: kept as well */
+  gun_is(GUN2);
+  body_is(body_draw);
+  for (unsigned n = 0; n < 6; n++) CHECK(!frame());
+  shown = socket_shown();
+  CHECK(stats().align.count == 6 && stats().align.how == TFP_ARM_ALIGN_KEPT && stats().align.weapon == GUN2 && apart_m(&shown, rest) < .0001f);
+}
+
 int main(int argc, char **argv) {
   if (argc != 2) { fprintf(stderr, "usage: arm_drive_test FIXTURE\n"); return 2; }
   load(argv[1]);
@@ -727,6 +1070,12 @@ int main(int argc, char **argv) {
   test_rebind_on_new_units();
   test_hold();
   test_hold_edge();
+  test_rest_grip();
+  test_rest_after_a_draw();
+  test_rest_gates();
+  test_rest_again();
+  test_rest_stances();
+  test_rest_other_gun();
   printf("arm drive: %u checks passed\n", checks);
   return 0;
 }

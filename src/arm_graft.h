@@ -279,6 +279,29 @@ static inline bool tfp_graft_align(TfpGraft *g, const TfpGraftMatrix *body, cons
   g->alignment = tfp_graft_product(&inverse, &shown);
   return true;
 }
+/* The grip tfp_graft_bind takes from the rig's world matrices, from the rig's own local records instead: `base`
+ * are the 42 joints' locals in the map's order (the game's values, not this mod's). The right hand's chain is
+ * composed up to the presentation root, so the result does not depend on what the rig showed when it was bound.
+ * false: a record is not rigid; *grip is then untouched. */
+static inline bool tfp_graft_grip(const TfpGraft *g, const TfpGraftMatrix *body, const TfpGraftLocal *base, TfpGraftMatrix *grip) {
+  const unsigned hand_joint = 34 - 10, socket_joint = TFP_GRAFT_JOINTS - 1;
+  TfpGraftMatrix hand = tfp_graft_local_matrix(&base[hand_joint]), socket = tfp_graft_local_matrix(&base[socket_joint]);
+  if (!tfp_graft_rigid(&hand) || !tfp_graft_rigid(&socket)) return false;
+  for (unsigned parent = g->parent[hand_joint], steps = 0; parent != 7; parent = g->parent[parent - 10]) {
+    if (parent < 10 || parent >= 50 || ++steps > TFP_GRAFT_JOINTS) return false;
+    const TfpGraftMatrix up = tfp_graft_local_matrix(&base[parent - 10]);
+    if (!tfp_graft_rigid(&up)) return false;
+    hand = tfp_graft_product(&hand, &up); /* a node's world is its local times its parent's world */
+  }
+  const TfpGraftMatrix *palm = &body[g->body[hand_joint]];
+  if (!tfp_graft_rigid(&hand) || !tfp_graft_rigid(palm) || !tfp_graft_rigid(&body[g->body[socket_joint]])) return false;
+  const TfpGraftMatrix body_grip = tfp_graft_relative(&body[g->body[socket_joint]], palm);
+  const TfpGraftMatrix fp_grip = tfp_graft_relative(&socket, &hand);
+  const TfpGraftMatrix out = tfp_graft_relative(&fp_grip, &body_grip);
+  if (!tfp_graft_rigid(&out)) return false;
+  *grip = out;
+  return true;
+}
 /* The test bend (arm_bend.txt): the record turned by `degrees` about its own Z axis. */
 static inline TfpGraftLocal tfp_graft_bend_z(TfpGraftLocal p, float degrees) {
   const float c = cosf(degrees * .01745329252f), s = sinf(degrees * .01745329252f);
