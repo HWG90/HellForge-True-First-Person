@@ -253,7 +253,14 @@ static bool dof_executable(void *u, uint64_t *exe, const char **error) {
   *error = ops_why(fx, &why);
   return false;
 }
-static bool dof_active_view(void *u, bool *is_true, const char **error) { return entry_true(u, TFP_RT_E_active_view, is_true, error); }
+static bool vignette_held(TfpFx *fx);
+/* The depth of field goes with the vignette through a weapon swap: the setting is not given back for the third of a
+ * second the view is away (tfp_wire_effects_vignette_view below has the rule). */
+static bool dof_active_view(void *u, bool *is_true, const char **error) {
+  if (!entry_true(u, TFP_RT_E_active_view, is_true, error)) return false;
+  if (!*is_true && vignette_held(u)) *is_true = true;
+  return true;
+}
 static bool dof_fallback_ready(void *u, bool *is_true, const char **error) { return entry_true(u, TFP_RT_E_dof_fallback_ready, is_true, error); }
 static void dof_controller(void *u, TfpDofControllerState *out) { out->pose_offset = controller_pose_offset(u), out->running = controller_running(u); }
 
