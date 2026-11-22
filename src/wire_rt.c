@@ -1281,6 +1281,28 @@ void tfp_wire_hold_frame(TfpWire *w) {
   tfp_view_log_event(&w->log, "%s", line);
 }
 
+bool tfp_wire_orphan(TfpWire *w) {
+  const TfpController *c = &w->controller;
+  const TfpWireLease *lease = held(w);
+  TfpOrphanView v;
+  memset(&v, 0, sizeof v);
+  v.pending = c->enabled && c->phase == TFP_PHASE_CLEANUP_PENDING && lease && w->hold.probe;
+  if (!v.pending) return tfp_orphan_step(&w->orphan, &v);
+  v.lease = lease->serial;
+  TfpOpsHold view;
+  TfpOpsText why = {false, ""};
+  if (tfp_ops_hold_snapshot(&w->ops, &view, &why) == TFP_OPS_TRUE) {
+    TfpWireHoldProbe probe;
+    memset(&probe, 0, sizeof probe);
+    v.proven = true;
+    v.camera_kind = view.player.camera_kind, v.record_ours = c->lease->request && view.player.record == c->lease->request;
+    v.seated = view.player.seated, v.full_aim = view.player.controller_active, v.ragdoll = view.ragdoll, v.foreign_camera = view.foreign_camera;
+    w->hold.probe(w, &view, lease->ops.origin.weapon_unit, &probe);
+    v.gun = !probe.gun_parent ? TFP_ORPHAN_GUN_UNKNOWN : strcmp(probe.gun_parent, "rig") ? TFP_ORPHAN_GUN_AWAY : TFP_ORPHAN_GUN_RIG;
+  }
+  return tfp_orphan_step(&w->orphan, &v);
+}
+
 TfpRtStatus tfp_wire_call(TfpWire *w, TfpRtEntry entry, const TfpRtArgs *args, TfpRtValue *ret) {
   if (w->depth++ == 0) w->arena_used = 0;
   TfpRtStatus status = tfp_rt_call(&w->rt, entry, args, ret);

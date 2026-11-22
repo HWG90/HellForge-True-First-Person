@@ -154,6 +154,7 @@ typedef struct TfpWire {
    * zero_restores, which the backend's statistics do not carry). false: none. */
   bool (*pose_counts)(const struct TfpWire *w, double *weapon_updates, double *zero_restores);
   TfpWireHold hold;
+  TfpOrphan orphan;            /* tfp_wire_orphan's memory (src/wire_action.h) */
 } TfpWire;
 
 /* Builds the host (off answers first, then the wired view) and the runtime's start state. The
@@ -175,6 +176,11 @@ bool tfp_wire_aim_probe(TfpWire *w, int right, int middle);
  * and not while the controller holds or a lease waits for its native exit (tfp_wire_options_busy). Off after
  * tfp_wire_init. */
 void tfp_wire_hold_set(TfpWire *w, bool on);
+/* Beyond retail (the camera lock; src/wire_action.h tfp_orphan_step). Once a tick, after tfp_wire_frame: true while
+ * the game presents the lease's first-person request although the controller waits for its exit and the lease's gun
+ * is off the first-person rig (a stim). Outside that wait it reads nothing: one compare. Within it: the hold's
+ * player snapshot and the hold's probe (w->hold.probe; without one the answer stays false). */
+bool tfp_wire_orphan(TfpWire *w);
 bool tfp_wire_hold_on(const TfpWire *w);
 /* The hold's part of a tick; tfp_wire_frame calls it after on_update. Does nothing while the switch is off. */
 void tfp_wire_hold_frame(TfpWire *w);

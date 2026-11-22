@@ -20,6 +20,46 @@ int main(void) {
   CHECK(!tfp_action_head_camera(false, 4, false, guarded)); /* the guard byte */
   CHECK(!tfp_action_head_camera(false, 4, false, other) && !tfp_action_head_camera(false, 4, false, wide));
 
+  /* head hiding under the lock: the lease's own first-person request keeps the head hidden, whatever the action flags */
+  CHECK(tfp_action_own_native(true, 6, false, 0x30e4130e0, 0x30e4130e0));
+  CHECK(!tfp_action_own_native(false, 6, false, 0x30e4130e0, 0x30e4130e0)); /* without the lock: retail's answers */
+  CHECK(!tfp_action_own_native(true, 4, false, 0x30e4130e0, 0x30e4130e0));  /* the ordinary camera has its own rules */
+  CHECK(!tfp_action_own_native(true, 6, true, 0x30e4130e0, 0x30e4130e0));   /* seated */
+  CHECK(!tfp_action_own_native(true, 6, false, 0x30e4132b0, 0x30e4130e0));  /* another request (the player's own aim) */
+  CHECK(!tfp_action_own_native(true, 6, false, 0, 0));                      /* no lease */
+  { /* the stim of 2026-11-23, tick by tick (log 8d992b8d, 12:17:38.895 to 12:17:39.830) */
+    TfpOrphan o;
+    memset(&o, 0, sizeof o);
+    TfpOrphanView v = {false, 2, true, 6, true, false, false, false, false, TFP_ORPHAN_GUN_RIG};
+    CHECK(!tfp_orphan_step(&o, &v));                    /* 38.895: the hold begins, the lease runs, the gun on the rig */
+    v.pending = true;
+    CHECK(!tfp_orphan_step(&o, &v));                    /* an exit asked for with the gun still on the rig: the weapon's eye */
+    v.gun = TFP_ORPHAN_GUN_AWAY;
+    CHECK(tfp_orphan_step(&o, &v));                     /* 38.928: the gun on the body, the game keeps the request */
+    v.proven = false; v.gun = TFP_ORPHAN_GUN_UNKNOWN;
+    CHECK(tfp_orphan_step(&o, &v));                     /* a tick that cannot be read: kept */
+    v.proven = true;
+    CHECK(tfp_orphan_step(&o, &v));                     /* the player read, the rig not proven: kept */
+    v.gun = TFP_ORPHAN_GUN_AWAY;
+    for (int i = 0; i < 24; i++) CHECK(tfp_orphan_step(&o, &v));
+    v.pending = false, v.lease = 0, v.camera_kind = 4, v.record_ours = false;
+    CHECK(!tfp_orphan_step(&o, &v) && !o.on);           /* 39.796: the exit acknowledged, the head camera */
+    v.pending = false, v.lease = 3, v.camera_kind = 6, v.record_ours = true, v.gun = TFP_ORPHAN_GUN_AWAY;
+    CHECK(!tfp_orphan_step(&o, &v));                    /* 39.830: the new lease runs, its gun not yet on the rig: not orphaned */
+    /* each way out of it */
+    const TfpOrphanView away = {true, 4, true, 6, true, false, false, false, false, TFP_ORPHAN_GUN_AWAY};
+    TfpOrphanView x;
+    #define ENDS(change) do { memset(&o, 0, sizeof o); x = away; CHECK(tfp_orphan_step(&o, &x)); change; CHECK(!tfp_orphan_step(&o, &x)); } while (0)
+    ENDS(x.gun = TFP_ORPHAN_GUN_RIG); ENDS(x.camera_kind = 4); ENDS(x.record_ours = false); ENDS(x.seated = true); ENDS(x.full_aim = true);
+    ENDS(x.ragdoll = true); ENDS(x.foreign_camera = true); ENDS(x.pending = false);
+    ENDS((x.lease = 5, x.gun = TFP_ORPHAN_GUN_UNKNOWN)); /* another lease's wait does not inherit it */
+    /* it never begins without a proven gun away */
+    memset(&o, 0, sizeof o); x = away; x.gun = TFP_ORPHAN_GUN_UNKNOWN;
+    CHECK(!tfp_orphan_step(&o, &x));
+    x = away; x.proven = false;
+    CHECK(!tfp_orphan_step(&o, &x));
+  }
+
   TfpAimWatch w;
   memset(&w, 0, sizeof w);
   /* not armed: no probe */

@@ -33,6 +33,46 @@ static inline bool tfp_action_head_camera(bool retail_answer, uint32_t camera_ki
   return retail_answer || (camera_kind == 4 && !seated && mask == TFP_ACTION_PICKUP_MASK && controller_bytes[5] == 0);
 }
 
+/* Beyond retail, and only with the camera lock (0.6.0-feel.26; seen in the game 2026-11-23). A stim on this build
+ * runs under mask 0x40 in the native view: the game keeps its first-person request (kind 6) for about 0.85 s after
+ * the mod has asked for the exit, moves the gun to the body about 30 ms in, and moves the rig's eye to the body's
+ * head. Retail's head hiding lets go on the first tick of any mask other than 2 (the snapshot is not safe), so the
+ * helmet, torso and shoulders were drawn around an eye that sat inside them.
+ *
+ * Head hiding: while the game presents the lease's own first-person request the head stays hidden, whatever the
+ * action flags say. (The native view's eye is behind the body's head with the gun in the hands too; the view is
+ * clean there only because the head is hidden.) lease_request: the controller's lease's request record, 0 without. */
+static inline bool tfp_action_own_native(bool lock, uint32_t camera_kind, bool seated, uint64_t record, uint64_t lease_request) {
+  return lock && camera_kind == 6 && !seated && lease_request != 0 && record == lease_request;
+}
+/* The eye: "orphaned" frames are those of that request after the mod has asked for its exit (the controller waits
+ * for the game: cleanup pending) in which the gun is off the first-person rig: the rig's eye is no longer a
+ * weapon's. One tick's view, read by the binder after the controller decided. */
+enum { TFP_ORPHAN_GUN_UNKNOWN = 0, TFP_ORPHAN_GUN_RIG, TFP_ORPHAN_GUN_AWAY };
+typedef struct TfpOrphanView {
+  bool pending;        /* the controller is enabled and waits for the game to end the lease's request */
+  uint64_t lease;      /* that lease's identity (never repeats), 0: none */
+  bool proven;         /* the local player and its camera request were read on this tick */
+  uint32_t camera_kind;
+  bool record_ours, seated, full_aim, ragdoll, foreign_camera;
+  int gun;             /* TFP_ORPHAN_GUN_*: the lease's gun's parent */
+} TfpOrphanView;
+typedef struct TfpOrphan { bool on; uint64_t lease; } TfpOrphan;
+/* True while the frames are orphaned. It begins on a proven tick with the gun away and is kept through ticks that
+ * cannot be read (one unread tick must not send the eye back into the helmet and out again); it ends when the wait
+ * ends, the lease is another, the request on top is no longer the lease's kind 6, the gun is on the rig again, or
+ * the view is the game's for another reason (seated, full aim, ragdoll, another camera's owner). */
+static inline bool tfp_orphan_step(TfpOrphan *o, const TfpOrphanView *v) {
+  if (!v->pending || !v->lease) { o->on = false; o->lease = 0; return false; }
+  if (o->lease != v->lease) o->on = false;
+  o->lease = v->lease;
+  if (!v->proven) return o->on;
+  if (v->camera_kind != 6 || !v->record_ours || v->seated || v->full_aim || v->ragdoll || v->foreign_camera || v->gun == TFP_ORPHAN_GUN_RIG)
+    return o->on = false;
+  if (v->gun == TFP_ORPHAN_GUN_AWAY) o->on = true;
+  return o->on;
+}
+
 /* The aim button between ticks. The tick arms it while the keeper could act (the runtime's own conditions and
  * a snapshot in full aim on the native view) and notes the levels it read; a probe from the engine's script
  * call reads again and asks for the keeper when a level changed. */

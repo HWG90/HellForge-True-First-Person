@@ -94,6 +94,14 @@ TfpWireEngineState tfp_wire_engine_state(const TfpWire *w, TfpWireEngineModule m
  * body head hiding takes the on-foot answer as yes, so the helmet, torso and shoulders stay hidden around the eye.
  * NULL (the default): retail's answers. Process-wide. */
 void tfp_wire_engine_set_held_body(uint32_t (*body)(void));
+/* Beyond retail (the camera lock; 0.6.0-feel.26). `lock` answers whether the camera lock is on. While it is, and the
+ * game presents the controller's lease's own first-person request (kind 6, the lease's record, not seated), head
+ * hiding stays on whatever the action flags say: a stim (mask 0x40) keeps that request for about 0.85 s, and the
+ * rig's eye sits at the body's head for most of it. Only the head module's snapshots are touched (the flag it takes
+ * for a vault and a pick-up). NULL (the default): retail's answers. Process-wide. */
+void tfp_wire_engine_set_lock_view(bool (*lock)(void));
+/* Rows head visibility hides now (its phase is "active"); 0: it hides nothing; -1: the module is not bound. Reads only. */
+int tfp_wire_engine_head_hidden(const TfpWire *w);
 
 /* The 27 Vector3 / Quaternion / Matrix4x4 value functions, computed here on 32-bit floats with the
  * engine's conventions (Quaternion.multiply(second, first); Matrix4x4.multiply(a, b) is a, then b).

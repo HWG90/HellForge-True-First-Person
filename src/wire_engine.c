@@ -1118,7 +1118,13 @@ static bool io_executable(void *user, double *exe, TfpVisText *why) {
   return true;
 }
 typedef TfpOpsResult (*Snapshot)(TfpOps *, TfpOpsSnapshot *, TfpOpsText *);
-static bool io_snapshot(St *st, Snapshot take, TfpVisSnapshot *out, TfpVisText *why) {
+/* Beyond retail (the camera lock; tfp_wire_engine_set_lock_view, src/wire_action.h tfp_action_own_native). Head
+ * hiding lets go when its snapshot is neither safe nor a weapon swap. While the game presents the lease's own
+ * first-person request under the lock, the head module's snapshot (and only its: `head`) says "the head camera's
+ * transition", which is the answer the module already takes for a vault and a pick-up. */
+static bool (*lock_view)(void);
+void tfp_wire_engine_set_lock_view(bool (*lock)(void)) { lock_view = lock; }
+static bool io_snapshot_for(St *st, Snapshot take, TfpVisSnapshot *out, TfpVisText *why, bool head) {
   TfpOpsSnapshot s;
   TfpOpsText text;
   text.present = false, text.text[0] = 0;
@@ -1129,11 +1135,16 @@ static bool io_snapshot(St *st, Snapshot take, TfpVisSnapshot *out, TfpVisText *
     return false;
   }
   vis_snapshot(&s, out);
+  if (head && lock_view) {
+    const TfpLease *lease = st->w->controller.lease;
+    if (tfp_action_own_native(lock_view(), s.camera_kind, s.seated, s.record, lease ? lease->request : 0)) out->head_camera_transition = true;
+  }
   remember(st, &s, out);
   return true;
 }
-static bool io_player_snapshot(void *user, TfpVisSnapshot *out, TfpVisText *why) { return io_snapshot(user, tfp_ops_player_snapshot, out, why); }
-static bool io_pin_player_snapshot(void *user, TfpVisSnapshot *out, TfpVisText *why) { return io_snapshot(user, tfp_ops_pin_player_snapshot, out, why); }
+static bool io_snapshot(St *st, Snapshot take, TfpVisSnapshot *out, TfpVisText *why) { return io_snapshot_for(st, take, out, why, false); }
+static bool io_player_snapshot(void *user, TfpVisSnapshot *out, TfpVisText *why) { return io_snapshot_for(user, tfp_ops_player_snapshot, out, why, true); }
+static bool io_pin_player_snapshot(void *user, TfpVisSnapshot *out, TfpVisText *why) { return io_snapshot_for(user, tfp_ops_pin_player_snapshot, out, why, true); }
 static bool io_full_snapshot(void *user, TfpVisSnapshot *out, TfpVisText *why) { return io_snapshot(user, tfp_ops_snapshot, out, why); }
 /* Says each change of the backpack answer (at most 24 a session): which of head_visibility.lua:728's
  * three conditions failed is not in its error text. */
@@ -1625,6 +1636,13 @@ static void slug(const char *text, char *out, size_t size) { /* a reason as one 
   size_t n = 0;
   for (; text[n] && n + 1 < size; n++) out[n] = text[n] == ' ' ? '_' : text[n];
   out[n] = 0;
+}
+int tfp_wire_engine_head_hidden(const TfpWire *w) {
+  St *st = ST(w);
+  TfpHeadResult r;
+  if (!st || !head_on(st)) return -1;
+  tfp_head_result(st->head, &r);
+  return r.phase == TFP_HEAD_ACTIVE ? (int)r.hidden : 0;
 }
 size_t tfp_wire_engine_second(TfpWire *w, char *out, size_t size) {
   St *st = ST(w);
