@@ -180,8 +180,10 @@ static bool same_user_file(void *user, TfpSettingsFile which, const char *suffix
   (void)user;
   if (!user_file_path(path, sizeof path, which, false)) return false;
   snprintf(copy, sizeof copy, "%s%s", path, suffix);
-  HANDLE a = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-  HANDLE b = a == INVALID_HANDLE_VALUE ? a : CreateFileA(copy, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  /* Read while another program has either file open, for writing too: a sharing violation would answer "not the same". */
+  const DWORD share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+  HANDLE a = CreateFileA(path, GENERIC_READ, share, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  HANDLE b = a == INVALID_HANDLE_VALUE ? a : CreateFileA(copy, GENERIC_READ, share, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
   LARGE_INTEGER size_a, size_b;
   bool same = b != INVALID_HANDLE_VALUE && GetFileSizeEx(a, &size_a) && GetFileSizeEx(b, &size_b) && size_a.QuadPart == size_b.QuadPart;
   for (LONGLONG left = same ? size_a.QuadPart : 0; same && left > 0;) {
