@@ -151,6 +151,27 @@ static void standing(Game &g, int frames, double dt, bool native_view, uint32_t 
   for (int i = 0; i < frames; ++i) { if (native_view) g.native(mask); else g.hip(mask); g.frame(dt); }
 }
 
+// One script played twice at the same instants, without camera damping and with it: what was forwarded each frame.
+struct Twice {
+  float at[2][400][4]; int frames[2];
+  float apart(int i) const {
+    float d = 0; for (int k = 0; k < 3; ++k) d += (at[1][i][k] - at[0][i][k]) * (at[1][i][k] - at[0][i][k]);
+    return std::sqrt(d);
+  }
+  bool same(int from, int to) const { return frames[0] == frames[1] && to <= frames[0] && !std::memcmp(at[0][from], at[1][from], sizeof(float) * 4 * (to - from)); }
+};
+template <class Script> static void twice(Twice &t, bool smooth, float damping_ms, Script script) {
+  for (int damped = 0; damped < 2; ++damped) {
+    fresh(true, smooth, false, damped ? damping_ms : 0.0f);
+    clock_ms = 900000;
+    Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+    t.frames[damped] = 0;
+    auto keep = [&]() { std::memcpy(t.at[damped][t.frames[damped]++], sent.position, 16); };
+    script(g, keep);
+    g.end();
+  }
+}
+
 // Scenario 14: the farthest the presented eye went with damping 0, measured on the build before the option existed.
 static const float RAW_PEAK = 0.0211488f, RAW_TRAVEL = 0.00265f; // farthest, and the most in one frame
 
@@ -624,6 +645,113 @@ int main() {
         g.end();
       }
       CHECK(!std::memcmp(record[0], record[1], sizeof(float) * 4 * 32) && std::memcmp(record[0], record[1], sizeof(float) * 4 * frames[0]));
+    }
+  }
+  // ---- 15. What is damped is the head against the body root, not the eye's place in front of it. With a head that
+  // is still, turning the view (the eye turns about the head with it, 0.18 m out) moves the presented eye exactly as
+  // without damping; so does the body turning under a still view (a strafe start, walking backwards). ----
+  {
+    const double dt = 1000.0 / 144;
+    static Twice t;
+    twice(t, false, 180, [&](Game &g, auto keep) {
+      for (int i = 0; i < 40; ++i) { g.hip(); g.frame(dt); keep(); }
+      for (int i = 1; i <= 40; ++i) { g.look(.2f + .04f * i, 0); g.hip(); g.frame(dt); keep(); } // 92 degrees in 0.28 s
+      for (int i = 0; i < 40; ++i) { g.hip(); g.frame(dt); keep(); }
+    });
+    CHECK(t.frames[0] == 120 && t.same(0, 120));
+    float worst = 0;
+    twice(t, false, 180, [&](Game &g, auto keep) {
+      for (int i = 0; i < 40; ++i) { g.hip(); g.frame(dt); keep(); }
+      for (int i = 1; i <= 40; ++i) { g.pose(1, 2, 0, .2f + .04f * i); g.hip(); g.frame(dt); keep(); } // the body, the view still
+      for (int i = 0; i < 40; ++i) { g.hip(); g.frame(dt); keep(); }
+    });
+    for (int i = 0; i < t.frames[0]; ++i) worst = std::fmax(worst, t.apart(i));
+    CHECK(t.frames[0] == 120 && t.frames[1] == 120 && worst < 1e-4f);
+    std::printf("damping, the body turning 92 degrees under a still view: the eye at most %.5f m from the undamped one\n", worst);
+  }
+  // ---- 16. The way out of damping. A lag is carried (the head dropped 0.5 m in a frame: 0.10 m, the limit), then
+  // the body leaves 'on foot' or full aim begins. The lag is not dropped in that frame: it is let go on 40 ms, is
+  // under 1 cm within 150 ms and gone after that, and the head's own motion meanwhile is not damped again. ----
+  for (int way = 0; way < 2; ++way) {
+    const double dt = 1000.0 / 144;
+    static Twice t;
+    twice(t, false, 300, [&](Game &g, auto keep) {
+      for (int i = 0; i < 40; ++i) { g.hip(); g.frame(dt); keep(); }
+      g.pose(1, 2, 0, .2f, 1.0f);
+      for (int i = 0; i < 3; ++i) { g.hip(); g.frame(dt); keep(); }
+      if (way == 0) g.s.state = 50; // off foot
+      for (int i = 1; i <= 80; ++i) {
+        g.pose(1, 2, 0, .2f, 1.0f - .004f * (i < 30 ? i : 30)); // and the head goes on down
+        g.hip(); if (way == 1) g.s.aim = 1;
+        g.frame(dt); keep();
+      }
+    });
+    CHECK(t.frames[0] == 123 && t.frames[1] == 123 && t.same(0, 40));
+    CHECK(std::fabs(t.apart(40) - .10f) < 1e-3f && t.apart(42) > .09f); // carried, at the limit
+    CHECK(t.apart(43) > .07f && t.apart(43) < t.apart(42));              // the first frame out: eased, not dropped
+    bool falling = true;
+    for (int i = 44; i < 123; ++i) if (t.apart(i) > t.apart(i - 1) * .9f + 1e-6f) falling = false; // 6.9 ms of 40: 0.84 a frame
+    CHECK(falling);
+    CHECK(t.apart(42 + 21) < .01f); // 146 ms
+    CHECK(t.same(42 + 40, 123));    // gone: every frame after is the undamped one
+    std::printf("damping let go (%s): %.3f m carried, %.3f m in the first frame out, %.4f m after 146 ms\n", way ? "full aim" : "off foot", t.apart(42), t.apart(43), t.apart(63));
+  }
+  // ---- 17. Where the damping stands back, each gate on its own: the same forwarded bytes with damping as without
+  // while the head jerks, in full aim, and in a camera of the lock that is not the ordinary one (kind 5). ----
+  {
+    const double dt = 1000.0 / 144;
+    auto jerk = [&](Game &g, int i) { g.pose(1, 2, 0, .2f, 1.5f - (i < 15 ? .05f * std::sin(i * static_cast<float>(dt) / 100 * 3.14159265f) : 0)); };
+    for (int gate = 0; gate < 2; ++gate) {
+      static Twice t; bool head_camera = true;
+      twice(t, false, 300, [&](Game &g, auto keep) {
+        for (int i = 0; i < 32; ++i) { g.hip(); g.frame(dt); keep(); }
+        for (int i = 1; i <= 60; ++i) {
+          jerk(g, i); g.hip();
+          if (gate == 0) g.s.aim = 1; else g.s.request[0] = 5;
+          g.frame(dt); keep();
+          if (!g.forwarded_own || tfp_camera_error() != 0) head_camera = false;
+        }
+      });
+      CHECK(head_camera && t.frames[0] == 92 && t.same(0, 92));
+    }
+    // The damped eye is handed on as it was shown: the way into the native view starts from it. The head has
+    // dropped 0.5 m (the eye is 0.10 m behind) when the native view begins; with the lag handed on the first native
+    // frame is the eye where it was, without it the eye would be shown 0.10 m off for that frame.
+    for (int smooth = 0; smooth < 2; ++smooth) {
+      fresh(true, smooth != 0, false, 300);
+      Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+      standing(g, 12, dt, false); standing(g, 40, dt, true); standing(g, 300, dt, false);
+      g.pose(1, 2, 0, .2f, 1.0f); g.hip(); g.frame(dt);
+      CHECK(std::fabs(g.from_head_eye() - .16f) < .005f); // 0.10 m of damping and the 0.06 m of the head camera's own smoothing
+      g.pose(1, 2, 0, .2f, 1.0f); g.hip(); g.frame(dt);
+      g.measure_from_here();
+      g.native(); g.frame(dt);
+      CHECK(g.step < .02f);
+      std::printf("damping handed on to the native view, smooth eye %s: %.4f m in the first native frame\n", smooth ? "on" : "off", g.step);
+      g.end();
+    }
+    // A frame that was not damped forgets the damping: after three native frames (21 ms, inside the pause the
+    // low-pass would bridge) in which the head moved 0.05 m, the head camera's eye starts from the true one.
+    {
+      static Twice t;
+      twice(t, false, 300, [&](Game &g, auto keep) {
+        for (int i = 0; i < 40; ++i) { g.hip(); g.frame(dt); keep(); }
+        g.pose(1, 2, 0, .2f, 1.45f);
+        for (int i = 0; i < 3; ++i) { g.native(); g.frame(dt); keep(); }
+        for (int i = 0; i < 40; ++i) { g.hip(); g.frame(dt); keep(); }
+      });
+      CHECK(t.frames[0] == 83 && t.same(0, 83));
+    }
+    // The limit, through the helper: the head 0.5 m away in one frame, the eye never more than 0.10 m behind it.
+    {
+      static Twice t; float worst = 0;
+      twice(t, false, 300, [&](Game &g, auto keep) {
+        for (int i = 0; i < 40; ++i) { g.hip(); g.frame(dt); keep(); }
+        g.pose(1, 2, 0, .2f, 1.0f);
+        for (int i = 0; i < 20; ++i) { g.hip(); g.frame(dt); keep(); }
+      });
+      for (int i = 0; i < t.frames[0]; ++i) worst = std::fmax(worst, t.apart(i));
+      CHECK(t.frames[0] == 60 && t.frames[1] == 60 && std::fabs(worst - .10f) < 1e-4f && std::fabs(t.apart(40) - .10f) < 1e-4f);
     }
   }
   std::printf("camera smooth: %d checks, %d failed\n", checks, failed);

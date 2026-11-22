@@ -328,6 +328,53 @@ int main() {
     TfpCameraDownStats down{}; tfp_camera_down_stats(&down); CHECK(down.frames > 30 && down.refused == 0);
     g.end();
   }
+  // ---- 9. Camera damping and a body that is down. Down by the head alone (4 m from the root, the animation state
+  // still on foot, no ragdoll flag): nothing of the head's motion is damped, the forwarded bytes are those without
+  // damping. And a lag that is carried when the body goes down (the head dropped 0.5 m in a frame while alive:
+  // 0.10 m behind) is let go over a few frames, not in one, and the head is followed to within 1 cm inside 150 ms. ----
+  {
+    static float record[2][120][4]; int frames[2] = {0, 0}; bool held = true;
+    for (int damped = 0; damped < 2; ++damped) {
+      fresh(true, false, 0, 0, damped ? 300.0f : 0.0f);
+      clock_ms = 800000; // the same instants in both runs
+      Game g; g.stand(0, 0, 0); g.look(first); g.hip(); g.begin();
+      for (int i = 0; i < 20; ++i) { g.hip(); g.frame(10); std::memcpy(record[damped][frames[damped]++], sent.position, 16); }
+      for (int i = 1; i <= 60; ++i) { // the head 4.2 m away, jerking 0.05 m down and back within 100 ms
+        g.head(4.2f, 0, .3f - (i < 10 ? .05f * std::sin(i / 10.0f * 3.14159265f) : 0)); g.hip(3.7f); g.frame(10);
+        if (!g.own || g.error != 0) held = false;
+        std::memcpy(record[damped][frames[damped]++], sent.position, 16);
+      }
+      TfpCameraDownStats down{}; tfp_camera_down_stats(&down); CHECK(down.frames == 60);
+      g.end();
+    }
+    CHECK(held && frames[0] == 80 && frames[1] == 80 && !std::memcmp(record[0], record[1], sizeof record[0][0] * 80));
+  }
+  {
+    static float record[2][120][4]; int frames[2] = {0, 0};
+    for (int damped = 0; damped < 2; ++damped) {
+      fresh(true, false, 0, 0, damped ? 300.0f : 0.0f);
+      clock_ms = 800000;
+      Game g; g.stand(0, 0, 0); g.look(first); g.hip(); g.begin();
+      for (int i = 0; i < 20; ++i) { g.hip(); g.frame(10); std::memcpy(record[damped][frames[damped]++], sent.position, 16); }
+      g.head(.03f, .06f, 1.06f);
+      for (int i = 0; i < 2; ++i) { g.hip(); g.frame(10); std::memcpy(record[damped][frames[damped]++], sent.position, 16); }
+      g.die();
+      for (int i = 1; i <= 60; ++i) { // thrown: 4 m in 0.3 s, then at rest
+        const float t = i < 30 ? i / 30.0f : 1;
+        g.head(.03f + 4.0f * t, .06f, 1.06f - .8f * t); g.hip(3.7f); g.frame(10);
+        std::memcpy(record[damped][frames[damped]++], sent.position, 16);
+      }
+      g.end();
+    }
+    auto apart = [&](int i) { float d = 0; for (int k = 0; k < 3; ++k) d += (record[1][i][k] - record[0][i][k]) * (record[1][i][k] - record[0][i][k]); return std::sqrt(d); };
+    CHECK(frames[0] == 82 && frames[1] == 82 && apart(21) > .09f && apart(21) < .1001f); // carried at death
+    CHECK(apart(22) > .06f && apart(22) < apart(21));                                    // the first frame down: eased
+    bool falling = true;
+    for (int i = 23; i < 82; ++i) if (apart(i) > apart(i - 1) * .9f + 1e-6f) falling = false; // 10 ms of 40: 0.78 a frame
+    CHECK(falling && apart(21 + 15) < .01f);                                              // 150 ms: within 1 cm of the head's eye
+    CHECK(!std::memcmp(record[0][21 + 30], record[1][21 + 30], sizeof record[0][0] * 31)); // and gone
+    std::printf("damping let go at death: %.3f m carried, %.3f m in the first frame down, %.4f m after 150 ms\n", apart(21), apart(22), apart(36));
+  }
   std::printf("camera death: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }
