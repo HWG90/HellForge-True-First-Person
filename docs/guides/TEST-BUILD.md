@@ -53,6 +53,13 @@ DBF-MCM is no longer needed. The mod has its own panel.
   view tab and switch while you play.
 - **Dying.** The view is meant to stay at the head as the body falls. See the limits.
 
+## Fixed since 0.6.0-feel.25
+
+- **Stim:** the view no longer sits behind your own helmet for half a second.
+- **Resting weapon:** after swapping back to a weapon it rests where your placement puts it, not in the middle
+  between both forearms.
+- **Aiming:** holding aim brings the rifle up to the shoulder again (with animated arms it sank out of view).
+
 ## What was checked in the game (2026-11-22 and 23, solo missions)
 
 A scripted run of 32 actions, each judged by two rules: no frame left first person, and the camera never

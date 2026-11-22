@@ -340,3 +340,26 @@ window tick by tick as logged, each way out of it, the head rule).
    one head sample), the same glide already happens on every grenade.
 8. With Weapon put-away off: the window should begin one tick later (the exit is asked on the mask's first tick, the
    gun leaves on the next); the same checks.
+
+## What pictures showed that numbers did not, 2026-11-23 (0.6.0-feel.25 to feel.27)
+
+Each action was filmed as a strip of captures (`tools/harness/burst.py`). Three flaws had passed every numeric check:
+
+- **Stim: the helmet from behind for about half a second** (`work/captures/feel25-stim-helmet-2026-11-23.jpg`). Head
+  hiding stopped on the stim's first tick and the game's own camera, kept for 26 frames with the gun on the body, sat
+  0.41 to 0.43 m behind the head camera's eye. feel.26: those frames present the head camera's eye and the head stays
+  hidden. Seen fixed (`feel26-stim-2026-11-23.jpg`; `Orphan:` lines).
+- **Two resting places for the rifle** (`feel25-burst-swap-back.jpg`, `feel25-burst-reload.jpg`): after a swap back
+  the arms' reference was taken inside the draw. feel.27: measured only at rest, kept per weapon and stance, eased.
+  In the game it moved 0.247 m / 8.9 degrees back to the placement after the first swap and was reused afterwards
+  (`Arms: aligned` lines; `feel27-rest-pose-2026-11-23.jpg`).
+- **Aiming sank the rifle to the bottom of the view** with the arms copied from the body. feel.27: while the action
+  is aim or ADS the copy fades out over 120 ms and the game's own aim pose shows; seen with the rifle
+  (`feel27-aim-rifle-pistol-2026-11-23.jpg`). The pistol in the same strip sits low at the hip and sweeps on release:
+  not judged.
+
+The matrix is now judged by the presented eye's own trace (the step may change by 0.06 m between two frames at 30 a
+second): 0.6.0-feel.27, 31 of 31 phases, no frame out of first person.
+
+Still not seen: a death under the relaxed head rule; stratagem input and the panel's rows (the harness cannot enter
+either); the empty-handed part of a stim shows no hands (they work below the view).
