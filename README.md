@@ -17,13 +17,13 @@ This is a C rewrite of the True First Person mode of Goose Gadget Kit (a Lua mod
 | Hiding your own head, torso and shoulders | In game; a fix for backpacks is in 0.6.0-feel.4, not yet confirmed |
 | Hip sensitivity that does not change with zoom level | In game since 0.6.0-feel.2 |
 | Depth of field and vignette handling, aim markers | In game |
-| Locked view: first person through every action (swap, grenade, stim, emote, vault, dive, prone) | In game since 0.6.0-feel.20; 30 of 32 scripted actions pass with no frame out of first person |
+| Locked view: first person through every action (swap, grenade, stim, emote, vault, dive, prone) | In game since 0.6.0-feel.20; all 35 scripted actions pass with no frame out of first person (0.6.0-feel.34), stratagem list and throw included |
 | Animated arms: the first-person arms follow the character's own animation; pistol in one hand at the hip, two when aiming | In game since 0.6.0-feel.21 |
 | Weapon put-away shown before a swap, grenade or stim | In game since 0.6.0-feel.22 |
 | Smooth eye: no camera pops when the game changes its camera | In game since 0.6.0-feel.23 |
-| Field-of-view lock (one configurable field of view), view kicks from body movement | In game since 0.6.0-feel.20 |
+| Field-of-view lock (one configurable field of view), view kicks from body movement | In game since 0.6.0-feel.20; the field-of-view lock works with the camera lock off since feel.34 |
 | Dying in first person (the view stays at the head of the body) | In game: seen standing, aiming, sprinting and mid-swap (0.6.0-feel.28) |
-| Own settings panel (F10, through NEST; DBF-MCM no longer needed) | In game since 0.6.0-feel.20; options switch live since feel.24; not every row clicked yet |
+| Own settings panel (F10, through NEST; DBF-MCM no longer needed) | In game since 0.6.0-feel.20; options switch live since feel.24; tabs, toggles, sliders and key rows used in the game (feel.34) |
 | Saving settings (`settings.json` for placements and menu, `locked_view.json` for the locked view) | In game; files written by feel.20 to feel.24 are converted on first start (0.6.0-feel.25) |
 | Sleeves and hand grips (retail's bone offsets) | Held back since 0.6.0-feel.19; superseded by Animated arms |
 | Replacing the mod in a running game | Built in 0.6.0-feel.5, never run |
