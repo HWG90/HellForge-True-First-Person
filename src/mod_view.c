@@ -27,6 +27,8 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "wire_win_effects.h"
 #include "engine.h"
 #include "mod_menu.h"
+#include "mod_panel.h"
+#include "wire_panel.h"
 #include "mod_editor.h"
 #define TFP_VIEW_VERSION "0.6.0-feel.20"
 #else
@@ -55,6 +57,7 @@ static DWORD tick_thread; /* the game thread, as the tick last saw it */
 static TfpWireFeel feel;
 static TfpFxPlatform fx_platform;
 static bool lock_wanted = true;
+static bool mcm_wanted; /* test switch mcm_on.txt: the settings menu in DBF-MCM instead of the mod's own panel */
 static bool engine_hooked, pose_hook_told[TFP_WIN_POSE_HOOKS];
 static char settings_text[TFP_SETTINGS_MAX];
 /* Two places hold settings.json. The one beside this DLL is made at build time (tools/convert_settings.py)
@@ -306,6 +309,11 @@ static void start(void) {
         FILE *lock_file = fopen(parts_path, "r");
         if (lock_file) fclose(lock_file);
         lock_wanted = lock_file == NULL;
+        strcpy(slash + 1, "mcm_on.txt");
+        FILE *mcm_file = fopen(parts_path, "r");
+        if (mcm_file) fclose(mcm_file);
+        mcm_wanted = mcm_file != NULL;
+        if (mcm_wanted) say("Test: mcm_on.txt: the settings menu is registered with DBF-MCM (goose.mcm) instead of the mod's own panel");
         if (digit >= '1' && digit <= '7') {
           tfp_head_set_parts((unsigned)(digit - '0'));
           say("Test: head_parts.txt: hiding parts mask %d (1 head, 2 torso, 4 shoulders)", digit - '0');
@@ -361,9 +369,10 @@ static void start(void) {
   stage = RUNNING;
 #ifdef TFP_FEEL
   say("Ready. F11 toggles True First Person (view, weapon and arm placement, motion; head hiding, sleeves, hand grips and the effects once "
-      "their checks pass: see the Ready / Check / Refused lines). The settings menu is in DBF-MCM when goose.mcm is loaded; "
-      "settings are saved when they change. Page Up (the menu's editor key) opens the placement editor when Goose Overlay Host is "
-      "loaded; F8 is HellForge's own editor. Not in this build: the eye-camera editor, Photo Mode camera sharing.");
+      "their checks pass: see the Ready / Check / Refused lines). F10 opens the mod's own settings panel when NEST (Goose Overlay "
+      "Host) is loaded; it is also in the host's panel list (Page Down). DBF-MCM is not needed and not used (a file mcm_on.txt beside "
+      "the DLL puts the menu there instead). Settings are saved when they change. Page Up (the menu's editor key) opens the placement "
+      "editor; F8 is HellForge's own editor. Not in this build: the eye-camera editor, Photo Mode camera sharing.");
 #else
   say("Ready. F11 toggles the view. Not in this build: arms and weapon placement, sleeves, hand grips, motion, head and body hiding, "
       "depth of field, vignette, aiming markers, movement policy, the F8 editor, the menu, Photo Mode camera sharing.");
@@ -494,10 +503,11 @@ static void tick_body(void) {
     if (refused) say("Placement editor: %s", refused);
   }
   editor_key_held = editor_down;
-  if (tfp_mod_editor_settled()) tfp_mod_menu_tick(hf, owner, &wire, menu_unavailable(), tfp_wire_editor_toggle);
+  if (tfp_mod_editor_settled()) tfp_mod_panel_tick(hf, owner, &wire, mcm_wanted, menu_unavailable(), tfp_wire_editor_toggle);
   tfp_wire_frame(&wire, extra);
   entry_note();
-  tfp_wire_menu_frame(&wire);          /* what the user did in MCM since the last tick, and the two status rows */
+  tfp_wire_panel_frame(&wire);         /* what the user did in the mod's own panel since the last tick */
+  tfp_wire_menu_frame(&wire);          /* the menu's queued buttons and toggles, and the two status rows */
   tfp_wire_settings_save_frame(&wire); /* writes only when the store changed since the last write */
   eng_temp_end();
   for (int i = 0; i < TFP_WIN_POSE_HOOKS; i++) {
@@ -591,6 +601,7 @@ __declspec(dllexport) int hellforge_mod_unload(const HfApi *api, HfMod *mod, uin
   }
   eng_set_script_probe(NULL);
   tfp_mod_editor_retire();   /* its panel stays registered with the overlay host: closed, and drawing nothing */
+  tfp_mod_panel_retire();    /* the settings panel likewise */
   unsigned restored = tfp_win_restore_slots() + tfp_win_pose_restore_slots();
   hf->log(mod, "Live %s: the mod held nothing in the game; %u dispatch slot(s) put back; this build does nothing from here on.",
           reason == HF_UNLOAD_REPLACE ? "replace" : "removal", restored);

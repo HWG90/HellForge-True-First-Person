@@ -674,12 +674,12 @@ int main(int argc, char **argv) {
     mcm_put("toggle_key", TFP_MENU_VALUE_NUMBER, false, 121), mcm_put("editor_key", TFP_MENU_VALUE_NUMBER, false, 119);
     mcm_put("weapon_near_hip_cm", TFP_MENU_VALUE_NUMBER, false, 9), mcm_put("weapon_near_aim_cm", TFP_MENU_VALUE_NUMBER, false, 9);
     mcm_put("show_aim_markers", TFP_MENU_VALUE_BOOL, true, 0), mcm_put("family_placement_defaults", TFP_MENU_VALUE_BOOL, false, 0);
-    TfpMenuHost host = {NULL, mcm_get, mcm_set, mcm_set_disabled, mcm_set_label};
+    TfpMenuHost host = {NULL, mcm_get, mcm_set, mcm_set_disabled, mcm_set_label, NULL};
     CHECK(!tfp_wire_menu_bound(&wire) && tfp_wire_menu_toggle_key(&wire) == 122);
     CHECK(tfp_wire_menu_bind(&wire, &host, TFP_MENU_NO_ARMS, NULL) && tfp_wire_menu_bound(&wire));
     CHECK(tfp_settings_menu_number(s, TFP_MENU_motion_strength) == 150 && tfp_settings_menu_flag(s, TFP_MENU_show_torso));
     CHECK(tfp_wire_menu_toggle_key(&wire) == 121 && tfp_wire_menu_editor_key(&wire, 33) == 33);
-    CHECK(strstr(mcm_disabled, "fird_person_arms") && strstr(mcm_disabled, "edit_placement") && logged("Ready: menu: registered"));
+    CHECK(strstr(mcm_disabled, "fird_person_arms") && strstr(mcm_disabled, "edit_placement") && logged("Ready: menu: registered with DBF-MCM as"));
     CHECK(logged("\"Fird Person Arms\" is shown disabled"));
     /* a slider moved in MCM reaches the store at once and is saved by the next save frame */
     TfpMenuValue v = {TFP_MENU_VALUE_NUMBER, false, 80}, before = {TFP_MENU_VALUE_NUMBER, false, 150};

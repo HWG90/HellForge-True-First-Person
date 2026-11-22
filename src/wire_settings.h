@@ -61,6 +61,24 @@ bool tfp_wire_settings_unsaved(TfpWire *w);                                   /*
 /* A menu control's value (the MCM binder's changed callback). false: not bound, or the wrong kind. */
 bool tfp_wire_settings_menu_set(TfpWire *w, TfpSettingsMenuId id, bool is_bool, bool boolean, double number);
 
+/* ---- the locked view's options (TFP_SETTINGS_LOCKED in src/tfp_settings.h) ---------------------------
+ * The own settings panel writes them (src/wire_panel.c); a change counts as a store change and is saved
+ * like any other. false: no store bound, not an option, the wrong kind. */
+bool tfp_wire_settings_locked_set(TfpWire *w, TfpSettingsLockedId id, bool is_bool, bool boolean, double number);
+/* The nine options by name, for the units that act on them. With no store bound each answers its default.
+ * Plain reads of one stored value each: no game call, no lock, so a read from another thread than the
+ * game thread sees the old or the new value of a change in flight, never a torn one on x86-64.
+ * The two strengths are percentages (0 .. 100), the two angles degrees. */
+bool tfp_locked_view_camera_lock(TfpWire *w);
+bool tfp_locked_view_fov_lock(TfpWire *w);
+double tfp_locked_view_fov_degrees(TfpWire *w);
+bool tfp_locked_view_fov_zoom_when_aiming(TfpWire *w);
+double tfp_locked_view_kick_strength(TfpWire *w);
+double tfp_locked_view_kick_max_degrees(TfpWire *w);
+double tfp_locked_view_thrown_kick_strength(TfpWire *w);
+bool tfp_locked_view_one_handed_pistols(TfpWire *w);
+bool tfp_locked_view_holster_animation(TfpWire *w);
+
 /* Actions.actions (action_placement.lua:66-67) is handed to the editor as this value: a ref to
  * tfp_wire_settings_actions, TFP_ACT_COUNT rows of {name, label}. */
 extern const char *const tfp_wire_settings_actions[TFP_ACT_COUNT][2];

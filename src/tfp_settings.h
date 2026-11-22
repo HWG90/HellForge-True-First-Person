@@ -79,6 +79,22 @@ typedef enum TfpSettingsMenuId {
 } TfpSettingsMenuId;
 typedef struct TfpSettingsMenuValue { bool is_bool, boolean; double number; } TfpSettingsMenuValue;
 
+/* The locked view's options (docs/design/specs/2026-11-22-locked-view-design.md), which retail does not have:
+ * X(id, 1 Boolean / 0 number, default, least, most, step). The two strengths are percentages. They are stored
+ * under "locked_view" in settings.json; a file without that section reads as the defaults. The store only
+ * holds them: what they do is the camera's and the arm rig's business (the getters are in src/wire_settings.h). */
+#define TFP_SETTINGS_LOCKED(X) \
+  X(camera_lock, 1, 1, 0, 1, 1) X(fov_lock, 1, 1, 0, 1, 1) X(fov_degrees, 0, 80, 50, 120, 1) X(fov_zoom_when_aiming, 1, 1, 0, 1, 1) \
+  X(kick_strength, 0, 35, 0, 100, 5) X(kick_max_degrees, 0, 8, 0, 20, 1) X(thrown_kick_strength, 0, 70, 0, 100, 5) \
+  X(one_handed_pistols, 1, 1, 0, 1, 1) X(holster_animation, 1, 1, 0, 1, 1)
+typedef enum TfpSettingsLockedId {
+#define TFP_SETTINGS_LOCKED_ID(name, is_bool, value, least, most, step) TFP_LOCKED_##name,
+  TFP_SETTINGS_LOCKED(TFP_SETTINGS_LOCKED_ID)
+#undef TFP_SETTINGS_LOCKED_ID
+  TFP_LOCKED_COUNT
+} TfpSettingsLockedId;
+typedef struct TfpSettingsLockedInfo { const char *name; bool is_bool; double value, min, max, step; } TfpSettingsLockedInfo;
+
 typedef struct TfpSettings {
   const TfpSettingsValue *field[TFP_SET_COUNT]; /* NULL: nil */
   TfpSettingsMenuValue menu[TFP_MENU_COUNT];
@@ -86,6 +102,8 @@ typedef struct TfpSettings {
   bool from_file;                               /* the last load took a text (false: defaults) */
   uint64_t writes;                              /* tfp_settings_set calls that changed a field */
   uint64_t menu_writes;                         /* tfp_settings_set_menu calls that changed a control's value */
+  TfpSettingsMenuValue locked[TFP_LOCKED_COUNT];
+  uint64_t locked_writes;                       /* tfp_settings_set_locked calls that changed an option */
 } TfpSettings;
 
 const char *tfp_settings_field_name(TfpSettingsField field);
@@ -93,6 +111,8 @@ TfpSettingsKind tfp_settings_field_kind(TfpSettingsField field);
 int tfp_settings_field(const char *name);          /* -1: not a key of this store */
 const char *tfp_settings_menu_name(TfpSettingsMenuId id);
 int tfp_settings_menu(const char *name);           /* -1 */
+const TfpSettingsLockedInfo *tfp_settings_locked_info(TfpSettingsLockedId id); /* NULL: not an option */
+int tfp_settings_locked(const char *name);         /* -1 */
 
 /* Retail's defaults into *s. *s must be zeroed or freed. false: out of memory (nothing is kept). */
 bool tfp_settings_defaults(TfpSettings *s);
@@ -126,6 +146,9 @@ const TfpSettingsValue *tfp_settings_owned(const TfpSettings *s, const void *add
  * default its default. */
 bool tfp_settings_set(TfpSettings *s, TfpSettingsField field, const TfpSettingsValue *value, const char **why);
 bool tfp_settings_set_menu(TfpSettings *s, TfpSettingsMenuId id, bool is_bool, bool boolean, double number);
+/* A locked-view option. false: not an option, the wrong kind, or not a number. A number outside the option's
+ * range is stored as the nearest end of it. */
+bool tfp_settings_set_locked(TfpSettings *s, TfpSettingsLockedId id, bool is_bool, bool boolean, double number);
 
 /* ---- typed reads ---- */
 /* mod.config as action_placement.lua takes it: the view stays valid until the next write to one of
@@ -139,6 +162,8 @@ int tfp_settings_flag(const TfpSettings *s, TfpSettingsField field);
 /* handle.get('<id>') of the menu: a Boolean control's value, a number control's value. */
 bool tfp_settings_menu_flag(const TfpSettings *s, TfpSettingsMenuId id);
 double tfp_settings_menu_number(const TfpSettings *s, TfpSettingsMenuId id);
+bool tfp_settings_locked_flag(const TfpSettings *s, TfpSettingsLockedId id);
+double tfp_settings_locked_number(const TfpSettings *s, TfpSettingsLockedId id);
 
 /* menu:motion_options(defaults), menu.lua:150-169, on the stored control values. default_enabled /
  * default_scale are the runtime's defaults (runtime.lua:818), used only where retail falls back to

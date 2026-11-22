@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "mod_menu.h"
+#include "mod_panel.h"
 #include "goose_mcm.h"
 
 static const McmApi *mcm;
@@ -47,10 +48,12 @@ static void changed(void *user, const char *id, const McmValue *value, const Mcm
 static const char *activate(void *user, const char *id) { (void)user; return bound ? tfp_wire_menu_activate(bound, id) : "The mod is not ready"; }
 
 bool tfp_mod_menu_registered(void) { return registered != NULL; }
-bool tfp_mod_menu_is_open(void) { return mcm && mcm->is_open && mcm->is_open() != 0; }
+/* "The settings menu" for the placement editor is whichever is in use: DBF-MCM's window or the mod's own panel. */
+static bool mcm_is_open(void) { return mcm && mcm->is_open && mcm->is_open() != 0; }
+bool tfp_mod_menu_is_open(void) { return mcm_is_open() || tfp_mod_panel_is_open(); }
 bool tfp_mod_menu_close(void) {
-  if (!tfp_mod_menu_is_open()) return true;
-  if (mcm->close) mcm->close();
+  if (mcm_is_open() && mcm->close) mcm->close();
+  tfp_mod_panel_close();
   return true;   /* the editor checks is_open again an update later, as retail's handoff does */
 }
 void tfp_mod_menu_tick(const HfApi *hf, HfMod *mod, TfpWire *w, unsigned unavailable, TfpMenuEditFn edit) {
@@ -71,7 +74,7 @@ void tfp_mod_menu_tick(const HfApi *hf, HfMod *mod, TfpWire *w, unsigned unavail
   registered = mcm->register_mod(definition, length, &callbacks);
   if (!registered) { gave_up = true; hf->log(mod, "Refused: menu: DBF-MCM did not take the settings (%s); the settings in settings.json apply", mcm->error()); return; }
   bound = w;
-  const TfpMenuHost host = {NULL, host_get, host_set, host_set_disabled, host_set_label};
+  const TfpMenuHost host = {NULL, host_get, host_set, host_set_disabled, host_set_label, NULL};
   if (!tfp_wire_menu_bind(w, &host, unavailable, edit)) {
     hf->log(mod, "Refused: menu: the binder could not be set up; taking the registration out again");
     tfp_mod_menu_release(hf, mod, w);

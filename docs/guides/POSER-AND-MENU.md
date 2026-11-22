@@ -17,7 +17,23 @@ Three things retail has that the first HellForge builds lacked. All three are bu
 - **A failed write** is tried once per change, not once a frame. The log says `Refused: settings were not saved: …`, the session keeps its values, and a live replace is refused while a change is unsaved.
 - **Consequence:** once your own file exists, a newer build's shipped `settings.json` no longer applies. Delete your file to take the shipped one again.
 
-## The menu
+## The mod's own settings panel (own-menu branch)
+
+Built, not yet run in the game. `src/wire_panel.c` (the panel), `src/mod_panel.c` (lock, clock, `ov_connect`), `tests/run-wire-panel.sh`.
+
+- **What:** one NEST (Goose Overlay Host) window, "True First Person", with three tabs: **First person** and **Bob and sway** (every control of the menu below: same labels, ranges, steps, descriptions) and **Locked view** (the nine options of `locked_view` in `settings.json`).
+- **Opening:** F10 (the panel's own hotkey; the host's config can override it), or the host's panel list (Page Down).
+- **Needs:** the host at API 6 or newer. Missing or older: one log line, no panel, the settings in `settings.json` apply.
+- **DBF-MCM is not needed and not called.** A file `mcm_on.txt` beside the DLL is the test switch: the menu then registers with DBF-MCM as before, and the panel is not made.
+- **How a change travels:** the panel is the menu's host, as `src/mod_menu.c` is for MCM, so a change goes through `tfp_wire_menu_changed` / `tfp_wire_menu_activate` exactly as one from MCM does, and is saved the same way. The draw callback (the host's render thread) only queues; the game thread applies at its next update.
+- **Sliders** are taken when let go, not at every step of a drag, so a drag saves once.
+- **Keys:** the host has no key-binding widget. A key row is its label, the key as a key cap, and **Change**, which takes the next key pressed (Esc keeps the old one, Delete clears it; after ten seconds the question goes away).
+- **The two status rows** are plain text here.
+- **Locked view options are stored only.** Nothing reads them yet; the getters are `tfp_locked_view_*` in `src/wire_settings.h`.
+- **The placement editor** closes the panel before it takes the cursor, as it closes MCM.
+- **Live replace:** the panel stays registered with the host, closed and drawing nothing (the host cannot take a panel out).
+
+## The menu (DBF-MCM, behind the `mcm_on.txt` switch)
 
 It needs DBF-MCM for HellForge (`goose.mcm`, opened with DEL). The mod looks for it once a second for 15 seconds after it starts; without it the log says so once and the saved settings apply.
 
