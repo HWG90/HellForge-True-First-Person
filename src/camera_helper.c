@@ -165,7 +165,7 @@ typedef struct Policy {
   uint32_t weapon_key, native_weapon_key, stretch_key, stretch_key_frames, eye_glides;
   bool guard_only, guard_grace; double last_view_tick; uint32_t guard_grace_frames;
   bool hold_seated, seated_now, anchor_ads, native_full_ads, ads_gap_active; double ads_gap_started; uint32_t ads_gap_frames, ads_learned; double last_native_tick; uint32_t exit_holds;
-  bool lock_now; /* beyond retail: this frame is held by the camera lock */
+  bool lock_now, lock_off_foot; /* beyond retail: this frame is held by the camera lock; the body is not on foot */
   uint32_t seated_frames, entry_trace_frame; TfpQ seated_q; bool seated_q_valid; uint32_t entry_trace_pad, entry_trace_count; TfpCameraEntryTraceRow entry_trace[TFP_CAMERA_ENTRY_TRACE_ROWS];
 } Policy;
 /* Policy{}: the default member initialisers. Everything 0/false except the
@@ -175,6 +175,7 @@ static _Atomic uint32_t tuning_extra_mask, tuning_eye_idle_ms = 300, tuning_eye_
 /* Beyond retail (tfp_camera_set_lock): the camera lock. Off by default, and then nothing here runs. */
 static _Atomic uint32_t lock_on, lock_last_kind;
 static _Atomic uint64_t lock_frames, lock_foreign_frames, lock_missed; static _Atomic uint32_t lock_missed_kind, lock_missed_error;
+static volatile float lock_entry_ms = 140; /* the eased entry into the native view while the lock is on (retail: none) */
 static volatile float lock_gain, lock_max, lock_settle = 300, lock_thrown_gain, lock_thrown_max, lock_peak;
 static TfpKick lock_kick; static TfpQ lock_view = {0, 0, 0, 1}, lock_last_kick = {0, 0, 0, 1}; static bool lock_view_known; static double lock_tick;
 static void policy_init(Policy *p) {
@@ -792,7 +793,7 @@ static void lock_rotation(Policy *p, const float *native, uint32_t kind, double 
   const float dt = lock_tick > 0 && tick > lock_tick ? (float)(tick-lock_tick)/1000 : 0; lock_tick = tick;
   TfpQ kick = tfp_q_identity();
   if (pointer(p->body_object + L_UNIT_WORLDS, &matrices) && read(matrices + (uint64_t)p->head_node*L_MATRIX, matrix, 64) && tfp_matrix_q(matrix, &head)) {
-    const bool thrown = foreign || !p->fallback_safe;
+    const bool thrown = foreign || (kind != 6 && p->lock_off_foot); /* a death camera, a ragdoll, a dive: not an action on foot */
     const TfpKickTuning tuning = {thrown ? lock_thrown_gain : lock_gain, thrown ? lock_thrown_max : lock_max, lock_settle};
     kick = tfp_kick_step(&lock_kick, view, head, dt, &tuning);
   } else tfp_kick_reset(&lock_kick);
@@ -825,6 +826,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
     if (policy.native6_seen && (tick < policy.native6_at || tick-policy.native6_at > policy.c.max_gap_ms)) policy.native6_seen = false;
     const bool known_kind = top(&policy, &kind);
     policy.lock_now = known_kind && policy.presentation_enabled && atomic_load_explicit(&lock_on, memory_order_relaxed);
+    if (policy.lock_now && lock_entry_ms > 0 && policy.handoff_entry_ms <= 0) policy.handoff_entry_ms = lock_entry_ms;
     lock_asked = policy.presentation_enabled && atomic_load_explicit(&lock_on, memory_order_relaxed); lock_kind = known_kind ? kind : 0xffff;
     const bool supported = known_kind && (kind == 4 || kind == 6 || policy.lock_now);
     if (supported && kind == 6) {
@@ -898,7 +900,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
       else if (!policy.fallback_safe && !policy.lock_now && !(policy.guard_grace = policy.guard_only && policy.last_view_tick > 0
               && tick >= policy.last_view_tick && tick-policy.last_view_tick <= 250.0)) { reset(&policy, false); }
       /* on_foot also samples what the final proof compares, so it runs under the lock too; only its answer is set aside. */
-      else if (!on_foot(&policy) && !policy.lock_now) { reset(&policy, false); error(ON_FOOT_REQUIRED); }
+      else if ((policy.lock_off_foot = !on_foot(&policy)) && !policy.lock_now) { reset(&policy, false); error(ON_FOOT_REQUIRED); }
       else {
         float root[3] = {0}, head[3] = {0}, forward[3] = {0}, up[3] = {0}, root_basis[9] = {0};
         /* A seated interaction (turning a valve): with cut-hold bit 3 the view stays at the head. */
@@ -1335,6 +1337,7 @@ void tfp_camera_set_lock(bool on, float gain, float max_degrees, float settle_ms
   lock_gain = gain; lock_max = max_degrees; lock_settle = settle_ms > 1 ? settle_ms : 300; lock_thrown_gain = thrown_gain; lock_thrown_max = thrown_max_degrees;
   atomic_store(&lock_on, on ? 1u : 0u);
 }
+uint64_t tfp_camera_lock_frames(void) { return atomic_load(&lock_frames); }
 void tfp_camera_lock_stats(TfpCameraLockStats *out) {
   if (!out) return;
   out->frames = atomic_load(&lock_frames); out->foreign_frames = atomic_load(&lock_foreign_frames); out->last_kind = atomic_load(&lock_last_kind);

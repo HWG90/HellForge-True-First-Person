@@ -601,14 +601,36 @@ static bool hook_exit_request(const Policy *p) {
 }
 /* cpp:517-578 setter_hook. `caller` replaces _ReturnAddress(). The policy
  * lock is released at the single exit below (retail's Unlock guard). */
+/* Beyond retail (tfp_fov_set_lock): one field of view for every frame of the view, whatever the weapon, action or
+ * camera. 0 switches it off, and then nothing here runs. The value glides (80 ms) so switching it never pops. */
+static volatile float lock_radians, lock_seen_native, lock_shown; static volatile uint32_t lock_zoom; static _Atomic uint64_t lock_camera, lock_applied;
+static double lock_at; static volatile double lock_clock; /* milliseconds, as the binder last gave them */
+void tfp_fov_set_lock(float radians, bool zoom_when_aiming, double now_ms) { lock_clock = now_ms; lock_zoom = zoom_when_aiming ? 1u : 0u; lock_radians = radians > .05f && radians < 3.0f ? radians : 0; }
+void tfp_fov_lock_stats(TfpFovLockStats *out) {
+  if (!out) return;
+  out->applied = atomic_load(&lock_applied); out->game_radians = lock_seen_native; out->shown_radians = lock_shown;
+}
+static float lock_field(void *camera, float native, float applied, bool aiming) {
+  const float wanted = lock_radians;
+  lock_seen_native = native;
+  if (!(wanted > 0) || (uint64_t)(uintptr_t)camera != atomic_load_explicit(&lock_camera, memory_order_relaxed)) { lock_shown = 0; return applied; }
+  const float target = aiming && lock_zoom ? applied : wanted;
+  const double tick = lock_clock; float shown = lock_shown;
+  if (!(shown > 0) || tick < lock_at || tick-lock_at > 250) shown = applied; /* start from what was on screen */
+  else if (tick > lock_at) shown += (target-shown)*(1-expf(-(float)(tick-lock_at)/80.0f));
+  lock_at = tick; lock_shown = shown;
+  atomic_fetch_add_explicit(&lock_applied, 1, memory_order_relaxed);
+  return shown;
+}
 void tfp_fov_setter_from(uint64_t caller, void *camera, float native) {
   atomic_fetch_add_explicit(&seen, 1, memory_order_relaxed);
   if (!atomic_load_explicit(&armed, memory_order_acquire) || caller != atomic_load_explicit(&return_address, memory_order_relaxed)) {
-    atomic_fetch_add_explicit(&forwarded, 1, memory_order_relaxed); call_original(camera, native); return;
+    atomic_fetch_add_explicit(&forwarded, 1, memory_order_relaxed); call_original(camera, lock_field(camera, native, native, false)); return;
   }
   policy_acquire();
   float applied = native; bool diagnostics_changed = false;
   if (atomic_load_explicit(&armed, memory_order_acquire) && (uint64_t)(uintptr_t)camera == policy.c.camera) {
+    atomic_store_explicit(&lock_camera, (uint64_t)(uintptr_t)camera, memory_order_relaxed);
     const uint32_t failure = owner_status(&policy, false);
     if (failure != OK) { atomic_store_explicit(&armed, 0, memory_order_release); error(failure); }
     else if (!dispatch_owned(&policy)) { atomic_store_explicit(&armed, 0, memory_order_release); error(API_MISMATCH); }
@@ -651,6 +673,7 @@ void tfp_fov_setter_from(uint64_t caller, void *camera, float native) {
       }
     }
   }
+  applied = lock_field(camera, native, applied, policy.full_ads);
   atomic_fetch_add_explicit(&forwarded, 1, memory_order_relaxed); call_original(camera, applied);
   if (diagnostics_changed) publish_diagnostics(&policy);
   policy_release();

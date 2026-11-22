@@ -427,6 +427,13 @@ static void quit_guard(void) {
   say("Quit guard: on: the game's faulty release of its table at state+0x%x is skipped while closing (game.dll+0x%x)", TFP_QUIT_GUARD_TABLE, TFP_QUIT_GUARD_RELEASE);
 }
 
+static void fov_lock_tick(void) { /* every tick: the field of view is locked while the view is being shown */
+  static uint64_t frames, shown_at;
+  const uint64_t now = GetTickCount64(), held = tfp_camera_lock_frames();
+  if (held != frames) { frames = held; shown_at = now; }
+  const bool shown = shown_at && now - shown_at < 250 && lock_wanted && tfp_locked_view_fov_lock(&wire);
+  tfp_fov_set_lock(shown ? (float)(tfp_locked_view_fov_degrees(&wire)*3.14159265358979/180) : 0, tfp_locked_view_fov_zoom_when_aiming(&wire), (double)now);
+}
 static void lock_note(void) { /* once a second while the view is on: frames by camera, frames missed, the largest kick */
   static uint64_t next, told_frames, told_foreign, told_missed;
   const uint64_t now = GetTickCount64();
@@ -441,9 +448,13 @@ static void lock_note(void) { /* once a second while the view is on: frames by c
       (unsigned long long)(s.frames - told_frames), (unsigned long long)(s.foreign_frames - told_foreign), s.last_kind,
       (unsigned long long)(s.missed - told_missed), s.missed_kind, s.missed_error, (double)s.peak_kick_degrees);
   told_frames = s.frames; told_foreign = s.foreign_frames; told_missed = s.missed;
+  static uint64_t told_fov; TfpFovLockStats f; tfp_fov_lock_stats(&f);
+  if (f.applied != told_fov) say("Fov: +%llu frames locked; the game asked for %.1f degrees, shown %.1f", (unsigned long long)(f.applied - told_fov),
+                                (double)f.game_radians*57.29578, (double)f.shown_radians*57.29578);
+  told_fov = f.applied;
 }
 static void tick_body(void) {
-  if (stage == RUNNING) { quit_guard(); lock_note(); }   /* not earlier: the game module and the guarded reader are set up in WAIT_MODULES */
+  if (stage == RUNNING) { quit_guard(); fov_lock_tick(); lock_note(); }   /* not earlier: the game module and the guarded reader are set up in WAIT_MODULES */
   if (stage == REFUSED) return;
   tick_thread = GetCurrentThreadId();
   if (!told_tick_thread) {

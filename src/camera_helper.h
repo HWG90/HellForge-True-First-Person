@@ -145,4 +145,5 @@ void tfp_camera_set_lock(bool on, float gain, float max_degrees, float settle_ms
 typedef struct TfpCameraLockStats { uint64_t frames, foreign_frames, missed; uint32_t last_kind, missed_kind, missed_error; float peak_kick_degrees; } TfpCameraLockStats;
 /* Counts since the start; the peak is the largest kick since the last call. */
 void tfp_camera_lock_stats(TfpCameraLockStats *out);
+uint64_t tfp_camera_lock_frames(void); /* frames the lock has held so far: rising while the view is shown */
 #endif
