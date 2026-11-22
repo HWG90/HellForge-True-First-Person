@@ -8,6 +8,7 @@
 #include "camera_helper.h"
 #include "camera_lock.h"
 #include "camera_continuity.h"
+#include "camera_damp.h"
 #include "camera_math.h"
 #include <stdatomic.h>
 
@@ -186,6 +187,7 @@ static _Atomic uint64_t lock_frames, view_frames, lock_foreign_frames, lock_miss
 static volatile float lock_entry_ms = 140; /* the eased entry into the native view while the lock is on (retail: none) */
 static volatile float lock_gain, lock_max, lock_settle = 300, lock_thrown_gain, lock_thrown_max, lock_peak;
 static volatile float lock_damp_ms; /* the camera damping option as a time constant (src/camera_damp.h); 0: none */
+static TfpEyeDamp lock_eye_damp;    /* the head camera's eye under that option (lock_damp_eye). Policy lock. */
 static TfpKick lock_kick; static TfpQ lock_view = {0, 0, 0, 1}, lock_last_kick = {0, 0, 0, 1}; static bool lock_view_known; static double lock_tick;
 /* Beyond retail: the body down under the lock (camera_helper.h TfpCameraDownStats). lock_carry: what is left of the
  * held direction after the body is up again, in the game's view frame, eased out (LOCK_CARRY_MS). Policy lock. */
@@ -998,6 +1000,27 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
   memcpy(trace.last, shown, 12); trace.last_tick = tick; trace.last_known = true;
   return correction > 0;
 }
+/* Beyond retail (the camera damping option): in a head-camera frame the eye is at the head, so every movement of the
+ * head moves the view. Here the eye follows the head through a low-pass (src/camera_damp.h), in the body root's
+ * frame, so the body's own travel is not held back. Only in the ordinary camera's frames (kind 4) of a body on foot
+ * that the lock holds: a body that is down or off foot is followed exactly, full aim keeps the sights on the eye, and
+ * the native view is the game's own. `eye` is the wanted eye in the world and takes the damped one, before the
+ * continuity sees it. True: this frame went through the low-pass; the caller forgets it in every frame that did not,
+ * so it starts from the true eye whenever the frame before was not such a frame. */
+static bool lock_damp_eye(Policy *p, uint32_t kind, const float *root, const float *root_basis, double tick, float *eye) {
+  const float damp_ms = lock_damp_ms;
+  if (kind != 4 || p->lock_down || p->lock_off_foot || p->full_ads || p->ads_gap_active || !(damp_ms > 0)) return false;
+  float relative[3] = {0}, damped[3] = {0};
+  for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
+    relative[axis] += (eye[component]-root[component])*root_basis[axis*3+component];
+  if (!tfp_finite3(relative)) return false;
+  if (tfp_eye_damp_step(&lock_eye_damp, relative, tick, p->c.max_gap_ms, damp_ms, damped) > 0 && tfp_finite3(damped)) {
+    for (unsigned component = 0; component < 3; ++component) { eye[component] = root[component];
+      for (unsigned axis = 0; axis < 3; ++axis) eye[component] += damped[axis]*root_basis[axis*3+component]; }
+    memcpy(p->last_relative, damped, 12); /* where the eye is shown: what the way into the native view starts from */
+  }
+  return true;
+}
 /* The rig eye the camera is (or is about to be) a child of, read and closed as remember_native does. */
 static bool smooth_parent(Policy *p, float *position, float *parent_basis) {
   TfpQ ignored = tfp_q_identity(); ParentProof proof; memset(&proof, 0, sizeof proof);
@@ -1076,7 +1099,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
     atomic_fetch_add_explicit(&forwarded, 1, memory_order_relaxed); call_original(camera, unit, native); return;
   }
   policy_acquire();
-  const float *output = native; _Alignas(16) float adjusted[4] = {0}; bool diagnostics_changed = false, lock_shown = false, lock_asked = false; uint32_t lock_kind = 0;
+  const float *output = native; _Alignas(16) float adjusted[4] = {0}; bool diagnostics_changed = false, lock_shown = false, lock_asked = false, eye_damped = false; uint32_t lock_kind = 0;
   double frame_tick = 0; policy.why = TFP_CAMERA_WHY_NONE; policy.lock_down = false; policy.head_far = false; policy.lock_ragdoll = false;
   if (entered_generation && entered_generation == atomic_load_explicit(&callback_generation, memory_order_acquire)
       && atomic_load_explicit(&armed, memory_order_acquire) && (uint64_t)(uintptr_t)camera == policy.c.camera && unit == policy.c.camera_unit) {
@@ -1360,7 +1383,8 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
             uint32_t commit_error = OWNER_MISMATCH;
             if (!commit_current(&policy, kind, &commit_error)) { reset(&policy, false); if (commit_error == READ_FAILED) atomic_store_explicit(&armed, 0, memory_order_release); error(commit_error); }
             else { memcpy(policy.last_relative, relative, 12); policy.last_relative_tick = tick; policy.relative_valid = true;
-              if (policy.lock_now) { float shown[3] = {0}; if (smooth_present(&policy, kind, SMOOTH_HEAD, root, root_basis, adjusted, tick, shown)) memcpy(adjusted, shown, 12); }
+              if (policy.lock_now) { float shown[3] = {0}; eye_damped = lock_damp_eye(&policy, kind, root, root_basis, tick, adjusted);
+                if (smooth_present(&policy, kind, SMOOTH_HEAD, root, root_basis, adjusted, tick, shown)) memcpy(adjusted, shown, 12); }
               memcpy(policy.last_head_world, adjusted, 12);
               if (policy.fallback_safe) policy.last_view_tick = tick; else ++policy.guard_grace_frames;
               if (held_view) {
@@ -1382,6 +1406,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
       }
     }
   }
+  if (diagnostics_changed && !eye_damped) tfp_eye_damp_reset(&lock_eye_damp); /* any other frame of this camera: the damping starts again */
   /* Serialize actual adjusted call with End, not just the calculation. */
   if (lock_asked && !lock_shown) { /* a frame of the view that was not first person: what the test matrix counts */
     atomic_fetch_add_explicit(&lock_missed, 1, memory_order_relaxed); atomic_store_explicit(&lock_missed_kind, lock_kind, memory_order_relaxed);
@@ -1716,6 +1741,7 @@ void tfp_camera_reset_for_tests(void) {
   atomic_store(&lock_down_error, 0); atomic_store(&lock_down_why, 0); atomic_store(&lock_body_ragdoll, 0); atomic_store(&lock_body_off_foot, 0);
   atomic_store(&lock_off_foot_body, 0); atomic_store(&lock_off_foot_at, 0); atomic_store(&lock_body_distance, 0); atomic_store(&lock_down_distance, 0);
   lock_carry = tfp_q_identity(); lock_was_held = false; lock_down_until = 0; lock_view_known = false; lock_first_known = false; lock_tick = 0; tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity();
+  lock_damp_ms = 0; tfp_eye_damp_reset(&lock_eye_damp);
   memset(&smooth, 0, sizeof smooth); memset(&trace, 0, sizeof trace); eye_watch_known = false; eye_unsettled_until = 0;
   memset(&smooth_watch, 0, sizeof smooth_watch); atomic_store(&smooth_event, 0);
   atomic_store(&original, 0);

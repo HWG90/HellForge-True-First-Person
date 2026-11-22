@@ -136,20 +136,23 @@ struct Game {
   }
 };
 
-static void fresh(bool lock, bool smooth, bool trace = false) {
+static void fresh(bool lock, bool smooth, bool trace = false, float damping_ms = 0) {
   tfp_camera_reset_for_tests();
   TfpCameraHost host{};
   host.hook = reinterpret_cast<uint64_t>(&hook_marker); host.read = host_read; host.readable_span = host_readable_span; host.now = host_now;
   host.writable_slot = host_true_slot; host.executable = host_executable; host.cas = host_cas; host.write = host_write; host.pin = host_pin;
   host.lock_exclusive = host_lock; host.unlock_exclusive = host_lock; host.lock_shared = host_lock; host.unlock_shared = host_lock; host.forward = host_forward;
   tfp_camera_set_host(&host);
-  tfp_camera_set_lock(lock, 0, 0, 300, 0, 0, 0); // no kick: the rotation is not the subject
+  tfp_camera_set_lock(lock, 0, 0, 300, 0, 0, damping_ms); // no kick: the rotation is not the subject
   tfp_camera_set_continuity(smooth, trace);
   clock_ms += 5000;
 }
 static void standing(Game &g, int frames, double dt, bool native_view, uint32_t mask = 0) {
   for (int i = 0; i < frames; ++i) { if (native_view) g.native(mask); else g.hip(mask); g.frame(dt); }
 }
+
+// Scenario 14: the farthest the presented eye went with damping 0, measured on the build before the option existed.
+static const float RAW_PEAK = 0.0211488f, RAW_TRAVEL = 0.00265f; // farthest, and the most in one frame
 
 int main() {
   W.build(HERE);
@@ -199,9 +202,10 @@ int main() {
     CHECK(g.from_rig_eye() < 1e-4f && g.change < .01f);
     g.end();
   }
-  // ---- 4. Leaving the native view and coming back (head camera for 12 frames): continuous both ways. ----
-  {
-    fresh(true, true);
+  // ---- 4. Leaving the native view and coming back (head camera for 12 frames): continuous both ways, with camera
+  // damping too (scenario 14; the damped eye starts from the true one and is handed on as it was shown). ----
+  for (int damped = 0; damped < 2; ++damped) {
+    fresh(true, true, false, damped ? 180.0f : 0.0f);
     Game g; g.pose(1, 1, 0, .4f); g.look(.4f, 0); g.hip(); g.begin();
     standing(g, 12, 33.3, false); standing(g, 20, 33.3, true);
     g.measure_from_here();
@@ -540,6 +544,75 @@ int main() {
     }
     std::printf("head frames, %s: step change %.3f m, farthest from the head's eye %.3f m\n", thrown ? "thrown off foot" : "a jump on foot", g.change, worst);
     g.end();
+  }
+  // ---- 14. Camera damping (the Locked view option, here as its time constant: 60 % is 180 ms). In head-camera
+  // frames on foot the head jerks 0.05 m down and back within 100 ms (a half sine, 144 frames a second): the eye
+  // presented moves clearly less with damping than without, and comes back to the head's eye. Without damping
+  // every frame is what it was before the option existed (the numbers are those of the build before it). Nothing
+  // else is damped: the native view, a body that is off foot, and anything without the lock give the same forwarded
+  // bytes with damping as without. ----
+  {
+    const double dt = 1000.0 / 144;
+    auto jerk = [&](Game &g, int i) { g.pose(1, 2, 0, .2f, 1.5f - (i < 15 ? .05f * std::sin(i * static_cast<float>(dt) / 100 * 3.14159265f) : 0)); };
+    float peak[2][2] = {}, travel[2][2] = {};
+    for (int smooth = 0; smooth < 2; ++smooth) for (int damped = 0; damped < 2; ++damped) {
+      fresh(true, smooth != 0, false, damped ? 180.0f : 0.0f);
+      Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+      standing(g, 12, dt, false); standing(g, 40, dt, true); standing(g, 300, dt, false); // 2 s: the way in from the native view is over
+      CHECK(g.from_head_eye() < 1e-3f);
+      float start[3]; std::memcpy(start, g.body, 12);
+      g.measure_from_here();
+      for (int i = 1; i <= 120; ++i) {
+        jerk(g, i); g.hip(); g.frame(dt);
+        const float moved = std::sqrt((g.body[0] - start[0]) * (g.body[0] - start[0]) + (g.body[1] - start[1]) * (g.body[1] - start[1]) + (g.body[2] - start[2]) * (g.body[2] - start[2]));
+        peak[smooth][damped] = std::fmax(peak[smooth][damped], moved);
+      }
+      CHECK(g.from_head_eye() < 2e-3f); // back at the head's eye
+      travel[smooth][damped] = g.travel;
+      std::printf("head jerk 0.05 m, smooth eye %s, damping %s: the eye moved %.4f m at most, %.5f m in one frame\n", smooth ? "on" : "off", damped ? "60 %" : "0", peak[smooth][damped], g.travel);
+      g.end();
+    }
+    for (int smooth = 0; smooth < 2; ++smooth) {
+      CHECK(peak[smooth][0] > .02f && peak[smooth][1] > .001f && peak[smooth][1] < peak[smooth][0] * .5f);
+      CHECK(travel[smooth][1] < travel[smooth][0] * .5f); // and no frame moves it half as far
+      CHECK(std::fabs(peak[smooth][0] - RAW_PEAK) < 2e-6f && std::fabs(travel[smooth][0] - RAW_TRAVEL) < 1e-5f); // damping 0: as before the option
+    }
+    // What is not damped: the same bytes with and without.
+    for (int scene = 0; scene < 3; ++scene) {
+      static float record[2][160][4]; int frames[2] = {0, 0};
+      for (int damped = 0; damped < 2; ++damped) {
+        fresh(scene != 2, true, false, damped ? 300.0f : 0.0f);
+        clock_ms = 700000; // the same instants in both runs
+        Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+        auto keep = [&]() { std::memcpy(record[damped][frames[damped]++], sent.position, 16); };
+        for (int i = 0; i < 12; ++i) { g.hip(); g.frame(dt); keep(); }
+        if (scene == 0) { // the native view: the rig eye jerks
+          for (int i = 0; i < 20; ++i) { g.native(); g.frame(dt); keep(); }
+          for (int i = 1; i <= 60; ++i) { jerk(g, i); g.native(); g.frame(dt); keep(); }
+        } else if (scene == 1) { // off foot (a dive, the first frames of a death): the head is followed exactly
+          for (int i = 0; i < 20; ++i) { g.hip(); g.frame(dt); keep(); }
+          g.s.state = 50;
+          for (int i = 1; i <= 60; ++i) { jerk(g, i); g.hip(); g.frame(dt); keep(); }
+        } else { // no lock
+          for (int i = 1; i <= 60; ++i) { jerk(g, i); g.hip(); g.frame(dt); keep(); }
+        }
+        g.end();
+      }
+      CHECK(frames[0] == frames[1] && frames[0] > 70 && !std::memcmp(record[0], record[1], sizeof(float) * 4 * frames[0]));
+    }
+    // And on foot under the lock the same script does differ (the comparison above can tell).
+    {
+      static float record[2][160][4]; int frames[2] = {0, 0};
+      for (int damped = 0; damped < 2; ++damped) {
+        fresh(true, true, false, damped ? 300.0f : 0.0f);
+        clock_ms = 700000;
+        Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+        for (int i = 0; i < 32; ++i) { g.hip(); g.frame(dt); std::memcpy(record[damped][frames[damped]++], sent.position, 16); }
+        for (int i = 1; i <= 60; ++i) { jerk(g, i); g.hip(); g.frame(dt); std::memcpy(record[damped][frames[damped]++], sent.position, 16); }
+        g.end();
+      }
+      CHECK(!std::memcmp(record[0], record[1], sizeof(float) * 4 * 32) && std::memcmp(record[0], record[1], sizeof(float) * 4 * frames[0]));
+    }
   }
   std::printf("camera smooth: %d checks, %d failed\n", checks, failed);
   return failed != 0;

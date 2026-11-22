@@ -140,7 +140,8 @@ void tfp_camera_set_action_tuning(uint32_t extra_head_mask, uint32_t eye_idle_ms
  * glide in from the game's camera; and the view's rotation takes a kick from the head's own movement
  * (src/camera_lock.h): `gain`/`max_degrees` on foot, the `thrown_` pair in any other state. `damping_ms` is the
  * camera damping option as a time constant (src/camera_damp.h tfp_camera_damping_ms; 0: none): the kick is low-passed
- * with it. Off: retail's behaviour. */
+ * with it, and so is the head camera's eye in the ordinary camera's frames of a body on foot (not in the native view,
+ * not in full aim, not on a body that is down or off foot). Off: retail's behaviour. */
 void tfp_camera_set_lock(bool on, float gain, float max_degrees, float settle_ms, float thrown_gain, float thrown_max_degrees, float damping_ms);
 /* missed: frames of the presented view that were neither the native view nor the head camera (0xffff: the
  * camera record was not ours), with the kind, the helper's error and the proof that failed (TFP_CAMERA_WHY_*) of
