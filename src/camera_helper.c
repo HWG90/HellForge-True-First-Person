@@ -837,7 +837,10 @@ static bool smooth_detect(const Policy *p, uint32_t kind, uint32_t source, doubl
   if (said || (smooth_watch.known && (p->control_mask != smooth_watch.mask || kind != smooth_watch.kind || p->current_weapon != smooth_watch.weapon
       || p->weapon_key != smooth_watch.key))) smooth_watch.until = tick+SMOOTH_EVENT_MS;
   smooth_watch.known = true; smooth_watch.mask = p->control_mask; smooth_watch.kind = kind; smooth_watch.weapon = p->current_weapon; smooth_watch.key = p->weapon_key;
-  return source != SMOOTH_HEAD && tick < smooth_watch.until;
+  /* The head camera too (seen in the game 2026-11-22: 0.15 m in one frame inside a swap, when the held eye lets go
+   * or starts for the incoming weapon's remembered eye). */
+  (void)source;
+  return tick < smooth_watch.until;
 }
 /* The eye about to be presented, in the world; `root`/`root_basis` are the body root's position and axis rows.
  * True: `shown` differs from `wanted` and is what to present. Always records the frame for the trace. */
