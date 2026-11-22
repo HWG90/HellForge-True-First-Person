@@ -29,6 +29,7 @@ typedef struct Settings {
   bool locked_stale;         /* that member's values replaced what locked_view.json says: the file is copied aside, then written */
   char split_kept[24];       /* this session's copy of the settings.json that held the member: its suffix; "": not made yet */
   char stale_kept[24];       /* the suffix of the copy of the locked_view.json whose values were replaced; "": none made */
+  bool locked_newer;         /* locked_view.json as read named what this build skipped (a later build wrote it), and it has no copy yet */
   bool record_on_disk;       /* locked_view.json as it is on disk holds "taken_from_settings" (see tfp_wire_settings_disk) */
   TfpWire *w;
   TfpSettings store;
@@ -450,6 +451,7 @@ void tfp_wire_settings_bind_locked(TfpWire *w, const char *json, size_t length, 
   memcpy(st->member, st->store.locked, sizeof st->member); /* tfp_wire_settings_disk decides between the two */
   st->locked_loaded = tfp_settings_load_locked(&st->store, json, length, why, sizeof why);
   st->refused[TFP_LOCKED_FILE] = !st->locked_loaded;
+  st->locked_newer = st->locked_loaded && st->store.locked_skipped[0];
   if (!st->locked_loaded)
     snprintf(line, sizeof line, "Refused: locked view options: %s: %s; they stay %s", origin, why,
              st->store.locked_in_settings ? "as settings.json has them" : "at their defaults");
@@ -566,9 +568,22 @@ static bool write_file(Settings *st, TfpSettingsFile file, size_t *written, char
     char suffix[sizeof st->stale_kept], line[300];
     TfpSettingsCopy copy = copy_free_name(st, file, TFP_LOCKED_REPLACED, suffix, sizeof suffix, why, why_size);
     if (copy == TFP_COPY_FAILED) return false;
+    st->locked_newer = false; /* the same file: one copy of it */
     if (copy == TFP_COPY_DONE) {
       memcpy(st->stale_kept, suffix, sizeof suffix);
       snprintf(line, sizeof line, "Kept: the locked_view.json whose values settings.json's newer \"locked_view\" member replaced is now locked_view.json%s; nothing of it was changed", suffix);
+      tfp_wire_say(st->w, line);
+    }
+  }
+  if (file == TFP_LOCKED_FILE && st->locked_newer) {
+    /* The file names options or members this build skipped, and the text written here has none of them: a later
+     * build's values are not written over without a copy. Once: what is written after it is this build's own. */
+    char suffix[24], line[300];
+    TfpSettingsCopy copy = copy_free_name(st, file, TFP_LOCKED_NEWER, suffix, sizeof suffix, why, why_size);
+    if (copy == TFP_COPY_FAILED) return false;
+    st->locked_newer = false;
+    if (copy == TFP_COPY_DONE) {
+      snprintf(line, sizeof line, "Kept: the locked_view.json that names what this build does not know is now locked_view.json%s; nothing of it was changed", suffix);
       tfp_wire_say(st->w, line);
     }
   }

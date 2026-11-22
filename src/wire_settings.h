@@ -75,6 +75,9 @@ void tfp_wire_settings_bind_locked(TfpWire *w, const char *json, size_t length, 
  *     and the write goes on. A disk with no `copy` cannot tell, and no file is written to it.
  *   - a settings.json that still holds "locked_view" (written by 0.6.0-feel.20 to feel.24, which 0.6.0-feel.19
  *     and older refuse whole): see tfp_wire_settings_disk.
+ *   - a locked_view.json that names options, or members beside "locked_view", that this build skipped (a later build
+ *     wrote it; the `Note:` line of tfp_wire_settings_bind_locked): this build's text has none of them, so before
+ *     the session's first write of it the file is copied to locked_view.json.newer (.newer-2 .. .newer-9).
  * In every case a copy that already holds the file's bytes (`same`) is the copy: a start whose write fails after the
  * copy does not take another name at the next start, and the nine names are only used up by nine different files. */
 typedef enum TfpSettingsFile { TFP_SETTINGS_FILE, TFP_LOCKED_FILE } TfpSettingsFile;
@@ -96,6 +99,7 @@ typedef struct TfpSettingsDisk {
 } TfpSettingsDisk;
 #define TFP_SETTINGS_BEFORE_SPLIT ".before-feel25"
 #define TFP_LOCKED_REPLACED ".replaced"
+#define TFP_LOCKED_NEWER ".newer"
 /* Where the two files are kept; NULL: nothing is ever written. Not kept: the struct is copied. user_file: the text
  * bound as settings.json was the user's own file, the one `write` replaces (false: the one shipped beside the DLL,
  * or none). What is loaded counts as what the files hold, with one exception that is done here, at once: when the
