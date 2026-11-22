@@ -29,6 +29,7 @@ typedef struct Settings {
   bool locked_stale;         /* that member's values replaced what locked_view.json says: the file is copied aside, then written */
   char split_kept[24];       /* this session's copy of the settings.json that held the member: its suffix; "": not made yet */
   char stale_kept[24];       /* the suffix of the copy of the locked_view.json whose values were replaced; "": none made */
+  bool locked_newer;         /* locked_view.json as read named what this build skipped (a later build wrote it), and it has no copy yet */
   bool record_on_disk;       /* locked_view.json as it is on disk holds "taken_from_settings" (see tfp_wire_settings_disk) */
   TfpWire *w;
   TfpSettings store;
@@ -450,6 +451,7 @@ void tfp_wire_settings_bind_locked(TfpWire *w, const char *json, size_t length, 
   memcpy(st->member, st->store.locked, sizeof st->member); /* tfp_wire_settings_disk decides between the two */
   st->locked_loaded = tfp_settings_load_locked(&st->store, json, length, why, sizeof why);
   st->refused[TFP_LOCKED_FILE] = !st->locked_loaded;
+  st->locked_newer = st->locked_loaded && st->store.locked_skipped[0];
   if (!st->locked_loaded)
     snprintf(line, sizeof line, "Refused: locked view options: %s: %s; they stay %s", origin, why,
              st->store.locked_in_settings ? "as settings.json has them" : "at their defaults");
@@ -463,19 +465,33 @@ static const char *const file_names[2] = {"settings.json", "locked_view.json"};
 static uint64_t revision(const Settings *st, TfpSettingsFile file) {
   return file == TFP_LOCKED_FILE ? st->store.locked_writes : st->store.writes + st->store.menu_writes;
 }
+/* Is one of <name><stem>, <name><stem>-2 .. -9 a copy that holds the file's bytes as they are now? true: `suffix` is
+ * that one, and no further copy is needed. So a start whose write fails after the copy does not take another name at
+ * the next start for the same file. */
+static bool held_already(const Settings *st, TfpSettingsFile file, const char *stem, char *suffix, size_t suffix_size) {
+  if (!st->disk.same) return false;
+  snprintf(suffix, suffix_size, "%s", stem);
+  for (int n = 2;; n++) {
+    if (st->disk.same(st->disk.user, file, suffix)) return true;
+    if (n > 9) return false;
+    snprintf(suffix, suffix_size, "%s-%d", stem, n);
+  }
+}
 /* Before the session's first write of a file: the file as it is on disk is copied aside when the store does not hold
  * what it says. Two cases: it was refused at load (<name>.refused), or no byte of it was bound (<name>.unread: it
  * could not be opened at the start, and what is loaded came from the file beside the DLL or is the defaults). In the
- * second case there is usually no file at all (the first run), which the copy answers. false: `why`; no write. */
+ * second case there is usually no file at all (the first run), which the copy answers. A copy that already holds the
+ * file's bytes counts as the copy. false: `why`; no write. */
 static bool keep_aside(Settings *st, TfpSettingsFile file, char *why, size_t why_size) {
   const bool unread = st->unread[file];
   const char *const stem = unread ? ".unread" : ".refused", *const what = unread ? "could not be opened at the start" : "could not be read";
   char suffix[24], line[300];
   if (!unread && !st->refused[file]) return true;
   if (!st->disk.copy) { snprintf(why, why_size, "a %s that %s cannot be copied aside first", file_names[file], what); return false; }
-  snprintf(suffix, sizeof suffix, "%s", stem);
+  const bool held = held_already(st, file, stem, suffix, sizeof suffix);
+  if (!held) snprintf(suffix, sizeof suffix, "%s", stem);
   for (int n = 2;; n++) {
-    TfpSettingsCopy answer = st->disk.copy(st->disk.user, file, suffix, why, why_size);
+    TfpSettingsCopy answer = held ? TFP_COPY_DONE : st->disk.copy(st->disk.user, file, suffix, why, why_size);
     if (answer == TFP_COPY_DONE) {
       snprintf(line, sizeof line, "Kept: the %s that %s is now %s%s; nothing of it was changed", file_names[file], what, file_names[file], suffix);
       tfp_wire_say(st->w, line);
@@ -492,11 +508,13 @@ static bool keep_aside(Settings *st, TfpSettingsFile file, char *why, size_t why
   }
 }
 /* The file as it is on disk to <name><stem>, or to <name><stem>-2 .. -9 when that name is taken: the first free one,
- * and a taken name is never written over. DONE: `suffix` is the one used. NONE: there is no such file. FAILED: `why`
- * (also when all nine names are taken, or the disk has no copy). Never EXISTS. */
+ * and a taken name is never written over. When one of the nine already holds the file's bytes, that one is the copy
+ * and nothing is made. DONE: `suffix` is the one used. NONE: there is no such file. FAILED: `why` (also when all
+ * nine names are taken by other files, or the disk has no copy). Never EXISTS. */
 static TfpSettingsCopy copy_free_name(Settings *st, TfpSettingsFile file, const char *stem, char *suffix, size_t suffix_size, char *why, size_t why_size) {
   char reason[160] = "";
   if (!st->disk.copy) { snprintf(why, why_size, "%s cannot be copied on this disk", file_names[file]); return TFP_COPY_FAILED; }
+  if (held_already(st, file, stem, suffix, suffix_size)) return TFP_COPY_DONE;
   snprintf(suffix, suffix_size, "%s", stem);
   for (int n = 2;; n++) {
     TfpSettingsCopy answer = st->disk.copy(st->disk.user, file, suffix, reason, sizeof reason);
@@ -513,7 +531,8 @@ static bool write_file(Settings *st, TfpSettingsFile file, size_t *written, char
 /* Before a settings.json that holds "locked_view" (0.6.0-feel.20 to feel.24) is replaced by one without it: the
  * options are in locked_view.json, and the file as it is has a copy of its own (.before-feel25, or the next free of
  * .before-feel25-2 .. -9 when an earlier conversion took that name: an older build wrote the member again since, and
- * the file as found now is not the one the earlier copy holds). Whatever replaces that settings.json goes through
+ * the file as found now is not the one the earlier copy holds; a copy that does hold it, from a start whose write
+ * failed, is the copy and no further name is taken). Whatever replaces that settings.json goes through
  * here, at the start or later, so neither can be skipped. false: `why`, and settings.json is not written. */
 static bool convert_first(Settings *st, char *why, size_t why_size) {
   char reason[240] = "";
@@ -549,9 +568,22 @@ static bool write_file(Settings *st, TfpSettingsFile file, size_t *written, char
     char suffix[sizeof st->stale_kept], line[300];
     TfpSettingsCopy copy = copy_free_name(st, file, TFP_LOCKED_REPLACED, suffix, sizeof suffix, why, why_size);
     if (copy == TFP_COPY_FAILED) return false;
+    st->locked_newer = false; /* the same file: one copy of it */
     if (copy == TFP_COPY_DONE) {
       memcpy(st->stale_kept, suffix, sizeof suffix);
       snprintf(line, sizeof line, "Kept: the locked_view.json whose values settings.json's newer \"locked_view\" member replaced is now locked_view.json%s; nothing of it was changed", suffix);
+      tfp_wire_say(st->w, line);
+    }
+  }
+  if (file == TFP_LOCKED_FILE && st->locked_newer) {
+    /* The file names options or members this build skipped, and the text written here has none of them: a later
+     * build's values are not written over without a copy. Once: what is written after it is this build's own. */
+    char suffix[24], line[300];
+    TfpSettingsCopy copy = copy_free_name(st, file, TFP_LOCKED_NEWER, suffix, sizeof suffix, why, why_size);
+    if (copy == TFP_COPY_FAILED) return false;
+    st->locked_newer = false;
+    if (copy == TFP_COPY_DONE) {
+      snprintf(line, sizeof line, "Kept: the locked_view.json that names what this build does not know is now locked_view.json%s; nothing of it was changed", suffix);
       tfp_wire_say(st->w, line);
     }
   }

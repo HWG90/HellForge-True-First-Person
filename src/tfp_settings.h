@@ -141,7 +141,7 @@ void tfp_settings_free(TfpSettings *s);
 /* The text of locked_view.json, {"format": 1, "locked_view": {option: value, ...}}, over what *s holds (a loaded
  * store or the defaults). A "taken_from_settings" object beside it is read into s->locked_taken* (see there; what it
  * holds that this build cannot read is skipped without a note, and it changes no option). An option the text does not name keeps its value; a name this build does not know is
- * skipped (s->locked_skipped lists them). false: `why` says what was wrong (not JSON, no "locked_view" object, a
+ * skipped (s->locked_skipped lists them), and so is a member beside "locked_view" that this build does not know. false: `why` says what was wrong (not JSON, no "locked_view" object, a
  * known option of the wrong type) and no option changed. settings.json's own "locked_view" member is read with the
  * same rules, except that nothing in it refuses settings.json: a wrong type is skipped as well. */
 bool tfp_settings_load_locked(TfpSettings *s, const char *json, size_t n, char *why, size_t why_size);

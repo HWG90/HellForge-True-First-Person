@@ -824,7 +824,12 @@ bool tfp_settings_load_locked(TfpSettings *s, const char *json, size_t n, char *
     const JNode *options = jmember(&d, &d.nodes[0], "locked_view");
     if (!options || options->type != J_OBJECT) snprintf(problem, sizeof problem, "locked_view: expected an object");
     else ok = load_locked_options(&d, options, s, true, NULL, problem, sizeof problem);
-    /* Any other member (a later build's) is left alone: "format" is written for such a build to tell by. */
+    /* Any other member (a later build's) is not read and is noted as skipped: "format" is written for such a build
+     * to tell by. This build's own write of the file does not carry it (src/wire_settings.c keeps a copy first). */
+    for (int at = ok ? d.nodes[0].child : -1; at >= 0; at = d.nodes[at].next) {
+      const char *key = d.nodes[at].key;
+      if (strcmp(key, "format") && strcmp(key, "locked_view") && strcmp(key, "taken_from_settings")) note_skipped(s, key);
+    }
     const JNode *taken = ok ? jmember(&d, &d.nodes[0], "taken_from_settings") : NULL;
     s->locked_taken = false, s->locked_taken_named = 0;
     if (taken && taken->type == J_OBJECT) {

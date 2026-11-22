@@ -114,6 +114,11 @@ Your settings are in `%LOCALAPPDATA%\Goose\HellForge\TrueFirstPerson\`.
   copied to `settings.json.refused` (or `.refused-2` and so on; `locked_view.json.refused` for the other
   file). A file that is there but would not open at the start is copied to `settings.json.unread` in the
   same way. The log says `Kept: ...` when either happens.
+- **A `locked_view.json` from a later build is kept too.** When it names options this build does not know,
+  the log says `Note: ... skipped: ...`, and before this build first saves the file it is copied to
+  `locked_view.json.newer`.
+- **One copy per file.** When a copy with the same contents is already there it is used, and no further
+  numbered copy is made. A save that keeps failing leaves one copy, not one per start.
 
 ## Not checked yet
 

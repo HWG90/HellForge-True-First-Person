@@ -104,7 +104,7 @@ static TfpSettingsCopy test_copy(void *user, TfpSettingsFile file, const char *s
   copies++, snprintf(copy_suffix, sizeof copy_suffix, "%s", suffix);
   return TFP_COPY_DONE;
 }
-static const TfpSettingsDisk test_disk = {NULL, test_save, test_copy};
+static const TfpSettingsDisk test_disk = {NULL, test_save, test_copy, NULL};
 #define STORE_PART
 static int store_part(void) {
   TfpSettings s;
@@ -206,7 +206,7 @@ static int store_part(void) {
   /* locked_view.json: a name this build does not know is skipped; a known one of the wrong type refuses that file,
    * and then no option of it is taken */
   static const char later[] = "{\"format\":2,\"locked_view\":{\"fov_degrees\":95,\"volume\":1,\"camera_lock\":false,\"deeper\":{\"x\":1}},\"other\":[1,2]}";
-  CHECK(tfp_settings_defaults(&s) && tfp_settings_load_locked(&s, later, sizeof later - 1, why, sizeof why) && !strcmp(s.locked_skipped, "volume, deeper"));
+  CHECK(tfp_settings_defaults(&s) && tfp_settings_load_locked(&s, later, sizeof later - 1, why, sizeof why) && !strcmp(s.locked_skipped, "volume, deeper, other"));
   CHECK(tfp_settings_locked_number(&s, TFP_LOCKED_fov_degrees) == 95 && !tfp_settings_locked_flag(&s, TFP_LOCKED_camera_lock) &&
         tfp_settings_locked_flag(&s, TFP_LOCKED_fov_lock) && s.locked_writes == 0);
   tfp_settings_free(&s);
