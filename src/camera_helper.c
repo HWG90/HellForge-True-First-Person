@@ -1033,7 +1033,8 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
 }
 /* Beyond retail (the camera damping option, and the camera style: Bodycam damps with that option's time constant
  * and 0.10 m of lag at most, Stable with its own 350 ms and 0.25 m, src/camera_damp.h): in a head-camera frame the
- * eye is at the head, so every movement of the head moves the view. Here the head's place against the body root (`head`: as the retail smoothing left it, the
+ * eye is at the head, so every movement of the head moves the view.
+ * Here the head's place against the body root (`head`: as the retail smoothing left it, the
  * point the eye is built on) goes through a low-pass (src/camera_damp.h), in the root's frame, so the body's own
  * travel is not held back, and the eye is moved by that lag. As with the retail smoothing, the eye's place in front
  * of and above the head is not filtered: it comes from this frame's view, so turning the view (or the body under
