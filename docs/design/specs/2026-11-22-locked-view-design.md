@@ -136,3 +136,22 @@ Three sessions. In the last, 32 phases:
   stim 0.21 m as before.
 - **Not there:** arms during swap, grenade and stim (the game leaves its first-person camera there, so the rig is
   not the one drawn); the put-away transition; a menu option for the arm drive (it is a test file); death.
+
+## The action hold in the game, 2026-11-22 night (0.6.0-feel.22, `hold_lease.txt` beside the DLL)
+
+- **Who drops the native view.** On a swap and a grenade it was the mod (retail's rule: leave when the snapshot is
+  not safe). With the hold the mod stays while the lease's own kind-6 request is on top, and the arm drive shows the
+  body's put-away on the first-person arms: 0.27 to 0.40 s from the action's first frame until the gun leaves the rig
+  (captures `work/captures/feel22-hold-grenade-putaway-2026-11-22.jpg`).
+- **The hold ends when the gun leaves the rig.** Held longer, a stim (mask 0x40 here, as in retail; the gun goes to the
+  body 30 ms in) showed the helmet from behind in the native view. After the change the stim shows the hands from the
+  head (`feel22-hold-stim-swap-2026-11-22.jpg`).
+- **A grenade** is the game's own exit: kind 6 ends when the grenade is in the hand.
+- **A stim** keeps kind 6 for about 0.85 s by the game's own doing, hold or no hold; the mod's exit is only
+  acknowledged afterwards. Its 0.21 to 0.28 m jump is unchanged.
+- **Cost.** With the hold on the matrix was 21 of 25: swap to secondary 0.31 m, swap to primary 0.15 m (0.01 to 0.05
+  without the hold), stim 0.28 m, and 1.1 m once on a one-frame change of the game's request after a support-weapon
+  swap (the same event measured 0.52 m without the hold). Whether the larger numbers are a visible snap or the eased
+  entry covering more distance is not known: it has to be seen in motion.
+- **Not built:** the mirrored lowering term in the pose helper, arms through the empty-handed part of a grenade or
+  stim on the rig (there the body's own arms are shown from the head), a menu option for the arm drive and the hold.
