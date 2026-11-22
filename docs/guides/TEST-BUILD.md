@@ -1,4 +1,4 @@
-# True First Person for HellForge: test build 0.6.0-feel.31
+# True First Person for HellForge: test build 0.6.0-feel.32
 
 For HellForge on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
@@ -24,6 +24,18 @@ DBF-MCM is no longer needed. The mod has its own panel.
 - **F10** opens the settings panel "True First Person" (also in NEST's list, Page Down). Three tabs:
   First person, Bob and sway, Locked view.
 - **Page Up** opens the weapon placement editor.
+
+## Fixed in 0.6.0-feel.32
+
+Found by a review of the code, not seen in play:
+
+- **Arms after an action begun while aiming.** If the arms had to be set up again in the middle of a grenade or
+  stim while you held aim, the weapon could stay displaced afterwards until you stood still. It is now lined up
+  again when the action ends.
+- **Settings copies.** A `settings.json` that could not be written got one more identical copy at every start
+  until the nine names were used up. An identical copy is now reused.
+- **A `locked_view.json` from a later build** is copied to `locked_view.json.newer` before this build writes it,
+  so options this build does not know are not lost.
 
 ## Fixed in 0.6.0-feel.26
 
