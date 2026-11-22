@@ -56,6 +56,7 @@ struct Game {
   float eye[3] = {0, .1f, .05f};      // the rig eye from the head: right, ahead, above
   uint64_t gen = 0;
   float shown[3] = {}, body[3] = {}, step = 0, change = 0, travel = 0; bool have = false; // the drawn eye, in the body's frame
+  float world_step = 0, world_change = 0; // the drawn eye's step in the world, and the most it changed from one frame to the next
   bool forwarded_own = false;
   void pose(float x, float y, float z, float yaw, float head_height = 1.5f) {
     const float c = std::cos(yaw), n = std::sin(yaw);
@@ -63,6 +64,8 @@ struct Game {
     std::memcpy(s.root, m, sizeof m);
     s.head[0] = x + .03f * c - .06f * n; s.head[1] = y + .03f * n + .06f * c; s.head[2] = z + head_height;
   }
+  // The body root alone, the head and the rig left where they are (the game re-seating the root by itself).
+  void root_only(float x, float y, float z) { s.root[12] = x; s.root[13] = y; s.root[14] = z; }
   void look(float yaw, float pitch) {
     const float c = std::cos(yaw), n = std::sin(yaw), cp = std::cos(pitch), sp = std::sin(pitch);
     right[0] = c; right[1] = n; right[2] = 0; ahead[0] = -n * cp; ahead[1] = c * cp; ahead[2] = sp; above[0] = n * sp; above[1] = -c * sp; above[2] = cp;
@@ -99,7 +102,7 @@ struct Game {
     }
   }
   void end() { tfp_camera_end(gen); have = false; step = change = travel = 0; }
-  void measure_from_here() { change = travel = 0; }
+  void measure_from_here() { change = travel = world_change = 0; }
   void frame(double dt) {
     clock_ms += dt; W.apply(s, 0); sent.seen = false;
     tfp_camera_setter_from(W.a[A_GAME] + HERE.call + 4, reinterpret_cast<void *>(W.a[A_CAMERA]), 0x400004, reinterpret_cast<const float *>(W.native()));
@@ -116,6 +119,10 @@ struct Game {
       if (std::fabs(now_step - step) > change) change = std::fabs(now_step - step);
       if (now_step > travel) travel = now_step;
       step = now_step;
+      const float w[3] = {world[0] - shown[0], world[1] - shown[1], world[2] - shown[2]};
+      const float now_world = std::sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]);
+      if (std::fabs(now_world - world_step) > world_change) world_change = std::fabs(now_world - world_step);
+      world_step = now_world;
     }
     have = true; std::memcpy(shown, world, 12); std::memcpy(body, relative, 12);
   }
@@ -278,6 +285,9 @@ int main() {
     g.eye[1] -= .2f; g.native(2); g.frame(33.3);
     count = tfp_camera_trace_read(rows, 64);
     CHECK(count == 1 && rows[0].ms > 30 && rows[0].ms < 36 && std::fabs(rows[0].correction - .2f) < .01f && rows[0].step < .01f);
+    // the body root the eye was measured against, and what was done with the frame: looked for a jump, took one up
+    CHECK(rows[0].root[0] == g.s.root[12] && rows[0].root[1] == g.s.root[13] && rows[0].root[2] == g.s.root[14]);
+    CHECK(rows[0].what == (TFP_CAMERA_TRACE_LOOKED | TFP_CAMERA_TRACE_JUMP));
     float eye_distance = 0; for (int i = 0; i < 3; ++i) eye_distance += (rows[0].eye[i] - g.shown[i]) * (rows[0].eye[i] - g.shown[i]);
     CHECK(std::sqrt(eye_distance) < 1e-4f && std::fabs(rows[0].wanted[1] - rows[0].eye[1]) > .15f && rows[0].entry_ease == 1);
     standing(g, 30, 33.3, true, 2);
@@ -288,6 +298,7 @@ int main() {
     tfp_camera_trace_edge();
     count = tfp_camera_trace_read(rows, 64);
     CHECK(count == 6 && rows[5].kind == 4 && rows[5].source == 1 && rows[2].kind == 6);
+    CHECK(rows[2].what == 0 && rows[3].what == TFP_CAMERA_TRACE_LOOKED); // the change of kind opens the time jumps are looked for
     g.end();
     fresh(true, true, false); // the trace switched off: nothing kept
     Game h; h.pose(0, 0, 0, 0); h.look(0, 0); h.hip(); h.begin();
@@ -753,6 +764,40 @@ int main() {
       for (int i = 0; i < t.frames[0]; ++i) worst = std::fmax(worst, t.apart(i));
       CHECK(t.frames[0] == 60 && t.frames[1] == 60 && std::fabs(worst - .10f) < 1e-4f && std::fabs(t.apart(40) - .10f) < 1e-4f);
     }
+  }
+  // ---- 18. The body root re-seated by itself (seen in the soak of 2026-11-22, 0.6.0-feel.37, 19:45:12.826: a
+  // backwards dive begun 170 ms after the view came back). The body walks backwards at 3 m/s in the native view; in
+  // one frame the game puts the root 0.6 m further on while the head and the rig eye go on as they went, and one
+  // frame later the rig eye follows by 0.44 m. Judged in the world, where the eye is drawn: the first of the two
+  // frames is an ordinary frame (in feel.37 the drawn eye went the root's 0.6 m with it), the second is a re-seated
+  // rig, taken up and eased. Smooth eye off: the game's own, the 0.44 m in one frame. ----
+  for (int smooth = 1; smooth >= 0; --smooth) {
+    fresh(true, smooth != 0, true);
+    Game g; float y = 0, root_y = 0; g.pose(0, y, 0, 0); g.look(0, 0); g.hip(); g.begin();
+    for (int i = 0; i < 12; ++i) { y -= .1f; root_y -= .1f; g.pose(0, y, 0, 0); g.hip(); g.frame(33.3); }
+    for (int i = 0; i < 5; ++i) { y -= .1f; root_y -= .1f; g.pose(0, y, 0, 0); g.native(); g.frame(33.3); }
+    const float entry = g.from_rig_eye(); // what the entry still carries, 170 ms in
+    g.measure_from_here();
+    TfpCameraTraceRow rows[64]; tfp_camera_trace_edge();
+    CHECK(tfp_camera_trace_read(rows, 64) == 6 && rows[0].kind == 4 && rows[1].kind == 6
+          && ((rows[1].what & TFP_CAMERA_TRACE_EDGE) != 0) == (smooth != 0)); // the entry: a change of camera taken up
+    y -= .1f; root_y -= .7f; g.pose(0, y, 0, 0); g.root_only(0, root_y, 0); g.native(); g.frame(33.3);
+    const float root_step = g.world_step, root_carried = g.from_rig_eye();
+    TfpCameraContinuityStats stats{}; tfp_camera_continuity_stats(&stats);
+    // the log says so: the Trace row of the frame names the root's place and that it alone was re-seated
+    CHECK(tfp_camera_trace_read(rows, 64) == 1 && rows[0].root[1] == root_y
+          && (smooth ? stats.reseats == 1 && (rows[0].what & TFP_CAMERA_TRACE_ROOT) && !(rows[0].what & TFP_CAMERA_TRACE_JUMP) : stats.reseats == 0 && rows[0].what == 0));
+    y -= .54f; root_y -= .1f; g.pose(0, y, 0, 0); g.root_only(0, root_y, 0); g.native(); g.frame(33.3);
+    const float eye_step = g.world_step, eye_carried = g.from_rig_eye();
+    for (int i = 0; i < 20; ++i) { y -= .1f; root_y -= .1f; g.pose(0, y, 0, 0); g.root_only(0, root_y, 0); g.native(); g.frame(33.3); }
+    if (smooth) {
+      CHECK(std::fabs(root_step - .1f) < .03f && root_carried <= entry + 1e-4f); // nothing taken up for the root
+      CHECK(std::fabs(eye_step - .1f) < .03f && eye_carried > .4f && eye_carried < .48f + entry); // the rig's 0.44 m is
+      CHECK(g.from_rig_eye() < 1e-4f && g.world_change < .04f);
+    } else {
+      CHECK(std::fabs(root_step - .1f) < 1e-3f && std::fabs(eye_step - .54f) < 1e-3f && g.from_rig_eye() < 1e-4f);
+    }
+    g.end();
   }
   std::printf("camera smooth: %d checks, %d failed\n", checks, failed);
   return failed != 0;

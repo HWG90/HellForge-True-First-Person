@@ -23,6 +23,28 @@ static void frame(Run *r, float x, float y, float z, uint32_t source, bool detec
   }
   r->first = false; memcpy(r->shown, out, sizeof out);
 }
+/* The same with the body root given (its place and its turn about the vertical): the eye and the root are in the
+ * world, the filter gets the eye in the root's frame and in the world, and what is kept is the presented eye's step
+ * in the world. */
+typedef struct Walk { TfpContinuity c; double tick; float shown[3], step, change, correction, travelled; bool first; } Walk;
+static void begin_walk(Walk *w) { memset(w, 0, sizeof *w); w->first = true; }
+static void walk(Walk *w, const float *eye, const float *root, float yaw, uint32_t source, bool detect, float dt_ms) {
+  const float cy = cosf(yaw), sy = sinf(yaw), basis[9] = {cy, sy, 0, -sy, cy, 0, 0, 0, 1};
+  float relative[3] = {0}, out[3], world[3];
+  for (int a = 0; a < 3; ++a) for (int k = 0; k < 3; ++k) relative[a] += (eye[k]-root[k])*basis[a*3+k];
+  w->tick += dt_ms;
+  w->correction = tfp_continuity_step_in(&w->c, relative, eye, basis, source, detect, false, w->tick, 250, &T, out);
+  for (int k = 0; k < 3; ++k) { world[k] = root[k]; for (int a = 0; a < 3; ++a) world[k] += out[a]*basis[a*3+k]; }
+  if (!w->first) {
+    const float d[3] = {world[0]-w->shown[0], world[1]-w->shown[1], world[2]-w->shown[2]};
+    const float step = sqrtf(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+    const float change = fabsf(step-w->step);
+    if (step > w->travelled) w->travelled = step;
+    if (change > w->change) w->change = change;
+    w->step = step;
+  }
+  w->first = false; memcpy(w->shown, world, sizeof world);
+}
 int main(void) {
   Run r;
   /* A still eye and an eye moving evenly: nothing is added, at 30 and at 144 frames a second. */
@@ -225,6 +247,69 @@ int main(void) {
     for (int i = 0; i < 40; ++i) frame(&r, 0, 0, 1.5f, NATIVE, true, false, dt);
     CHECK(r.travelled < .03f);
     CHECK(r.correction == 0 && fabsf(r.shown[0]) < 1e-4f && fabsf(r.shown[2]-1.5f) < 1e-4f);
+  }
+  /* The body root re-seated by itself (seen in the soak of 2026-11-22, 0.6.0-feel.37, 19:45:12.826: a backwards dive
+   * begun 170 ms after an entry; the wanted eye went on at its 0.08 m a frame in the world, the presented eye went
+   * 0.70 m in that frame and 0.61 m of correction appeared). A step that is a jump in the root's frame only, with the
+   * eye going on evenly in the world, is the root's: nothing is taken up, the eye is shown where the game put it.
+   * Here: walking backwards at 3 m/s, the root 0.6 m further on in one frame. */
+  {
+    Walk w; begin_walk(&w);
+    float eye[3] = {.1f, 0, 1.6f}, root[3] = {0, 0, 0};
+    for (int i = 0; i < 12; ++i) { eye[1] -= .1f; root[1] -= .1f; walk(&w, eye, root, 0, NATIVE, true, 33.3f); }
+    w.change = 0;
+    eye[1] -= .1f; root[1] -= .7f; walk(&w, eye, root, 0, NATIVE, true, 33.3f);
+    CHECK(w.correction == 0 && w.c.jumps == 0 && w.c.reseats == 1 && fabsf(w.step-.1f) < 1e-4f);
+    /* One frame later the rig eye follows (0.44 m in that frame, both in the root's frame and in the world): that
+     * is the eye re-seated, taken up and eased like any other. */
+    eye[1] -= .1f+.44f; root[1] -= .1f; walk(&w, eye, root, 0, NATIVE, true, 33.3f);
+    CHECK(w.c.jumps == 1 && w.c.reseats == 1 && fabsf(w.correction-.44f) < 1e-3f && fabsf(w.step-.1f) < 1e-3f);
+    for (int i = 0; i < 16; ++i) { eye[1] -= .1f; root[1] -= .1f; walk(&w, eye, root, 0, NATIVE, true, 33.3f); }
+    CHECK(w.correction == 0 && fabsf(w.shown[1]-eye[1]) < 1e-4f && w.change < .035f);
+  }
+  /* A correction that is being carried goes through it as it was: 0.2 m taken up, and two frames later the root
+   * re-seated by 0.6 m, and by 0.6 m with a turn of half a circle (the eye 0.3 m from it, not moved). The curve
+   * goes on in the world as if nothing had been; no step changes by more than the curve's own 0.03 m. */
+  for (int turned = 0; turned < 2; ++turned) {
+    Walk w; begin_walk(&w);
+    float eye[3] = {0, .3f, 1.6f}, root[3] = {0, 0, 0}, yaw = 0;
+    for (int i = 0; i < 12; ++i) walk(&w, eye, root, yaw, NATIVE, true, 33.3f);
+    eye[0] += .2f; walk(&w, eye, root, yaw, NATIVE, true, 33.3f);
+    walk(&w, eye, root, yaw, NATIVE, true, 33.3f);
+    CHECK(w.c.jumps == 1 && w.correction > .15f);
+    const float before = w.correction; w.change = 0;
+    if (turned) { yaw = 3.14159265f; root[1] += .6f; } else root[1] -= .6f;
+    walk(&w, eye, root, yaw, NATIVE, true, 33.3f);
+    CHECK(w.c.jumps == 1 && w.c.reseats == 1 && w.correction < before && w.correction > before-.05f);
+    for (int i = 0; i < 16; ++i) walk(&w, eye, root, yaw, NATIVE, true, 33.3f);
+    CHECK(w.correction == 0 && fabsf(w.shown[0]-eye[0]) < 1e-4f && fabsf(w.shown[1]-eye[1]) < 1e-4f && w.change < .03f);
+  }
+  /* With the root going on evenly everything is as without the world: the rig re-seated by 0.218 m while the body
+   * walks is taken up whole, the body's own travel is not a jump, and a body that is moved 5 m with its eye in one
+   * frame (a respawn) is nothing. */
+  {
+    Walk w; begin_walk(&w);
+    float eye[3] = {.1f, 0, 1.6f}, root[3] = {0, 0, 0};
+    for (int i = 0; i < 12; ++i) { eye[1] -= .1f; root[1] -= .1f; walk(&w, eye, root, 0, NATIVE, true, 33.3f); CHECK(w.correction == 0); }
+    eye[1] -= .1f; eye[0] += .218f; root[1] -= .1f; walk(&w, eye, root, 0, NATIVE, true, 33.3f);
+    CHECK(w.c.jumps == 1 && w.c.reseats == 0 && fabsf(w.correction-.218f) < 1e-4f && fabsf(w.step-.1f) < 1e-4f);
+    for (int i = 0; i < 16; ++i) { eye[1] -= .1f; root[1] -= .1f; walk(&w, eye, root, 0, NATIVE, true, 33.3f); }
+    CHECK(w.correction == 0);
+    eye[0] += 5; root[0] += 5; eye[1] -= .1f; root[1] -= .1f; walk(&w, eye, root, 0, NATIVE, true, 33.3f);
+    CHECK(w.correction == 0 && w.c.jumps == 1 && w.c.reseats == 0 && w.c.restarts == 0 && fabsf(w.shown[0]-eye[0]) < 1e-5f);
+    eye[1] -= .1f; root[1] -= .1f; walk(&w, eye, root, 0, NATIVE, true, 33.3f);
+    CHECK(w.correction == 0 && w.c.jumps == 1);
+  }
+  /* Where jumps are not looked for the root's jump is not believed as a speed of the eye either: the frame after it,
+   * with jumps looked for again, is an ordinary frame. */
+  {
+    Walk w; begin_walk(&w);
+    float eye[3] = {.1f, 0, 1.6f}, root[3] = {0, 0, 0};
+    for (int i = 0; i < 12; ++i) { eye[1] -= .1f; root[1] -= .1f; walk(&w, eye, root, 0, NATIVE, false, 33.3f); }
+    eye[1] -= .1f; root[1] -= .7f; walk(&w, eye, root, 0, NATIVE, false, 33.3f);
+    CHECK(w.correction == 0 && w.c.reseats == 1);
+    eye[1] -= .1f; root[1] -= .1f; walk(&w, eye, root, 0, NATIVE, true, 33.3f);
+    CHECK(w.correction == 0 && w.c.jumps == 0);
   }
   printf("camera continuity: %d checks, %d failed\n", checks, failed);
   return failed != 0;

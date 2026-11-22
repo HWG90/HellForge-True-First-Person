@@ -208,13 +208,20 @@ void tfp_camera_set_orphan(bool on);
  * was, along the level view direction. */
 typedef struct TfpCameraOrphanStats { uint64_t frames, refused; float behind_m; } TfpCameraOrphanStats;
 void tfp_camera_orphan_stats(TfpCameraOrphanStats *out);
-typedef struct TfpCameraContinuityStats { uint64_t jumps, edges, restarts; float largest_m; } TfpCameraContinuityStats;
-/* Counts since the start; the largest correction carried since the last call. */
+typedef struct TfpCameraContinuityStats { uint64_t jumps, edges, restarts; float largest_m; uint64_t reseats; } TfpCameraContinuityStats;
+/* Counts since the start; the largest correction carried since the last call. reseats: frames in which the body
+ * root alone was re-seated (a jump in the root's frame with the eye going on evenly in the world; nothing taken up). */
 void tfp_camera_continuity_stats(TfpCameraContinuityStats *out);
 /* The trace: a State edge was just written. The presented frames of the next 500 ms, and the six before it that
  * were not yet handed out, are given to tfp_camera_trace_read (oldest first, each once). `ms` counts from the edge.
- * source: 1 head camera, 2 native view, 3 the last native argument repeated. */
-typedef struct TfpCameraTraceRow { float ms; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; } TfpCameraTraceRow;
+ * source: 1 head camera, 2 native view, 3 the last native argument repeated. root: the body root the eye was
+ * measured against. what: TFP_CAMERA_TRACE_* of the frame. */
+enum { TFP_CAMERA_TRACE_LOOKED = 1,  /* jumps within the camera were looked for */
+       TFP_CAMERA_TRACE_JUMP = 2,    /* a jump within the camera was taken up */
+       TFP_CAMERA_TRACE_EDGE = 4,    /* a change of camera was taken up */
+       TFP_CAMERA_TRACE_ROOT = 8,    /* the body root alone was re-seated: nothing taken up for it */
+       TFP_CAMERA_TRACE_RESTART = 16 /* the continuity started again (a teleport, a pause) */ };
+typedef struct TfpCameraTraceRow { float ms; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; float root[3]; uint32_t what; } TfpCameraTraceRow;
 void tfp_camera_trace_edge(void);
 uint32_t tfp_camera_trace_read(TfpCameraTraceRow *rows, uint32_t capacity);
 #endif

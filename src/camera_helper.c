@@ -230,7 +230,7 @@ static struct { bool known; uint32_t mask, kind, weapon, key; double until; } sm
 #define TRACE_RING 128u
 #define TRACE_BEFORE 6u   /* frames before the edge that are written with it */
 #define TRACE_MS 500.0
-typedef struct TraceFrame { double tick; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; } TraceFrame;
+typedef struct TraceFrame { double tick; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease, root[3]; uint32_t what; } TraceFrame;
 static struct { TraceFrame frames[TRACE_RING]; uint64_t head, sent; double edge, until; float last[3]; double last_tick; bool last_known, open; } trace;
 /* The native eye is not remembered for its weapon while it is being moved about (set in the native view). */
 static float eye_watch[3]; static bool eye_watch_known; static double eye_unsettled_until;
@@ -972,7 +972,7 @@ static bool smooth_detect(const Policy *p, uint32_t kind, uint32_t source, doubl
 /* The eye about to be presented, in the world; `root`/`root_basis` are the body root's position and axis rows.
  * True: `shown` differs from `wanted` and is what to present. Always records the frame for the trace. */
 static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const float *root, const float *root_basis, const float *wanted, double tick, float *shown) {
-  float wanted_relative[3] = {0}, relative[3] = {0}, correction = 0;
+  float wanted_relative[3] = {0}, relative[3] = {0}, correction = 0; uint32_t what = 0;
   for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
     wanted_relative[axis] += (wanted[component]-root[component])*root_basis[axis*3+component];
   memcpy(shown, wanted, 12);
@@ -984,16 +984,21 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
      * left the eye behind the head for up to half a second. On foot the head-frame jump of a swap is still taken up,
      * and native frames are as before. smooth_detect is called first: it keeps the watch on every frame. */
     const bool detect = smooth_detect(p, kind, source, tick) && !p->lock_down && !(source == SMOOTH_HEAD && p->lock_off_foot);
-    correction = tfp_continuity_step(&smooth, wanted_relative, source == SMOOTH_REPEAT ? SMOOTH_NATIVE : source, detect, p->full_ads, tick, p->c.max_gap_ms, &smooth_tuning, relative);
+    const uint64_t jumps = smooth.jumps, edges = smooth.edges, reseats = smooth.reseats, restarts = smooth.restarts;
+    /* The eye in the world goes with it: the root re-seated by itself is not the eye jumping (camera_continuity.h). */
+    correction = tfp_continuity_step_in(&smooth, wanted_relative, wanted, root_basis, source == SMOOTH_REPEAT ? SMOOTH_NATIVE : source, detect, p->full_ads, tick,
+                                        p->c.max_gap_ms, &smooth_tuning, relative);
     if (correction > 1e-6f && tfp_finite3(relative)) for (unsigned component = 0; component < 3; ++component) { shown[component] = root[component];
       for (unsigned axis = 0; axis < 3; ++axis) shown[component] += relative[axis]*root_basis[axis*3+component]; }
     else correction = 0;
+    what = (detect ? TFP_CAMERA_TRACE_LOOKED : 0u) | (smooth.jumps != jumps ? TFP_CAMERA_TRACE_JUMP : 0u) | (smooth.edges != edges ? TFP_CAMERA_TRACE_EDGE : 0u)
+        | (smooth.reseats != reseats ? TFP_CAMERA_TRACE_ROOT : 0u) | (smooth.restarts != restarts ? TFP_CAMERA_TRACE_RESTART : 0u);
   }
   if (atomic_load_explicit(&trace_on, memory_order_relaxed)) {
     TraceFrame *row = &trace.frames[trace.head++ % TRACE_RING];
     row->tick = tick; row->kind = kind; row->source = source; memcpy(row->eye, shown, 12); memcpy(row->wanted, wanted, 12);
     row->step = trace.last_known && tick >= trace.last_tick && tick-trace.last_tick <= p->c.max_gap_ms ? distance(shown, trace.last) : 0;
-    row->correction = correction;
+    row->correction = correction; memcpy(row->root, root, 12); row->what = what;
     row->entry_ease = p->entry.ease.active && p->entry.ease.duration > 0 ? (float)fmin(1.0, fmax(0.0, (tick-p->entry.ease.started)/p->entry.ease.duration)) : 1;
     if (trace.head-trace.sent > TRACE_RING) trace.sent = trace.head-TRACE_RING;
   }
@@ -1684,6 +1689,7 @@ void tfp_camera_continuity_stats(TfpCameraContinuityStats *out) {
   if (!host.lock_exclusive) return; /* before the host is supplied there is nothing to report */
   policy_acquire();
   out->jumps = smooth.jumps; out->edges = smooth.edges; out->restarts = smooth.restarts; out->largest_m = smooth.largest; smooth.largest = 0;
+  out->reseats = smooth.reseats;
   policy_release();
 }
 void tfp_camera_trace_edge(void) {
@@ -1707,6 +1713,7 @@ uint32_t tfp_camera_trace_read(TfpCameraTraceRow *rows, uint32_t capacity) {
     row->ms = (float)(frame->tick-trace.edge); row->kind = frame->kind; row->source = frame->source;
     memcpy(row->eye, frame->eye, 12); memcpy(row->wanted, frame->wanted, 12);
     row->step = frame->step; row->correction = frame->correction; row->entry_ease = frame->entry_ease;
+    memcpy(row->root, frame->root, 12); row->what = frame->what;
   }
   policy_release();
   return count;
