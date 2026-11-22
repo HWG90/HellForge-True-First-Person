@@ -547,7 +547,9 @@ jump detection after an event during 600 ms (300 before: walking out of an emote
 frame half a second after the view came back; 0.10 to 0.12 m then, 0.045 to 0.052 m now, four runs).
 
 In the game on feel.36: matrix 35 of 35, twice. A death from real damage (three injuries through the HD2 runtime)
-stayed at the head and came back after the respawn; a hit of 30 gave a 1.6 degree flinch. Open: a dive begun
-0.9 s after a swap measured 0.122 m in one frame; a dive alone leaves no trace to compare with, so whether that is
-the dive's own start or the wider watch softening it is not known.
+stayed at the head and came back after the respawn; a hit of 30 gave a 1.6 degree flinch. A dive begun 0.9 s after a swap first read as
+0.122 m in one frame; that was the judge: the trace stops half a second after an edge and starts again at the next,
+and `matrix.judge` compared the frames on either side of the pause. It no longer does (`GAP_MS`); the same dive is
+0.042 to 0.057 m (three runs). Numbers before this date for phases that span two trace windows may be too high for
+the same reason.
 

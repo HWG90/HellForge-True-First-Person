@@ -68,6 +68,14 @@ def log_path():
     return sessions[-1] / "mod-goose.true-first-person.log"
 
 
+GAP_MS = 80   # the trace counts milliseconds from its edge; two traced frames further apart than this are not consecutive (30 frames a second in the harness)
+
+
+def _pop(rows):
+    steps = [sum((x - y) ** 2 for x, y in zip(a[2], b[2])) ** 0.5 for a, b in zip(rows, rows[1:])]
+    return max([0.0] + [abs(q - s) for s, q in zip(steps, steps[1:])])
+
+
 def judge(lines, toggles=False):
     held = other = missed = 0
     kick = jump = 0.0
@@ -89,8 +97,16 @@ def judge(lines, toggles=False):
     import trace as trace_reader
     pop, traced = 0.0, False
     for _, rows in trace_reader.windows(lines):
-        steps = [sum((x - y) ** 2 for x, y in zip(a[2], b[2])) ** 0.5 for a, b in zip(rows, rows[1:])]
-        pop = max([pop] + [abs(q - s) for s, q in zip(steps, steps[1:])]); traced = True
+        traced = True
+        # The trace stops half a second after an edge and starts again at the next: frames on either side of such a
+        # pause are not neighbours (a dive begun inside one window and over before the next read as 0.12 m).
+        run = [rows[0]] if rows else []
+        for a, b in zip(rows, rows[1:]):
+            if b[0] - a[0] > GAP_MS or b[0] < a[0]:
+                pop = max(pop, _pop(run)); run = [b]
+            else:
+                run.append(b)
+        pop = max(pop, _pop(run))
     if traced:
         jump = pop
     ok = held > 0 and missed == 0 and (jump < (POP_M if traced else LIMIT_M) or toggles) and not refused   # F11 itself is a cut by design
