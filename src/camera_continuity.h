@@ -25,6 +25,25 @@
  *    (Not the eye's speed in the world: that turns with the body, its average lags behind in a fast turn, and the
  *    lag passed for the root's part, so that part of a genuine re-seat was shown at once: 0.26 m of step change for
  *    0.17 m, the eye 0.8 m ahead of a root turning at 12 rad/s.)
+ *  - THE TURNING. The root's frame is right for an eye that goes round with the root, and only for that. Seen in
+ *    the soak of 2026-11-22 on 0.6.0-feel.39 (tests/reference/soak-6-steps.h):
+ *    a body that began to sprint turned its axes by 0.26 rad in one frame; what had been taken up the frame before
+ *    was kept against the root, and the presented eye, 0.87 m from the root, went round with the axes: 0.176 m in
+ *    a frame the root moved 0.041 m. And a root that turned on the spot at 10 rad/s after a landing, the rig eye
+ *    standing in the world 0.6 m from it: in the root's frame that eye goes round, each frame's step is off the last
+ *    by 0.6 m times the turn squared, more than the measure; jump after jump was taken up, 0.61 m was carried, and
+ *    the presented eye went 0.06 m a frame while the wanted one stood. So every step is read a second way as well,
+ *    with the root's turning left out: the eye against the root's place (its place on its course, if the root was
+ *    re-seated) along the world's axes, against that eye's own speed, kept and averaged as the other is. A frame is
+ *    read that way, and what is carried and the eye's speed then keep their direction in the world, when
+ *      - the root's axes are off their even course by more than the measure, seen at the eye, and the step is a jump
+ *        both ways or a change of camera: what is taken up is the step without the turning, and the presented eye
+ *        goes on against the root's place, not round with its axes; or
+ *      - the eye has not gone round with the root of late: the wanted eye's step changed more from frame to frame
+ *        in the root's frame than without the turning, by half the measure on average over 100 ms. An
+ *        eye that goes round with a root turning evenly, however fast, is the other way about (its step changes
+ *        more without the turning) and is read in the root's frame as before, a re-seat in a turn too.
+ *    In a frame the axes are off their course what is carried keeps its direction in the world whatever the step.
  *  - A jump is a frame whose step differs from the wanted eye's own recent speed by more than
  *    max(pop_m, pop_accel * dt * dt). A change of source takes up any difference. Jumps within a source are looked
  *    for only where the caller says so (`detect`: the short time after something that can re-seat the rig); anywhere
@@ -63,6 +82,11 @@ typedef struct TfpContinuity {
   bool placed, coursed;                  /* last frame's root is known (tfp_continuity_step_in); so is its course */
   float root[3], basis[9];               /* last frame: the root in the world and its axis rows */
   float root_speed[3], root_along[3], spin[3]; /* the root's course: its speed in the world and along its own axes (m/s), its turning (rad/s, about its axes) */
+  bool loose;                            /* loose_speed is known */
+  float loose_speed[3];                  /* the wanted eye's speed against the root's place, along the world's axes (m/s): THE TURNING */
+  bool stepped;                          /* last frame's steps are known: */
+  float held_step[3], loose_step[3];     /* as speeds (m/s), in the root's frame and with the turning left out */
+  float held_off, loose_off;             /* how much the step changed from frame to frame of late (m, over 100 ms), read each way */
   bool tried;                            /* last frame the root was off its course: what it did then, should it prove a new course */
   float tried_speed[3], tried_along[3], tried_spin[3];
   uint64_t jumps, edges, restarts;       /* taken up within a source; at a change of source; started again */
@@ -111,11 +135,12 @@ static inline void tfp_continuity_turned(const float *angle, float *turn) {
   }
 }
 /* The root's part of this frame's eye (in the root's frame) for one course: `spin`, and `speed` in the world or
- * `along` the root's axes. `even`: the axis rows of the root on that course. Returns the part's length. */
+ * `along` the root's axes. `even`, `root`: the axis rows and the place of the root on that course. Returns the part's
+ * length. */
 static inline float tfp_continuity_part(const TfpContinuity *c, const float *spin, const float *speed, bool along, const float *wanted,
-                                        const float *world, float dt, float *even, float *part) {
+                                        const float *world, float dt, float *even, float *root, float *part) {
   const float angle[3] = {spin[0]*dt, spin[1]*dt, spin[2]*dt};
-  float turn[9], root[3];
+  float turn[9];
   tfp_continuity_turned(angle, turn);
   for (unsigned i = 0; i < 9; ++i) even[i] = 0;
   for (unsigned a = 0; a < 3; ++a) for (unsigned b = 0; b < 3; ++b) for (unsigned k = 0; k < 3; ++k) even[a*3+k] += turn[a*3+b]*c->basis[b*3+k];
@@ -166,7 +191,7 @@ static inline float tfp_continuity_believed(const TfpContinuity *c, unsigned axi
 }
 /* One presented frame. `wanted`: the eye the helper would present, in the body's frame. `world`, `basis`: the same
  * eye in the world and the body root's axis rows (wanted = basis times (world - root)), or both NULL where the
- * world is not known: the root is then taken to move evenly. `source`: which camera
+ * world is not known: the root is then taken to move evenly and to carry the eye round with it. `source`: which camera
  * gave it. `detect`: jumps within a source are looked for (the native view); false: only a change of source is
  * taken up (the head camera, whose eye turns about the head with the view). Returns the correction's length;
  * `out` is the eye to present. */
@@ -198,36 +223,83 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
   float size = tfp_continuity_length(difference);
   const float measure = fmaxf(t->pop_m, t->pop_accel*dt*dt);
   /* The root's part of the step (see THE COMPARISON above), in the root's present axes. */
-  float root[3] = {0}, moved[3] = {0}, turn[9] = {0}, part_size = 0; const bool placed = world && c->placed; bool reseated = false;
+  float root[3] = {0}, moved[3] = {0}, turn[9] = {0}, part_size = 0, swing_size = 0, even_root[3] = {0};
+  const bool placed = world && c->placed; bool reseated = false;
   if (placed) {
-    tfp_continuity_root(wanted, world, basis, root);
+    tfp_continuity_root(wanted, world, basis, root); memcpy(even_root, root, sizeof root);
     for (unsigned a = 0; a < 3; ++a) for (unsigned b = 0; b < 3; ++b) for (unsigned k = 0; k < 3; ++k) turn[a*3+b] += basis[a*3+k]*c->basis[b*3+k];
     for (unsigned a = 0; a < 3; ++a) for (unsigned k = 0; k < 3; ++k) moved[a] += (root[k]-c->root[k])*basis[a*3+k];
   }
+  float rest[3] = {0}, off[9] = {0}, rest_size = size; bool reseat = false;
   if (placed && c->coursed) {
     /* The course that fits this frame best. One that the root took up only last frame, in a frame it was off its
      * course, counts once it is kept: that was a new speed (a throw), not a re-seat, and it is the course from here. */
-    float even[9] = {0}, part[3] = {0}, rest[3], off[9] = {0}; unsigned best = 0;
+    float even[9] = {0}, part[3] = {0}, at[3] = {0}, swing[3]; unsigned best = 0;
     for (unsigned course = 0; course < (c->tried ? 4u : 2u); ++course) {
-      float axes[9], its[3];
+      float axes[9], its[3], place[3];
       const float length = tfp_continuity_part(c, course < 2 ? c->spin : c->tried_spin, course == 0 ? c->root_speed : course == 1 ? c->root_along
-                                               : course == 2 ? c->tried_speed : c->tried_along, course & 1, wanted, world, dt, axes, its);
+                                               : course == 2 ? c->tried_speed : c->tried_along, course & 1, wanted, world, dt, axes, place, its);
       if (course && !(length < part_size)) continue;
-      part_size = length; best = course; memcpy(even, axes, sizeof even); memcpy(part, its, sizeof part);
+      part_size = length; best = course; memcpy(even, axes, sizeof even); memcpy(part, its, sizeof part); memcpy(at, place, sizeof at);
     }
+    /* how far the root's axes alone are off their course, seen at the eye (the root where it is) */
+    for (unsigned a = 0; a < 3; ++a) { swing[a] = wanted[a]; for (unsigned k = 0; k < 3; ++k) swing[a] -= (world[k]-root[k])*even[a*3+k]; }
+    swing_size = tfp_continuity_length(swing);
     if (best >= 2) for (unsigned i = 0; i < 3; ++i) { c->root_speed[i] = c->tried_speed[i]; c->root_along[i] = c->tried_along[i]; c->spin[i] = c->tried_spin[i]; }
     for (unsigned i = 0; i < 3; ++i) rest[i] = difference[i]-part[i];
-    const float rest_size = tfp_continuity_length(rest);
-    if (!edge && c->moving && isfinite(rest_size) && size > measure && part_size > measure && rest_size < size) {
-      /* The root re-seated. What is carried, and the eye's speed, keep their direction in the world: they are
-       * turned by as much as the root's axes are off their even course. */
-      for (unsigned a = 0; a < 3; ++a) for (unsigned b = 0; b < 3; ++b) for (unsigned k = 0; k < 3; ++k) off[a*3+b] += basis[a*3+k]*even[b*3+k];
-      tfp_continuity_turn(off, c->from); tfp_continuity_turn(off, c->from_speed); tfp_continuity_turn(off, c->speed);
-      for (unsigned i = 0; i < TFP_CONTINUITY_SPEED_FRAMES; ++i) tfp_continuity_turn(off, c->recent[i]);
-      tfp_continuity_curve(c, tick, value, speed);
-      for (unsigned i = 0; i < 3; ++i) { expected[i] = c->speed[i]*dt; difference[i] = rest[i]; step[i] = expected[i]+rest[i]; }
-      size = rest_size; ++c->reseats; reseated = true;
+    rest_size = tfp_continuity_length(rest);
+    /* The root re-seated: the step is measured against the root on its course. */
+    reseat = !edge && c->moving && isfinite(rest_size) && size > measure && part_size > measure && rest_size < size;
+    if (reseat) { memcpy(even_root, at, sizeof at);
+      for (unsigned a = 0; a < 3; ++a) for (unsigned b = 0; b < 3; ++b) for (unsigned k = 0; k < 3; ++k) off[a*3+b] += basis[a*3+k]*even[b*3+k]; }
+    else rest_size = size;
+  }
+  /* The same step with the root's turning left out (THE TURNING above): against the root's place (on its course, if
+   * it was re-seated), along the world's axes, here turned into the root's present ones. */
+  float loose[3] = {0}, free_step[3] = {0}, held_step[3], loose_size = rest_size; bool freely = false;
+  for (unsigned i = 0; i < 3; ++i) held_step[i] = reseat ? c->speed[i]*dt+rest[i] : step[i]; /* the step in the root's frame, a re-seated root on its course */
+  if (placed) {
+    for (unsigned k = 0; k < 3; ++k) { free_step[k] = world[k]-even_root[k]; for (unsigned a = 0; a < 3; ++a) free_step[k] -= c->wanted[a]*c->basis[a*3+k]; }
+    if (c->loose && (c->moving || edge)) {
+      for (unsigned a = 0; a < 3; ++a) for (unsigned k = 0; k < 3; ++k) loose[a] += (free_step[k]-c->loose_speed[k]*dt)*basis[a*3+k];
+      loose_size = tfp_continuity_length(loose);
+      /* The frame is read without the turning when the axes left their course in it and the step is a jump either
+       * way (or a change of camera), or when the eye has not gone round with the root of late. How the step changed
+       * from the last frame's, each way, says which: the wanted eye's steps as they are, not measured against a speed
+       * the filter kept (a run of jumps keeps one, and in a body thrown while it turns the two kept speeds part by
+       * themselves). */
+      const bool swung = !reseat && swing_size > measure, both = rest_size > measure && loose_size > measure;
+      if (!edge && c->stepped) {
+        float held[3], free[3]; const float fade = 1-expf(-dt/.1f);
+        for (unsigned i = 0; i < 3; ++i) { held[i] = held_step[i]-c->held_step[i]*dt; free[i] = free_step[i]-c->loose_step[i]*dt; }
+        const float held_size = tfp_continuity_length(held), free_size = tfp_continuity_length(free);
+        if (isfinite(held_size) && isfinite(free_size)) { c->held_off += (held_size-c->held_off)*fade; c->loose_off += (free_size-c->loose_off)*fade; }
+      }
+      const bool apart = !edge && rest_size > measure && c->held_off-c->loose_off > measure/2;
+      freely = isfinite(loose_size) && (apart || (swung && (edge || both)));
+      if (freely || swung) { /* what is carried does not go round with the axes */
+        tfp_continuity_turn(turn, c->from); tfp_continuity_turn(turn, c->from_speed);
+        tfp_continuity_curve(c, tick, value, speed);
+      }
+      if (freely) { /* nor does the eye's speed: it keeps its direction in the world */
+        tfp_continuity_turn(turn, c->speed);
+        for (unsigned i = 0; i < TFP_CONTINUITY_SPEED_FRAMES; ++i) tfp_continuity_turn(turn, c->recent[i]);
+        for (unsigned i = 0; i < 3; ++i) { expected[i] = c->speed[i]*dt; difference[i] = loose[i]; step[i] = expected[i]+loose[i]; }
+        size = loose_size;
+      }
     }
+  }
+  if (placed) { c->stepped = !edge;
+    for (unsigned i = 0; i < 3; ++i) { c->held_step[i] = held_step[i]/dt; c->loose_step[i] = free_step[i]/dt; } }
+  if (reseat) { ++c->reseats; reseated = true; }
+  if (reseat && !freely) {
+    /* What is carried, and the eye's speed, keep their direction in the world: they are turned by as much as the
+     * root's axes are off their even course. */
+    tfp_continuity_turn(off, c->from); tfp_continuity_turn(off, c->from_speed); tfp_continuity_turn(off, c->speed);
+    for (unsigned i = 0; i < TFP_CONTINUITY_SPEED_FRAMES; ++i) tfp_continuity_turn(off, c->recent[i]);
+    tfp_continuity_curve(c, tick, value, speed);
+    for (unsigned i = 0; i < 3; ++i) { expected[i] = c->speed[i]*dt; difference[i] = rest[i]; step[i] = expected[i]+rest[i]; }
+    size = rest_size;
   }
   if (!isfinite(size) || size > t->teleport_m) { /* a real teleport: nothing is carried across it */
     ++c->restarts; tfp_continuity_reset(c);
@@ -259,6 +331,7 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
       float fresh[3]; for (unsigned i = 0; i < 3; ++i) fresh[i] = tfp_continuity_believed(c, i, c->run+1);
       const float fast = tfp_continuity_length(fresh);
       if (fast > 8) for (unsigned i = 0; i < 3; ++i) fresh[i] *= 8/fast;
+      if (placed) for (unsigned k = 0; k < 3; ++k) for (unsigned a = 0; a < 3; ++a) c->loose_speed[k] += (fresh[a]-c->speed[a])*basis[a*3+k];
       for (unsigned i = 0; i < 3; ++i) { from_speed[i] += c->speed[i]-fresh[i]; c->speed[i] = fresh[i]; }
       rate = tfp_continuity_length(from_speed);
     }
@@ -277,7 +350,15 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
     const float fast = tfp_continuity_length(c->speed);
     if (fast > 8) for (unsigned i = 0; i < 3; ++i) c->speed[i] *= 8/fast;
     if (quiet && c->active && c->started+c->duration-tick > TFP_CONTINUITY_QUIET_MS) tfp_continuity_begin(c, value, speed, tick, TFP_CONTINUITY_QUIET_MS);
+    if (placed) { /* the speed with the turning left out, kept and averaged as the other is */
+      const float kept = loose_size > limit || !c->loose ? 1 : 1-expf(-dt/.05f);
+      for (unsigned i = 0; i < 3; ++i) c->loose_speed[i] += (free_step[i]/dt-c->loose_speed[i])*kept;
+      const float quick = tfp_continuity_length(c->loose_speed);
+      if (quick > 8) for (unsigned i = 0; i < 3; ++i) c->loose_speed[i] *= 8/quick;
+      c->loose = isfinite(quick);
+    }
   }
+  if (!placed) { c->loose = c->stepped = false; c->held_off = c->loose_off = 0; }
   if (placed) {
     /* The root's course. A root that is off it by more than the measure without the eye jumping against it has a
      * new speed (the body thrown, a dive), believed at once. A root re-seated keeps the course it had; what it did

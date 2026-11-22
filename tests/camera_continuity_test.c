@@ -2,6 +2,7 @@
  * correction ends. The figures in the comments are the game's, from the feel.22 session of 2026-11-22. */
 #include "camera_continuity.h"
 #include <stdio.h>
+#include "reference/soak-6-steps.h"
 static int checks, failed;
 #define CHECK(c) do { ++checks; if (!(c)) { ++failed; printf("FAILED line %d: %s\n", __LINE__, #c); } } while (0)
 static const TfpContinuityTuning T = TFP_CONTINUITY_DEFAULT;
@@ -75,6 +76,36 @@ static void turning(bool thrown, int way, float ahead, float v, float w, float d
     if (correction > *carried) *carried = correction;
     memcpy(two, one, sizeof two); memcpy(one, shown, sizeof one);
   }
+}
+/* Logged frames (tests/reference/soak-6-steps.h) through the filter: from frame `from` on, the most the presented
+ * eye's step in the world changes from one frame to the next beyond what the body root's own step changes by, the
+ * largest such change itself, and the most carried. */
+typedef struct Soak { float beyond, change, carried, logged_change; } Soak;
+static Soak soak(const SoakFrame *frames, int count, int from) {
+  TfpContinuity c; memset(&c, 0, sizeof c);
+  Soak s = {0, 0, 0, 0}; float shown[3] = {0}, step = 0, root_step = 0, logged_step = 0;
+  for (int i = 0; i < count; ++i) {
+    const SoakFrame *f = &frames[i]; float relative[3] = {0}, out[3], world[3];
+    for (int a = 0; a < 3; ++a) for (int k = 0; k < 3; ++k) relative[a] += (f->wanted[k]-f->root[k])*f->axes[a*3+k];
+    const float carried = tfp_continuity_step_in(&c, relative, f->wanted, f->axes, (uint32_t)f->source, f->looked != 0, false, 1000.0+(double)f->ms, 250, &T, out);
+    for (int k = 0; k < 3; ++k) { world[k] = f->root[k]; for (int a = 0; a < 3; ++a) world[k] += out[a]*f->axes[a*3+k]; }
+    if (i) {
+      float d = 0, r = 0, l = 0;
+      for (int k = 0; k < 3; ++k) { d += (world[k]-shown[k])*(world[k]-shown[k]); r += (f->root[k]-f[-1].root[k])*(f->root[k]-f[-1].root[k]);
+        l += (f->logged[k]-f[-1].logged[k])*(f->logged[k]-f[-1].logged[k]); }
+      d = sqrtf(d); r = sqrtf(r); l = sqrtf(l);
+      if (i > from) {
+        const float change = fabsf(d-step), beyond = change-fabsf(r-root_step);
+        if (change > s.change) s.change = change;
+        if (beyond > s.beyond) s.beyond = beyond;
+        if (fabsf(l-logged_step) > s.logged_change) s.logged_change = fabsf(l-logged_step);
+        if (carried > s.carried) s.carried = carried;
+      }
+      step = d; root_step = r; logged_step = l;
+    }
+    memcpy(shown, world, sizeof world);
+  }
+  return s;
 }
 int main(void) {
   Run r;
@@ -485,6 +516,37 @@ int main(void) {
     const float carried = tfp_continuity_step(&c, rig, 2, true, false, tick, 100, &T, out);
     CHECK(fabsf(out[0]-eye[0]) < .005f && fabsf(out[1]-eye[1]) < .005f && fabsf(out[2]-eye[2]) < .005f);
     CHECK(carried > 1.15f && carried < 1.19f);
+  }
+  /* The three largest steps of the soak of 2026-11-22 on 0.6.0-feel.39 (tests/reference/soak-6-steps.h; the root's
+   * axes there are fitted, the log did not carry them). In all three the body root's axes turned while something was
+   * carried or taken up, and the presented eye, kept against the root, went round with them:
+   *  - 22:38:05.662, head-camera frames inside a swap: 0.149 m of the eye taken up while the body stood; in the next
+   *    frame the body began to sprint and its axes turned by 0.26 rad in that one frame. The presented eye, 0.87 m
+   *    from the root, went 0.176 m in a frame the root moved 0.041 m.
+   *  - 22:33:17.3 to .7, the native view after a hold ended on a landing: the root turned on the spot at about
+   *    10 rad/s for a third of a second while the rig eye stood in the world 0.6 m from it. In the root's frame the
+   *    eye went round, every frame's step off the last by more than the measure: jump after jump, 0.61 m carried in
+   *    the end, and 0.139 m in the frame the turning stopped.
+   *  - 22:28:33.416, head-camera frames after a change of camera: the eye 1.68 m from a root whose axes turned by
+   *    0.09 to 0.17 rad a frame; 0.048 then 0.141 m, which is 0.047 m beyond the root's own change of step.
+   * The presented eye's step does not change by more than 0.05 m in a frame beyond what the root's own step does
+   * (the filter of feel.39 on these frames: 0.133 m, 0.236 m with 0.617 m carried, and 0.047 m). */
+  {
+    const Soak sprint = soak(soak6_sprint_in_swap, (int)(sizeof soak6_sprint_in_swap/sizeof *soak6_sprint_in_swap), 2);
+    printf("soak 6, sprint begun inside a swap: step change at most %.3f m (the log: %.3f m), %.3f m beyond the root's own, %.3f m carried\n",
+           (double)sprint.change, (double)sprint.logged_change, (double)sprint.beyond, (double)sprint.carried);
+    CHECK(sprint.beyond < .05f);
+    /* from the frame the hold ended in; before it the body falls and nothing is looked for */
+    const Soak turn = soak(soak6_turn_after_hold, (int)(sizeof soak6_turn_after_hold/sizeof *soak6_turn_after_hold), 7);
+    printf("soak 6, the root turning on the spot after a hold: step change at most %.3f m (the log: %.3f m), %.3f m beyond the root's own, %.3f m carried\n",
+           (double)turn.change, (double)turn.logged_change, (double)turn.beyond, (double)turn.carried);
+    CHECK(turn.beyond < .05f);
+    CHECK(turn.carried < .25f);
+    /* from the change of camera (22:28:33.316) on */
+    const Soak camera = soak(soak6_after_camera_change, (int)(sizeof soak6_after_camera_change/sizeof *soak6_after_camera_change), 16);
+    printf("soak 6, after a change of camera: step change at most %.3f m (the log: %.3f m), %.3f m beyond the root's own, %.3f m carried\n",
+           (double)camera.change, (double)camera.logged_change, (double)camera.beyond, (double)camera.carried);
+    CHECK(camera.beyond < .03f);
   }
   printf("camera continuity: %d checks, %d failed\n", checks, failed);
   return failed != 0;
