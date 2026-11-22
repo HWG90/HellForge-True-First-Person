@@ -498,6 +498,34 @@ TfpOpsResult tfp_ops_snapshot(TfpOps *b, TfpOpsSnapshot *out, TfpOpsText *why) {
 TfpOpsResult tfp_ops_player_snapshot(TfpOps *b, TfpOpsSnapshot *out, TfpOpsText *why) { return taken(b, TAKE_PLAYER, out, why); }
 TfpOpsResult tfp_ops_pin_player_snapshot(TfpOps *b, TfpOpsSnapshot *out, TfpOpsText *why) { return taken(b, TAKE_PIN, out, why); }
 
+/* ---- the action hold's view (not in retail; backend_ops.h) --------------------------------- */
+#define B_AVATAR_PHYSICS UINT32_C(0x547844) /* src/arm_drive.c B_AVATAR_PHYSICS: a byte per avatar, stride 0x78, bit 0x10 = ragdoll */
+TfpOpsResult tfp_ops_hold_snapshot(TfpOps *b, TfpOpsHold *out, TfpOpsText *why) {
+  TfpOpsHold h;
+  uint8_t physics = 0, entry[20];
+  uint64_t wield = 0, rows = 0, owner = 0;
+  uint32_t index = 0, weapon = 0;
+  none(why);
+  memset(&h, 0, sizeof h);
+  if (!take(b, TAKE_PLAYER, &h.player)) return say(why, TFP_OPS_NIL, b->why);
+  if (!rd(b, h.player.avatar_owner + B_AVATAR_PHYSICS + (uint64_t)h.player.avatar_index * 0x78, &physics, 1)) return say(why, TFP_OPS_NIL, b->why);
+  h.ragdoll = (physics & 0x10) != 0;
+  /* The wield row as _snapshot reads it (:240-246); here a row that cannot be read is empty hands, not a failure. */
+  if (ptr(b, h.player.base + FP_WIELD, &wield) && map(b, wield + 0x30, h.player.avatar, 4096, &index) && ptr(b, wield + 0x48, &rows) &&
+      ptr(b, rows + (uint64_t)index * 8, &owner) && rd(b, owner, entry, sizeof entry) && !memcmp(entry, h.player.avatar_descriptor, 20) &&
+      ptr(b, wield + 0x60, &rows) && u32(b, rows + (uint64_t)index * 0x1d0, &weapon) && valid_id(weapon))
+    h.wielded = weapon;
+  if (b->host->foreign_camera) { /* as the full snapshot: a raise is not an answer, TRUE is another owner */
+    TfpOpsText text;
+    none(&text);
+    TfpOpsForeign foreign = b->host->foreign_camera(b->host->user, &text);
+    if (foreign == TFP_OPS_FOREIGN_RAISED) return say(why, TFP_OPS_NIL, text.text);
+    h.foreign_camera = foreign == TFP_OPS_FOREIGN_TRUE;
+  }
+  *out = h;
+  return TFP_OPS_TRUE;
+}
+
 /* ---- _alignment_executable (:688) -------------------------------------------------------- */
 /* the three `executable` tables of profile.lua */
 enum { EXE_ALIGNMENT = TFP_OPS_EXECUTABLE_ALIGNMENT, EXE_POSE = TFP_OPS_EXECUTABLE_POSE, EXE_CAMERA = TFP_OPS_EXECUTABLE_CAMERA };

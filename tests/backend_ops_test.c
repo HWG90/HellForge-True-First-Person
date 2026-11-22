@@ -1005,6 +1005,59 @@ int main(int argc, char **argv) {
       failures++;
     }
   }
+  unsigned hold_worlds = 0;
+  { /* the action hold's view (not in retail): on every run's first image that has a safe player with a firearm */
+    static TfpOpsHost quiet;
+    quiet = host;
+    quiet.log = NULL, quiet.foreign_camera = NULL, quiet.camera_before_entry = NULL, quiet.placement_resolver = NULL, quiet.presentation_transition = NULL;
+    for (unsigned n = 0; n < run_count && !failures; n++) {
+      TfpOpsSnapshot full, again;
+      TfpOpsHold hold;
+      TfpOpsText why;
+      uint64_t wield = 0, rows = 0;
+      uint32_t index = 0;
+      const char *wrong = NULL;
+      run = ops_runs + n;
+      memset(&state, 0, sizeof state);
+      armed_count = 0;
+      first_image();
+      tfp_ops_init(&backend, &quiet, NULL, NULL);
+      if (tfp_ops_snapshot(&backend, &full, &why) != TFP_OPS_TRUE || !full.safe) continue;
+      uint64_t physics = full.avatar_owner + 0x547844 + (uint64_t)full.avatar_index * 0x78;
+      if (tfp_ops_hold_snapshot(&backend, &hold, &why) != TFP_OPS_NIL) wrong = "an unreadable ragdoll byte must be no answer";
+      poke(physics, 0x01);
+      if (!wrong && (tfp_ops_hold_snapshot(&backend, &hold, &why) != TFP_OPS_TRUE || !tfp_ops_same_player(&hold.player, &full) || hold.player.full ||
+                     !hold.player.safe || hold.ragdoll || hold.foreign_camera || hold.wielded != full.weapon ||
+                     hold.player.record != full.record || hold.player.camera_kind != full.camera_kind))
+        wrong = "a safe player with its firearm";
+      poke(full.controller, 2); /* an action */
+      if (!wrong && (tfp_ops_snapshot(&backend, &again, &why) != TFP_OPS_TRUE || again.safe)) wrong = "the full snapshot must be unsafe in an action";
+      if (!wrong && (tfp_ops_hold_snapshot(&backend, &hold, &why) != TFP_OPS_TRUE || hold.player.safe || hold.wielded != full.weapon ||
+                     !tfp_ops_same_player(&hold.player, &full)))
+        wrong = "an action: the same player, unsafe, the firearm still wielded";
+      if (!wrong && (!tfp_ops_ptr(&backend, full.base + 53634080ULL, &wield, &why) || !tfp_ops_map(&backend, wield + 0x30, full.avatar, 4096, true, &index, &why) ||
+                     !tfp_ops_ptr(&backend, wield + 0x60, &rows, &why)))
+        wrong = "the wield row of the test image";
+      if (!wrong) {
+        for (int i = 0; i < 4; i++) poke(rows + (uint64_t)index * 0x1d0 + (unsigned)i, 0); /* empty hands */
+        if (tfp_ops_snapshot(&backend, &again, &why) != TFP_OPS_NIL) wrong = "the full snapshot must fail with empty hands";
+        else if (tfp_ops_hold_snapshot(&backend, &hold, &why) != TFP_OPS_TRUE || hold.wielded || hold.player.safe ||
+                 !tfp_ops_same_player(&hold.player, &full))
+          wrong = "empty hands: still the player, nothing wielded";
+      }
+      poke(physics, 0x11);
+      if (!wrong && (tfp_ops_hold_snapshot(&backend, &hold, &why) != TFP_OPS_TRUE || !hold.ragdoll)) wrong = "the ragdoll bit";
+      if (wrong) {
+        fprintf(stderr, "hold view, run %s: %s (\"%s\")\n", run->name, wrong, why.present ? why.text : "");
+        failures++;
+      }
+      hold_worlds++;
+    }
+    if (!hold_worlds && !failures) {
+      fprintf(stderr, "hold view: no run starts with a safe full snapshot\n");
+      failures++;
+    }
+  }
   if (failures) {
     fprintf(stderr, "%u runs differ from retail\n", failures);
     return 1;
@@ -1017,5 +1070,7 @@ int main(int argc, char **argv) {
   printf("Backend operations (%s): %u runs, %u steps, %u method calls answered as retail's backend.lua (%s); %u engine calls and %u memory "
          "writes compared; %u runs with the presentation switch %s\n",
          object, run_count - skipped, steps, calls, BACKEND_OPS_VECTOR_COMMIT, natives, writes, skipped, presentation);
+  printf("Backend operations, hold view (not in retail): on %u first images: the player with a firearm, in an action, with empty hands, as a ragdoll\n",
+         hold_worlds);
   return 0;
 }

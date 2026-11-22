@@ -227,6 +227,11 @@ TfpOpsResult tfp_ops_camera_ready(TfpOps *b, TfpOpsText *why);
 TfpOpsResult tfp_ops_snapshot(TfpOps *b, TfpOpsSnapshot *out, TfpOpsText *why);            /* TRUE or NIL */
 TfpOpsResult tfp_ops_player_snapshot(TfpOps *b, TfpOpsSnapshot *out, TfpOpsText *why);
 TfpOpsResult tfp_ops_pin_player_snapshot(TfpOps *b, TfpOpsSnapshot *out, TfpOpsText *why);
+/* Not in retail: the action hold's view (controller.h TfpHoldView). The player snapshot, which needs no
+ * weapon, with what it does not carry: the avatar's ragdoll flag, what the wield row holds now (0: nothing
+ * readable or nothing in the hands) and whether another camera owns the view. Reads only. TRUE or NIL. */
+typedef struct TfpOpsHold { TfpOpsSnapshot player; bool ragdoll, foreign_camera; uint32_t wielded; } TfpOpsHold;
+TfpOpsResult tfp_ops_hold_snapshot(TfpOps *b, TfpOpsHold *out, TfpOpsText *why);
 TfpOpsResult tfp_ops_backpack(TfpOps *b, const TfpOpsSnapshot *s, TfpOpsBackpack *out, TfpOpsText *why); /* TRUE, NIL (none), RAISED */
 TfpOpsResult tfp_ops_camera_only_weapon(TfpOps *b, const TfpOpsSnapshot *s, TfpOpsText *why);
 TfpOpsResult tfp_ops_action_state(TfpOps *b, const TfpOpsSnapshot *s, TfpOpsAction *out, TfpOpsText *why); /* TRUE or NIL */
