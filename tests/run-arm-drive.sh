@@ -2,7 +2,8 @@
 # The arm drive with no game: the graft maths against the retired First Person Controller's own results on
 # poses recorded in the game (tests/arm_graft_test.c), and the drive on a fake player, body, rig and weapon
 # (tests/arm_drive_test.c). Where the retired tree and numpy exist (read only), the committed fixture is made
-# again and must come out the same, and all 120 recorded pose pairs are compared instead of every fourth.
+# again and must come out the same, all 120 recorded pose pairs are compared instead of every fourth, and the
+# resting weapon pose is played over all 120.
 set -euo pipefail
 TFP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TFP_CC="${CC:-cc}"
@@ -25,6 +26,8 @@ if [ -f "$TFP_RETIRED_FPC/work/live-d9c4c484/paired-arm-poses-0.3.34.npz" ] && p
   echo "arm graft: the committed fixture is what the retired functions produce today"
   python3 "$TFP_ROOT/tests/arm_graft_fixture.py" "$TFP_WORK/arm-graft-all.bin" --every 1 --retired "$TFP_RETIRED_FPC"
   "$TFP_WORK/arm_graft_o2" "$TFP_WORK/arm-graft-all.bin" | sed 's/^/all pairs: /'
+  # The resting weapon pose on every frame of the recording (tests/arm_drive_test.c test_rest_recorded).
+  ASAN_OPTIONS=detect_leaks=0 "$TFP_WORK/arm_drive" "$TFP_FIXTURE" "$TFP_WORK/arm-graft-all.bin" | sed 's/^/all pairs: /'
 else
   echo "arm graft: the retired tree's capture or numpy is not here; the committed fixture (every fourth pair) was used alone"
 fi

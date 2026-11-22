@@ -72,8 +72,9 @@ static bool smooth_wanted = true, trace_wanted = true;
 static bool mcm_wanted; /* test switch mcm_on.txt: the settings menu in DBF-MCM instead of the mod's own panel */
 /* The arm drive (src/arm_drive.h). arms_live: it is on (the Animated arms option, or its files). Test switches, files
  * beside the DLL read once at the start: arms_live_restore.txt makes it put the game's joint values back after every
- * draw instead of leaving them; arm_bend.txt makes it bend one shoulder instead of following the body. */
-static bool arms_live, arms_restore, arms_bend;
+ * draw instead of leaving them; arm_bend.txt makes it bend one shoulder instead of following the body; rest_trace.txt
+ * makes the "Rest:" line (the resting weapon pose, once a second) come every tick. */
+static bool arms_live, arms_restore, arms_bend, arms_rest_trace;
 /* The action hold (docs/design/ACTION-CAMERA.md "Action hold") is on: the Weapon put-away option, or its files.
  * While it is off none of the hold's code is reached. */
 static bool hold_lease;
@@ -493,6 +494,7 @@ static void arms_start(void) {
   if ((arms_live || arms_bend) && arms_restore) say("Test: arms_live_restore.txt: the rig's own joint values are put back after every primary draw");
   else if (arms_live || arms_bend) say("Arms: written joint values stay until the next frame, where the game's own are recovered (a file "
                                        "arms_live_restore.txt beside the DLL puts them back after every draw instead)");
+  if (arms_live && arms_rest_trace) say("Test: rest_trace.txt: the \"Rest:\" line of the resting weapon pose comes every tick instead of once a second");
   const char *why = tfp_render_slot_contract();
   if (why) {
     snprintf(arms_refusal, sizeof arms_refusal, "%s", why);
@@ -512,6 +514,39 @@ static void arms_tick(void) {
   const bool wanted = (arms_live || arms_bend) && wire.controller.enabled;
   tfp_render_slot_tick();
   tfp_arm_drive_set(wanted, arms_restore, 1.0f);
+  { /* The resting weapon pose (src/arm_drive.h): the clock, whether this tick is a rest and in which stance, and the body's layer states.
+     * The action alone is not a rest: a walk, hip fire, an ammo check and a melee are "idle" to it (src/action_select.c), and in the game
+     * a reload was too. So also: the speed over the ground, the look pitch and the fire button (the left mouse button: the game's key
+     * bindings are not read, so fire on another key is not seen). An ammo check, a melee and a reload that the game does not flag are
+     * told from a rest by nothing here; the drive's own rule is for them (a measurement is kept only when a second one confirms it). */
+    const TfpMotionRuntime *motion = tfp_wire_motion_runtime(&wire);
+    const bool live = motion && motion->state.phase == TFP_MOTION_PHASE_ACTIVE && wire.log.has_lease && !wire.controller.holding;
+    const TfpAct act = live ? motion->state.action : TFP_ACT_NONE;
+    TfpArmRestSample sample = {.stance = act == TFP_ACT_IDLE ? TFP_ARM_REST_STAND : act == TFP_ACT_CROUCH ? TFP_ARM_REST_CROUCH
+                                         : act == TFP_ACT_PRONE ? TFP_ARM_REST_PRONE : TFP_ARM_REST_NONE,
+                               .fire = tfp_win_focused() && tfp_win_key_down(VK_LBUTTON)};
+    if (live) {
+      sample.has_speed = motion->state.has_speed, sample.speed = motion->state.speed;
+      sample.has_pitch = motion->model.has_previous, sample.pitch = motion->model.previous.pitch; /* of the model's last sample: the camera's forward */
+      sample.has_layers = motion->state.has_l1 && motion->state.has_l3 && motion->state.has_l14;
+      sample.l1 = motion->state.l1, sample.l3 = motion->state.l3, sample.l14 = motion->state.l14;
+    }
+    static uint64_t told, next_rest;
+    uint32_t key = 0;
+    unsigned why = 0;
+    const unsigned rest = tfp_arm_drive_rest_of(&sample, &key, &why);
+    TfpArmDriveStats a;
+    tfp_arm_drive_set_rest(now, rest, key);
+    tfp_arm_drive_set_rest_why(why);
+    tfp_arm_drive_stats(&a);
+    if (a.align.count != told) told = a.align.count, say("Arms: %s", tfp_arm_drive_align_line(&a.align));
+    if (arms_rest_trace || now >= next_rest) { /* once a second; with rest_trace.txt every tick that had a driven frame */
+      TfpArmDriveRest seen;
+      next_rest = now + 1000;
+      tfp_arm_drive_rest_take(&seen);
+      if (seen.frames) say("Rest: %s", tfp_arm_drive_rest_line(&seen));
+    }
+  }
   if (wanted) {
     if (!tfp_render_slot_installed() && now >= next_try) {
       next_try = now + 500;
@@ -591,9 +626,9 @@ static void start(void) {
         mcm_wanted = mcm_file != NULL;
         if (mcm_wanted) say("Test: mcm_on.txt: the settings menu is registered with DBF-MCM (goose.mcm) instead of the mod's own panel");
 #ifdef TFP_FEEL
-        static const char *const arm_files[] = {"arms_live_restore.txt", "arm_bend.txt"};
-        bool *const arm_switches[] = {&arms_restore, &arms_bend};
-        for (int i = 0; i < 2; i++) {
+        static const char *const arm_files[] = {"arms_live_restore.txt", "arm_bend.txt", "rest_trace.txt"};
+        bool *const arm_switches[] = {&arms_restore, &arms_bend, &arms_rest_trace};
+        for (int i = 0; i < 3; i++) {
           strcpy(slash + 1, arm_files[i]);
           FILE *arm_file = fopen(parts_path, "r");
           if (arm_file) fclose(arm_file);
