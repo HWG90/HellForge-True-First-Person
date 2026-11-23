@@ -110,6 +110,9 @@ Bodycam 0.47  5.0  33.3 | 0.174  3 0.305 333 (333) 0.040 0.006 | 0.174  3 0.305 
 Bodycam 0.47  5.0  50.0 | 0.236  2 0.317 250 (250) 0.086 0.006 | 0.236  2 0.317 250 (250) 0.086 0.006
 ```
 
+The figures are with the continuity filter of this branch's base (d171321). With main's of the same day (86b9b0f, THE
+HITCH and THE TRIAL in it) the summary lines and the logged swaps come out the same.
+
 Over all 96 (0.07, 0.15, 0.25, 0.26, 0.37 and 0.47 m):
 `96 swaps: 132 frames taken up as jumps with retail's glide, 88 with the lock's; less is carried in 34, the same in 50, more in 12 (by 0.002 m more at most); the presented step changes by more in 0 (by 0.000 m more at most)`
 

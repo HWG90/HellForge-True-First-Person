@@ -324,7 +324,12 @@ static void gate(void) {
     for (int i = 0; i*FRAMES[f] < 300; ++i)
       CHECK(tfp_eye_glide_lock_step(&g, eye, far_away, dt) == tfp_eye_glide_step(&plain, other, far_away, dt) && same(eye, other));
     CHECK(same(eye, far_away));
-    /* An eye that is not where the last frame left it is a glide begun: settled anew, here retail's (0.60 m back). */
+    /* A gentle glide that is over and a new target: a glide begun from rest, settled anew. 0.60 m back to the
+     * start is retail's. */
+    memcpy(other, eye, 12);
+    CHECK(tfp_eye_glide_lock_step(&g, eye, START, dt) == tfp_eye_glide_retail(other, START, dt) && same(eye, other));
+    CHECK(fabs(apart(eye, far_away)-.60*(1-exp(-FRAMES[f]/70))) < 1e-4);
+    /* An eye that is not where the last frame left it is a glide begun: settled anew, here retail's (0.60 m). */
     memcpy(eye, START, 12); memcpy(other, START, 12);
     CHECK(tfp_eye_glide_lock_step(&g, eye, far_away, dt) == tfp_eye_glide_retail(other, far_away, dt) && same(eye, other));
     /* and once a retail glide moves no more, the next one is settled anew: a near target, gently */

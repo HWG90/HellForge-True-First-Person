@@ -145,11 +145,13 @@ static inline bool tfp_eye_glide_rest(TfpEyeGlide *g, float *value, float dt) {
 }
 /* One frame of the glide in a frame the camera lock holds: the gentle glide where the way is no more than
  * TFP_EYE_GLIDE_FAR_M when it begins, retail's where it is longer (GATE). Which of the two is settled when a glide
- * begins (from rest, or an eye that is not where the last frame left it) and holds until it is over: a gentle glide
- * whose target moves away stays gentle within its 300 ms, a retail one goes on as retail's until it moves no more. */
+ * begins (from rest: the first frame, an eye that is not where the last frame left it, a new target after a gentle
+ * glide that is over) and holds until it is over: a gentle glide whose target moves away while the eye is under way
+ * stays gentle within its 250 ms, a retail one goes on as retail's until it moves no more. */
 static inline bool tfp_eye_glide_lock_step(TfpEyeGlide *g, float *value, const float *target, float dt) {
   if (!tfp_finite3(value) || !tfp_finite3(target)) { tfp_eye_glide_reset(g); return false; }
-  if (!(g->active || g->retail) || value[0] != g->at[0] || value[1] != g->at[1] || value[2] != g->at[2]) {
+  const bool over = g->active && !(g->elapsed < g->duration) && (target[0] != g->target[0] || target[1] != g->target[1] || target[2] != g->target[2]);
+  if (!(g->active || g->retail) || over || value[0] != g->at[0] || value[1] != g->at[1] || value[2] != g->at[2]) {
     float square = 0;
     for (unsigned i = 0; i < 3; ++i) square += (target[i]-value[i])*(target[i]-value[i]);
     tfp_eye_glide_reset(g);
