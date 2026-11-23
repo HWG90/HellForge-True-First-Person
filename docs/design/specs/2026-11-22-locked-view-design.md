@@ -973,8 +973,8 @@ correction's step in that frame, both as vectors, which add up to the shown one 
 
 | Time | Vector | Lengths | Own | Curve | Root's change | Carried | Taken | What it is |
 |---|---|---|---|---|---|---|---|---|
-| 02:21:31.078 | 0.062 | 0.047 | 0.035 | 0.028 | 0.000 | 0.064 | `- - - - - - - edge - [-] jump - ` | C |
-| 02:21:31.445 | 0.064 | 0.062 | 0.048 | 0.015 | 0.000 | 0.000 | `- jump jump jump - - - - - [-] jump` | D |
+| 02:21:31.078 | 0.062 | 0.047 | 0.035 | 0.028 | 0.000 | 0.064 | `jump - - - - - - edge - [-] jump -` | C |
+| 02:21:31.445 | 0.064 | 0.062 | 0.048 | 0.015 | 0.000 | 0.000 | `- jump jump jump - - - - - [-] jump -` | D |
 | 02:21:44.166 | 0.060 | 0.060 | 0.056 | 0.004 | 0.000 | 0.075 | `- jump jump jump - - - jump - [-] - jump` | D |
 | 02:22:52.808 | 0.090 | 0.023 | 0.026 | 0.072 | 0.079 | 0.231 | `- - - - - - - jump root [jump+root] jump jump` | A |
 | 02:22:52.842 | 0.078 | 0.061 | 0.079 | 0.054 | 0.012 | 0.203 | `- - - - - - jump root jump+root [jump] jump -` | E |
@@ -982,7 +982,7 @@ correction's step in that frame, both as vectors, which add up to the shown one 
 | 02:29:59.622 | 0.063 | 0.063 | 0.068 | 0.010 | 0.004 | 0.033 | `- edge jump - - - - root root [-] jump jump` | E |
 | 02:31:12.739 | 0.066 | 0.052 | 0.006 | 0.072 | 0.000 | 0.055 | `jump - - - - - - jump jump [-] - -` | B |
 | 02:34:34.959 | 0.062 | 0.020 | 0.020 | 0.079 | 0.001 | 0.091 | `jump jump - jump jump - jump jump jump [-] - -` | B |
-| 02:30:34.577 (the tenth) | 0.061 | 0.060 | 0.069 | 0.129 | 0.011 | 0.170 | `- jump - jump - jump - jump jump [-] -` | D |
+| 02:30:34.577 (the tenth) | 0.061 | 0.060 | 0.069 | 0.129 | 0.011 | 0.170 | `- jump - jump - jump - jump jump [-] - -` | D |
 
 **By cause.**
 
@@ -1055,7 +1055,8 @@ E. *The body's own change of speed in one frame, the eye a frame later* (3: 02:2
    speed stands as in every frame of a run. 02:31:12.739: 0.066 to 0.028 m (0.018 m more carried); 02:34:34.959:
    0.062 to 0.027 m. Of the feel.40 soaks: 00:36:03.183 0.068 to 0.029 m, 00:33:35.314 0.074 to 0.051 m,
    00:33:35.513 0.085 to 0.046 m (0.06 m more carried), 00:39:30.882 0.063 to 0.028 m; four under the count as well
-   (0.051 to 0.054 m, now 0.019 to 0.039 m). No frame of the four logs got worse by more than 0.002 m.
+   (0.051 to 0.054 m, now 0.019 to 0.039 m). From change 1 to change 2 no step of 0.05 m or more in the four logs
+   grew by more than 0.002 m and none appeared.
    What it costs, made up at four frame times: a re-seat of 0.15 m and one more frame at 0.97 of the measure the
    same way, then rest: the step changed by 0.040, 0.042, 0.051 and 0.112 m (8, 16.7, 33.3, 50 ms a frame), now by
    0.001, 0.005, 0.016 and 0.029 m, with 0.027 to 0.063 m more carried and 32 to 100 ms longer to settle. When the
@@ -1132,11 +1133,11 @@ in the tests.
   correction carried are the game's own by any reading. The judge was left as it is, so the figures stay comparable.
 - E is the design, as before: handing the root's change of speed to the curve carries the eye into the ground on a
   landing (the feel.40 section).
-- Not looked into: the 16 left in soak 9 beyond the ones named above and in the feel.40 sections (00:24:56.788,
+- Not looked into: of the 16 left in soak 9, the nine that no section names a cause for (00:24:56.788,
   00:25:52.009, 00:27:08.298, 00:30:10.655, 00:30:53.355 and .421, 00:33:32.074, 00:37:57.933, 00:39:30.581).
-  00:30:53.355 and .421 (0.117 and 0.085 m with 0.97 m carried) come from a speed kept across a change of camera in
-  a sprint and are the next thing to look at.
+  00:30:53.355 and .421 (0.117 and 0.085 m with 0.97 m carried) look like a speed kept across a change of camera
+  in a sprint, read once in passing; they are the next thing to look at.
 
-Tests on the branch: `tests/run-camera-continuity.sh` 2,462 checks (2,396 on main, all unchanged), the other four
-`run-camera-*.sh` as on main (2,765, 229, 643, 260), the harness's python tests 24 (21 and the three for the
-probes), all 46 `tests/run-*.sh` pass, `build.sh --feel` builds. Nothing here has been run in the game.
+Tests on the branch: `tests/run-camera-continuity.sh` 2,462 checks (main's 2,396 unchanged and 66 new), the other
+four `run-camera-*.sh` pass (2,765, 229, 643 and 260 checks), the harness's python tests 24 (21 and the three for
+the probes), all 46 `tests/run-*.sh` pass, `build.sh --feel` builds. Nothing here has been run in the game.
