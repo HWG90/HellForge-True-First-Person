@@ -217,6 +217,104 @@ int main(void) {
       CHECK(fabsf(worst-.25f) < 1e-5f && within > 0 && within < 1200 && at1200 < .05f && apart(out, truth) < .001f);
     }
   }
+  /* A change of camera style while a lag is carried never moves the eye by itself. The limit in force goes down to
+   * the new style's at TFP_EYE_DAMP_LIMIT_M_S, and the time constant is not shortened before it is there; a limit
+   * that goes up, and a longer time constant, hold nothing back and are in force at once. */
+  {
+    const TfpCameraStyle bodycam = tfp_camera_style(true, 180), stable = tfp_camera_style(false, 180);
+    static const double rates[] = {30, 60, 144};
+    for (int r = 0; r < 3; ++r) {
+      const double dt = 1000.0/rates[r];
+      /* Stable, and the head drops 0.5 m in one frame: 0.25 m carried. Then Bodycam, [0] with the head staying
+       * there, [1] with the head going on down at 1 m a second, so the eye is pulled along at the limit. `stay` is
+       * the same camera left in Stable. Counted: the most the eye moves in one frame against the true eye (with a
+       * still head, the most it moves at all), and the same for `stay`. */
+      for (int going = 0; going < 2; ++going) {
+        TfpEyeDamp d, stay; tfp_eye_damp_reset(&d);
+        float eye[3] = {.03f, .24f, 1.54f}, out[3], kept[3];
+        tfp_eye_damp_follow(&d, eye, 5000, 250, stable.eye_damp_ms, stable.eye_lag_m, out);
+        eye[2] -= .5f;
+        float lag = tfp_eye_damp_follow(&d, eye, 5000+dt, 250, stable.eye_damp_ms, stable.eye_lag_m, out);
+        CHECK(fabsf(lag-.25f) < 1e-5f);
+        stay = d;
+        float most = 0, own = 0, first = 0, at300 = 9, behind[3], stay_behind[3];
+        for (int i = 0; i < 3; ++i) behind[i] = stay_behind[i] = out[i]-eye[i];
+        for (int i = 1; i*1000.0/rates[r] <= 1000; ++i) {
+          const double ms = i*1000.0/rates[r];
+          if (going) eye[2] -= (float)(dt/1000);
+          lag = tfp_eye_damp_follow(&d, eye, 5000+dt+ms, 250, bodycam.eye_damp_ms, bodycam.eye_lag_m, out);
+          tfp_eye_damp_follow(&stay, eye, 5000+dt+ms, 250, stable.eye_damp_ms, stable.eye_lag_m, kept);
+          CHECK(fabsf(lag-apart(out, eye)) < 1e-5f);
+          const float now[3] = {out[0]-eye[0], out[1]-eye[1], out[2]-eye[2]}, stay_now[3] = {kept[0]-eye[0], kept[1]-eye[1], kept[2]-eye[2]};
+          const float moved = apart(now, behind), stay_moved = apart(stay_now, stay_behind);
+          if (i == 1) first = moved;
+          if (moved > most) most = moved;
+          if (stay_moved > own) own = stay_moved;
+          if (ms >= 300 && at300 == 9) at300 = lag;
+          memcpy(behind, now, 12); memcpy(stay_behind, stay_now, 12);
+        }
+        printf("Stable to Bodycam with 0.25 m carried, %g frames a second, the head %s: %.4f m in the first frame, at most %.4f m in one frame "
+               "(Stable itself: %.4f m), %.4f m behind after 300 ms\n", rates[r], going ? "going on down" : "still", first, most, own, at300);
+        /* Stable's own follow from 0.25 m is 0.0227 m in a frame at 30 frames a second: the change adds nothing to it. */
+        CHECK(most <= (own > .02f ? own : .02f)+1e-6f);
+        CHECK(at300 <= bodycam.eye_lag_m+1e-5f && lag <= bodycam.eye_lag_m+1e-5f);
+        if (going) CHECK(fabsf(lag-bodycam.eye_lag_m) < 1e-5f); else CHECK(lag < .01f);
+      }
+      /* The other way: Bodycam with 0.10 m carried, then Stable. The eye moves no more in any frame than Bodycam
+       * itself would have moved it, and Stable's 0.25 m is the limit at once: a further drop is taken up to it. */
+      {
+        TfpEyeDamp d, stay; tfp_eye_damp_reset(&d);
+        float eye[3] = {.03f, .24f, 1.54f}, out[3], kept[3], before[3], stay_before[3];
+        tfp_eye_damp_follow(&d, eye, 5000, 250, bodycam.eye_damp_ms, bodycam.eye_lag_m, out);
+        eye[2] -= .5f;
+        float lag = tfp_eye_damp_follow(&d, eye, 5000+dt, 250, bodycam.eye_damp_ms, bodycam.eye_lag_m, out);
+        CHECK(fabsf(lag-.10f) < 1e-5f);
+        stay = d; memcpy(before, out, 12); memcpy(stay_before, out, 12);
+        bool more = false;
+        for (int i = 1; i <= 6; ++i) {
+          lag = tfp_eye_damp_follow(&d, eye, 5000+dt+i*dt, 250, stable.eye_damp_ms, stable.eye_lag_m, out);
+          tfp_eye_damp_follow(&stay, eye, 5000+dt+i*dt, 250, bodycam.eye_damp_ms, bodycam.eye_lag_m, kept);
+          if (apart(out, before) > apart(kept, stay_before)+1e-6f) more = true;
+          memcpy(before, out, 12); memcpy(stay_before, kept, 12);
+        }
+        CHECK(!more && lag > .03f);
+        eye[2] -= .5f;
+        CHECK(fabsf(tfp_eye_damp_follow(&d, eye, 5000+dt+7*dt, 250, stable.eye_damp_ms, stable.eye_lag_m, out)-.25f) < 1e-5f);
+      }
+      /* Bodycam with camera damping 0 while Stable carries 0.25 m: no damping is left, and the lag is let go, by
+       * what the 40 ms of tfp_eye_damp_release takes or by 0.55 m a second, whichever is less in that frame: never
+       * dropped in one frame, gone within 600 ms, and `release` itself is not changed by a bit. */
+      {
+        TfpEyeDamp d, plain; tfp_eye_damp_reset(&d);
+        float eye[3] = {.03f, .24f, 1.54f}, out[3], behind[3], other[3];
+        tfp_eye_damp_follow(&d, eye, 5000, 250, stable.eye_damp_ms, stable.eye_lag_m, out);
+        eye[2] -= .5f;
+        float lag = tfp_eye_damp_follow(&d, eye, 5000+dt, 250, stable.eye_damp_ms, stable.eye_lag_m, out), most = 0, first = 0; double gone = -1;
+        plain = d;
+        const float fast = tfp_eye_damp_release(&plain, 5000+2*dt, 250, other);
+        CHECK(fabsf(fast-.25f*expf(-(float)dt/TFP_EYE_DAMP_RELEASE_MS)) < 1e-6f); /* as it was */
+        for (int i = 1; i*1000.0/rates[r] <= 1000 && gone < 0; ++i) {
+          const float now = tfp_eye_damp_release_slowly(&d, 5000+dt+i*1000.0/rates[r], 250, behind);
+          CHECK(now <= lag && now >= fast*(i == 1)-1e-6f && fabsf(behind[0]) < 1e-6f && fabsf(behind[1]) < 1e-6f && behind[2] >= 0);
+          if (i == 1) first = lag-now;
+          if (lag-now > most && now > 0) most = lag-now;
+          if (!(now > 0)) gone = i*1000.0/rates[r];
+          lag = now;
+        }
+        printf("Stable to Bodycam at damping 0 with 0.25 m carried, %g frames a second: let go by %.4f m in the first frame (40 ms alone: %.4f m), "
+               "at most %.4f m in one frame, gone after %.0f ms\n", rates[r], first, .25f-fast, most, gone);
+        CHECK(most <= .02f && most <= TFP_EYE_DAMP_LIMIT_M_S*(float)dt/1000+1e-6f && gone > 300 && gone <= 600 && !d.known);
+        /* A lag small enough for the 40 ms to be the slower of the two: the same bits as `release`. */
+        TfpEyeDamp a, b; tfp_eye_damp_reset(&a);
+        float small[3] = {.03f, .24f, 1.54f};
+        tfp_eye_damp_follow(&a, small, 5000, 250, 180, .10f, out);
+        small[2] -= .01f;
+        tfp_eye_damp_follow(&a, small, 5000+dt, 250, 180, .10f, out);
+        b = a;
+        CHECK(tfp_eye_damp_release_slowly(&a, 5000+2*dt, 250, behind) == tfp_eye_damp_release(&b, 5000+2*dt, 250, other) && same(behind, other) && behind[2] > 0);
+      }
+    }
+  }
   printf("camera damp: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }
