@@ -7,7 +7,7 @@ Needs a harness session in a mission with player control; takes the keyboard and
 matrix.py checks; this looks for what one action leaves behind for the next: a frame out of first person, a camera
 step over POP_M between two traced frames, a refusal, the arm drive refusing, an action after which the view does
 not come back. Every action and what the judge said of its stretch of the log go to stdout; the seed repeats a run.
-The view is on at the start and is not toggled (toggling is a cut by design). No death: that ends the body.
+The view is switched on at the start if it is not, and is not toggled (toggling is a cut by design). No death: that ends the body.
 """
 import random
 import sys
@@ -27,12 +27,23 @@ OVERLAPS = [   # two inputs at once, as a player does
 ]
 
 
+def verdict(frames, flagged):
+    """The exit code: 2 when no frame was judged (the view was not on: nothing was looked at), 1 when flagged."""
+    if frames <= 0:
+        return 2
+    return 1 if flagged else 0
+
+
 def main(argv):
     minutes = float(argv[1]) if len(argv) > 1 else 10.0
     rng = random.Random(int(argv[2]) if len(argv) > 2 else 1)
     names = [n for n in matrix.PHASES if n not in SKIP]
+    if not drive.focus():
+        print("the game window could not be focused"); return 2
     d = drive.Input()
     log = matrix.log_path()
+    if "frames held" not in log.read_text(errors="replace")[-4000:]:
+        d.run("key f11; wait 2.5")   # the view on, as matrix.py does
     whole = log.stat().st_size
     end = time.time() + minutes * 60
     worst, bad, count = 0.0, [], 0
@@ -75,7 +86,9 @@ def main(argv):
         print("  arms:", text[13:170])
     last = [l for l in lines if " State:" in l or " Status:" in l][-2:]
     print("  ends:", [l[13:110] for l in last])
-    return 1 if bad else 0
+    if j["frames"] <= 0:
+        print("  NOT A PASS: no frame was held in first person: the view was not on")
+    return verdict(j["frames"], len(bad))
 
 
 if __name__ == "__main__":
