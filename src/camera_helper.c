@@ -9,6 +9,7 @@
 #include "camera_lock.h"
 #include "camera_continuity.h"
 #include "camera_damp.h"
+#include "camera_glide.h"
 #include "camera_math.h"
 #include <stdatomic.h>
 
@@ -1370,15 +1371,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
                     || (policy.control_mask == 0 && tick >= policy.eye_swap_tick && tick-policy.eye_swap_tick <= idle));
                 /* A different weapon is coming up and its eye is known: glide there during the swap. */
                 const EyeMemory *incoming = keep && (policy.weapon_key != policy.native_weapon_key || policy.eye_returning) ? eye_memory_find(policy.weapon_key) : NULL;
-                if (incoming) {
-                  const float step = dt > 0 ? 1-expf(-dt/.07f) : 0; bool moved = false;
-                  for (unsigned axis = 0; axis < 3; ++axis) {
-                    const float change = (incoming->delta[axis]-policy.eye_delta[axis])*step;
-                    if (fabsf(change) > 1e-6f) moved = true;
-                    policy.eye_delta[axis] += change;
-                  }
-                  if (moved) ++policy.eye_glides;
-                }
+                if (incoming && tfp_eye_glide_retail(policy.eye_delta, incoming->delta, dt)) ++policy.eye_glides; /* src/camera_glide.h */
                 if (!keep) {
                   const float fade = dt > 0 ? expf(-dt/.08f) : 1; float square = 0;
                   for (unsigned axis = 0; axis < 3; ++axis) { policy.eye_delta[axis] *= fade; square += policy.eye_delta[axis]*policy.eye_delta[axis]; }
