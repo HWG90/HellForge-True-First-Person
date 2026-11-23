@@ -22,10 +22,19 @@ The Trace lines of 0.6.0-feel.39 and before do not carry the axes. For those the
 frame the turn with which the old filter presents the eye the log shows (replay_filter.c), and the second run is
 given those axes. There the frames are replayed one row each and judged where the logged filter is within 0.02 m.
 
-A step is counted as the log's judge counts it: for frames a, b, c (5 to 80 ms apart) the shown change is
-| |c.eye-b.eye| - |b.eye-a.eye| |, the wanted change the same of the wanted eye. At 0.06 m or more of shown change it
-is the game's own when the wanted change is at least 0.8 of it and under 0.03 m is carried in b and c, "reduced" when
-the wanted change is over 1.2 of it, and otherwise the filter's.
+A step is counted for frames a, b, c (5 to 80 ms apart) by how much the presented eye's step changed, as a vector:
+| (c.eye-b.eye) - (b.eye-a.eye) |, and the wanted change is the same of the wanted eye. At 0.06 m or more of shown
+change it is the game's own when the wanted change is at least 0.8 of it and under 0.03 m is carried in b and c,
+"reduced" when the wanted change is over 1.2 of it, and otherwise the filter's.
+The log's own judge, and this tool until 2026-11-22, took the difference of the two steps' lengths instead:
+| |c.eye-b.eye| - |b.eye-a.eye| |. That is blind to a change of direction: an eye that goes 0.04 m forwards and then
+0.04 m back has changed its step by 0.08 m and counts as nothing. A filter that throws the eye backwards was counted
+as better than one that does not (docs/design/specs/2026-11-22-locked-view-design.md, "What the count did not see").
+The count by lengths is still printed beside the other, for the figures written down before.
+
+Beside the steps, for each filter, what it carries where the replay is exact: the correction summed over the frames
+(metre-frames: a filter can hide a step by carrying more for longer), and the longest time more than 0.05 m is
+carried on after a change of camera (to the first frame at or under it, or to the last frame that is known).
 
 What this leaves out:
  - Only the rows in the Trace windows are there (0.5 s after each State edge and six frames before it). What the
@@ -59,6 +68,7 @@ NEAR_M = 0.02    # fitted axes: the logged filter, replayed, "follows the log"
 EXACT_M = 0.005  # logged axes: the replay is exact
 GAP_MS = 250.0   # the helper's frame gap: a longer pause starts the filter again
 BEYOND_M = 0.05
+CARRY_M = 0.05   # a correction over this, carried on after a change of camera, is timed
 TRACE = re.compile(r"^(\d+):(\d+):(\d+)\.(\d+) Trace: t=(-?[\d.]+) kind=(\d+) eye_world=\(([-\d. ]+)\) step=[-\d.]+ wanted=\(([-\d. ]+)\) "
                    r"correction=([-\d.]+).*?source=(\S+) root=\(([-\d. ]+)\)(?: axes=\(([-\d. ]+)\))? looked=(\d) taken=(\S+)"
                    r"(?: quiet=(\d))?(?: tick=([\d.]+))?")
@@ -136,17 +146,24 @@ def stretches(rows):
         before = row
 
 
-def judge(rows, eye="eye", carried="carried", known=False):
+def change(a, b, c, vector):
+    """How much the step from b to c differs from the step from a to b: as a vector, or (the old measure) in length."""
+    one, two = [y - x for x, y in zip(a, b)], [y - x for x, y in zip(b, c)]
+    return math.dist(two, one) if vector else abs(math.hypot(*two) - math.hypot(*one))
+
+
+def judge(rows, eye="eye", carried="carried", known=False, vector=False):
     """[(whose, shown change, wanted change, a, b, c)] for every step of STEP_M or more. `known`: only where the
-    logged filter, replayed, shows what the log shows in all three frames (row["follows"])."""
+    logged filter, replayed, shows what the log shows in all three frames (row["follows"]). `vector`: the change of
+    the step as a vector; without it the difference of the steps' lengths, which does not see a change of direction."""
     found = []
     for a, b, c in zip(rows, rows[1:], rows[2:]):
         if not (5 <= b["tick"] - a["tick"] <= 80 and 5 <= c["tick"] - b["tick"] <= 80):
             continue
         if known and not (follows(a) and follows(b) and follows(c)):
             continue
-        shown = abs(math.dist(c[eye], b[eye]) - math.dist(b[eye], a[eye]))
-        wanted = abs(math.dist(c["wanted"], b["wanted"]) - math.dist(b["wanted"], a["wanted"]))
+        shown = change(a[eye], b[eye], c[eye], vector)
+        wanted = change(a["wanted"], b["wanted"], c["wanted"], vector)
         if shown < STEP_M:
             continue
         if wanted >= 0.8 * shown and b[carried] < 0.03 and c[carried] < 0.03:
@@ -157,6 +174,33 @@ def judge(rows, eye="eye", carried="carried", known=False):
             whose = "filter"
         found.append((whose, shown, wanted, a, b, c))
     return found
+
+
+def carry(rows, carried="carried", known=False):
+    """(metre-frames, (ms, row)): the correction summed over the frames, and the longest time more than CARRY_M was
+    carried on from a change of camera (the row of that change; None where there was none), to the first frame at or
+    under it or to the last frame before a pause (or, with `known`, before a frame that is not exact). `known`: only
+    the frames where the replay is exact."""
+    metres, longest, where = 0.0, 0, None
+    for i, row in enumerate(rows):
+        if known and not follows(row):
+            continue
+        metres += row[carried]
+        before = rows[i - 1] if i else None
+        if before is None or (known and not follows(before)) or row["tick"] - before["tick"] > GAP_MS:
+            continue
+        if SOURCES.get(row["source"], 0) == SOURCES.get(before["source"], 0) or not row[carried] > CARRY_M:
+            continue
+        last = row
+        for later in rows[i + 1:]:
+            if later["tick"] - last["tick"] > GAP_MS or (known and not follows(later)):
+                break
+            last = later
+            if not later[carried] > CARRY_M:
+                break
+        if last["tick"] - row["tick"] > longest:
+            longest, where = last["tick"] - row["tick"], row
+    return metres, (longest, where)
 
 
 def follows(row):
@@ -187,6 +231,8 @@ def taken(bits):
 def header(revision, work, name):
     """The filter's header as it was in `revision`, in a folder of its own."""
     folder = Path(work) / name
+    if Path(revision).is_dir():  # a folder with the two headers in place of a revision
+        return Path(revision).resolve()
     folder.mkdir()
     for file in ("camera_continuity.h", "camera_math.h"):
         (folder / file).write_text(subprocess.run(["git", "-C", str(ROOT), "show", f"{revision}:src/{file}"], capture_output=True, text=True,
@@ -196,7 +242,8 @@ def header(revision, work, name):
 
 def replay(rows, logged=None, present=None):
     """Runs both filters over `rows` (read(), all of them with axes or none) and returns (the frames, whether the axes
-    were given). `present`: a git revision in place of this tree's filter. Each row gets old_eye, old_carried, old_taken (the logged build's filter), new_eye, new_carried,
+    were given). `present`: a git revision, or a folder with camera_continuity.h and camera_math.h, in place of this
+    tree's filter. Each row gets old_eye, old_carried, old_taken (the logged build's filter), new_eye, new_carried,
     new_taken (this tree's), fit (the axes used), misfit (m, the logged filter from the log) and follows."""
     given = bool(rows) and all(row["axes"] for row in rows)
     logged = logged or ("9a3470b" if given else "b7ce1ab")
@@ -222,7 +269,7 @@ def main(argv):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("log")
     parser.add_argument("--logged", default=None, help="git revision of the build that wrote the log")
-    parser.add_argument("--present", default=None, help="git revision to run in place of this tree's filter")
+    parser.add_argument("--present", default=None, help="git revision (or a folder with the two headers) to run in place of this tree's filter")
     parser.add_argument("--from", dest="start", default=None)
     parser.add_argument("--to", dest="end", default=None)
     parser.add_argument("--emit", default=None, help="write the rows of --from/--to as a C array of this name")
@@ -281,18 +328,23 @@ def main(argv):
                                        (f"the log, {where}", "eye", "carried", True),
                                        ("the logged filter, replayed, there", "old_eye", "old_carried", True),
                                        ("the present filter, replayed, there", "new_eye", "new_carried", True)):
-        found = judge(rows, eye, carried, known)
+        found = judge(rows, eye, carried, known, vector=True)
         counts = {whose: sum(1 for f in found if f[0] == whose) for whose in ("filter", "game", "reduced")}
+        lengths = sorted((f[1] for f in judge(rows, eye, carried, known) if f[0] == "filter"), reverse=True)
 
         def root_change(a, b, c):
-            return abs(math.dist(c["root"], b["root"]) - math.dist(b["root"], a["root"]))
+            return change(a["root"], b["root"], c["root"], True)
         beyond = sum(1 for f in found if f[0] == "filter" and f[1] - root_change(*f[3:]) > BEYOND_M)
         print(f"{title}: {counts['filter']} steps of {STEP_M} m or more are the filter's ({beyond} of them more than {BEYOND_M} m beyond the "
-              f"root's own change of step), {counts['game']} the game's own, {counts['reduced']} reduced")
+              f"root's own change of step), {counts['game']} the game's own, {counts['reduced']} reduced; by the lengths of the steps "
+              f"(the old count) {len(lengths)} the filter's" + (f", the largest {lengths[0]:.3f} m" if lengths else ""))
+        metres, (longest, where) = carry(rows, carried, known)
+        print(f"  carried: {metres:.1f} metre-frames; more than {CARRY_M} m for {longest:.0f} ms at most after a change of camera"
+              + (f" ({where['at']})" if where else ""))
         for whose, shown, wanted, a, b, c in found:
             if whose == "filter":
-                print(f"  {c['at']} kind {c['kind']}: shown change {shown:.3f} m, wanted {wanted:.3f} m, root {root_change(a, b, c):.3f} m, "
-                      f"carried {c[carried]:.3f} m")
+                print(f"  {c['at']} kind {c['kind']}: shown change {shown:.3f} m (by lengths {change(a[eye], b[eye], c[eye], False):.3f} m), "
+                      f"wanted {wanted:.3f} m, root {root_change(a, b, c):.3f} m, carried {c[carried]:.3f} m")
     return 0
 
 
