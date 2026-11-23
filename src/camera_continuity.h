@@ -76,6 +76,19 @@
  *    alone: the frame the time runs out in can itself be a jump (seen in the game 2026-11-22: a rig eye going back
  *    and forth by 0.19 m from frame to frame; the last flip, believed as 6 m/s, sent the presented eye off at that
  *    speed while the rig stood). A flicker is no speed at any frame time; a motion that begins and goes on is.
+ *    Once in a run, within its time, a frame counts as a jump that is under the measure by a tenth of it at most
+ *    and goes the way the jump before it went (within 45 degrees). A rig re-seated over three frames is three
+ *    steps of one re-seat, and the third can be a hair under: seen in the soak of 2026-11-22 on 0.6.0-feel.41
+ *    (tests/reference/soak-11-steps.h: 0.053, 0.052 and 0.045 m, the last 0.0396 m off the kept speed against a
+ *    measure of 0.0406 m) and three times in the soaks before it (0.039 m against 0.040 m). Followed, that frame
+ *    was shown whole while the curve begun at the jump before it was at its steepest: 0.066 m of step change for an
+ *    eye whose own was 0.006 m. Taken up, nothing is believed for it; the kept speed stands as in every frame of a
+ *    run. Only once: such a frame can as well be the first of a motion that goes on, each one taken up is up to a
+ *    measure more carried, and at 8 ms a frame eight of them fit a run (made up, 0.15 m and then 0.97 of the
+ *    measure a frame for eight frames: 0.28 m more carried and 230 ms longer without the limit; with it 0.027 to
+ *    0.063 m more, 32 to 100 ms longer, the step 0.001 to 0.004 m more). (Any frame above half the measure kept in
+ *    the run, whichever way it went, broke the flicker test; three quarters of the measure, the way of the jump
+ *    before, carried 0.027 m more for a motion dying down at 8 ms a frame.)
  *    A run that ends before its time, at a frame that is no jump, ends without a speed believed: that frame is
  *    followed as any other. (Tried on the soaks of 2026-11-22 and taken out again: that frame taken up as well and
  *    what the run's frames and it agree on handed to the curve as the eye's new speed. The run's frames are the
@@ -96,12 +109,14 @@
 typedef struct TfpContinuityTuning { float pop_m, pop_accel, ease_accel, min_ms, max_ms, max_m, teleport_m; } TfpContinuityTuning;
 #define TFP_CONTINUITY_DEFAULT {.04f, 36.0f, 24.0f, 100.0f, 400.0f, 1.6f, 2.5f} /* max_m 1.0 and teleport_m 1.5 until 0.6.0-feel.39: a change of camera in a sprint is 1.2 m */
 #define TFP_CONTINUITY_RUN_MS 70.0   /* jumps in a row are taken up for this long without a change of source */
+#define TFP_CONTINUITY_NEAR .9f       /* of the measure: once in a run a frame from here on counts as a jump, if it goes the way of the jump before it */
 #define TFP_CONTINUITY_QUIET_MS 80.0f
 #define TFP_CONTINUITY_SPEED_FRAMES 4u /* the frames looked at for the speed believed when a run's time is over */
 
 typedef struct TfpContinuity {
   bool known, active, moving; /* moving: the wanted eye's speed is known (a step has been seen since the start) */
   uint32_t source, run;
+  bool neared;                           /* the present run has had its frame under the measure */
   double tick, started, run_started; /* run_started: the first jump of the present run */
   float wanted[3], speed[3], shown[3];   /* last frame: the wanted eye, its smoothed speed (m/s), the presented eye */
   float from[3], from_speed[3], duration; /* the correction's curve: value and speed at `started`, length in ms */
@@ -351,14 +366,19 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
     tfp_continuity_place(c, wanted, world, basis);
     return 0;
   }
+  float last[3], alike = 0; /* the frame before, off the kept speed (m/s), and how far this frame goes its way */
+  for (unsigned i = 0; i < 3; ++i) { last[i] = c->recent[(c->recent_at+TFP_CONTINUITY_SPEED_FRAMES-1)%TFP_CONTINUITY_SPEED_FRAMES][i]-c->speed[i]; alike += last[i]*difference[i]; }
   for (unsigned i = 0; i < 3; ++i) c->recent[c->recent_at%TFP_CONTINUITY_SPEED_FRAMES][i] = step[i]/dt;
   c->recent_at = (c->recent_at+1)%TFP_CONTINUITY_SPEED_FRAMES;
   const float limit = measure;
   const float along = step[0]*expected[0]+step[1]*expected[1]+step[2]*expected[2];
   const bool slowing = along >= 0 && tfp_continuity_length(step) < tfp_continuity_length(expected);
   const bool over = size > limit;
-  const bool jump = !quiet && !edge && detect && over && !slowing && !onset;
   const bool within = !c->run || (tick >= c->run_started && tick-c->run_started <= TFP_CONTINUITY_RUN_MS);
+  /* A run's last frame a hair under the measure: once in a run, within its time, a frame that goes the way the jump
+   * before it went counts as a jump from TFP_CONTINUITY_NEAR of the measure. */
+  const bool near = c->run && within && !c->neared && size > TFP_CONTINUITY_NEAR*limit && alike > .7f*size*tfp_continuity_length(last);
+  const bool jump = !quiet && !edge && detect && (over || near) && !slowing && !onset;
   const bool believe = jump && !within; /* jumps for longer than the run: a new speed, not a re-seated rig */
   const bool take = !quiet && size > 1e-4f && (edge || jump);
   if (take) {
@@ -385,9 +405,10 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
     tfp_continuity_begin(c, next, from_speed, tick, duration);
     for (unsigned i = 0; i < 3; ++i) value[i] = next[i];
     if (edge) { ++c->edges; c->run = 0; } else if (believe) c->run = 0; else { ++c->jumps; if (!c->run++) c->run_started = tick; }
+    c->neared = c->run && (c->neared || !over);
     /* otherwise the wanted eye's speed is kept: after a jump it goes on as it went */
   } else {
-    c->run = 0;
+    c->run = 0; c->neared = false;
     const float k = over || !c->moving ? 1 : 1-expf(-dt/.05f); /* a new speed is believed at once, an ordinary frame is averaged in */
     for (unsigned i = 0; i < 3; ++i) c->speed[i] += (step[i]/dt-c->speed[i])*k;
     const float fast = tfp_continuity_length(c->speed);
