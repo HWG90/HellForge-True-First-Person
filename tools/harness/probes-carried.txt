@@ -1,0 +1,28 @@
+# tools/harness/probes.py --record: scene, ms a frame, largest change of the presented step as a vector (m),
+# largest correction carried (m), settled (ms). The scenes with a correction being carried (probe_filter.c), with the
+# numbers of the filter that has THE LENT SPEED as the bound. The filter of 0.6.0-feel.42 (f557194) is the same in the
+# carried-* scenes and worse in six of the eight lent-* ones.
+carried-jump-0.4 8.0 0.0014 0.4211 296
+carried-camera-0.4 8.0 0.0015 0.3001 248
+lent-0.4 8.0 0.0402 0.6740 384
+carried-jump-0.8 8.0 0.0018 0.8058 376
+carried-camera-0.8 8.0 0.0018 0.3001 248
+lent-0.8 8.0 0.0402 1.0720 384
+carried-jump-0.4 16.7 0.0053 0.4021 284
+carried-camera-0.4 16.7 0.0072 0.3012 251
+lent-0.4 16.7 0.0649 0.6806 418
+carried-jump-0.8 16.7 0.0070 0.7801 367
+carried-camera-0.8 16.7 0.0080 0.3020 251
+lent-0.8 16.7 0.0650 1.0746 418
+carried-jump-0.4 33.3 0.0154 0.3403 233
+carried-camera-0.4 33.3 0.0336 0.3176 233
+lent-0.4 33.3 0.0953 0.6907 466
+carried-jump-0.8 33.3 0.0222 0.6917 366
+carried-camera-0.8 33.3 0.0412 0.3394 266
+lent-0.8 33.3 0.0973 1.0751 500
+carried-jump-0.4 50.0 0.0305 0.2625 200
+carried-camera-0.4 50.0 0.0764 0.3642 250
+lent-0.4 50.0 0.1117 0.6882 450
+carried-jump-0.8 50.0 0.0375 0.5671 300
+carried-camera-0.8 50.0 0.0996 0.4364 250
+lent-0.8 50.0 0.1199 1.0638 500

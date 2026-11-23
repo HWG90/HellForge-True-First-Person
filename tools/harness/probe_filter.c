@@ -22,7 +22,17 @@
  *   flicker-N               the rig eye back and forth by 0.19 m from frame to frame, N frames (2 to 12), then at rest
  *   dying-down              a motion dying down: 0.26, 0.21, 0.136, 0.083, 0.053 m a frame and on by 0.62 a frame
  *   root-reseat             the body walking backwards at 3 m/s; the root is 0.6 m further on in one frame and the eye
- *                           goes on as it went, following a frame later */
+ *                           goes on as it went, following a frame later
+ * Scenes with a correction being carried (the body stands; a change of camera to a rig eye 0.4 or 0.8 m in front of
+ * the head camera's; recorded in probes-carried.txt, with the numbers of the filter that has THE LENT SPEED):
+ *   carried-jump-0.4, -0.8    three frames after the change of camera the rig eye is re-seated by 0.15 m to the side:
+ *                             a jump taken up while the catch-up runs; measured from that frame on
+ *   carried-camera-0.4, -0.8  three frames after it the view goes back to the head camera, whose eye is now 0.3 m to
+ *                             the side of where it was: a change of camera while the catch-up runs; measured from there
+ *   lent-0.4, -0.8            the head camera's eye going down against the root at 5 m/s when the view changes; the
+ *                             rig eye is re-seated by 0.27 m forwards in its first frame, stands in the second, then
+ *                             goes to the side by half the head camera's step, 0.6 and 0.2 of that, and rests;
+ *                             measured from the change of camera on */
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -134,6 +144,35 @@ static void root_reseat(float dt) {
   }
   report("root-reseat", dt, &p);
 }
+/* A change of camera `apart` m forwards with the body standing, and three frames later, while the catch-up runs, a
+ * re-seat of the rig eye by 0.15 m to the side (`camera` false) or the view back in the head camera, its eye 0.3 m to
+ * the side of where it was (`camera` true). */
+static void carried(float dt, float apart, bool camera) {
+  Probe p; begin(&p); char name[32];
+  const float root[3] = {0, 0, 0}; float head[3] = {.1f, .3f, 1.5f}, rig[3] = {.1f, .3f+apart, 1.5f};
+  const int warm = (int)(1000/dt)+4, after = (int)(1600/dt);
+  for (int n = -warm; n <= after; ++n) {
+    if (n == 3) { event(&p); if (camera) head[0] += .3f; else rig[0] += .15f; }
+    const bool native = n >= 0 && !(camera && n >= 3);
+    frame(&p, native ? rig : head, root, native ? NATIVE : HEAD, native, dt);
+  }
+  snprintf(name, sizeof name, "carried-%s-%.1f", camera ? "camera" : "jump", (double)apart);
+  report(name, dt, &p);
+}
+static void lent(float dt, float apart) {
+  Probe p; begin(&p); char name[32];
+  const float root[3] = {0, 0, 0}, v = 5, h = dt/1000; float head[3] = {.1f, .3f, 1.6f}, rig[3] = {0, 0, 0};
+  const int warm = (int)(400/dt)+4, after = (int)(1600/dt);
+  for (int n = -warm; n <= after; ++n) {
+    if (n < 0) head[2] -= v*h;
+    if (n == 0) { event(&p); rig[0] = head[0]; rig[1] = head[1]+apart; rig[2] = head[2]; }
+    if (n == 1) rig[1] += .27f;
+    if (n >= 3 && n <= 5) rig[0] += (n == 3 ? 1 : n == 4 ? .6f : .2f)*.5f*v*h;
+    frame(&p, n < 0 ? head : rig, root, n < 0 ? HEAD : NATIVE, n >= 0, dt);
+  }
+  snprintf(name, sizeof name, "lent-%.1f", (double)apart);
+  report(name, dt, &p);
+}
 
 int main(void) {
   static const float times[4] = {8.0f, 16.7f, 33.3f, 50.0f};
@@ -150,6 +189,7 @@ int main(void) {
     for (int flips = 2; flips <= 12; ++flips) flicker(dt, flips);
     dying_down(dt);
     root_reseat(dt);
+    for (int far = 0; far < 2; ++far) { carried(dt, far ? .8f : .4f, false); carried(dt, far ? .8f : .4f, true); lent(dt, far ? .8f : .4f); }
   }
   return 0;
 }

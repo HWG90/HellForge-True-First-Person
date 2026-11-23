@@ -18,7 +18,12 @@ camera_continuity.h and camera_math.h) in place of this tree's. --against REV: t
 the recorded numbers. --record: write this tree's (or --present's) numbers as the new record; only for a filter
 that is to be the bound from now on.
 
-tests/test_harness_probes.py runs the comparison with the other harness tests."""
+The scenes with a correction being carried (a jump taken up or a change of camera while a catch-up runs, and a speed
+kept across a change of camera) came with THE LENT SPEED and have a record of their own, tools/harness/probes-carried.txt,
+with that filter's numbers as the bound; probes-main.txt is as it was. Both are compared and both are written by --record,
+each with its own scenes.
+
+tests/test_harness_probes.py and tests/test_harness_probes_carried.py run the comparison with the other harness tests."""
 import argparse
 import subprocess
 import sys
@@ -27,6 +32,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 RECORD = ROOT / "tools/harness/probes-main.txt"
+CARRIED = ROOT / "tools/harness/probes-carried.txt"  # the scenes with a correction being carried
 SLACK_M = 0.0005
 
 
@@ -94,11 +100,14 @@ def main(argv):
     args = parser.parse_args(argv[1:])
     now, text = measure(args.present)
     if args.record:
-        RECORD.write_text("# tools/harness/probes.py --record: scene, ms a frame, largest change of the presented step as a vector (m),\n"
-                          "# largest correction carried (m), settled (ms). The bound for the filter: see probes.py.\n" + text)
-        print(f"recorded {len(now)} scenes in {RECORD}")
+        for record in (RECORD, CARRIED):  # each keeps its own scenes and its notes
+            old = record.read_text().splitlines()
+            names = {line.split()[0] for line in old if line.strip() and not line.startswith("#")}
+            lines = [line for line in text.splitlines() if line.split()[0] in names]
+            record.write_text("\n".join([line for line in old if line.startswith("#")] + lines) + "\n")
+            print(f"recorded {len(lines)} scenes in {record}")
         return 0
-    bound = measure(args.against)[0] if args.against else parse(RECORD.read_text())
+    bound = measure(args.against)[0] if args.against else {**parse(RECORD.read_text()), **parse(CARRIED.read_text())}
     if args.table:
         b, n = group(bound), group(now)
         print("scene | ms a frame | change (m), bound / now | carried (m), bound / now | settled (ms), bound / now")

@@ -6,6 +6,7 @@
 #include "reference/soak-8-steps.h"
 #include "reference/soak-9-runs.h"
 #include "reference/soak-11-steps.h"
+#include "reference/soak-14-steps.h"
 static int checks, failed;
 #define CHECK(c) do { ++checks; if (!(c)) { ++failed; printf("FAILED line %d: %s\n", __LINE__, #c); } } while (0)
 static const TfpContinuityTuning T = TFP_CONTINUITY_DEFAULT;
@@ -280,6 +281,52 @@ static float against(float v, float dt) {
     if (n >= 0 && carried > most) most = carried;
   }
   return most;
+}
+/* Logged rows through the filter, rows `from` to `to`: the correction summed over them and its most, of the filter
+ * and of the log (the logged eye's distance from the wanted one). */
+typedef struct Borne { float sum, most, logged_sum, logged_most; } Borne;
+static Borne borne(const SoakFrame *rows, int count, int from, int to) {
+  TfpContinuity c; memset(&c, 0, sizeof c);
+  Borne b = {0, 0, 0, 0};
+  for (int i = 0; i < count && i <= to; ++i) {
+    const SoakFrame *f = &rows[i]; float relative[3] = {0}, out[3], was = 0;
+    for (int a = 0; a < 3; ++a) for (int k = 0; k < 3; ++k) relative[a] += (f->wanted[k]-f->root[k])*f->axes[a*3+k];
+    const float carried = tfp_continuity_step_in(&c, relative, f->wanted, f->axes, (uint32_t)f->source, f->looked != 0, false, 1000.0+(double)f->ms, 250, &T, out);
+    for (int k = 0; k < 3; ++k) was += (f->logged[k]-f->wanted[k])*(f->logged[k]-f->wanted[k]);
+    if (i < from) continue;
+    b.sum += carried; b.logged_sum += sqrtf(was);
+    if (carried > b.most) b.most = carried;
+    if (sqrtf(was) > b.logged_most) b.logged_most = sqrtf(was);
+  }
+  return b;
+}
+/* THE LENT SPEED, made up: the body stands. The head camera's eye goes down against the root at `v` m/s (jumps are not
+ * looked for in it) and the view changes to a rig eye `apart` m in front of it. The rig eye is re-seated by 0.27 m
+ * forwards in its first frame and stands in the second; with `moves` it then goes to the side, across the head
+ * camera's way, by half the head camera's step in a frame, 0.6 of that and 0.2 of it, and rests. `change`: the most
+ * the presented eye's step changes from frame to frame (as a vector) from the change of camera on; `carried`: the most
+ * carried; `settled`: ms from the change of camera to the last frame more than 0.005 m is carried. */
+static void lent(float v, float apart, bool moves, float dt, float *change, float *carried, float *settled) {
+  TfpContinuity c; memset(&c, 0, sizeof c);
+  static const float basis[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+  const int warm = (int)(400/dt)+4, after = (int)(1600/dt); const float h = dt/1000;
+  float head[3] = {.1f, .6f, 1.6f}, rig[3] = {0, 0, 0}, one[3] = {0}, two[3] = {0};
+  *change = *carried = *settled = 0;
+  for (int n = -warm; n <= after; ++n) {
+    float out[3];
+    if (n < 0) head[2] -= v*h;
+    if (n == 0) { rig[0] = head[0]; rig[1] = head[1]+apart; rig[2] = head[2]; }
+    if (n == 1) rig[1] += .27f;
+    if (moves && n >= 3 && n <= 5) rig[0] += (n == 3 ? 1 : n == 4 ? .6f : .2f)*.5f*v*h;
+    const float *eye = n < 0 ? head : rig;
+    const float length = tfp_continuity_step_in(&c, eye, eye, basis, n < 0 ? HEAD : NATIVE, n >= 0, false, 1000.0+(double)(n+warm)*(double)dt, 250, &T, out);
+    if (n >= 0) { float d = 0;
+      for (int k = 0; k < 3; ++k) { const float e = out[k]-2*one[k]+two[k]; d += e*e; }
+      if (sqrtf(d) > *change) *change = sqrtf(d);
+      if (length > *carried) *carried = length;
+      if (length > .005f) *settled = (float)n*dt; }
+    memcpy(two, one, sizeof two); memcpy(one, out, sizeof one);
+  }
 }
 #define ROWS(a) a, (int)(sizeof a/sizeof *a)
 int main(void) {
@@ -957,6 +1004,55 @@ int main(void) {
       CHECK(change <= .03f && carried <= .15f+measure);
       CHECK(on_carried <= .15f+measure);
       CHECK(back_carried <= .1505f && less_carried <= .1505f);
+    }
+  }
+  /* THE LENT SPEED. The soak of 2026-11-22 on 0.6.0-feel.42 (tests/reference/soak-14-steps.h), 04:00:51.667, the
+   * largest of the filter's steps in it by far: 0.180 m. A dive begun and the native view entered in the same frame.
+   * The head camera's eye was being thrown forwards against the root, 5 m/s (0.166 m a frame), and that speed was
+   * kept across the change of camera (row 6), as every speed is. The rig eye was re-seated by 0.29 m in row 7 and
+   * stood in row 8: both jumps against the kept speed, taken up, and in both the presented eye went on at it whole
+   * (0.33 m on the head camera's way; 0.86 m carried). In row 9 the rig eye moved 0.086 m, 81 degrees off that way:
+   * shorter than the step expected and not against it, so "the motion slowing down", followed, and the lent speed
+   * was dropped whole in that frame: 0.180 m of step change where the rig eye's own was 0.076 m. Now the presented
+   * eye is let down from a lent speed in the frames that are taken up, by pop_accel, as far as the speed whose step
+   * in a frame is the measure. What is left in row 9 is the rig eye's own step (0.077 m), and less is carried. */
+  {
+    const Judged dive = judged(ROWS(soak14_dive_camera), 6, 20), first = judged(ROWS(soak14_dive_camera), 6, 8);
+    const Borne load = borne(ROWS(soak14_dive_camera), 6, 20);
+    printf("soak 14, a dive begun and the native view entered in the same frame: the filter's largest step %.3f m (the log: %.3f m); %.2f metre-frames "
+           "carried in 15 rows, %.3f m at most (the log: %.2f and %.3f m)\n", (double)dive.turned, (double)dive.logged_turned, (double)load.sum,
+           (double)load.most, (double)load.logged_sum, (double)load.logged_most);
+    CHECK(dive.logged_turned > .17f && dive.turned < .08f);
+    CHECK(first.turned < .06f); /* the three frames the eye is let down in: 0.039, 0.043 and 0.057 m */
+    CHECK(load.sum < load.logged_sum-.5f && load.most < load.logged_most-.1f);
+  }
+  /* The same made up, at 8 to 50 ms a frame, the rig eye 0.4 and 0.8 m from the head camera's (the soaks ran at 30
+   * frames a second only). A rig eye that stands has a step of nothing, which is "slowing down" against any speed:
+   * the filter of 0.6.0-feel.42 dropped the lent speed whole in the rig eye's second frame, 0.177 m of step change at
+   * 33.3 ms a frame and 0.283 m at 50 ms for 5 m/s (0.085 m at 16.7 ms; at 8 ms the step of 5 m/s is the measure
+   * itself, 0.040 m, and nothing is let down). Now 0.097 and 0.120 m at most (0.065 m at 16.7 ms): two frames of
+   * letting down are not enough for all of 5 m/s, and the rest is still dropped at once. Never more step, never
+   * more carried and never later settled than without it, which the bounds here are (the filter of feel.42, measured:
+   * the step, the most carried, the time to settle). A speed under that of the measure (1 m/s) is not touched:
+   * every figure as it was. */
+  {
+    static const float times[] = {8, 16.7f, 33.3f, 50};
+    static const float was[2][4][3] = {{{.0402f, .6740f, 384}, {.0851f, .6873f, 418}, {.1770f, .7358f, 466}, {.2799f, .8090f, 500}},
+                                       {{.0402f, 1.0720f, 384}, {.0851f, 1.0789f, 418}, {.1777f, 1.1046f, 500}, {.2825f, 1.1454f, 500}}};
+    static const float slow[2][4][2] = {{{.0082f, .6694f}, {.0180f, .6676f}, {.0408f, .6609f}, {.0682f, .6506f}},
+                                        {{.0083f, 1.0692f}, {.0190f, 1.0665f}, {.0465f, 1.0564f}, {.0818f, 1.0402f}}};
+    for (int far = 0; far < 2; ++far) for (unsigned d = 0; d < 4; ++d) {
+      float change, carried, settled, still, still_carried, unused;
+      lent(5, far ? .8f : .4f, true, times[d], &change, &carried, &settled);
+      lent(5, far ? .8f : .4f, false, times[d], &still, &still_carried, &unused);
+      printf("  5 m/s lent, the rig eye %.1f m off, %g ms a frame: step change %.4f m (%.4f m), %.3f m carried (%.3f m), settled in %.0f ms (%.0f ms)\n",
+             far ? .8 : .4, (double)times[d], (double)change, (double)was[far][d][0], (double)carried, (double)was[far][d][1], (double)settled,
+             (double)was[far][d][2]);
+      CHECK(change <= was[far][d][0]+.0005f && carried <= was[far][d][1]+.0005f && settled <= was[far][d][2]+1);
+      CHECK(times[d] < 16 || change < .77f*was[far][d][0]);
+      CHECK(times[d] < 30 || (change < .125f && still < .125f && carried < was[far][d][1]-.02f && still_carried <= carried+.0005f));
+      lent(1, far ? .8f : .4f, true, times[d], &change, &carried, &settled);
+      CHECK(fabsf(change-slow[far][d][0]) < .0002f && fabsf(carried-slow[far][d][1]) < .0002f);
     }
   }
   printf("camera continuity: %d checks, %d failed\n", checks, failed);
