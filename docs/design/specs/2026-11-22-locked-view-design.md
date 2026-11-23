@@ -1141,3 +1141,12 @@ in the tests.
 Tests on the branch: `tests/run-camera-continuity.sh` 2,462 checks (main's 2,396 unchanged and 66 new), the other
 four `run-camera-*.sh` pass (2,765, 229, 643 and 260 checks), the harness's python tests 24 (21 and the three for
 the probes), all 46 `tests/run-*.sh` pass, `build.sh --feel` builds. Nothing here has been run in the game.
+
+### feel.42 in the game (2026-11-22)
+
+46 test scripts and the harness's python tests pass (the probes among them). Matrix, Stable: 35 of 35. Soak, Bodycam,
+seed 6: 259 actions, 18,101 frames, nothing missed, one flagged (0.062 m). The Stable soak before it stopped itself
+after 14 actions (the game window was not in front) and is owed again. By `replay.py` on the session's log (matrix and
+both soaks): 5 of the filter's steps of 0.06 m or more, 98.1 metre-frames carried, 435 ms the longest carry after a
+change of camera.
+
