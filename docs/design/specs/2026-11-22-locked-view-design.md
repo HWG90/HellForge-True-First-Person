@@ -1359,3 +1359,11 @@ Tests on the branch: `tests/run-camera-continuity.sh` 2,497 checks (main's 2,462
 four `run-camera-*.sh` pass (2,765, 229, 643 and 260 checks), the harness's python tests 27 (24 and the three for
 the new probes; `tests/test_harness_probes.py` is as it was and its 84 bounds stand), all 46 `tests/run-*.sh` pass,
 `build.sh --feel` builds. Nothing here has been run in the game.
+
+### feel.43 in the game (2026-11-23)
+
+46 test scripts and the harness's python tests pass. Matrix, Stable: 35 of 35. Soak, Stable, seed 3: 248 actions,
+18,101 frames, nothing missed, three flagged: 0.142 m at a jump begun while walking (the root's own change of step is
+0.10 to 0.15 m in those frames and the wanted eye's 0.08 to 0.15 m: the body's lunge, as on feel.39), and 0.071 and
+0.073 m at swaps in a dive and in a sprint. Log: `/home/goose/.cache/tfp-soak-15.modlog`.
+
