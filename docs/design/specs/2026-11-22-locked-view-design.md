@@ -1790,3 +1790,121 @@ Tests on the branch: `tests/run-camera-continuity.sh` 2,817 checks (main's 2,534
 four `run-camera-*.sh` pass (damp 3,403, death 229, lock 2,377, smooth 301), the harness's python tests 30 (both
 probe tests with their recorded bounds as they were), all 46 `tests/run-*.sh` pass, `build.sh --feel` builds. Nothing
 here has been run in the game.
+
+**The second check: a step on and back after a stop, and a tenth log** (the same day; tests first, 77 checks fail on
+the three commits above).
+
+The check passed the hitch and found a regression against main that is in no log. Its scene O (`probe7.c`): the eye
+stops from a speed whose step is over the measure, the next frame goes on by about that step, the frame after goes
+back by it, and the eye is at rest: the game's own flicker of one frame after a stop. The frame that goes on was
+followed and its speed believed at once; the step back was then a jump of two steps against it, taken up, and the
+presented eye ran one step MORE forwards, past anywhere the wanted eye had been, and came back along the curve. At
+4 m/s and 33.3 ms a frame, the eye along its way from the frame that goes on (m):
+
+| | frame 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+|---|---|---|---|---|---|---|---|---|---|
+| wanted | 0.133 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| main | 0.000 | 0.012 | 0.018 | 0.008 | 0.000 | 0 | 0 | 0 | 0 |
+| the three commits above | 0.133 | 0.266 | 0.254 | 0.222 | 0.178 | 0.127 | 0.077 | 0.035 | 0.007 |
+| now | 0.133 | 0.000 | 0.000 | 0.000 | 0.000 | 0 | 0 | 0 | 0 |
+
+The tenth log, `~/.cache/tfp-soak-19.modlog` (20 minutes, Stable, feel.44; `--logged ebe3c1f`), had a second thing:
+one step more than main's, 18 for 17. At 07:04:11.051 (`tests/reference/soak-19-steps.h`, `soak19_stop`) an eye
+thrown about in a dive, 0.25 m carried: a run of jumps ends with a speed believed (1.9 m/s, row 37), the next frame
+all but stands against the root (0.006 m: a stop, row 38) and the one after goes 0.051 m, by chance within the
+measure of the step that speed would have made (0.065 m). It was followed as the eye going on while the curve was at
+its steepest: 0.064 m of step change for the wanted eye's 0.042 m, where main took the frame up and made none.
+
+**What was changed** (`src/camera_continuity.h`, THE TRIAL).
+
+- The speed of the frame that goes on after a stop is on trial for one frame; what was kept before it (the speed
+  after the stop, next to nothing) is kept beside it (`trial`, `held`, `held_loose`). The next frame confirms it by
+  going on within the measure of it. A frame that slows down or stops is followed as any such frame (so a second
+  hitch a frame later is a stop again, and the frame after it can go on again). Any other frame says the speed never
+  was and is asked against what was kept before: a step back, no further than a measure past where the eye stood, is
+  followed as the game's own, nothing carried and no speed believed from it; anything else is a jump against the
+  speed kept before, and the presented eye stays where the wanted eye has been. One exception: a frame whose step
+  along the trial's way is at least the trial's own (on at twice the speed) is a jump against the speed on trial as
+  it was, since going on at it leaves the presented eye behind the wanted one, not past it (asked against nothing
+  instead it carried 0.54 to 1.29 m where it now carries 0.22 to 0.59 m, the figures of the three commits above).
+- The speed dropped at a stop is kept for the frame after only if the eye was going at it (`fresh`): not when it was
+  believed only the frame before (a run's time over, or at once straight after a frame taken up) and no frame has
+  gone on at it since. That is soak 19's frame, and the only row of the ten logs it acts on.
+
+Tried and not in: the trial's failure always asked against the speed before (worse for "on at twice the speed", see
+above); the step back's own speed believed (the flicker twice, back, on, back, then ran a step past the other end);
+the speed at a stop kept only when the frame before was followed within the measure (soak 14's hitch is an eye dying
+down, every frame over the measure off the averaged speed, and was lost) or only when the two frames before were
+followed (the hitch 50 and 100 ms after a re-seat at 50 ms a frame was lost: a jump keeps the speed, and it is the
+eye's).
+
+**Scene O, the worst of the four ways** (the check's probe; "settled" by its count, a frame more than the tests').
+Step is the most the presented eye's step changes, and the wanted eye's own beside it:
+
+| Speed | ms a frame | main: step / own (m) | carried (m) | settled (ms) | before the mend: step | carried | settled | now: step | carried | settled |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2 m/s | 8 | 0.032 / 0.032 | 0 | 0 | 0.032 | 0 | 0 | 0.032 | 0 | 0 |
+| 2 m/s | 16.7 | 0.033 / 0.067 | 0.060 | 150 | 0.033 | 0.060 | 150 | 0.033 | 0.060 | 150 |
+| 2 m/s | 33.3 | 0.067 / 0.133 | 0.067 | 166 | 0.078 | 0.133 | 266 | 0.133 | 0 | 0 |
+| 2 m/s | 50 | 0.100 / 0.200 | 0.100 | 200 | 0.126 | 0.200 | 350 | 0.200 | 0 | 0 |
+| 4 m/s | 8 | 0.032 / 0.064 | 0.060 | 136 | 0.032 | 0.060 | 136 | 0.032 | 0.060 | 136 |
+| 4 m/s | 16.7 | 0.067 / 0.134 | 0.067 | 134 | 0.070 | 0.134 | 217 | 0.134 | 0 | 0 |
+| 4 m/s | 33.3 | 0.133 / 0.266 | 0.133 | 166 | 0.145 | 0.266 | 333 | 0.266 | 0 | 0 |
+| 4 m/s | 50 | 0.200 / 0.400 | 0.200 | 200 | 0.227 | 0.400 | 450 | 0.400 | 0 | 0 |
+
+Where the step is over the measure the flicker is now shown as the game makes it: nothing carried and nothing to
+settle, the presented eye never off the wanted one, and the step changing by the eye's own (a step on and the step
+back), which is twice what main showed: main never showed the step on at all. That is the price of following the
+frame after a stop, and the same price as the last step of soak 14 above. Where the step is under the measure
+(2 m/s at 16.7 ms, 4 m/s at 8 ms) no speed is dropped at the stop, no frame is on trial, and all three filters are
+alike, the 0.027 and 0.028 m the presented eye goes past the wanted one there included (on main too; not looked
+into here).
+
+What else can come after the frame that goes on (the tests' scenes, the body standing and walking; 2 and 4 m/s where
+the step is over the measure; "beyond" is how far the presented eye gets outside where the wanted eye has been):
+
+| After the frame that goes on | main: beyond / carried (m) / settled (ms) | before the mend | now |
+|---|---|---|---|
+| a step back, at rest | 0 / 0.067-0.200 / 117-150 | 0.067-0.200 / 0.133-0.400 / 200-400 | 0 / 0 / 0 |
+| half a step back, at rest | 0 / 0.067-0.200 / 133-200 | 0.067-0.200 / 0.100-0.300 / 167-350 | 0 / 0 / 0 |
+| two steps back, at rest | 0 / 0.071-0.229 / 150-300 | 0.067-0.200 / 0.200-0.600 / 234-450 | 0 / 0.133-0.400 / 200-400 |
+| a step sideways, at rest | 0 / 0.087-0.265 / 167-300 | 0-0.200 / 0-0.283 / 0-350 | 0 / 0-0.200 / 0-300 |
+| back, on, back, at rest | 0 / 0.067-0.200 / 150-250 | 0.160-0.505 / 0.226-0.705 / 301-550 | 0 / 0.067-0.200 / 150-250 |
+| a step back and on going back | 0 / 0.167-0.411 / 433-500 | 0.187-0.501 / 0.543-1.290 / 501-550 | 0 / 0.219-0.593 / 500-600 |
+| on at twice the speed | 0 / 0.492-1.133 / 484-500 | 0 / 0.219-0.593 / 466-550 | the same as before the mend |
+
+Two steps back, and a step back that then goes on back, carry more than on main (the presented eye stays at the step
+on, which main never showed, and then has a step further to come back); neither goes anywhere the wanted eye was
+not. The step sideways is followed where its length comes out a hair under the trial's step (it then reads as
+slowing down) and taken up where a hair over: the 0 and the 0.200 m in one cell.
+
+**Unchanged.** The check's other scenes (`probe7.c`: 1,696 cells) are the three commits' to the last digit but
+scene O's 20: every hitch scene (0, +1 and -1 mm at 2 and 4 m/s and four frame times; back a step and 6 mm; two
+hitches a frame apart; the hitch 50 and 100 ms after a re-seat; stop, one more step, at rest) with 0 carried as
+before, and every scene that is no hitch main's. The tests' own hitch and stop tables print the same lines as before.
+
+**Replayed**, the ten logs ("main" is d171321; "before" the three commits above; where the logged filter is exact):
+
+| Log | Filter | Filter's steps | largest (m) | game's own | reduced | by lengths | metre-frames | longest carry (ms) |
+|---|---|---|---|---|---|---|---|---|
+| Soak 8 | main / before / now | 9 / 9 / 9 | 0.214, 0.142, 0.107 | 5 | 2 | 5 | 179.5 / 179.5 / 179.5 | 468 |
+| Soak 9 | main / before / now | 16 / 16 / 16 | 0.214, 0.142, 0.137 | 9 | 5 | 7 | 313.0 / 313.0 / 313.0 | 566 |
+| Soak 10 | main / before / now | 4 / 4 / 4 | 0.085, 0.064, 0.062 | 7 | 2 | 1 | 117.8 / 117.8 / 117.8 | 501 |
+| Soak 11 | main / before / now | 7 / 7 / 7 | 0.085, 0.071, 0.064 | 7 | 3 | 3 | 209.5 / 209.5 / 209.5 | 501 |
+| Soak 13 | main / before / now | 7 / 7 / 7 | 0.121, 0.090, 0.086 | 6 | 1 | 2 | 115.7 / 115.7 / 115.7 | 435 |
+| Soak 14 | main / before / now | 7 / 7 / 7 | 0.090, 0.077, 0.076 | 3 | 0 | 2 | 95.7 / 95.6 / 95.6 (-0.1 %) | 467 |
+| Soak 15 | main / before / now | 10 / 10 / 10 | 0.179, 0.146, 0.130 | 3 | 1 | 7 | 110.1 / 110.1 / 110.1 | 468 |
+| Soak 17 | main / before / now | 10 / 10 / 10 | 0.173, 0.161, 0.142 | 3 | 1 | 6 | 126.6 / 126.6 / 126.6 | 467 |
+| Soak 18 | main / before / now | 26 / 26 / 26 | 0.265, 0.200, 0.173 | 12 | 7 | 18 | 268.4 / 268.4 / 268.4 | 468 |
+| Soak 19 | main / before / now | 17 / **18** / 17 | 0.182, 0.148, 0.134 | 14 | 10 | 11 / 12 / 11 | 257.1 / 256.9 / 257.1 | 835 |
+
+Over all frames 10, 19, 4, 7, 7, 7, 10, 11, 27 and 17 steps on main and now, the longest carry the same on every
+log (soak 19: 835 ms, on all three). Row by row the filter now shows main's eye in every row of all ten logs but the
+five of soak 14's hitch (04:05:18.329 to .462, the table further up, as the three commits showed them), and the
+three commits' eye in every row but five of soak 19 (07:04:11.087 to .186 and 07:04:14.058), which are main's again.
+No frame of the ten logs is a trial that fails: the one frame that goes on after a stop (soak 14) is followed by a
+stop.
+
+Tests now: `tests/run-camera-continuity.sh` 2,922 checks (2,817 and 105 new), damp 3,403, death 229, lock 2,377,
+smooth 301; the harness's python tests 30, both probe tests with their recorded bounds as they were; all 46
+`tests/run-*.sh` pass; `build.sh --feel` builds. Nothing here has been run in the game.
