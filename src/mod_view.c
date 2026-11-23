@@ -34,7 +34,7 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "arm_drive.h"
 #include "wire_options.h"
 #include "arm_weight.h"
-#define TFP_VIEW_VERSION "0.6.0-feel.39"
+#define TFP_VIEW_VERSION "0.6.0-feel.40"
 #else
 #include "wire_win.h"
 #include "wire_action.h"
@@ -388,7 +388,7 @@ static void trace_note(void) {
   static const char *const sources[] = {"-", "head", "native", "repeat"};
   for (uint32_t i = 0; i < count; i++) {
     const TfpCameraTraceRow *r = &rows[i];
-    /* root: the body root the eye was measured against, axes: its three axis rows (the soak of 2026-11-22 on feel.39:
+    /* root: the body root the eye was measured against, axes: its three axis rows (the soak of 2026-11-22 on feel.40:
      * a root whose axes turned 0.26 rad in one frame carried the eye 0.18 m, and the lines could not say so); looked:
      * jumps within the camera were looked for; taken:
      * what the continuity did with the frame (jump, edge: taken up; root: the root alone re-seated, nothing taken
