@@ -3,7 +3,10 @@
  *
  *   replay_filter fit|run < rows
  *
- * A row: tick(ms) source detect  wanted x y z  root x y z  logged eye x y z  root axes (9, rows; "run" only)
+ * A row: tick(ms) source detect quiet fresh  wanted x y z  root x y z  logged eye x y z  root axes (9, rows; "run" only)
+ *        quiet: full aim (the filter takes nothing up); fresh: 1 the filter starts from nothing in this row (the helper
+ *        forgot it), 2 the log carries no correction in this row and the filter's was not known: it is let go before
+ *        the row, and the rest of the state (the eye's speed, the root's course) is kept
  * Out:   presented eye x y z  correction  taken(bits: 1 jump, 2 edge, 4 root, 8 restart)  root axes (9)  misfit(m)
  *
  * The Trace lines of 0.6.0-feel.39 and before do not say how the root's axes stood. "fit" looks for them: in each
@@ -19,13 +22,13 @@
 #include <string.h>
 #include "camera_continuity.h"
 
-typedef struct Row { double tick; unsigned source; int detect; float wanted[3], root[3], logged[3]; } Row;
+typedef struct Row { double tick; unsigned source; int detect, quiet, fresh; float wanted[3], root[3], logged[3]; } Row;
 static const TfpContinuityTuning tuning = TFP_CONTINUITY_DEFAULT;
 
 static float present(TfpContinuity *c, const Row *row, const float *basis, float *shown) {
   float relative[3] = {0}, out[3];
   for (int a = 0; a < 3; ++a) for (int k = 0; k < 3; ++k) relative[a] += (row->wanted[k]-row->root[k])*basis[a*3+k];
-  const float carried = tfp_continuity_step_in(c, relative, row->wanted, basis, row->source, row->detect != 0, false, row->tick, 250, &tuning, out);
+  const float carried = tfp_continuity_step_in(c, relative, row->wanted, basis, row->source, row->detect != 0, row->quiet != 0, row->tick, 250, &tuning, out);
   for (int k = 0; k < 3; ++k) { shown[k] = row->root[k]; for (int a = 0; a < 3; ++a) shown[k] += out[a]*basis[a*3+k]; }
   return carried;
 }
@@ -113,8 +116,8 @@ int main(int argc, char **argv) {
   int count = 0, room = 1024; Row *rows = malloc((size_t)room*sizeof *rows); float *axes = malloc((size_t)room*9*sizeof *axes);
   for (;;) {
     Row row;
-    if (scanf("%lf %u %d %f %f %f %f %f %f %f %f %f", &row.tick, &row.source, &row.detect, row.wanted, row.wanted+1, row.wanted+2, row.root, row.root+1,
-              row.root+2, row.logged, row.logged+1, row.logged+2) != 12) break;
+    if (scanf("%lf %u %d %d %d %f %f %f %f %f %f %f %f %f", &row.tick, &row.source, &row.detect, &row.quiet, &row.fresh, row.wanted, row.wanted+1,
+              row.wanted+2, row.root, row.root+1, row.root+2, row.logged, row.logged+1, row.logged+2) != 14) break;
     if (count == room) { room *= 2; rows = realloc(rows, (size_t)room*sizeof *rows); axes = realloc(axes, (size_t)room*9*sizeof *axes); }
     for (int i = 0; i < 9; ++i) if (scanf("%f", &axes[count*9+i]) != 1) return 1;
     rows[count++] = row;
@@ -122,10 +125,12 @@ int main(int argc, char **argv) {
   TfpContinuity c; memset(&c, 0, sizeof c);
   for (int from = 0; from < count;) {
     int to = from+1;
-    while (to < count && rows[to].tick-rows[to-1].tick <= 250) ++to;
+    while (to < count && rows[to].tick-rows[to-1].tick <= 250 && rows[to].fresh != 1) ++to;
+    if (rows[from].fresh == 1) memset(&c, 0, sizeof c);
     if (fit) fit_stretch(&c, rows+from, to-from, axes+from*9);
     for (int n = from; n < to; ++n) {
       const uint64_t jumps = c.jumps, edges = c.edges, reseats = c.reseats, restarts = c.restarts; float shown[3], apart = 0;
+      if (rows[n].fresh == 2) { c.active = false; c.run = 0; }
       const float carried = present(&c, &rows[n], axes+n*9, shown);
       for (int k = 0; k < 3; ++k) apart += (shown[k]-rows[n].logged[k])*(shown[k]-rows[n].logged[k]);
       printf("%.4f %.4f %.4f %.4f %u", (double)shown[0], (double)shown[1], (double)shown[2], (double)carried,
