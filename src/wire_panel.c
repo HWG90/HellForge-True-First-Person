@@ -7,7 +7,8 @@
 enum { ROWS = 40, QUEUE = 16, TABS = 3 };
 static const char *const LOCKED_TAB = "Locked view";
 /* The options of TFP_SETTINGS_LOCKED, in its order: what the panel calls them. `note`: the option sets nothing;
- * it is drawn greyed (the host's begin_disabled) with the note under it, since a greyed item may show no tooltip. */
+ * it is drawn greyed (the host's begin_disabled) with the note under it; its description is a tooltip all the same
+ * (tip_greyed). */
 static const struct { const char *label, *description, *note; } LOCKED[TFP_LOCKED_COUNT] = {
   {"Camera lock", "Keep the view first person through every action and camera of your own character.", NULL},
   {"Field of view lock", "Hold one field of view whatever the weapon or the camera asks for.", NULL},
@@ -32,7 +33,7 @@ _Static_assert(TFP_LOCKED_COUNT == 13 && TFP_LOCKED_bodycam == 4 && TFP_LOCKED_k
                TFP_LOCKED_animated_arms == 9 && TFP_LOCKED_one_handed_pistols == 10 && TFP_LOCKED_put_away == 11 && TFP_LOCKED_smooth_eye == 12, "LOCKED names the options of TFP_SETTINGS_LOCKED in its order");
 
 /* The camera style (src/camera_damp.h): the three sliders only the Bodycam camera uses. While Bodycam is off they are
- * drawn greyed, as stored, and BODYCAM_NOTE under the Bodycam row says why. */
+ * drawn greyed, as stored, each with its tooltip (tip_greyed), and BODYCAM_NOTE under the Bodycam row says why. */
 static bool bodycam_only(int id) { return id == TFP_LOCKED_kick_strength || id == TFP_LOCKED_kick_max_degrees || id == TFP_LOCKED_camera_damping; }
 static const char *const BODYCAM_NOTE = "View kick strength, View kick limit and Camera damping apply to Bodycam.";
 
@@ -132,6 +133,20 @@ static void push(Panel *p, int index, bool locked, bool activate, TfpMenuValue v
   unlock(p);
 }
 static void tip(Panel *p, const char *text) { if (text && p->ov->is_item_hovered()) p->ov->tooltip(text); }
+/* The tooltip of an item that was drawn greyed, called after end_disabled. The host answers "not hovered" for a
+ * greyed item (Dear ImGui's rule for a disabled one) and its tooltip asks the same again, so tip() alone never shows
+ * anything there. An item that draws nothing, of the greyed item's own rectangle and not greyed, is laid over it and
+ * carries the tooltip; the layout goes on from it as it did from the greyed item, which is alone on its line. */
+static void tip_greyed(Panel *p, const char *text) {
+  const OvApi *ov = p->ov;
+  float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+  if (!text) return;
+  ov->item_rect(&x0, &y0, &x1, &y1);
+  if (!(x1 > x0) || !(y1 > y0)) return;
+  ov->set_cursor_screen_pos(x0, y0);
+  ov->dummy(x1 - x0, y1 - y0);
+  tip(p, text);
+}
 /* A whole-number slider with a step. `slot` names it among all sliders. true: let go on a new value (*value). */
 static bool slider(Panel *p, int slot, const char *label, double now, double min, double max, double step, int *value) {
   const OvApi *ov = p->ov;
@@ -198,8 +213,9 @@ static void draw_control(Panel *p, int i, const OvFrame *frame) {
     }
     default: break;
   }
-  tip(p, c->description);
   ov->end_disabled();
+  /* (a greyed key row ends in its small button on a line of several items: nothing is laid over that) */
+  if (row->disabled && c->kind != TFP_MK_KEY) tip_greyed(p, c->description); else tip(p, c->description);
 }
 static void draw_locked(Panel *p) {
   const OvApi *ov = p->ov;
@@ -213,7 +229,7 @@ static void draw_locked(Panel *p) {
       ov->begin_disabled(1);
       ov->checkbox(LOCKED[i].label, &v);   /* shown as stored; the host blocks it */
       ov->end_disabled();
-      tip(p, LOCKED[i].description);
+      tip_greyed(p, LOCKED[i].description);
       ov->text_colored(ov->theme(OV_THEME_TEXT_DIM), LOCKED[i].note);
       continue;
     }
@@ -224,7 +240,7 @@ static void draw_locked(Panel *p) {
       ov->begin_disabled(1);
       ov->slider_int(LOCKED[i].label, &v, (int)info->min, (int)info->max);   /* shown as stored; the host blocks it */
       ov->end_disabled();
-      tip(p, LOCKED[i].description);
+      tip_greyed(p, LOCKED[i].description);
       continue;
     }
     if (info->is_bool) {
@@ -274,7 +290,7 @@ static bool host_fits(const OvApi *ov) {
          ov->text && ov->text_wrapped && ov->text_disabled && ov->text_colored && ov->same_line && ov->spacing && ov->button && ov->small_button &&
          ov->checkbox && ov->slider_int && ov->combo && ov->is_item_hovered && ov->tooltip && ov->begin_tab_bar && ov->end_tab_bar &&
          ov->begin_tab_item && ov->end_tab_item && ov->key_pressed && ov->is_item_active && ov->is_item_deactivated_after_edit &&
-         ov->begin_disabled && ov->end_disabled && ov->theme && ov->button_primary && ov->key_cap;
+         ov->begin_disabled && ov->end_disabled && ov->theme && ov->button_primary && ov->key_cap && ov->item_rect && ov->set_cursor_screen_pos && ov->dummy;
 }
 bool tfp_wire_panel_bound(TfpWire *w) { Panel *p = state(w); return p && p->handle; }
 bool tfp_wire_panel_bind(TfpWire *w, const OvApi *ov, const TfpPanelPlatform *platform, unsigned unavailable, TfpMenuEditFn edit) {

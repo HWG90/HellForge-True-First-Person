@@ -299,7 +299,9 @@ static struct {
   const char *tab;            /* the selected tab; NULL: every tab's content is drawn */
   const char *click, *flip, *slide, *release, *pick;
   int slide_to, pick_to, key;
-  bool hover, active;
+  bool hover, active;         /* hover: the mouse is over every item (what the real host makes of that: o_hovered) */
+  bool last_disabled;         /* the last item was drawn greyed (inside begin_disabled(1)) */
+  int items, covers, bad_covers; float cursor[2]; bool cursor_set;   /* o_item_rect, o_dummy */
   char last[200];
   int disabled, disabled_depth, tab_bars, tab_items, bad_colours, locks, lock_depth, connects;
   const char *taken;          /* an id the host already holds (a replaced build's panel): refused */
@@ -310,6 +312,7 @@ static OvPanel *const HANDLE = (OvPanel *)&ov;
 static void drew(const char *kind, const char *text) {
   if (ov.drawn_count < (int)COUNT(ov.drawn)) snprintf(ov.drawn[ov.drawn_count++], sizeof ov.drawn[0], "%s:%s%s", kind, text, ov.disabled ? " (disabled)" : "");
   snprintf(ov.last, sizeof ov.last, "%s", text);
+  if (strcmp(kind, "tip")) ov.last_disabled = ov.disabled != 0, ov.items++, ov.cursor_set = false;   /* a tooltip is no item */
 }
 static const char *drawn(const char *line) {
   for (int i = 0; i < ov.drawn_count; i++) if (!strcmp(ov.drawn[i], line)) return ov.drawn[i];
@@ -332,9 +335,22 @@ static void o_text(const char *text) { drew("text", text); }
 static void o_text_colored(uint32_t colour, const char *text) { if (colour >> 24 != 0xAB) ov.bad_colours++; drew("text", text); }
 static void o_heading(const char *text) { drew("heading", text); }
 static void o_key_cap(const char *text) { drew("cap", text); }
-static void o_tooltip(const char *text) { drew("tip", text); }
+/* As the real host (overlay-host src/api.cpp): is_item_hovered is Dear ImGui's IsItemHovered() without flags, which
+ * answers false for an item drawn disabled, and tooltip asks the same again before it draws anything. */
+static int o_hovered(void) { return ov.hover && !ov.last_disabled; }
+static void o_tooltip(const char *text) { if (o_hovered()) drew("tip", text); }
 static void o_none(void) {}
-static int o_hovered(void) { return ov.hover; }
+/* The last item's rectangle: one row of 300 by 18 for each item, 20 apart. */
+static void o_item_rect(float *x0, float *y0, float *x1, float *y1) { *x0 = 10, *y0 = 20.0f * (float)ov.items, *x1 = 310, *y1 = *y0 + 18; }
+static void o_set_cursor(float x, float y) { ov.cursor[0] = x, ov.cursor[1] = y, ov.cursor_set = true; }
+/* An item that draws nothing. The panel lays one over a greyed item to carry its tooltip: counted when it is exactly
+ * the last item's rectangle (so the layout goes on as after that item), and it is the last item from here on. */
+static void o_dummy(float width, float height) {
+  float x0, y0, x1, y1;
+  o_item_rect(&x0, &y0, &x1, &y1);
+  if (ov.cursor_set && ov.cursor[0] == x0 && ov.cursor[1] == y0 && width == x1 - x0 && height == y1 - y0) ov.covers++; else ov.bad_covers++;
+  ov.cursor_set = false, ov.last_disabled = ov.disabled != 0;
+}
 static int o_button(const char *label) {
   drew("button", label);
   if (ov.disabled || !is(ov.click, label)) return 0;
@@ -396,6 +412,7 @@ static void new_host(uint32_t version) {
   api.key_pressed = o_key_pressed;
   if (version < 2) return;
   api.is_item_active = o_active, api.is_item_deactivated_after_edit = o_released;
+  api.item_rect = o_item_rect, api.set_cursor_screen_pos = o_set_cursor, api.dummy = o_dummy;
   api.begin_disabled = o_begin_disabled, api.end_disabled = o_end_disabled, api.theme = o_theme;
   if (version < 6) { api.size = offsetof(OvApi, button_primary); return; }
   api.button_primary = o_primary, api.key_cap = o_key_cap, api.heading = o_heading;
@@ -595,7 +612,19 @@ static int panel_part(void) {
   CHECK(drawn("text:Comes from your character's own animation while Animated arms is on.") &&
         drawn("tip:One-handed weapons are held as your character holds them. This comes from the character's own animation while Animated arms is on; there is nothing to set here."));
   CHECK(!ov.tab_bars && !ov.tab_items && !ov.disabled_depth && !ov.disabled && !ov.lock_depth && ov.locks && !ov.bad_colours);
+  /* A greyed item answers "not hovered" in the host, so each greyed row's description is carried by an unseen item
+   * laid over it, of its own rectangle and not greyed: the three Bodycam sliders, One-handed pistols, and the two
+   * rows of the First person tab that need a weapon. */
+  CHECK(drawn("tip:The most the view is turned by a kick while on foot. Default 8.") &&
+        drawn("tip:How much the view is steadied against your body's movement. 0 is the raw movement; higher is calmer and slower. Default 60."));
+  CHECK(ov.covers == 6 && !ov.bad_covers);
+  {
+    const char *slider_row = drawn("slider:View kick strength (%)=35[0..100] (disabled)"), *tip_row = drawn("tip:How much of your body's movement reaches the view while on foot. Default 35.");
+    CHECK(slider_row && tip_row && tip_row - slider_row == (ptrdiff_t)sizeof ov.drawn[0]);   /* directly after its slider */
+  }
   ov.hover = false;
+  draw_frame();
+  CHECK(ov.covers == 12 && !ov.bad_covers && !drawn_part("tip:"));   /* laid over them in every frame; no tooltip without the mouse */
   ov.tab = "Bob and sway";                                        /* one tab selected: only its controls */
   draw_frame();
   CHECK(drawn_part("slider:Weapon bob strength=") && !drawn_part("Camera lock") && !drawn_part("Near clip distance") && !drawn_part("tip:"));
