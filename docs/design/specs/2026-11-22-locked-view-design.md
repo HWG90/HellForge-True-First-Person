@@ -1401,3 +1401,224 @@ and 161.9 metre-frames; 468 ms the longest carry after a change of camera in bot
 Stable: its eye damping is shorter and its lag limit tighter, so more of the head's own motion reaches the filter.
 Logs: `/home/goose/.cache/tfp-soak-17.modlog`, `tfp-soak-18.modlog`.
 
+
+### After feel.44 (2026-11-23): the Bodycam soak's steps by cause (branch `round4`; offline, not yet in a build)
+
+The question was why Bodycam makes more of the filter's steps than Stable (17 against 11 in the two soaks of feel.44)
+and whether it can be helped without touching Stable or what Bodycam is meant to be. The log
+(`/home/goose/.cache/tfp-soak-18.modlog`: the Stable soak to 06:16:03.405, the Bodycam soak from there) replayed with
+the filter that wrote it (`--logged ebe3c1f`): 3,909 rows, the filter's state known in 3,802, the replay exact in
+3,757. Over all frames 28 of the filter's steps of 0.06 m or more by the vector measure, 11 and 17; where the replay
+is exact 27 (the one that is not is 06:09:34.218 of the Stable part).
+
+**It is not the camera style.** 16 of the 17 are frames of the native view, where the eye is the rig eye and the
+style has no part in it (the kicks turn the view, the eye damping is the head camera's alone); in the Stable part all
+11 are. What the style does to the head camera's eye is there to be seen and is not what is counted:
+
+| Head-camera frames (the wanted eye against the root, after the eye damping) | Stable part | Bodycam part |
+|---|---|---|
+| change of step from frame to frame, median / 9 in 10 under / 99 in 100 under (m) | 0.0017 / 0.034 / 0.156 | 0.0025 / 0.042 / 0.179 |
+| frames whose step changed by more than 0.04 m / 0.06 m | 47 / 31 of 561 | 60 / 40 of 553 |
+| jumps taken up in them | 67 | 81 |
+| steps of 0.06 m or more: the filter's / the game's own / reduced | 0 / 1 / 0 | 1 / 4 / 0 |
+| the change to the native view: correction taken up, mean / median (m) | 0.151 / 0.120 (41) | 0.167 / 0.139 (43) |
+
+So more of the head's own motion does reach the filter in Bodycam (a quarter more frames over the measure, four
+steps shown as the game's own where Stable has one), and the filter makes one step of it. The other six of the
+difference are the play: one jump begun while walking gave nine in the Bodycam soak (06:18:53.275 to 06:18:54.377)
+where Stable's two gave five and four, and the seeds differ (seed 7: 3 swaps of the primary, seed 8: 11). The
+measure counting the head's own motion (the wanted eye is logged after the damping) is not it either: one frame.
+
+**The 17 of the Bodycam part** ("own": the wanted eye's own change of step in the world; "root": the root's own in
+that frame and in the one before; "rest": the shown change less both of the root's, as vectors; the frame itself in
+brackets, the two before it in front; all in the native view but 06:22:27.850):
+
+| Time | Vector | Lengths | Own | Root, frame before | Rest | Carried | The filter in the three frames | Cause |
+|---|---|---|---|---|---|---|---|---|
+| 06:18:40.922 | 0.076 | 0.027 | 0.001 | 0.000, 0.000 | 0.076 | 0.092 | `jump jump [-]` | S |
+| 06:18:53.275 | 0.105 | 0.011 | 0.066 | 0.117, 0.019 | 0.029 | 0.212 | `- jump [jump]` | J, R2 |
+| 06:18:53.342 | 0.110 | 0.069 | 0.044 | 0.099, 0.039 | 0.059 | 0.234 | `jump jump+root [-]` | J, R2 |
+| 06:18:53.409 | 0.145 | 0.138 | 0.141 | 0.102, 0.142 | 0.099 | 0.145 | `- root [root]` | J, R1 |
+| 06:18:53.443 | 0.104 | 0.101 | 0.102 | 0.062, 0.102 | 0.066 | 0.099 | `root root [-]` | J, R1 |
+| 06:18:53.477 | 0.065 | 0.064 | 0.062 | 0.057, 0.062 | 0.055 | 0.058 | `root - [-]` | J, R1 |
+| 06:18:53.509 | 0.122 | 0.121 | 0.057 | 0.120, 0.057 | 0.056 | 0.080 | `- - [jump]` | J, R2 |
+| 06:18:53.576 | 0.200 | 0.173 | 0.128 | 0.026, 0.128 | 0.049 | 0.017 | `jump jump+root [-]` | J, R2 |
+| 06:18:54.110 | 0.265 | 0.035 | 0.258 | 0.026, 0.256 | 0.042 | 0.152 | `jump root [-]` | J, R1 |
+| 06:18:54.377 | 0.079 | 0.078 | 0.081 | 0.006, 0.094 | 0.010 | 0.238 | `jump root [-]` | J, R1 |
+| 06:22:27.850 (head camera) | 0.082 | 0.069 | 0.043 | 0.035, 0.036 | 0.060 | 0.059 | `- - [jump]` | T |
+| 06:22:28.150 | 0.060 | 0.055 | 0.052 | 0.003, 0.001 | 0.060 | 0.149 | `- - [-]` | M |
+| 06:22:30.654 | 0.087 | 0.074 | 0.073 | 0.029, 0.056 | 0.006 | 0.133 | `- root [jump]` | R2 |
+| 06:23:42.302 | 0.063 | 0.015 | 0.053 | 0.072, 0.084 | 0.103 | 0.041 | `jump+root root [root]` | J, R1 |
+| 06:23:42.436 | 0.082 | 0.056 | 0.094 | 0.016, 0.109 | 0.023 | 0.028 | `jump root [-]` | J, R1 |
+| 06:24:02.935 | 0.061 | 0.001 | 0.018 | 0.001, 0.001 | 0.059 | 0.135 | `jump jump [-]` | C |
+| 06:24:46.537 | 0.075 | 0.050 | 0.055 | 0.017, 0.012 | 0.054 | 0.224 | `jump jump [-]` | C |
+
+**By cause**, each marked (a) a fault of the filter or of the eye damping, (b) the design working on a violent
+motion of the game's own, (c) the measure counting what a player would not see.
+
+(a), 4:
+
+S. *A stop taken up as a jump* (1: 06:18:40.922). New, a fault of the filter, mended. The native view entered after a
+   swap to the LAS-5 Scythe, the body standing. The rig eye is thrown 0.38 m in its second frame (taken up) and comes
+   back over nine frames, gathering way to 0.072 m a frame (1.9 m/s), and stops dead: 0.004, 0.003, 0.003, 0.002 m.
+   "A step shorter than the speed predicted, in the same direction, is the motion slowing down and is followed": the
+   first 4 mm pointed against the way the eye had gone, so they were a jump of 0.064 m, taken up, and the next
+   frame's 3 mm too. The presented eye went on at the kept speed past an eye that stood, 0.117 m in two frames; the
+   third frame's 3 mm pointed forwards, the frame was followed and the kept speed dropped whole on top of the
+   catch-up begun: 0.076 m, where the rig eye's own change in that frame was 0.001 m.
+   Which way a stop's last step points is a coin's toss. In the nine logs an eye going 0.038 to 0.066 m a frame
+   against the root goes 0.0003 to 0.007 m in the next, where jumps are looked for and outside a run, 30 times: 17
+   times the step points along the way (followed, as slowing down) and 13 times against it (taken up). In this log
+   15 times, 2 in the Stable part (both along) and 13 in the Bodycam part (7 along, 6 against: 06:16:27, 06:16:48,
+   06:16:54, 06:18:23, 06:18:40, 06:25:57, all with the LAS-5 Scythe in the hands, which each part draws a dozen
+   times). At 06:16:48 and 06:18:23 the stop is a jump for all the frames of a run, the run's time is over, a speed
+   of nothing is believed and the kept one handed to the curve: no step of 0.06 m, and 0.12 and 0.16 m carried past
+   an eye that stands.
+T. *A jump in the root's frame alone in the frame the root turns as the body gains speed* (1: 06:22:27.850, the one
+   step in a head-camera frame). The filter's, and not mended. Inside a swap the body begins to walk (the root's step
+   0.036 and then 0.071 m) and its axes turn by 0.30 rad in that frame (0.27 and 0.24 rad in the two after). The eye
+   goes with the root's place and not round with its axes: 0.059 m in the root's frame, 0.058 m off the kept speed,
+   0.011 m off with the turning left out. The root is 0.078 m off its course, by the turn and by its own gain of
+   speed together, so the step less the root's part is no smaller and the frame does not read as the root
+   re-seated; THE TURNING reads a frame without the turning when the axes are off their course and the step is a
+   jump both ways, and this is a jump one way only. Taken up, and the presented eye held to axes that turned.
+C. *A frame under the measure followed on a curve just begun* (2: 06:24:02.935, 06:24:46.537). The filter's, known
+   (cause C of the sections before) and not mended. Both are the fourth frame after three jumps, 100 ms after the
+   run began, so its time is over; 0.0386 m off the kept speed against a measure of 0.0404 m and 0.0421 m against
+   0.0423 m, so no jump, nothing believed, the frame followed whole on the curve's steepest frames. The frame a hair
+   under the measure that counts as a jump once in a run counts within the run's time only.
+
+(b), 12:
+
+J. *A jump begun while walking* ("hold w; key space": "holding the native view through an action"; 11: the nine of
+   06:18:53.275 to 06:18:54.377 and 06:23:42.302, .436). The body is thrown forwards and lands: the root's step goes
+   0.017, 0.102, 0.081, 0.165, 0.301, 0.400, 0.339, 0.282, 0.162, 0.034, 0.009 m in eleven frames, changing by up to
+   0.14 m from one frame to the next (0.256 m at the landing, 06:18:54.077), and the rig eye's own step in the world
+   changes by 0.04 to 0.14 m a frame beside it, not by the same as the root's. Seven of the eleven are the eye's
+   own change shown as it is (R1 of the feel.42 section: 0.063 to 0.265 m shown for 0.053 to 0.258 m of the eye's
+   own; counted because 0.03 m or more is carried).
+   Four are the root's change given to the eye (R2, the filter's and not mended: 0.105, 0.110, 0.122 and 0.200 m for
+   0.066, 0.044, 0.057 and 0.128 m; less both of the root's changes 0.029 to 0.059 m). The soak's own judge flags the
+   same action ("the body's own lunge", feel.43 and feel.44 in the game).
+R2. *The root's change of speed given to an eye that did not make it* (1 more: 06:22:30.654). "Motion: action=dive"
+   straight after a swap: the root's step goes 0.092, 0.136, 0.163 m while the rig eye's in the world goes 0.095,
+   0.087, 0.033 m. The first frame reads as the root re-seated, the second is a jump against the speed kept in the
+   root's frame, taken up, and the presented eye is carried on with the root: 0.160 m for the wanted eye's 0.033 m,
+   0.087 m of step change for the eye's own 0.073 m, 0.006 m of it left less the root's two changes.
+
+(c), 1:
+
+M. *The measure counting the eye's own move* (06:22:28.150): the rig eye slows from 0.107 to 0.058 m a frame after a
+   swap (0.052 m), shown as 0.060 m; counted because 0.15 m of the change of camera is still carried.
+
+**The 11 of the Stable part** are all explained by causes the sections before name. Two jumps begun while walking
+(J: 06:06:36.935 to 06:06:37.135, five, the root to 0.38 m a frame; 06:10:46.032 to .165, four): R1 three
+(06:06:36.968, 06:06:37.034, 06:10:46.032), R2 six. 06:06:44.046 is R2 without a violent motion (the root sets off
+at 0.041 m a frame and turns 0.14 rad a frame under a rig eye that stands in the world, 0.5 m of a change of camera
+carried; 0.078 m for 0.037 m). 06:09:34.218 is C (a run ended by a frame 0.0381 m off against 0.0412 m that is also
+slowing down; 0.079 m for 0.028 m). No S, no T.
+
+**What was changed** (`src/camera_continuity.h`, THE STOP; the tests are built from the logged frames,
+`tests/reference/soak-18-steps.h`, and 7 checks fail on main's filter, with the logged 0.076 m among them).
+
+A step of next to nothing, under a fifth of the measure (`TFP_CONTINUITY_STOP`) and a quarter of the step predicted,
+is the eye stopping whichever way it points, and is followed as a motion slowing down is. Only as the first frame,
+not in a run of jumps; and not against a speed kept from the camera before (THE LENT SPEED lets that down in the
+frames taken up, and a stop followed would drop it whole).
+
+06:18:40.855: followed; the rig eye's own stop is shown (0.068 m, the game's own by the judge), nothing is carried
+for it and the 0.076 m two frames later is gone. It acts on all thirteen stops of the logs that point against the
+way (each is a first frame); 06:18:40 is the one that made a step that is counted.
+
+Made up, at 8, 16.7, 33.3 and 50 ms a frame: an eye going 2 or 4 m/s that stops dead, its last steps 3 mm against
+its way. Where the step of that speed is over the measure, main's filter carried the eye on for a run's time and
+handed the speed to the curve: 0.23 and 0.26 m past an eye that stood for 2 m/s (33.3 and 50 ms), 0.26, 0.56 and
+0.60 m for 4 m/s (16.7, 33.3, 50 ms). Now 0.000 m in all eight, and the step changes by the eye's own stop. The same
+to the digit as main, which the tests hold: the last steps 3 mm along the way (followed before as well), 20 mm
+against it (no step of nothing; taken up), and a speed kept from the camera before.
+A second family, 7,680 cases (a body that gains 0 to 2.5 m/s and turns 0.1 to 0.45 rad in one frame under an eye
+that goes with its place, at the four frame times; made for T below): the stop differs from main in 166, in none
+with more step than before and than the eye's own, more taken up or more to the side; on average 0.066 to 0.028 m
+of step and 0.070 to 0.018 m taken up.
+
+The two limits, each from what went wrong without it on the nine logs (steps by the vector measure, exact frames
+and all frames):
+
+- *Any frame of a run* (not the first only): inside the conditions for one pair of numbers alone (a quarter of the
+  measure, a fifth to three tenths of the step predicted: -2 steps), and outside at every other (a tenth to a fifth
+  of the measure: soak 13 one more, 03:52:20.754 0.080 m; four tenths of the predicted: soak 17 one more,
+  06:07:37.365 0.065 m new). A frame taken up and the next followed as a stop is the fault itself. With the
+  first frame only every pair from a tenth to a quarter of the measure and a tenth of the predicted to all of it is
+  inside and gives the same count; from three tenths of the measure on (and a fifth of the predicted or more) soaks
+  8 and 9 have one more over all frames (00:27:35.808, 0.083 m: an eye that goes 0.011 m is not standing). A fifth
+  is in the middle of what holds.
+- *Not against a lent speed*: no frame of the logs; the made-up case above is what it is for.
+
+**Replayed** (by the vector measure; "main" is a398dbb, the filter of feel.44; each log judged where the filter
+that wrote it is exact: 9a3470b for soaks 8 and 9, 66ee111 for 10 and 11, f557194 for 13 and 14, b486193 for 15,
+ebe3c1f for 17 and 18):
+
+| Log | Filter | Filter's steps | largest (m) | game's own | reduced | by lengths | metre-frames | longest carry (ms) |
+|---|---|---|---|---|---|---|---|---|
+| Soak 8 | main | 9 | 0.214, 0.142, 0.107 | 5 | 2 | 5 | 179.5 | 468 |
+| Soak 8 | round4 | 9 | 0.214, 0.142, 0.107 | 5 | 2 | 5 | 179.5 (0.0 %) | 468 |
+| Soak 9 | main | 16 | 0.214, 0.142, 0.137 | 9 | 5 | 7 | 313.8 | 566 |
+| Soak 9 | round4 | 16 | 0.214, 0.142, 0.137 | 9 | 5 | 7 | 313.0 (-0.3 %) | 566 |
+| Soak 10 | main | 4 | 0.085, 0.064, 0.062 | 7 | 2 | 1 | 117.9 | 501 |
+| Soak 10 | round4 | 4 | 0.085, 0.064, 0.062 | 7 | 2 | 1 | 117.8 (-0.1 %) | 501 |
+| Soak 11 | main | 7 | 0.085, 0.071, 0.064 | 7 | 3 | 3 | 209.8 | 501 |
+| Soak 11 | round4 | 7 | 0.085, 0.071, 0.064 | 7 | 3 | 3 | 209.5 (-0.1 %) | 501 |
+| Soak 13 | main | 7 | 0.121, 0.090, 0.086 | 6 | 1 | 2 | 116.0 | 435 |
+| Soak 13 | round4 | 7 | 0.121, 0.090, 0.086 | 6 | 1 | 2 | 115.7 (-0.3 %) | 435 |
+| Soak 14 | main | 7 | 0.090, 0.077, 0.076 | 3 | 0 | 2 | 95.7 | 467 |
+| Soak 14 | round4 | 7 | 0.090, 0.077, 0.076 | 3 | 0 | 2 | 95.7 (0.0 %) | 467 |
+| Soak 15 | main | 10 | 0.179, 0.146, 0.130 | 3 | 1 | 7 | 110.5 | 468 |
+| Soak 15 | round4 | 10 | 0.179, 0.146, 0.130 | 3 | 1 | 7 | 110.1 (-0.4 %) | 468 |
+| Soak 17 | main | 10 | 0.173, 0.161, 0.142 | 3 | 1 | 6 | 126.6 | 467 |
+| Soak 17 | round4 | 10 | 0.173, 0.161, 0.142 | 3 | 1 | 6 | 126.6 (0.0 %) | 467 |
+| Soak 18 | main | 27 | 0.265, 0.200, 0.173 | 10 | 7 | 18 | 271.0 | 468 |
+| Soak 18 | round4 | 26 | 0.265, 0.200, 0.173 | 12 | 7 | 18 | 268.4 (-1.0 %) | 468 |
+
+Over all frames the same: 10, 19, 4, 7, 7, 7, 10, 11, 28 on main and 10, 19, 4, 7, 7, 7, 10, 11, 27 now (the
+Bodycam part 17 to 16, the Stable part 11 and 11), no log carries more (0.0 to -0.9 %), the longest carry as it was
+on every log (468, 700, 501, 501, 435, 467, 468, 467, 468 ms). No step of any list grew by more than 0.002 m and
+none appeared.
+
+**The probes.** All 108 cells (the 84 of `probes-main.txt` and the 24 of `probes-carried.txt`) are the same to the
+last digit: none of those scenes has an eye that stops against its way outside a run.
+
+**What was not changed, and why.**
+
+- T, the turn with a gain of speed. Tried: in a frame the axes are off their course, a jump in the root's frame
+  alone is read without the turning as well, where the two readings are half the measure apart and the eye has not
+  been seen to go round with the root of late (THE ONSET's two conditions). 06:22:27.850: followed, 0.056 m shown
+  where 0.086 m was, the step gone; soak 18 one fewer, no other figure of any log moves, every existing check
+  passes. (Without the two conditions the soak 6 check after a change of camera fails, 0.038 m beyond the root's own
+  against 0.03. Followed in the root's frame as THE ONSET follows, the turn's step is believed as a speed, 1.8 m/s,
+  and lent to the native view entered in the next frame: 06:22:27.983 0.068 m new.) Inside the conditions, and not
+  in: it acts on one frame of nine logs, and in the 7,680 made-up cases above it changes 496, on average for the
+  better (0.100 to 0.053 m taken up, 0.093 to 0.049 m to the side), but 60 of them for the worse (all 60 a turn that
+  goes on for three frames: up to 0.016 m more taken up, 0.040 m more to the side, 0.013 m more step). A pure turn
+  under an eye that goes straight on, and a turn with a gain of speed under the measure, read as the root re-seated
+  on main already and nothing is taken up. The step is held by a test that it does not grow; the header is kept
+  outside the tree (`~/.cache/tfp-round4-work/v3c/`).
+- C. Tried: the frame a hair under the measure counts as a jump after the run's time as well, and a speed is then
+  believed. Soak 18 two fewer (both gone) and soaks 10 and 11 one fewer (02:21:31.445), but soak 15 one more
+  (05:06:43.221, 0.066 m), the longest carry on soak 13 468 ms where it was 435 (and on soak 17 longer by under a
+  millisecond), 02:21:31.078 0.062 to 0.068 m, and more carried on every log (0.1 to 1.3 %). Taken up without a
+  speed believed, or only within 35 ms after the run's time: the same three logs outside. The third round that C is
+  looked at and left; it is the same sum as before, a frame within the measure on a curve begun at 36 to 53 m/s^2.
+- R2, and R1 with it: the jump begun while walking is 20 of the 28. Not tried again; what the feel.42 section tried
+  for R2 stands (every reading that makes the kept speed truer ends runs sooner).
+- The eye damping. Nothing in the log is its fault: the one head-camera step is the filter's reading of a turn. Not
+  touched, so Stable's numbers are the same bit for bit, and Bodycam's too. What the log cannot show: the damping
+  low-passes the head's place in the root's frame, so in a frame the root's axes turn under a head that does not go
+  round, the lag is turned with the axes. The wanted eye of 06:22:27.850, logged after the damping, did not go
+  round (0.011 m off its way in the world), so it is not seen here; it would be the same in both styles, more in
+  Stable with its longer lag.
+- M and the judge: as before.
+
+Tests on the branch: `tests/run-camera-continuity.sh` 2,534 checks (main's 2,497 unchanged and 37 new), the other
+four `run-camera-*.sh` pass (damp 3,403, death 229, lock 2,377, smooth 301), the harness's python tests 27 (both
+probe tests with their recorded bounds as they were), all 46 `tests/run-*.sh` pass, `build.sh --feel` builds. Nothing
+here has been run in the game.
