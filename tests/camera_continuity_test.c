@@ -1145,6 +1145,23 @@ int main(void) {
       CHECK(fabsf(lent_change-w[6]) < .0002f && fabsf(lent_carried-w[7]) < .0002f);
     }
   }
+  /* NOT MENDED. The same soak, 06:22:27.850 (soak18_sprint_turn), the one step of its 17 in a head-camera frame:
+   * inside a swap the body begins to walk and its root's axes turn by 0.30 rad in one frame under an eye that goes
+   * straight on. The eye's step is 0.058 m off the kept speed in the root's frame and 0.011 m with the turning left
+   * out; the root is 0.078 m off its course by the turn and its own gain of speed together, so the frame does not
+   * read as the root re-seated, and a jump in the root's frame alone is not read without the turning: taken up, and
+   * the presented eye held to axes that turned, 0.082 m of step change for the eye's own 0.043 m. Read without the
+   * turning (where the two readings are half the measure apart and the eye has not gone round with the root of late)
+   * the frame is followed and shows 0.056 m; it is the only frame of nine logs that reading acts on, and made up
+   * (a body that gains speed and turns in one frame, 7,680 cases) it was worse in 60 of the 496 it changed. Left as
+   * it is; the filter is held to adding nothing to the logged step and to the rows after it. */
+  {
+    const Judged turn = judged(ROWS(soak18_sprint_turn), 27, 27), before = judged(ROWS(soak18_sprint_turn), 0, 26), after = judged(ROWS(soak18_sprint_turn), 28, 42);
+    printf("soak 18, a body that begins to walk and turns under the head camera (not mended): the filter's step %.3f m (the log: %.3f m); after it %.3f m "
+           "(the log: %.3f m)\n", (double)turn.turned, (double)turn.logged_turned, (double)after.turned, (double)after.logged_turned);
+    CHECK(before.apart < .005f && turn.logged_turned > .08f);
+    CHECK(turn.turned <= turn.logged_turned+.001f && after.turned <= after.logged_turned+.001f);
+  }
   printf("camera continuity: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }
