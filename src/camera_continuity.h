@@ -90,6 +90,27 @@
  *    soak logs (tests/reference/soak-14-steps.h, soak14_hitch: a rig eye dying down, 0.052, 0.002 and 0.056 m, then
  *    at rest; the 0.056 m was taken up and let out over four frames, and is now shown as it is). One frame only: an
  *    eye that stands for two frames and goes on has stopped and set off, as before.
+ *    THE TRIAL. The frame that goes on after a stop is one frame, and one frame's step is no speed. With its speed
+ *    believed for good, an eye that only flickered after its stop (a step on, the same step back, at rest: made up,
+ *    2 and 4 m/s at 16.7 to 50 ms a frame) was a jump of two steps in the frame it went back, taken up: the presented
+ *    eye ran one step more forwards, 0.067 to 0.200 m past anywhere the wanted eye had been, and came back over 200
+ *    to 400 ms with two steps carried, where the filter before THE HITCH had carried one for 117 to 150 ms. So that
+ *    speed is on trial for one frame, and what was kept before it is kept beside it. The next frame confirms it by
+ *    going on within the measure of it, and is an ordinary frame; a frame that slows down or stops is followed as
+ *    any such frame is (a second hitch is a stop after it, and the frame after that can go on again). Any other
+ *    frame says the speed never was, and is asked against what was kept before the trial: a step back, no further
+ *    than a measure past where the eye stood, is the game's own flicker and is followed, nothing carried and no speed
+ *    believed from it (a flicker is no speed); anything else is a jump against the speed kept before, so the
+ *    presented eye stays where the wanted eye has been. Only a frame whose step along the trial's way is at least the
+ *    trial's own (on at twice the speed) is still a jump against the speed on trial: the presented eye going on at
+ *    it is then behind the wanted one, not past it.
+ *    And the speed dropped at a stop is kept for the frame after only if the eye was going at it: not when it was
+ *    believed the frame before, when a run's time was over or at once straight after a frame taken up, and no frame
+ *    has since gone on at it. Seen in the Stable soak of 2026-11-23 on 0.6.0-feel.44 (tests/reference/
+ *    soak-19-steps.h): an eye thrown about in a dive, 0.25 m carried, a run of jumps ended with 1.9 m/s believed, the
+ *    next frame 0.006 m (a stop) and the one after 0.051 m, within the measure of that speed's step by chance. It was
+ *    followed as the eye going on, while the curve was at its steepest: 0.064 m of step change for the wanted eye's
+ *    0.042 m, a step the filter before THE HITCH did not make. Now it is a jump, as it was.
  *    Jumps in a row are taken up for
  *    TFP_CONTINUITY_RUN_MS at most (a time, not a number of frames); then the new speed is believed, and the
  *    difference between the two speeds goes into the correction's curve, so the presented eye keeps its speed in
@@ -165,6 +186,9 @@ typedef struct TfpContinuity {
   bool neared;                           /* the present run has had its frame under the measure */
   bool lent; float left;                 /* the kept speed is the camera before's (THE LENT SPEED); how much of it the presented eye still has (1: all) */
   bool paused; float before[3];          /* last frame was followed as the eye stopping (THE STOP); the speed kept until then (THE HITCH) */
+  bool calm, fresh;                      /* the last frame was followed; the kept speed was believed when a run's time was over or at once straight after a
+                                          * frame taken up, and no frame has been followed since that went on within the measure of it or after another followed */
+  bool trial; float held[3], held_loose[3]; /* last frame was followed as the eye going on after a stop; the speeds kept until then (THE TRIAL) */
   double tick, started, run_started; /* run_started: the first jump of the present run */
   float wanted[3], speed[3], shown[3];   /* last frame: the wanted eye, its smoothed speed (m/s), the presented eye */
   float from[3], from_speed[3], duration; /* the correction's curve: value and speed at `started`, length in ms */
@@ -388,7 +412,7 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
         tfp_continuity_curve(c, tick, value, speed);
       }
       if (freely) { /* nor does the eye's speed: it keeps its direction in the world */
-        tfp_continuity_turn(turn, c->speed); tfp_continuity_turn(turn, c->before);
+        tfp_continuity_turn(turn, c->speed); tfp_continuity_turn(turn, c->before); tfp_continuity_turn(turn, c->held);
         for (unsigned i = 0; i < TFP_CONTINUITY_SPEED_FRAMES; ++i) tfp_continuity_turn(turn, c->recent[i]);
         for (unsigned i = 0; i < 3; ++i) { expected[i] = c->speed[i]*dt; difference[i] = loose[i]; step[i] = expected[i]+loose[i]; }
         size = loose_size;
@@ -402,6 +426,7 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
     /* What is carried, and the eye's speed, keep their direction in the world: they are turned by as much as the
      * root's axes are off their even course. */
     tfp_continuity_turn(off, c->from); tfp_continuity_turn(off, c->from_speed); tfp_continuity_turn(off, c->speed); tfp_continuity_turn(off, c->before);
+    tfp_continuity_turn(off, c->held);
     for (unsigned i = 0; i < TFP_CONTINUITY_SPEED_FRAMES; ++i) tfp_continuity_turn(off, c->recent[i]);
     tfp_continuity_curve(c, tick, value, speed);
     for (unsigned i = 0; i < 3; ++i) { expected[i] = c->speed[i]*dt; difference[i] = rest[i]; step[i] = expected[i]+rest[i]; }
@@ -413,6 +438,21 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
     for (unsigned i = 0; i < 3; ++i) c->wanted[i] = c->shown[i] = wanted[i];
     tfp_continuity_place(c, wanted, world, basis);
     return 0;
+  }
+  /* THE TRIAL: the frame before went on after a stop and its speed was believed. A frame that does not go on within
+   * the measure of it, and is no slowing down either, says that speed never was: the kept speed is what it was before
+   * that frame, and a frame that goes back, no further than a measure past where the eye stood, is the game's own. */
+  bool returned = false, denied = false;
+  if (c->trial && !edge) {
+    const float went = tfp_continuity_length(step), meant = tfp_continuity_length(expected);
+    const float way = step[0]*expected[0]+step[1]*expected[1]+step[2]*expected[2];
+    const bool stop = !c->run && !c->lent && went < TFP_CONTINUITY_STOP*measure && went < meant/4;
+    if (size > measure && !((way >= 0 || stop) && went < meant) && way < meant*meant) {
+      denied = true; returned = way < 0 && went < meant+measure;
+      for (unsigned i = 0; i < 3; ++i) { difference[i] += (c->speed[i]-c->held[i])*dt; expected[i] = c->held[i]*dt; c->speed[i] = c->held[i]; }
+      if (placed && c->loose) for (unsigned i = 0; i < 3; ++i) c->loose_speed[i] = c->held_loose[i];
+      size = tfp_continuity_length(difference);
+    }
   }
   float last[3], alike = 0; /* the frame before, off the kept speed (m/s), and how far this frame goes its way */
   for (unsigned i = 0; i < 3; ++i) { last[i] = c->recent[(c->recent_at+TFP_CONTINUITY_SPEED_FRAMES-1)%TFP_CONTINUITY_SPEED_FRAMES][i]-c->speed[i]; alike += last[i]*difference[i]; }
@@ -432,7 +472,7 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
   /* A run's last frame a hair under the measure: once in a run, within its time, a frame that goes the way the jump
    * before it went counts as a jump from TFP_CONTINUITY_NEAR of the measure. */
   const bool near = c->run && within && !c->neared && size > TFP_CONTINUITY_NEAR*limit && alike > .7f*size*tfp_continuity_length(last);
-  const bool jump = !quiet && !edge && detect && (over || near) && !slowing && !onset && !resumed;
+  const bool jump = !quiet && !edge && detect && (over || near) && !slowing && !onset && !resumed && !returned;
   const bool believe = jump && !within; /* jumps for longer than the run: a new speed, not a re-seated rig */
   const bool take = !quiet && size > 1e-4f && (edge || jump);
   if (take) {
@@ -466,19 +506,26 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
     tfp_continuity_begin(c, next, from_speed, tick, duration);
     for (unsigned i = 0; i < 3; ++i) value[i] = next[i];
     if (edge) { ++c->edges; c->run = 0; } else if (believe) c->run = 0; else { ++c->jumps; if (!c->run++) c->run_started = tick; }
-    c->neared = c->run && (c->neared || !over); c->paused = false;
+    c->neared = c->run && (c->neared || !over); c->paused = c->trial = c->calm = false;
+    if (believe) c->fresh = true; /* believed in this frame: no frame has gone on at it yet */
     /* otherwise the wanted eye's speed is kept: after a jump it goes on as it went */
   } else {
     c->run = 0; c->neared = false; c->lent = false;
-    c->paused = stopped && over; /* the kept speed is dropped whole in this frame: what it was is kept for one frame more */
+    /* the kept speed is dropped whole in this frame: what it was is kept for one frame more, unless it was believed
+     * only the frame before, out of a run of jumps or straight after a frame taken up (the eye was not going steadily) */
+    c->paused = stopped && over && !c->fresh;
     if (c->paused) for (unsigned i = 0; i < 3; ++i) c->before[i] = c->speed[i];
-    const float k = over || !c->moving ? 1 : 1-expf(-dt/.05f); /* a new speed is believed at once, an ordinary frame is averaged in */
+    c->fresh = over && !c->calm; c->calm = true;
+    c->trial = resumed; /* its speed is believed at once and is on trial for one frame: what was kept is kept beside it */
+    if (resumed) for (unsigned i = 0; i < 3; ++i) { c->held[i] = c->speed[i]; c->held_loose[i] = c->loose_speed[i]; }
+    /* a new speed is believed at once, an ordinary frame is averaged in, a step back after a trial is no speed */
+    const float k = returned ? 0 : over || !c->moving ? 1 : 1-expf(-dt/.05f);
     for (unsigned i = 0; i < 3; ++i) c->speed[i] += (step[i]/dt-c->speed[i])*k;
     const float fast = tfp_continuity_length(c->speed);
     if (fast > 8) for (unsigned i = 0; i < 3; ++i) c->speed[i] *= 8/fast;
     if (quiet && c->active && c->started+c->duration-tick > TFP_CONTINUITY_QUIET_MS) tfp_continuity_begin(c, value, speed, tick, TFP_CONTINUITY_QUIET_MS);
     if (placed) { /* the speed with the turning left out, kept and averaged as the other is */
-      const float kept = loose_size > limit || !c->loose ? 1 : 1-expf(-dt/.05f);
+      const float kept = returned ? 0 : loose_size > limit || denied || !c->loose ? 1 : 1-expf(-dt/.05f);
       for (unsigned i = 0; i < 3; ++i) c->loose_speed[i] += (free_step[i]/dt-c->loose_speed[i])*kept;
       const float quick = tfp_continuity_length(c->loose_speed);
       if (quick > 8) for (unsigned i = 0; i < 3; ++i) c->loose_speed[i] *= 8/quick;
