@@ -246,6 +246,53 @@ int main(void) {
     CHECK(most < carried*(1000.0f/144/250)*1.05f && last < .01f);
     printf("Stable, thrown and then on foot: %.2f degrees carried, let go by at most %.3f in one frame\n", carried, most);
   }
+  /* A change of camera style (or of the camera damping option) that switches the kick's damping off while a kick is
+   * being eased: the kick shown goes on from where it was and reaches the raw one over TFP_KICK_BLEND_MS, not in one
+   * frame, and is the raw one bit for bit after that. The head of a thrown body nods 10 degrees in one frame and
+   * stays; 100 ms later the option changes. [0] Stable to Bodycam with camera damping 0, [1] Bodycam at 60 % to
+   * Bodycam at 0, [2] the reverse of [0]: Bodycam with damping 0 to Stable, which goes on under Stable's low-pass. */
+  {
+    const float gain = .35f, max = 8.0f, thrown_gain = .7f, thrown_max = 35.0f, settle = 300.0f;
+    const TfpCameraStyle stable = tfp_camera_style(false, 0), raw_body = tfp_camera_style(true, 0), damped_body = tfp_camera_style(true, 180);
+    const TfpKickTuning stable_thrown = tfp_kick_style_tuning(&stable, true, gain, max, thrown_gain, thrown_max, settle);
+    const TfpKickTuning raw_thrown = tfp_kick_style_tuning(&raw_body, true, gain, max, thrown_gain, thrown_max, settle);
+    const TfpKickTuning damped_thrown = tfp_kick_style_tuning(&damped_body, true, gain, max, thrown_gain, thrown_max, settle);
+    const TfpKickTuning *const from[3] = {&stable_thrown, &damped_thrown, &raw_thrown}, *const to[3] = {&raw_thrown, &raw_thrown, &stable_thrown};
+    static const double rates[] = {30, 60, 144};
+    const TfpQ view = about(0, 0, 1, 37);
+    for (int c = 0; c < 3; ++c) for (int r = 0; r < 3; ++r) {
+      const float dt = (float)(1/rates[r]);
+      const int nod_at = (int)(rates[r]/3), change_at = nod_at + (int)(rates[r]/10 + .5); /* 100 ms after the nod */
+      /* `k` is the camera; `there` the camera that had the new option all along, whose head rest is the same. */
+      TfpKick k, there; tfp_kick_reset(&k); tfp_kick_reset(&there);
+      TfpQ before = tfp_q_identity();
+      float most = 0, step_at_change = 0, apart_at_change = 0, apart_400 = 9, apart_end = 9; bool same_after = true, nearer = true;
+      for (int i = 0; i < change_at + (int)(rates[r]*2); ++i) {
+        const TfpQ head = tfp_q_mul(view, about(1, 0, 0, i >= nod_at ? 10.0f : 0));
+        const TfpQ out = tfp_kick_step(&k, view, head, dt, i < change_at ? from[c] : to[c]);
+        const TfpQ wanted = tfp_kick_step(&there, view, head, dt, to[c]);
+        CHECK(tfp_q_valid(out) && fabsf(sqrtf(tfp_q_dot(out, out))-1) < 1e-4f);
+        const float apart = tfp_degrees_between(out, wanted), moved = tfp_degrees_between(out, before);
+        const double ms = (i-change_at+1)*1000.0/rates[r]; /* since the option changed */
+        if (i == change_at-1) apart_at_change = apart;
+        if (i == change_at) step_at_change = moved;
+        if (i >= change_at) {
+          if (moved > most) most = moved;
+          if (apart > apart_end+.15f) nearer = false; /* (the raw kick moves on meanwhile, and a share of that is taken each frame) */
+          if (ms >= 400 && apart_400 == 9) apart_400 = apart;
+          if (ms >= 400 && c < 2 && memcmp(&out, &wanted, sizeof out)) same_after = false;
+        }
+        apart_end = apart; before = out;
+      }
+      static const char *const names[3] = {"Stable to Bodycam with damping 0", "Bodycam 60 % to damping 0", "Bodycam with damping 0 to Stable"};
+      printf("%s, %g frames a second: %.2f degrees apart when the option changes, %.3f in the first frame, at most %.3f in one frame, %.4f apart after 400 ms\n",
+             names[c], rates[r], apart_at_change, step_at_change, most, apart_400);
+      CHECK(apart_at_change > 2.0f);           /* there was something to snap to */
+      CHECK(most <= 1.5f && nearer);           /* no frame turns the view by more, and the kick does not swing away from the new one */
+      if (c < 2) CHECK(apart_400 < .05f && same_after); /* the raw kick itself, bit for bit, from 400 ms on */
+      else CHECK(apart_end < .05f);            /* Stable's low-pass takes it there on its 250 ms */
+    }
+  }
   printf("camera lock: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

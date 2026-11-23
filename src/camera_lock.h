@@ -19,12 +19,14 @@ static inline TfpKickTuning tfp_kick_style_tuning(const TfpCameraStyle *style, b
                          style->kick_damp_ms};
 }
 /* rest: the slowly following head rotation, in the view's frame; view: last frame's view, for its own turning speed;
- * shown: the kick last returned (what the damping goes on from) */
-typedef struct TfpKick { TfpQ rest, view, shown; bool known; } TfpKick;
+ * shown: the kick last returned (what the damping goes on from); damped: that one was low-passed; blend_ms: what is
+ * left of the way from a low-passed kick to the raw one (tfp_kick_step), 0: none */
+typedef struct TfpKick { TfpQ rest, view, shown; float blend_ms; bool known, damped; } TfpKick;
+#define TFP_KICK_BLEND_MS 150.0f /* how long the kick shown takes to reach the raw one when its damping is switched off */
 #define TFP_KICK_YAW_SHARE .2f /* how much of the head's sideways turn against the view counts; a nod and a tilt count whole */
 #define TFP_KICK_VIEW_STILL 60.0f /* degrees a second of the view's own turning at which nothing is added any more */
 
-static inline void tfp_kick_reset(TfpKick *k) { k->rest = k->view = k->shown = tfp_q_identity(); k->known = false; }
+static inline void tfp_kick_reset(TfpKick *k) { k->rest = k->view = k->shown = tfp_q_identity(); k->blend_ms = 0; k->known = k->damped = false; }
 /* One frame of the kick as the head gives it, before any damping. `view` is the game's own view rotation in the
  * world (without any kick), `head` the head's. Returns the kick as a rotation in the view's own frame; identity when
  * there is nothing to add. */
@@ -75,10 +77,26 @@ static inline TfpQ tfp_kick_raw(TfpKick *k, TfpQ view, TfpQ head, float dt, cons
 /* One frame: tfp_kick_raw, then the damping. The rotation returned is the one to apply, and the one the caller takes
  * out of the rendered view again to find the game's own (it goes on from what it returned, not from the raw kick).
  * damp_ms 0: the raw kick itself. A frame that cannot be used (tfp_kick_raw's first line) and a reset give identity
- * and start the damping again from there. Always a unit rotation. */
+ * and start the damping again from there. Always a unit rotation.
+ * When damp_ms goes to 0 after frames that were low-passed (the camera style was changed to Bodycam with the camera
+ * damping option at 0, or that option was set to 0) the kick shown is not the raw one: it goes on from where it is
+ * and closes on the raw kick in equal shares of the time left of TFP_KICK_BLEND_MS, so the view does not turn by the
+ * difference in one frame. After that, and in every frame of a camera whose damping was never on, it is the raw
+ * kick bit for bit. The other way needs nothing: a low-pass always goes on from the kick shown. */
 static inline TfpQ tfp_kick_step(TfpKick *k, TfpQ view, TfpQ head, float dt, const TfpKickTuning *t) {
   const TfpQ raw = tfp_kick_raw(k, view, head, dt, t);
-  if (!k->known || !(t->damp_ms > 0) || !isfinite(t->damp_ms)) { k->shown = k->known ? raw : tfp_q_identity(); return raw; }
+  if (!k->known) { k->shown = tfp_q_identity(); k->blend_ms = 0; k->damped = false; return raw; }
+  if (!(t->damp_ms > 0) || !isfinite(t->damp_ms)) {
+    if (k->damped) { k->damped = false; k->blend_ms = TFP_KICK_BLEND_MS; }
+    if (k->blend_ms > 0) {
+      const float passed = dt*1000; /* dt is above 0 here (tfp_kick_raw) */
+      const TfpQ next = passed < k->blend_ms ? tfp_slerp(k->shown, raw, passed/k->blend_ms) : raw;
+      if (passed < k->blend_ms && tfp_q_valid(next)) { k->blend_ms -= passed; k->shown = tfp_q_normalised(next); return k->shown; }
+      k->blend_ms = 0;
+    }
+    k->shown = raw; return raw;
+  }
+  k->damped = true; k->blend_ms = 0;
   /* Frame-rate independent: the share of the way taken in dt. dt is above 0 here (tfp_kick_raw). */
   const TfpQ next = tfp_slerp(k->shown, raw, 1-expf(-dt*1000/t->damp_ms));
   k->shown = tfp_q_valid(next) ? tfp_q_normalised(next) : tfp_q_identity();
