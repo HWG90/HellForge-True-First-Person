@@ -34,7 +34,12 @@ The count by lengths is still printed beside the other, for the figures written 
 
 Beside the steps, for each filter, what it carries where the replay is exact: the correction summed over the frames
 (metre-frames: a filter can hide a step by carrying more for longer), and the longest time more than 0.05 m is
-carried on after a change of camera (to the first frame at or under it, or to the last frame that is known).
+carried on after a change of camera (to the first frame at or under it, or to the last frame that is known). The line
+says which of the two the figure is: "which settled" (a frame at or under 0.05 m came), or "cut off by the end of the
+trace" with what was still carried in the last frame there is (the Trace window ended, or the replay stopped being
+exact: the true time is longer and not known), and gives the longest of the other kind and how many there were of
+each. Most of the figures written down before 2026-11-23 ("467 ms", "468 ms", "835 ms") were cut off: a window of half
+a second is 14 frames at 30 frames a second.
 
 What this leaves out:
  - Only the rows in the Trace windows are there (0.5 s after each State edge and six frames before it). What the
@@ -176,31 +181,76 @@ def judge(rows, eye="eye", carried="carried", known=False, vector=False):
     return found
 
 
-def carry(rows, carried="carried", known=False):
-    """(metre-frames, (ms, row)): the correction summed over the frames, and the longest time more than CARRY_M was
-    carried on from a change of camera (the row of that change; None where there was none), to the first frame at or
-    under it or to the last frame before a pause (or, with `known`, before a frame that is not exact). `known`: only
-    the frames where the replay is exact."""
-    metres, longest, where = 0.0, 0, None
+def carries(rows, carried="carried", known=False):
+    """What is carried on after the changes of camera, as a dict:
+      "metres":  the correction summed over the frames (metre-frames)
+      "settled": (ms, row) the longest time more than CARRY_M was carried on from a change of camera (the row of that
+                 change) to the first frame at or under it
+      "cut":     (ms, row, still) the longest such time that the trace cut off: no frame at or under CARRY_M came before
+                 a pause, the end of the rows or (with `known`) a frame that is not exact; ms to the last frame there
+                 is, and `still` what that frame carried
+      "counts":  (how many settled, how many were cut off)
+    (0, None) and (0, None, 0.0) where there was none. `known`: only the frames where the replay is exact."""
+    found = {"metres": 0.0, "settled": (0, None), "cut": (0, None, 0.0), "counts": (0, 0)}
     for i, row in enumerate(rows):
         if known and not follows(row):
             continue
-        metres += row[carried]
+        found["metres"] += row[carried]
         before = rows[i - 1] if i else None
         if before is None or (known and not follows(before)) or row["tick"] - before["tick"] > GAP_MS:
             continue
         if SOURCES.get(row["source"], 0) == SOURCES.get(before["source"], 0) or not row[carried] > CARRY_M:
             continue
-        last = row
+        last, settled = row, False
         for later in rows[i + 1:]:
             if later["tick"] - last["tick"] > GAP_MS or (known and not follows(later)):
                 break
             last = later
             if not later[carried] > CARRY_M:
+                settled = True
                 break
-        if last["tick"] - row["tick"] > longest:
-            longest, where = last["tick"] - row["tick"], row
-    return metres, (longest, where)
+        ms = last["tick"] - row["tick"]
+        if settled:
+            found["counts"] = (found["counts"][0] + 1, found["counts"][1])
+            if found["settled"][1] is None or ms > found["settled"][0]:
+                found["settled"] = (ms, row)
+        else:
+            found["counts"] = (found["counts"][0], found["counts"][1] + 1)
+            if found["cut"][1] is None or ms > found["cut"][0]:
+                found["cut"] = (ms, row, last[carried])
+    return found
+
+
+def carry(rows, carried="carried", known=False):
+    """(metre-frames, (ms, row)): the correction summed over the frames, and the longest time more than CARRY_M was
+    carried on from a change of camera (the row of that change; None where there was none), to the first frame at or
+    under it or to the last frame before a pause (or, with `known`, before a frame that is not exact): the longer of
+    the two that carries() tells apart. `known`: only the frames where the replay is exact."""
+    found = carries(rows, carried, known)
+    settled, cut = found["settled"], found["cut"]
+    if cut[1] is not None and (settled[1] is None or cut[0] > settled[0]):
+        return found["metres"], (cut[0], cut[1]) if cut[0] > 0 else (0, None)
+    return found["metres"], settled if settled[0] > 0 else (0, None)
+
+
+def carry_line(metres, found):
+    """The "carried:" line: as it was printed (the longest time, whichever kind), then which kind that was and the
+    longest of the other kind."""
+    settled, cut, (settled_count, cut_count) = found["settled"], found["cut"], found["counts"]
+    cut_longest = cut[1] is not None and (settled[1] is None or cut[0] > settled[0])
+    longest, where = (cut[0], cut[1]) if cut_longest else settled
+    line = f"  carried: {metres:.1f} metre-frames; more than {CARRY_M} m for {longest:.0f} ms at most after a change of camera"
+    if where is None:
+        return line
+    line += f" ({where['at']})"
+    if cut_longest:
+        line += f", cut off by the end of the trace with {cut[2]:.3f} m still carried; "
+        line += f"the longest that settled: {settled[0]:.0f} ms ({settled[1]['at']})" if settled[1] is not None else "none settled"
+    else:
+        line += ", which settled; "
+        line += (f"the longest cut off by the end of the trace: {cut[0]:.0f} ms ({cut[1]['at']}), {cut[2]:.3f} m still carried"
+                 if cut[1] is not None else "none was cut off by the end of the trace")
+    return line + f"; {settled_count} settled, {cut_count} cut off"
 
 
 def follows(row):
@@ -338,9 +388,8 @@ def main(argv):
         print(f"{title}: {counts['filter']} steps of {STEP_M} m or more are the filter's ({beyond} of them more than {BEYOND_M} m beyond the "
               f"root's own change of step), {counts['game']} the game's own, {counts['reduced']} reduced; by the lengths of the steps "
               f"(the old count) {len(lengths)} the filter's" + (f", the largest {lengths[0]:.3f} m" if lengths else ""))
-        metres, (longest, where) = carry(rows, carried, known)
-        print(f"  carried: {metres:.1f} metre-frames; more than {CARRY_M} m for {longest:.0f} ms at most after a change of camera"
-              + (f" ({where['at']})" if where else ""))
+        found_carried = carries(rows, carried, known)
+        print(carry_line(found_carried["metres"], found_carried))
         for whose, shown, wanted, a, b, c in found:
             if whose == "filter":
                 print(f"  {c['at']} kind {c['kind']}: shown change {shown:.3f} m (by lengths {change(a[eye], b[eye], c[eye], False):.3f} m), "
