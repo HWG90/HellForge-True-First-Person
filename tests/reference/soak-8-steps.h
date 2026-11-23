@@ -4,7 +4,11 @@
  * so nothing here is fitted, and every row is one call of the filter (the game can set the camera twice in a frame:
  * two rows under 5 ms apart). Each array begins where a stretch of Trace rows begins or where the log carries no
  * correction; the filter of that build (9a3470b), started from nothing at the first row, shows the logged eye at
- * the steps named in tests/camera_continuity_test.c. SoakFrame: tests/reference/soak-6-steps.h. */
+ * the steps named in tests/camera_continuity_test.c. SoakFrame: tests/reference/soak-6-steps.h.
+ * The actions (the soak lists have no times; from the State and Motion lines around each): soak9_three_frames, two
+ * quick swaps; soak9_sprint_swap and soak8_stop_in_sprint, a swap inside a sprint; soak8_sprint_begun and
+ * soak8_swap_in_sprint, the next such action, its first frames and its swap; soak8_swap_in_dive, a swap inside a
+ * dive forwards. */
 /* 00:36:02.817 to 00:36:03.316: ms, source, looked, wanted eye, root, root axes (logged), eye shown in the log */
 static const SoakFrame soak9_three_frames[] = {
   {0.0f, 1, 1, {25.8389f, 69.2327f, 3.7470f}, {25.9216f, 69.2193f, 2.1039f},
@@ -140,7 +144,7 @@ static const SoakFrame soak9_sprint_swap[] = {
     {0.852000f, -0.523600f, 0.000000f, 0.523600f, 0.852000f, 0.000000f, 0.000000f, 0.000000f, 1.000000f}, {15.5157f, 54.2177f, 11.0007f}},
 };
 /* 00:30:10.455 to 00:30:11.355: ms, source, looked, wanted eye, root, root axes (logged), eye shown in the log */
-static const SoakFrame soak8_camera_change_in_dive[] = {
+static const SoakFrame soak8_swap_in_sprint[] = {
   {0.0f, 2, 1, {36.0945f, -22.5601f, 15.3186f}, {36.1501f, -22.3372f, 13.7898f},
     {0.966200f, -0.257800f, 0.000000f, 0.257800f, 0.966200f, 0.000000f, 0.000000f, 0.000000f, 1.000000f}, {36.0945f, -22.5601f, 15.3186f}},
   {34.7f, 2, 1, {36.1312f, -22.4079f, 15.4275f}, {36.1873f, -22.1889f, 13.8688f},
@@ -201,7 +205,7 @@ static const SoakFrame soak8_camera_change_in_dive[] = {
     {0.994300f, -0.106700f, 0.000000f, 0.106700f, 0.994300f, 0.000000f, 0.000000f, 0.000000f, 1.000000f}, {36.6202f, -18.8429f, 16.0824f}},
 };
 /* 00:30:09.186 to 00:30:09.687: ms, source, looked, wanted eye, root, root axes (logged), eye shown in the log */
-static const SoakFrame soak8_dive_back_begun[] = {
+static const SoakFrame soak8_sprint_begun[] = {
   {0.0f, 1, 1, {35.1297f, -26.8619f, 14.1205f}, {34.8226f, -27.4477f, 13.6030f},
     {0.884800f, -0.466100f, -0.000000f, 0.466100f, 0.884800f, 0.000000f, -0.000000f, -0.000000f, 1.000000f}, {35.1285f, -26.8642f, 14.1214f}},
   {33.7f, 1, 1, {35.1302f, -26.8619f, 14.1200f}, {34.8226f, -27.4477f, 13.6030f},
@@ -236,7 +240,7 @@ static const SoakFrame soak8_dive_back_begun[] = {
     {0.966300f, -0.257400f, 0.000000f, 0.257400f, 0.966300f, 0.000000f, 0.000000f, 0.000000f, 1.000000f}, {35.3756f, -25.3053f, 14.4137f}},
 };
 /* 00:26:05.564 to 00:26:06.766: ms, source, looked, wanted eye, root, root axes (logged), eye shown in the log */
-static const SoakFrame soak8_dive_back[] = {
+static const SoakFrame soak8_swap_in_dive[] = {
   {0.0f, 2, 0, {-40.4391f, -9.0745f, 15.4243f}, {-40.4741f, -8.9450f, 14.0783f},
     {-0.973100f, -0.230500f, 0.000000f, 0.230500f, -0.973100f, 0.000000f, 0.000000f, 0.000000f, 1.000000f}, {-40.4391f, -9.0745f, 15.4243f}},
   {33.1f, 2, 0, {-40.3808f, -9.3199f, 15.4574f}, {-40.4286f, -9.1324f, 14.1369f},

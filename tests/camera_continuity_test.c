@@ -601,13 +601,13 @@ int main(void) {
    * A run ended at the first frame that was no jump, and that frame was followed as an ordinary one: the presented
    * eye, which had gone on at the kept speed through the run, took the wanted eye's speed in that one frame, and the
    * curve begun at the last jump went on as if nothing had happened.
-   *  - 00:36:03.183, the native view, the body standing: the rig eye went 0.070, 0.063 and 0.060 m in three frames
+   *  - 00:36:03.183, the native view after two quick swaps, the body standing: the rig eye went 0.070, 0.063 and 0.060 m in three frames
    *    and stood again (the kept speed: 0.022 m a frame). 0.049 and 0.042 m off the kept speed were jumps; 0.039 m
    *    was 0.001 m under the measure, and the presented eye went 0.003 m and then 0.070 m.
    *  - 00:33:35.314, the native view after a swap in a sprint: the rig eye all but stopped, two frames 0.046 and
    *    0.053 m off the kept speed, the third 0.039 m: 0.143 m and then 0.081 m.
-   *  - 00:30:10.988 and 00:26:06.399, the native view entered in a dive: the rig re-seated by 0.5 m a frame after
-   *    the change of camera, one jump, and the frame after it 0.02 m off the kept speed: 0.064 and 0.078 m.
+   *  - 00:30:10.988 and 00:26:06.399, the native view entered again after a swap in a sprint and in a dive: the rig
+   *    re-seated by 0.5 m a frame after the change of camera, one jump, and the frame after it 0.02 m off the kept speed: 0.064 and 0.078 m.
    * Now the run's end is taken up as its time-out is: what the run's frames and this one agree on is the eye's new
    * speed, and the difference from the kept one goes into the curve. */
   {
@@ -618,22 +618,22 @@ int main(void) {
     const Judged stop = judged(ROWS(soak9_sprint_swap), 21, 42);
     printf("soak 9, the rig eye stopping after a swap in a sprint: the filter's largest step %.3f m (the log: %.3f m)\n", (double)stop.step, (double)stop.logged);
     CHECK(stop.logged > .06f && stop.step < .06f);
-    const Judged camera = judged(ROWS(soak8_camera_change_in_dive), 2, 28);
-    printf("soak 8, the rig re-seated a frame after a change of camera: the filter's largest step %.3f m (the log: %.3f m)\n", (double)camera.step, (double)camera.logged);
+    const Judged camera = judged(ROWS(soak8_swap_in_sprint), 2, 28);
+    printf("soak 8, the native view entered after a swap in a sprint: the filter's largest step %.3f m (the log: %.3f m)\n", (double)camera.step, (double)camera.logged);
     CHECK(camera.logged > .06f && camera.step < .06f);
-    const Judged dive = judged(ROWS(soak8_dive_back), 24, 42);
-    printf("soak 8, the native view entered in a dive backwards: the filter's largest step %.3f m (the log: %.3f m)\n", (double)dive.step, (double)dive.logged);
+    const Judged dive = judged(ROWS(soak8_swap_in_dive), 24, 42);
+    printf("soak 8, the native view entered after a swap in a dive: the filter's largest step %.3f m (the log: %.3f m)\n", (double)dive.step, (double)dive.logged);
     CHECK(dive.logged > .06f && dive.step < .06f);
   }
-  /* And one came from the speed believed when a run's time is over. 00:26:06.131, the head camera in a dive
-   * backwards: the head was thrown and its eye, against the root, went 0.26, 0.21, 0.136 and 0.083 m in four frames,
+  /* And one came from the speed believed when a run's time is over. 00:26:06.131, the head camera after a swap in
+   * a dive: the head was thrown and its eye, against the root, went 0.26, 0.21, 0.136 and 0.083 m in four frames,
    * each slower than the one before. Of four frames that agree the middle was believed, 0.175 m a frame; the next
    * frame went 0.053 m, shorter than believed and the same way, so it was followed as the motion slowing down, and
    * the 0.12 m believed too much showed at once: the presented eye went 0.192 m and then 0.115 m while the wanted
    * eye's step changed by 0.032 m. A motion that is dying down is believed at its newest frame. */
   {
-    const Judged thrown = judged(ROWS(soak8_dive_back), 2, 23);
-    printf("soak 8, the head thrown in a dive backwards: the filter's largest step %.3f m (the log: %.3f m)\n", (double)thrown.step, (double)thrown.logged);
+    const Judged thrown = judged(ROWS(soak8_swap_in_dive), 2, 23);
+    printf("soak 8, the head thrown in a dive: the filter's largest step %.3f m (the log: %.3f m)\n", (double)thrown.step, (double)thrown.logged);
     CHECK(thrown.logged > .06f && thrown.step < .06f);
     /* tfp_continuity_believed by itself: dying down, the newest; otherwise as before (of two the slower, of three or
      * four the middle); a frame the other way ends what counts */
@@ -656,9 +656,9 @@ int main(void) {
    *    still carried. Two frames on (.362) the root went on again, 0.053, 0.110, 0.138 m: 0.072 m.
    *  - 00:33:34.846, the head camera in the same action: the root's step from 0.199 to 0.108 m, the presented eye's
    *    from 0.204 to 0.104 m a frame later.
-   *  - 00:30:09.385, a dive backwards begun: the root's step 0.000, 0.041, 0.091 m while its axes turned 0.14 and
+   *  - 00:30:09.385, a sprint begun in the head camera: the root's step 0.000, 0.041, 0.091 m while its axes turned 0.14 and
    *    0.08 rad; here the end of a run added to it (0.100 m in the log).
-   *  - 00:27:13.539, a sprint ended, and 00:38:46.845, a dive begun: the same, 0.094 and 0.098 m of the wanted eye's
+   *  - 00:27:13.539, half a second into a dive backwards, and 00:38:46.845, a dive begun: the same, 0.094 and 0.098 m of the wanted eye's
    *    own 0.081 and 0.106 m; both are the last frames of their Trace windows and are not among the rows here.
    * The filter must not add to these. (To carry the root's change of speed over to the curve hides most of them, at
    * 0.06 m of eye ahead of the body for each m/s; the landing in soak6_turn_after_hold, a root that stops from
@@ -671,8 +671,8 @@ int main(void) {
     printf("soak 9, the same in the head camera: the largest step %.3f m (the log: %.3f m)\n", (double)head.step, (double)head.logged);
     CHECK(head.step < head.logged+.005f);
     /* the root's own step changes by 0.050 m in that frame; no more than the measure on top of it */
-    const Judged begun = judged(ROWS(soak8_dive_back_begun), 2, 15);
-    printf("soak 8, a dive backwards begun: the largest step %.3f m (the log: %.3f m)\n", (double)begun.step, (double)begun.logged);
+    const Judged begun = judged(ROWS(soak8_sprint_begun), 2, 15);
+    printf("soak 8, a sprint begun: the largest step %.3f m (the log: %.3f m)\n", (double)begun.step, (double)begun.logged);
     CHECK(begun.logged > .09f && begun.step < .05f+T.pop_m);
   }
   printf("camera continuity: %d checks, %d failed\n", checks, failed);

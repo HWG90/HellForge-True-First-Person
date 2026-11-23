@@ -815,7 +815,7 @@ aim (`quiet=`), the filter's first frame (`start` in `taken=`), and places to 0.
 
 1. *The body's own change of speed in one frame* (6: 00:21:53.294 0.163 m, 00:21:53.362 0.072 m, 00:27:13.539
    0.094 m, 00:30:09.385 0.100 m, 00:33:34.846 0.100 m, 00:38:46.845 0.098 m; a swap in a sprint three times, a
-   sprint, a dive begun twice). The root changes its speed in one frame (its step 0.237 to 0.053 m at .294, 0.199 to
+   sprint begun, a dive backwards half a second in, a dive begun). The root changes its speed in one frame (its step 0.237 to 0.053 m at .294, 0.199 to
    0.108 m at .846) and the eye follows a frame later. The first frame reads as the root re-seated and the eye goes on
    as it went; in the next the root's new course is kept and the eye, against the root, has the new speed whole. In
    three of them the wanted eye's own step changed as much (0.175, 0.081, 0.106 m): they count as the filter's only

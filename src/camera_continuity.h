@@ -59,11 +59,11 @@
  *    A run ends in the same way at the first frame that is no jump, where one comes before the time is over: the
  *    presented eye has gone on at the kept speed through the run, and to follow that frame as an ordinary one gives
  *    it the wanted eye's speed in one frame while the curve of the last jump goes on as it was (seen in the soaks of
- *    2026-11-22 on 0.6.0-feel.40, tests/reference/soak-8-steps.h: a rig eye that went 0.07 m a frame for three
- *    frames, 0.049 and 0.042 m off the kept speed and then 0.039 m, 0.001 m under the measure; the presented eye went
- *    0.003 m and then 0.070 m). So that frame is taken up as well, the eye's speed is what the run's frames and it
- *    agree on, and the difference goes into the curve. A frame that is the motion slowing down ends the run as
- *    before: it is followed.
+ *    2026-11-22 on 0.6.0-feel.40, tests/reference/soak-8-steps.h: after two quick swaps a rig eye that went 0.07 m
+ *    a frame for three frames, 0.049 and 0.042 m off the kept speed and then 0.039 m, 0.001 m under the measure; the
+ *    presented eye went 0.003 m and then 0.070 m). So that frame is taken up as well, the eye's speed is what the
+ *    run's frames and it agree on, and the difference goes into the curve. A frame that is the motion slowing down
+ *    ends the run as before: it is followed.
  *  - The catch-up is a cubic with zero end speed whose length follows from the distance, so that its largest
  *    acceleration is ease_accel: sqrt(6 * distance / ease_accel), between min_ms and max_ms. A new jump during a
  *    catch-up starts the curve again from the correction's present value and speed.
