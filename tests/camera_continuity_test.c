@@ -366,6 +366,40 @@ static void stopped_lent(float v, float back, float dt, float *change, float *ca
     memcpy(two, one, sizeof two); memcpy(one, out, sizeof one);
   }
 }
+/* THE HITCH, made up: the native view, jumps looked for. The rig eye goes forwards at `v` m/s for forty frames, goes
+ * `hitch` m in each of the next `frames` frames (one frame of next to nothing is a hitch; four are a stop) and then
+ * goes at `after` m/s for two seconds (`v`: on as it went). `placed`: the body walks at 3 m/s meanwhile, turned by
+ * 0.3 rad, and the filter is given the world. From the first of those frames on: `change`, the most the presented
+ * eye's step changes from frame to frame (as a vector), and `own`, the same of the wanted eye; `carried`, the most
+ * carried; `settled`, ms to the last frame more than 0.001 m is carried; `against`, the most the presented eye moves
+ * away from the wanted one in a frame nothing is taken up in (a catch-up only closes). */
+typedef struct Hitch { float change, own, carried, settled, against; } Hitch;
+static Hitch hitched(float v, float hitch, int frames, float after, bool placed, float dt) {
+  TfpContinuity c; memset(&c, 0, sizeof c);
+  Hitch h = {0, 0, 0, 0, 0};
+  const float cy = cosf(.3f), sy = sinf(.3f), basis[9] = {cy, sy, 0, -sy, cy, 0, 0, 0, 1};
+  float eye[3] = {.1f, .3f, 1.5f}, one[3] = {0}, two[3] = {0}, wanted_one[3] = {0}, wanted_two[3] = {0}, gap[3] = {0};
+  for (int n = 0; n <= 40+frames+(int)(2000/dt); ++n) {
+    const float root[3] = {3*(float)n*dt/1000, 0, 0}; float out[3], world[3], now[3], d = 0, w = 0, grown = 0, size = 0;
+    if (n && n <= 40) eye[1] += v*dt/1000; else if (n > 40 && n <= 40+frames) eye[1] += hitch; else if (n) eye[1] += after*dt/1000;
+    for (int k = 0; k < 3; ++k) { world[k] = root[k]; for (int a = 0; a < 3; ++a) world[k] += eye[a]*basis[a*3+k]; }
+    const uint64_t taken = c.jumps+c.edges; const double tick = 1000.0+(double)n*(double)dt;
+    const float length = placed ? tfp_continuity_step_in(&c, eye, world, basis, NATIVE, true, false, tick, 250, &T, out)
+                                : tfp_continuity_step(&c, eye, NATIVE, true, false, tick, 250, &T, out);
+    for (int k = 0; k < 3; ++k) { const float e = out[k]-2*one[k]+two[k], f = eye[k]-2*wanted_one[k]+wanted_two[k]; d += e*e; w += f*f;
+      now[k] = out[k]-eye[k]; grown += (now[k]-gap[k])*gap[k]; size += gap[k]*gap[k]; }
+    if (n > 40) {
+      if (sqrtf(d) > h.change) h.change = sqrtf(d);
+      if (sqrtf(w) > h.own) h.own = sqrtf(w);
+      if (length > h.carried) h.carried = length;
+      if (length > .001f) h.settled = (float)(n-41)*dt;
+      if (c.jumps+c.edges == taken && size > 1e-6f && grown/sqrtf(size) > h.against) h.against = grown/sqrtf(size);
+    }
+    memcpy(two, one, sizeof two); memcpy(one, out, sizeof one); memcpy(wanted_two, wanted_one, sizeof two); memcpy(wanted_one, eye, sizeof one);
+    memcpy(gap, now, sizeof gap);
+  }
+  return h;
+}
 #define ROWS(a) a, (int)(sizeof a/sizeof *a)
 int main(void) {
   Run r;
@@ -1161,6 +1195,78 @@ int main(void) {
            "(the log: %.3f m)\n", (double)turn.turned, (double)turn.logged_turned, (double)after.turned, (double)after.logged_turned);
     CHECK(before.apart < .005f && turn.logged_turned > .08f);
     CHECK(turn.turned <= turn.logged_turned+.001f && after.turned <= after.logged_turned+.001f);
+  }
+  /* THE HITCH, made up, at 8 to 50 ms a frame: an eye going 2 or 4 m/s whose step is next to nothing for one frame
+   * (nothing, 1 mm along its way, 1 mm or 6 mm against it) and which then goes on as it went; the body standing, and
+   * walking with the world given. The hitch is the game's own and is followed as a stop (THE STOP), the kept speed
+   * dropped whole; the frame after it was then a jump against a speed of nothing, and so were the next ones for the
+   * time of a run: where the step of that speed is over the measure (2 m/s from 33.3 ms a frame, 4 m/s from 16.7 ms)
+   * 0.25 to 0.61 m was carried and 450 to 500 ms went by until it was let out (the worst of the eight in each), and
+   * while the run lasted the presented eye fell back behind an eye it was meant to catch up with, 0.04 to 0.15 m a
+   * frame. Now the frame after a stop that goes on as the eye went
+   * before it is followed: nothing is carried, and what shows is the hitch itself. */
+  {
+    static const float times[] = {8, 16.7f, 33.3f, 50}, hitches[] = {0, .001f, -.001f, -.006f};
+    for (int fast = 0; fast < 2; ++fast) for (unsigned d = 0; d < 4; ++d) {
+      const float v = fast ? 4 : 2; Hitch worst = {0, 0, 0, 0, 0};
+      for (unsigned k = 0; k < 4; ++k) for (int placed = 0; placed < 2; ++placed) {
+        const Hitch h = hitched(v, hitches[k], 1, v, placed != 0, times[d]);
+        if (h.change-h.own > worst.change-worst.own || !k) { worst.change = h.change; worst.own = h.own; }
+        if (h.carried > worst.carried) worst.carried = h.carried;
+        if (h.settled > worst.settled) worst.settled = h.settled;
+        if (h.against > worst.against) worst.against = h.against;
+        CHECK(h.carried <= v*times[d]/1000+.002f); /* about one frame's travel at most */
+        CHECK(h.settled <= 100);
+        CHECK(h.against < .005f);
+        CHECK(h.change <= h.own+.002f);          /* the hitch itself and no more */
+      }
+      printf("  %g m/s, one frame's hitch, %g ms a frame: step change %.4f m (the eye's own %.4f m), %.4f m carried, settled in %.0f ms, "
+             "%.4f m a frame against the catch-up\n", (double)v, (double)times[d], (double)worst.change, (double)worst.own, (double)worst.carried,
+             (double)worst.settled, (double)worst.against);
+    }
+  }
+  /* What is no hitch is as it was, to the digit (the bounds are the filter before THE HITCH, measured): an eye that
+   * stops for four frames, 4 mm a frame against its way, and then goes back the way it came; one that stops and
+   * creeps back at 7 mm a frame for good; and one that stands for two frames and then goes on (not mended: the
+   * speed before a stop is kept for one frame). */
+  {
+    static const float times[] = {8, 16.7f, 33.3f, 50};
+    /* back the way: step change, carried, ms to settle, against the catch-up; creeping: the same; two frames: the same */
+    static const float was[2][4][12] = {
+      {{0.0200f, 0.0000f, 0, 0.0000f, 0.0230f, 0.0000f, 0, 0.0000f, 0.0160f, 0.0000f, 0, 0.0000f},
+       {0.0374f, 0.0000f, 0, 0.0000f, 0.0404f, 0.0000f, 0, 0.0000f, 0.0334f, 0.0000f, 0, 0.0000f},
+       {0.0706f, 0.2012f, 500, 0.0317f, 0.0736f, 0.0000f, 0, 0.0000f, 0.0666f, 0.2190f, 466, 0.0349f},
+       {0.1040f, 0.2313f, 600, 0.0476f, 0.1070f, 0.0000f, 0, 0.0000f, 0.1000f, 0.2454f, 500, 0.0510f}},
+      {{0.0360f, 0.6313f, 496, 0.0388f, 0.0390f, 0.0000f, 0, 0.0000f, 0.0320f, 0.0000f, 0, 0.0000f},
+       {0.0708f, 0.4259f, 534, 0.0457f, 0.0738f, 0.0000f, 0, 0.0000f, 0.0668f, 0.4581f, 501, 0.0494f},
+       {0.1372f, 0.5239f, 599, 0.0899f, 0.1402f, 0.0000f, 0, 0.0000f, 0.1332f, 0.5433f, 533, 0.0936f},
+       {0.2040f, 0.5786f, 650, 0.1369f, 0.2070f, 0.0000f, 0, 0.0000f, 0.2000f, 0.5925f, 550, 0.1407f}}};
+    for (int fast = 0; fast < 2; ++fast) for (unsigned d = 0; d < 4; ++d) {
+      const float v = fast ? 4 : 2, *w = was[fast][d];
+      const Hitch back = hitched(v, -.004f, 4, -v, false, times[d]), creep = hitched(v, -.007f, 100000, 0, false, times[d]),
+                  twice = hitched(v, 0, 2, v, false, times[d]);
+      printf("  %g m/s, %g ms a frame: stopped and back the way %.4f, %.4f, %.0f, %.4f; stopped and creeping %.4f, %.4f, %.0f, %.4f; "
+             "two frames' hitch %.4f, %.4f, %.0f, %.4f\n", (double)v, (double)times[d], (double)back.change, (double)back.carried,
+             (double)back.settled, (double)back.against, (double)creep.change, (double)creep.carried, (double)creep.settled, (double)creep.against,
+             (double)twice.change, (double)twice.carried, (double)twice.settled, (double)twice.against);
+      CHECK(fabsf(back.change-w[0]) < .0002f && fabsf(back.carried-w[1]) < .0002f && fabsf(back.settled-w[2]) < 1 && fabsf(back.against-w[3]) < .0002f);
+      CHECK(fabsf(creep.change-w[4]) < .0002f && fabsf(creep.carried-w[5]) < .0002f && fabsf(creep.settled-w[6]) < 1 && fabsf(creep.against-w[7]) < .0002f);
+      CHECK(fabsf(twice.change-w[8]) < .0002f && fabsf(twice.carried-w[9]) < .0002f && fabsf(twice.settled-w[10]) < 1 && fabsf(twice.against-w[11]) < .0002f);
+    }
+  }
+  /* The one hitch of the nine soak logs: 04:05:18.296 of the Stable soak of 0.6.0-feel.42 (soak14_hitch). A rig eye
+   * dying down against a standing root, 0.052 m in row 5; 0.002 m in row 6; 0.056 m in row 7, the frame missed made
+   * up; and at rest from row 8. Row 6 is followed as a stop; row 7 was a jump against a speed of nothing: 0.054 m
+   * taken up and let out over the next four rows. Now row 7 goes on as the eye went before the stop and is followed:
+   * nothing is carried, and the presented eye is the rig eye, its hitch and its last step with it. */
+  {
+    const Judged before = judged(ROWS(soak14_hitch), 0, 6), after = judged(ROWS(soak14_hitch), 7, 12);
+    const Borne load = borne(ROWS(soak14_hitch), 7, 12);
+    printf("soak 14, a rig eye that misses a frame: %.3f m carried at most from the frame after it on (the log: %.3f m)\n", (double)load.most,
+           (double)load.logged_most);
+    CHECK(before.apart < .005f);
+    CHECK(load.logged_most > .05f && load.most < .005f);
+    CHECK(after.turned < .06f && after.step < .06f); /* its last step is under what the soak's judge counts */
   }
   printf("camera continuity: %d checks, %d failed\n", checks, failed);
   return failed != 0;
