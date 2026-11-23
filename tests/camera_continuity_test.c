@@ -5,6 +5,7 @@
 #include "reference/soak-6-steps.h"
 #include "reference/soak-8-steps.h"
 #include "reference/soak-9-runs.h"
+#include "reference/soak-11-steps.h"
 static int checks, failed;
 #define CHECK(c) do { ++checks; if (!(c)) { ++failed; printf("FAILED line %d: %s\n", __LINE__, #c); } } while (0)
 static const TfpContinuityTuning T = TFP_CONTINUITY_DEFAULT;
@@ -185,6 +186,54 @@ static Rested rested(const SoakFrame *rows, int count, int at, int to) {
   for (int k = 0; k < 3; ++k) { const float v = span > 0 ? (last[k]-then[k])/span : 0; off += (believed[k]-v)*(believed[k]-v); real += v*v; }
   r.off = sqrtf(off); r.real = sqrtf(real); r.believed = tfp_continuity_length(believed);
   return r;
+}
+/* THE ONSET, made up: the body runs at 6 m/s and its root's axes begin to roll about its forward at `w` rad/s from
+ * one frame on. `rides`: the eye, 1.25 m above the root, goes round with the axes; otherwise it goes straight on in
+ * the world. `reseat`: the rig eye is re-seated by 0.15 m forwards two frames before. `change`: the most the presented
+ * eye's step in the world changes from frame to frame (as a vector); `carried`: the most carried; `aside`: the most
+ * the presented eye is to the side of the wanted one. */
+static void rolling(bool rides, bool reseat, float w, float dt, float *change, float *carried, float *aside) {
+  TfpContinuity c; memset(&c, 0, sizeof c);
+  float root[3] = {0, 0, 0}, straight[3] = {.1f, .3f, 1.25f}, angle = 0, one[3] = {0}, two[3] = {0}; double tick = 1000;
+  const int event = (int)(600/dt)+2, frames = event+(int)(900/dt);
+  *change = *carried = *aside = 0;
+  for (int i = 0; i < frames; ++i) {
+    const float h = dt/1000, moved = reseat && i >= event-2 ? .15f : 0, fixed[3] = {.1f, .3f+moved, 1.25f};
+    if (i >= event) angle += w*h;
+    root[1] += 6*h; straight[1] = root[1]+.3f+moved;
+    const float ca = cosf(angle), sa = sinf(angle), basis[9] = {ca, 0, sa, 0, 1, 0, -sa, 0, ca};
+    float eye[3], relative[3] = {0}, out[3], shown[3];
+    for (int k = 0; k < 3; ++k) { eye[k] = straight[k]; if (rides) { eye[k] = root[k]; for (int a = 0; a < 3; ++a) eye[k] += fixed[a]*basis[a*3+k]; } }
+    for (int a = 0; a < 3; ++a) for (int k = 0; k < 3; ++k) relative[a] += (eye[k]-root[k])*basis[a*3+k];
+    const float correction = tfp_continuity_step_in(&c, relative, eye, basis, NATIVE, true, false, tick, 250, &T, out);
+    for (int k = 0; k < 3; ++k) { shown[k] = root[k]; for (int a = 0; a < 3; ++a) shown[k] += out[a]*basis[a*3+k]; }
+    tick += dt;
+    if (i > 3) { const float d[3] = {shown[0]-2*one[0]+two[0], shown[1]-2*one[1]+two[1], shown[2]-2*one[2]+two[2]};
+      const float size = sqrtf(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]); if (size > *change) *change = size; }
+    if (correction > *carried) *carried = correction;
+    if (fabsf(shown[0]-eye[0]) > *aside) *aside = fabsf(shown[0]-eye[0]);
+    memcpy(two, one, sizeof two); memcpy(one, shown, sizeof one);
+  }
+}
+/* Logged rows through the filter. `jumps`: how many of the rows `from` to `to` were taken up as jumps; `aside`: how
+ * far the presented eye is to the side of the wanted one at most in those rows: level, and across the way the body
+ * goes in that row (its root's step in the world). An eye held back or let run on along the body's way is not aside. */
+typedef struct Swung { int jumps; float aside; } Swung;
+static Swung swung(const SoakFrame *rows, int count, int from, int to) {
+  TfpContinuity c; memset(&c, 0, sizeof c);
+  Swung s = {0, 0};
+  for (int i = 0; i < count && i <= to; ++i) {
+    const SoakFrame *f = &rows[i]; float relative[3] = {0}, out[3], off[3]; const uint64_t jumps = c.jumps;
+    for (int a = 0; a < 3; ++a) for (int k = 0; k < 3; ++k) relative[a] += (f->wanted[k]-f->root[k])*f->axes[a*3+k];
+    tfp_continuity_step_in(&c, relative, f->wanted, f->axes, (uint32_t)f->source, f->looked != 0, false, 1000.0+(double)f->ms, 250, &T, out);
+    if (i < from || !i) continue;
+    for (int k = 0; k < 3; ++k) { off[k] = f->root[k]-f->wanted[k]; for (int a = 0; a < 3; ++a) off[k] += out[a]*f->axes[a*3+k]; }
+    const float way[2] = {f->root[0]-f[-1].root[0], f->root[1]-f[-1].root[1]}, length = sqrtf(way[0]*way[0]+way[1]*way[1]);
+    const float aside = length > 1e-4f ? fabsf(off[0]*way[1]-off[1]*way[0])/length : 0;
+    if (aside > s.aside) s.aside = aside;
+    s.jumps += (int)(c.jumps-jumps);
+  }
+  return s;
 }
 /* A rig re-seated in two frames, 0.09 m in each, that then creeps on the same way at 0.5 mm a frame (the body
  * stands, jumps are looked for). `back`: the most the presented eye goes the other way in one frame, against its
@@ -800,6 +849,56 @@ int main(void) {
     const Judged begun = judged(ROWS(soak8_sprint_begun), 2, 15);
     printf("soak 8, a sprint begun: the largest step %.3f m (the log: %.3f m)\n", (double)begun.step, (double)begun.logged);
     CHECK(begun.logged > .09f && begun.step < begun.logged+.005f);
+  }
+  /* The soaks of 2026-11-22 on 0.6.0-feel.41 (tests/reference/soak-11-steps.h): the largest step the filter made in
+   * them, 0.090 m at 02:22:52.808, a dive forwards out of a sprint. The body leaves the ground and rolls: its root's
+   * axes turn by 0.06 rad a frame from one frame on, about the root's own forward, and the eye is 1.25 m above the
+   * root: 0.07 m a frame sideways in the root's frame for an eye that goes straight on in the world, as the rig eye
+   * did (its step in the world changed by 0.026 m). The frame the axes left their course in read as the root
+   * re-seated, rightly. In the next the root kept its new turning, the filter took that for the course, and the eye
+   * that had not gone round with the root was 0.068 m off the speed kept for it in the root's frame: a jump, taken
+   * up, and two more after it, each holding the presented eye against axes that rolled on. It went 0.21 m to the
+   * side in four frames (0.080, 0.060, 0.043, 0.027 m; the wanted eye 0.017 m a frame) and 0.16 m of the correction
+   * was to the side of the body's way. With the root's turning left out that frame was 0.019 m off: no jump. Such a frame,
+   * in which the root keeps a course it took up alone the frame before, is followed now (THE TURNING, the onset).
+   * The presented eye's step changes by 0.039 m in that row now (0 below: none of 0.06 m is counted).
+   * The step that is left in the next row (0.085 m; 0.078 m before) is the eye's own: the body lost a third of its speed in row 9
+   * and the eye follows a frame later, 0.079 m. */
+  {
+    const Judged onset = judged(ROWS(soak11_dive_from_sprint), 9, 9);
+    const Swung rolled = swung(ROWS(soak11_dive_from_sprint), 9, 13);
+    const Judged after = judged(ROWS(soak11_dive_from_sprint), 10, 15);
+    printf("soak 11, a dive out of a sprint, the frame the root keeps its new turning: the filter's step %.3f m (the log: %.3f m); %d jumps taken up in "
+           "five rows, %.3f m of the correction to the side of the body's way; the largest step after it %.3f m (the log: %.3f m)\n", (double)onset.turned,
+           (double)onset.logged_turned, rolled.jumps, (double)rolled.aside, (double)after.turned, (double)after.logged_turned);
+    CHECK(onset.logged_turned > .085f && onset.turned < .06f);
+    CHECK(rolled.jumps <= 1 && rolled.aside < .05f);
+    CHECK(after.turned < after.logged_turned+.01f);
+  }
+  /* The same made up, at 8 to 50 ms a frame and 1.8, 4 and 8 rad/s (the soaks ran at 30 frames a second only). An eye
+   * that goes straight on is not carried round with the roll: nothing is taken up for it, and a re-seat two frames
+   * before the roll is eased as one without a roll is (0.15 m carried, a step change as in the probes). The filter
+   * of 0.6.0-feel.41 on these: up to 0.83 m to the side and 1.01 m carried (8 rad/s at 8 ms), 0.113 m of step change
+   * (1.8 rad/s at 50 ms); it was right in 14 of the 24. An eye that goes round with the roll is as before: nothing
+   * taken up without a re-seat, and with one 0.15 m carried and never more. */
+  {
+    static const float times[] = {8, 16.7f, 33.3f, 50}, turns[] = {1.8f, 4, 8};
+    float worst = 0, most = 0, far = 0;
+    for (unsigned t = 0; t < 3; ++t) for (unsigned d = 0; d < 4; ++d) for (int reseat = 0; reseat < 2; ++reseat) {
+      float change, carried, aside;
+      rolling(false, reseat != 0, turns[t], times[d], &change, &carried, &aside);
+      if (change > .035f || carried > (reseat ? .1505f : .0005f) || aside > .005f)
+        printf("  an eye going straight on, a roll of %g rad/s at %g ms a frame%s: step change %.3f m, %.3f m carried, %.3f m to the side\n",
+               (double)turns[t], (double)times[d], reseat ? ", re-seated before" : "", (double)change, (double)carried, (double)aside);
+      CHECK(change <= .035f && carried <= (reseat ? .1505f : .0005f) && aside <= .005f);
+      if (change > worst) worst = change;
+      if (carried > most) most = carried;
+      if (aside > far) far = aside;
+      rolling(true, reseat != 0, turns[t], times[d], &change, &carried, &aside);
+      CHECK(carried <= (reseat ? .1505f : .0005f));
+    }
+    printf("a roll begun under an eye that goes straight on, 24 cases: step change at most %.3f m, %.3f m carried, %.3f m to the side\n", (double)worst,
+           (double)most, (double)far);
   }
   printf("camera continuity: %d checks, %d failed\n", checks, failed);
   return failed != 0;
