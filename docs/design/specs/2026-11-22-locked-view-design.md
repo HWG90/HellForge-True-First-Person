@@ -795,3 +795,55 @@ socket 0.18 m and about 98 degrees off the rig's own for seconds on end in soaks
 feel.39 as well), beginning without a new binding. In a soak the player walks into walls and stands there, where the
 body turns the weapon aside; the rig's own pose is not what the arms should match then. Not seen in a capture yet.
 
+
+### After feel.40 (2026-11-22): the full soaks replayed exactly (branch `logs`; offline, not yet in a build)
+
+Two full soaks of feel.40 in Stable (seeds 3 and 5; one session, 3,592 Trace rows in 3,511 frames) left 11 steps of
+0.06 to 0.163 m counted as the filter's. The Trace lines of feel.40 carry the root's axes, so the filter can be run
+again as the helper ran it (`tools/harness/replay.py`: every Trace row one call, the second row of a frame the game
+set twice too, the logged axes; the fit of the axes is only for older logs now).
+
+**How exact.** The filter's state is known from the first row of a stretch at which the log carries no correction:
+3,447 of the 3,592 rows. In 3,418 of those the filter of feel.40, replayed, shows the logged eye within 0.005 m
+(all 1,807 of seed 3's). The other 29 rows are two events, each a decision that fell within the rounding of the
+lines: at 00:34:32.739 a step of 0.0008 m whose direction decides between "slowing down" and "jump", and at
+00:35:09.798 a step 0.0001 m over the measure (0.0407 against 0.0406 m, the measure itself moved by 0.1 ms of frame
+time). All 11 steps are in frames that replay exactly. The Trace lines now carry the helper's clock (`tick=`), full
+aim (`quiet=`), the filter's first frame (`start` in `taken=`), and places to 0.01 mm.
+
+**The 11 steps by cause.**
+
+1. *The body's own change of speed in one frame* (6: 00:21:53.294 0.163 m, 00:21:53.362 0.072 m, 00:27:13.539
+   0.094 m, 00:30:09.385 0.100 m, 00:33:34.846 0.100 m, 00:38:46.845 0.098 m; a swap in a sprint three times, a
+   sprint, a dive begun twice). The root changes its speed in one frame (its step 0.237 to 0.053 m at .294, 0.199 to
+   0.108 m at .846) and the eye follows a frame later. The first frame reads as the root re-seated and the eye goes on
+   as it went; in the next the root's new course is kept and the eye, against the root, has the new speed whole. In
+   three of them the wanted eye's own step changed as much (0.175, 0.081, 0.106 m): they count as the filter's only
+   because 0.05 to 0.18 m was still carried. This is the design ("the body's own travel is not a jump") and is left.
+   Handing the root's change of speed to the curve was tried: it hides all six, at 0.06 m of eye ahead of the body
+   per m/s (0.33 m for the stop at .294), and on a landing (soak 6, a root that stops from 7.5 m/s in a frame) it
+   carried 0.79 m of eye into the ground, which `soak6_turn_after_hold` forbids. Not done.
+2. *The end of a run of jumps* (4, and part of 00:30:09.385: 00:26:06.399 0.078 m, 00:30:10.988 0.064 m,
+   00:33:35.314 0.062 m, 00:36:03.183 0.067 m). A run ended at the first frame that was no jump, and that frame was
+   followed as an ordinary one: the presented eye, held at the kept speed through the run, took the wanted eye's
+   speed in one frame. In three of them that frame was 0.039 m off the kept speed, 0.001 m under the measure.
+   Fixed: the run's end is taken up as its time-out is, the speed the run's frames and that one agree on goes into the
+   curve. (Keeping a run going above half the measure was tried first: it broke the flicker test and one of soak 6.)
+3. *The speed believed for a motion dying down* (1: 00:26:06.131 0.077 m). 0.26, 0.21, 0.136, 0.083 m a frame; the
+   middle, 0.175 m, was believed; the next frame went 0.053 m and was followed as slowing down, 0.12 m at once.
+   Fixed: frames each slower than the one before are believed at the newest.
+
+**Replayed** (the frames where the replay is exact; both logs, the second holds the first): 11 of the filter's before
+(0.163, 0.100, 0.100, 0.098, 0.094 the largest), 5 after (0.164, 0.101, 0.094, 0.078, 0.072: all of cause 1); 5 the
+game's own before and after; 2 reduced before, 3 after (00:38:46.845 is now 0.080 m of the wanted eye's 0.106 m).
+Seed 3 alone: 7 before, 4 after. The older logs have no axes and are replayed with fitted ones, which is rougher
+(axes that turn half a radian a frame in places): soaks 2, 3 and 6 together 19 of the filter's on the filter of
+feel.40 and 18 now (8 and 8, 6 and 6, 5 and 4); the tests built from them pass unchanged.
+
+What the fix of 2 costs: a catch-up that had a run in it is planned again at the run's end, with its speed counted,
+so it can last up to 400 ms from there (00:38:46.4: 0.5 m of a change of camera, 0.19 m still carried 300 ms later
+where feel.40 carried 0.09 m).
+
+Considered and left: counting the curve's start speed in its length for every jump (the curves begun in a catch-up
+reach 36 to 53 m/s^2 against the 24 asked for, 0.04 to 0.06 m a frame per frame at 30 frames a second) changed no
+count and broke the test of a start at 3 m/s.

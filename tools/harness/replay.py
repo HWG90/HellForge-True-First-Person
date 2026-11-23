@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Replay a log's "Trace:" lines through the continuity filter alone and count the steps the filter makes.
 
-  replay.py LOG [--logged REV] [--worst N] [--from HH:MM:SS.mmm --to HH:MM:SS.mmm [--emit NAME]]
+  replay.py LOG [--logged REV] [--present REV] [--worst N] [--from HH:MM:SS.mmm --to HH:MM:SS.mmm [--emit NAME]]
 
 With --from/--to: the frames of that time, one line each (the log, the logged filter, the present filter). With
 --emit as well: the same frames as a C array NAME for a test (tests/reference/soak-6-steps.h and soak-8-steps.h were
@@ -9,7 +9,8 @@ written so). --worst N: the N rows where the logged filter, replayed, is farthes
 
 The filter (src/camera_continuity.h) is run twice over the logged rows (wanted eye, body root and its axes, source,
 looked): once as it was in the build that wrote the log (REV, a git revision; default 9a3470b, 0.6.0-feel.40, for a
-log with axes and b7ce1ab, 0.6.0-feel.39, for one without) and once as it is in this tree.
+log with axes and b7ce1ab, 0.6.0-feel.39, for one without) and once as it is in this tree (or in --present REV, to
+see what a change to the filter did to a log).
 
 A log whose Trace lines carry "axes=" (0.6.0-feel.40 on) is replayed as the helper ran the filter: every Trace row is
 one call of it, the second row of a frame the game set twice too, with the logged axes. The filter's state is known
@@ -183,9 +184,19 @@ def taken(bits):
     return "+".join(name for bit, name in TAKEN if int(bits) & bit) or "-"
 
 
-def replay(rows, logged=None):
+def header(revision, work, name):
+    """The filter's header as it was in `revision`, in a folder of its own."""
+    folder = Path(work) / name
+    folder.mkdir()
+    for file in ("camera_continuity.h", "camera_math.h"):
+        (folder / file).write_text(subprocess.run(["git", "-C", str(ROOT), "show", f"{revision}:src/{file}"], capture_output=True, text=True,
+                                                  check=True).stdout)
+    return folder
+
+
+def replay(rows, logged=None, present=None):
     """Runs both filters over `rows` (read(), all of them with axes or none) and returns (the frames, whether the axes
-    were given). Each row gets old_eye, old_carried, old_taken (the logged build's filter), new_eye, new_carried,
+    were given). `present`: a git revision in place of this tree's filter. Each row gets old_eye, old_carried, old_taken (the logged build's filter), new_eye, new_carried,
     new_taken (this tree's), fit (the axes used), misfit (m, the logged filter from the log) and follows."""
     given = bool(rows) and all(row["axes"] for row in rows)
     logged = logged or ("9a3470b" if given else "b7ce1ab")
@@ -195,12 +206,8 @@ def replay(rows, logged=None):
     else:
         rows = merge(rows)  # the fit was made for one row a frame
     with tempfile.TemporaryDirectory() as work:
-        old_dir = Path(work) / "logged"
-        old_dir.mkdir()
-        for name in ("camera_continuity.h", "camera_math.h"):
-            (old_dir / name).write_text(subprocess.run(["git", "-C", str(ROOT), "show", f"{logged}:src/{name}"], capture_output=True, text=True,
-                                                       check=True).stdout)
-        old, new = build(old_dir, "logged_filter", work), build(ROOT / "src", "present_filter", work)
+        old = build(header(logged, work, "logged"), "logged_filter", work)
+        new = build(header(present, work, "present") if present else ROOT / "src", "present_filter", work)
         for row in rows:
             row["start"] = row["axes"] if given else identity
         for row, out in zip(rows, run(old, "run" if given else "fit", rows, "start")):
@@ -215,13 +222,14 @@ def main(argv):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("log")
     parser.add_argument("--logged", default=None, help="git revision of the build that wrote the log")
+    parser.add_argument("--present", default=None, help="git revision to run in place of this tree's filter")
     parser.add_argument("--from", dest="start", default=None)
     parser.add_argument("--to", dest="end", default=None)
     parser.add_argument("--emit", default=None, help="write the rows of --from/--to as a C array of this name")
     parser.add_argument("--worst", type=int, default=0, help="list this many rows where the logged filter, replayed, is farthest from the log")
     args = parser.parse_args(argv[1:])
     calls = read(Path(args.log).read_text(errors="replace").splitlines())
-    rows, given = replay(calls, args.logged)
+    rows, given = replay(calls, args.logged, args.present)
     if not given:
         calls = rows
 
