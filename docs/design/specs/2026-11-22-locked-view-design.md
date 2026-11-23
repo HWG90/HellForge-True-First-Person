@@ -1367,3 +1367,13 @@ the new probes; `tests/test_harness_probes.py` is as it was and its 84 bounds st
 0.10 to 0.15 m in those frames and the wanted eye's 0.08 to 0.15 m: the body's lunge, as on feel.39), and 0.071 and
 0.073 m at swaps in a dive and in a sprint. Log: `/home/goose/.cache/tfp-soak-15.modlog`.
 
+The Bodycam soak on feel.43, seed 6 (ticked through the panel, unticked after; saved style Stable once the game had
+closed): 259 actions, 18,108 frames, nothing missed, one flagged (0.107 m, a swap in a sprint). By `replay.py` over
+all frames: 7 of the filter's steps of 0.06 m or more, 148.9 metre-frames carried, 467 ms the longest carry.
+
+A review of the camera style and of two changes made by hand without one (the camera held when its world matrix is
+behind; `max_m` 1.6 and `teleport_m` 2.5): nothing found in the two hand changes. Three minor defects confirmed in the
+style, all at the moment of a switch or in the panel: ticking Bodycam while Stable carries more than 0.10 m of eye
+lag pulls the eye up to 0.15 m in one frame; ticking it with camera damping 0 while a thrown kick eases snaps the
+kick to the raw one; the greyed sliders show no tooltip (the host answers "not hovered" for a disabled item).
+
