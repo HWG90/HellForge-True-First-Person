@@ -9,6 +9,7 @@
 #include "reference/soak-14-steps.h"
 #include "reference/soak-18-steps.h"
 #include "reference/soak-19-steps.h"
+#include "reference/soak-slowing-steps.h"
 static int checks, failed;
 #define CHECK(c) do { ++checks; if (!(c)) { ++failed; printf("FAILED line %d: %s\n", __LINE__, #c); } } while (0)
 static const TfpContinuityTuning T = TFP_CONTINUITY_DEFAULT;
@@ -436,6 +437,77 @@ static Trial tried(float v, float dt, bool placed, const float (*then)[2], int c
     memcpy(two, one, sizeof two); memcpy(one, out, sizeof one); memcpy(wanted_two, wanted_one, sizeof two); memcpy(wanted_one, eye, sizeof one);
   }
   return r;
+}
+/* Logged rows through the filter (tests/reference/soak-slowing-steps.h: every row one frame). In rows `from` to `to`:
+ * `change`, the most the presented eye's step in the world changes from row to row as a vector, whoever's it is (the
+ * judge leaves out what it calls reduced); `sum`, the correction summed; `away`, the most the presented eye moves away
+ * from the wanted one in a row in which nothing is taken up (a catch-up only closes); `logged`, `logged_sum`,
+ * `logged_away`: the same of the eye the log shows. `apart`: how far the presented eye is from the logged one at most
+ * in the rows before `from`; `rest`: the same in rows `from` to `to`; `past`: how far the presented eye comes on the
+ * other side of the wanted eye from where the log shows it. */
+typedef struct Slowing { float change, sum, away, logged, logged_sum, logged_away, apart, rest, past; } Slowing;
+static Slowing slowing(const SoakFrame *rows, int count, int from, int to) {
+  TfpContinuity c; memset(&c, 0, sizeof c);
+  Slowing s = {0, 0, 0, 0, 0, 0, 0, 0, 0}; float one[3] = {0}, two[3] = {0}, before = 0, logged_before = 0;
+  for (int i = 0; i < count && i <= to; ++i) {
+    const SoakFrame *f = &rows[i]; float relative[3] = {0}, out[3], world[3], apart = 0, was = 0, d = 0, l = 0, side = 0;
+    const uint64_t taken = c.jumps+c.edges;
+    for (int a = 0; a < 3; ++a) for (int k = 0; k < 3; ++k) relative[a] += (f->wanted[k]-f->root[k])*f->axes[a*3+k];
+    const float carried = tfp_continuity_step_in(&c, relative, f->wanted, f->axes, (uint32_t)f->source, f->looked != 0, false, 1000.0+(double)f->ms, 250, &T, out);
+    for (int k = 0; k < 3; ++k) { world[k] = f->root[k]; for (int a = 0; a < 3; ++a) world[k] += out[a]*f->axes[a*3+k];
+      apart += (world[k]-f->logged[k])*(world[k]-f->logged[k]); was += (f->logged[k]-f->wanted[k])*(f->logged[k]-f->wanted[k]);
+      side -= (world[k]-f->wanted[k])*(f->logged[k]-f->wanted[k]);
+      if (i >= 2) { const float e = world[k]-2*one[k]+two[k], g = f->logged[k]-2*f[-1].logged[k]+f[-2].logged[k]; d += e*e; l += g*g; } }
+    apart = sqrtf(apart); was = sqrtf(was);
+    if (i < from) { if (apart > s.apart) s.apart = apart; }
+    else {
+      if (apart > s.rest) s.rest = apart;
+      if (was > 1e-4f && side/was > s.past) s.past = side/was;
+      if (sqrtf(d) > s.change) s.change = sqrtf(d);
+      if (sqrtf(l) > s.logged) s.logged = sqrtf(l);
+      s.sum += carried; s.logged_sum += was;
+      if (c.jumps+c.edges == taken && carried-before > s.away) s.away = carried-before;
+      if (c.jumps+c.edges == taken && was-logged_before > s.logged_away) s.logged_away = was-logged_before;
+    }
+    before = carried; logged_before = was;
+    memcpy(two, one, sizeof two); memcpy(one, world, sizeof one);
+  }
+  return s;
+}
+/* THE LET-DOWN AT A SLOWING, made up: the body stands, the native view, jumps looked for. The rig eye rests and then
+ * goes forwards at `v` m/s: a motion that begins, each frame a jump for the time of a run, then that speed believed,
+ * the presented eye behind the rig eye and gathering way along the curve. With `ahead` the rig is re-seated 1.2 m
+ * backwards in the next frame (a jump, taken up; the presented eye, gone on, is then in front of it). Then the rig eye
+ * goes on at `slow` m/s, the same way: slowing down against the speed believed. From that frame on: `change`, the most
+ * the presented eye's step changes from frame to frame (as a vector), and `own`, the same of the rig eye; `past`, how
+ * far the presented eye comes in front of the rig eye (with `ahead`: further in front of it than it was); `away`, the
+ * most it moves away from the rig eye in a frame in which nothing is taken up; `carried`, the most carried;
+ * `settled`, ms to the last frame more than 0.005 m is carried. */
+typedef struct Slowed { float change, own, past, away, carried, settled; } Slowed;
+static Slowed slowed(float v, float slow, bool ahead, float dt) {
+  TfpContinuity c; memset(&c, 0, sizeof c);
+  Slowed s = {0, 0, 0, 0, 0, 0}; float eye[3] = {.1f, .3f, 1.5f}, one[3] = {0}, two[3] = {0}, eye_one[3] = {0}, eye_two[3] = {0}, off = 0, start = 0;
+  int believed = -1, at = -1;
+  for (int n = 0; n < (int)(3000/dt); ++n) {
+    float out[3]; const uint64_t taken = c.jumps+c.edges;
+    if (believed < 0) { if (n > 10) eye[1] += v*dt/1000; }
+    else if (ahead && n == believed+1) eye[1] -= 1.2f;
+    else { eye[1] += slow*dt/1000; if (at < 0) at = n; }
+    const float carried = tfp_continuity_step(&c, eye, NATIVE, true, false, 1000.0+(double)n*(double)dt, 250, &T, out);
+    if (believed < 0 && n > 11 && c.jumps == taken && c.speed[1] > v/2) believed = n;
+    if (at >= 0) { float d = 0, w = 0;
+      for (int k = 0; k < 3; ++k) { const float e = out[k]-2*one[k]+two[k], g = eye[k]-2*eye_one[k]+eye_two[k]; d += e*e; w += g*g; }
+      if (n == at) start = ahead ? off : 0;
+      if (sqrtf(d) > s.change) s.change = sqrtf(d);
+      if (sqrtf(w) > s.own) s.own = sqrtf(w);
+      if (out[1]-eye[1]-start > s.past) s.past = out[1]-eye[1]-start;
+      if (c.jumps+c.edges == taken && fabsf(out[1]-eye[1])-fabsf(off) > s.away) s.away = fabsf(out[1]-eye[1])-fabsf(off);
+      if (carried > s.carried) s.carried = carried;
+      if (carried > .005f) s.settled = (float)(n-at)*dt; }
+    off = out[1]-eye[1];
+    memcpy(two, one, sizeof two); memcpy(one, out, sizeof one); memcpy(eye_two, eye_one, sizeof two); memcpy(eye_one, eye, sizeof one);
+  }
+  return s;
 }
 #define ROWS(a) a, (int)(sizeof a/sizeof *a)
 int main(void) {
@@ -1361,6 +1433,106 @@ int main(void) {
     }
     printf("  4 m/s, 33.3 ms a frame, stop, on, a step back, at rest: the presented eye from the frame that goes on (m; wanted 0.133, 0, 0): ");
     (void)tried(4, 33.3f, false, back, 1, 0, true); printf("\n");
+  }
+  /* THE LET-DOWN AT A SLOWING. The Stable soak of 2026-11-23 on 0.6.0-feel.45 (tests/reference/soak-slowing-steps.h).
+   * 09:06:29.235 (soak20_swap_believed, row 18): the native view entered in a swap, the rig eye thrown forwards for
+   * four frames, the run's time over in row 17 and 4.7 m/s believed (0.156 m a frame), the presented eye 0.87 m behind
+   * and gathering that speed along the curve. In row 18 the rig eye goes 0.048 m, the same way: the motion slowing
+   * down, followed, the speed believed dropped whole. The curve had been begun for an eye going 0.156 m a frame, and
+   * under one going 0.048 m the presented eye was thrown back: 0.114 m of step change, 0.046 m further from the eye it
+   * was to catch up with, and 0.061 m of step change in the frame after. 09:11:59.029 (soak20_dive_believed, row 24):
+   * the same in a dive, 6.4 m/s believed and 0.044 m gone; 0.144 m, then 0.080 and 0.066 m, the presented eye 0.131 m
+   * further behind in that frame. Now what the presented eye still had of the speed dropped, towards the wanted eye,
+   * is let down by pop_accel: it goes on closing, and the step changes by 0.034 and 0.054 m at most.
+   * 05:06:55.307 of the Stable soak of 0.6.0-feel.43 (soak15_run_slowing, row 16): the presented eye went on at a speed
+   * believed, 4.3 m/s, through three frames the rig eye went the other way, and closed on it from 0.46 to 0.07 m; the
+   * frame that slows down comes 0.05 m short of the rig eye: 0.105 m of step change for the rig eye's own 0.045 m.
+   * 0.05 m is no room to let 0.13 m a frame down in; what fits is let down (0.098 m, half as much carried after). */
+  {
+    const Slowing swap = slowing(ROWS(soak20_swap_believed), 18, 20), dive = slowing(ROWS(soak20_dive_believed), 24, 27);
+    const Slowing run = slowing(ROWS(soak15_run_slowing), 16, 18);
+    printf("soak 20, a speed believed and the next frame slowing down, the presented eye behind: in a swap the largest change of the presented step "
+           "%.3f m (the log: %.3f m), %.3f m away from the wanted eye in a frame followed (%.3f m), %.2f metre-frames in three rows (%.2f); in a dive "
+           "%.3f m (%.3f m), %.3f m away (%.3f m), %.2f metre-frames in four rows (%.2f)\n", (double)swap.change, (double)swap.logged, (double)swap.away,
+           (double)swap.logged_away, (double)swap.sum, (double)swap.logged_sum, (double)dive.change, (double)dive.logged, (double)dive.away,
+           (double)dive.logged_away, (double)dive.sum, (double)dive.logged_sum);
+    printf("soak 15, slowing down 0.05 m short of the wanted eye: %.3f m (the log: %.3f m), %.3f metre-frames in three rows (%.3f)\n", (double)run.change,
+           (double)run.logged, (double)run.sum, (double)run.logged_sum);
+    CHECK(swap.apart < .005f && dive.apart < .005f && run.apart < .005f); /* up to the frame that slows down the filter shows what the log shows */
+    CHECK(swap.logged > .11f && swap.change < .04f);
+    CHECK(dive.logged > .14f && dive.change < .06f);
+    CHECK(run.logged > .10f && run.change < run.logged-.005f);
+    CHECK(swap.logged_away > .04f && dive.logged_away > .13f && swap.away < .001f && dive.away < .001f && run.away < .001f);
+    CHECK(swap.sum < swap.logged_sum-.4f && dive.sum < dive.logged_sum-.9f && run.sum < run.logged_sum-.04f);
+    CHECK(swap.past < .001f && dive.past < .001f && run.past < .001f);
+  }
+  /* The same where the way to the wanted eye is short: 00:25:51.875 of the second soak of 2026-11-22 on 0.6.0-feel.40
+   * (soak9_run_slowing, row 14), slowing down straight after three jumps, 0.46 m carried and three jumps more to come;
+   * at row 18 (00:25:52.009) 0.06 m is left and the curve is closing fast. The step there is 0.095 m on the filter
+   * of 0.6.0-feel.45 (0.100 m in the log, which had no let-down of a lent speed yet). What is let down goes no further
+   * than the wanted eye, the curve's own speed counted (with the bare way as the room it came 0.007 m past it in row
+   * 19): 0.081 m, less carried, never past. */
+  {
+    const Slowing near = slowing(ROWS(soak9_run_slowing), 14, 20);
+    printf("soak 9, slowing down with a short way to the wanted eye: %.3f m (the log: %.3f m), %.4f m past the wanted eye, %.3f m away from it in a "
+           "frame followed (%.3f m), %.2f metre-frames in seven rows (%.2f)\n", (double)near.change, (double)near.logged, (double)near.past,
+           (double)near.away, (double)near.logged_away, (double)near.sum, (double)near.logged_sum);
+    CHECK(near.apart < .005f);
+    CHECK(near.logged > .09f && near.change < .085f);
+    CHECK(near.past < .001f && near.away <= near.logged_away+.001f && near.sum < near.logged_sum-.05f);
+  }
+  /* NOT MENDED: the same frame with the presented eye AHEAD of the wanted one, which is the larger steps of the Stable
+   * soak of 0.6.0-feel.44. 07:19:31.978 (soak19_prone_lent, row 8): going prone out of an emote, 7.7 m/s lent at the
+   * change of camera, the presented eye let down for two frames and 0.32 m past a rig eye that all but stands; the
+   * 5.3 m/s it still has are dropped at once, 0.182 m of step change for the rig eye's own 0.070 m. 07:13:24.300
+   * (soak19_back_believed, row 19): 3.2 m/s believed, the rig eye re-seated 0.72 m the other way and the presented
+   * eye 0.30 m in front of it; 0.074 m for 0.039 m. To let that speed down is to go on away from the wanted eye:
+   * 0.14 m further for 5.3 m/s at 36 m/s^2 (docs/design/specs/2026-11-22-locked-view-design.md, round 7, what was
+   * tried). Nothing of it is towards the wanted eye, and the filter is held to showing what the log shows. */
+  {
+    const Slowing prone = slowing(ROWS(soak19_prone_lent), 8, 20), back = slowing(ROWS(soak19_back_believed), 19, 20);
+    printf("soak 19, slowing down with the presented eye ahead (not mended): going prone %.3f m (the log: %.3f m), walking backwards %.3f m (%.3f m); "
+           "the filter %.4f and %.4f m from the log at most\n", (double)prone.change, (double)prone.logged, (double)back.change, (double)back.logged,
+           (double)fmaxf(prone.apart, prone.rest), (double)fmaxf(back.apart, back.rest));
+    CHECK(prone.apart < .005f && prone.rest < .005f && back.apart < .005f && back.rest < .005f);
+    CHECK(prone.logged > .18f && back.logged > .07f);
+  }
+  /* The same made up, at 8 to 50 ms a frame (the soaks ran at 30 frames a second only): a motion that begins at 2, 4
+   * or 6.5 m/s, believed when the run's time is over, and in the next frame the eye goes on at a quarter or a half of
+   * it. The bounds are the filter of 0.6.0-feel.45, measured: the step change, how far the presented eye comes in
+   * front of the wanted one, how far it moves away from it in a frame followed, the most carried, the time to settle.
+   * Behind the wanted eye: where the step dropped is over the measure, less step and less away; nowhere more step, more
+   * carried or later settled, and never in front of the wanted eye. Ahead of it (the rig re-seated 1.2 m backwards in
+   * the frame after the speed is believed): every figure as it was, to the digit. */
+  {
+    static const float times[] = {8, 16.7f, 33.3f, 50};
+    static const float was[2][3][2][4][5] = {
+      {{{{0.0120f, 0.0000f, 0.0000f, 0.0000f, 0}, {0.0250f, 0.0000f, 0.0000f, 0.0000f, 0}, {0.0349f, 0.0000f, 0.0198f, 0.2190f, 233}, {0.0437f, 0.0000f, 0.0181f, 0.2454f, 250}},
+        {{0.0080f, 0.0000f, 0.0000f, 0.0000f, 0}, {0.0167f, 0.0000f, 0.0000f, 0.0000f, 0}, {0.0218f, 0.0000f, 0.0198f, 0.2190f, 233}, {0.0437f, 0.0000f, 0.0181f, 0.2454f, 250}}},
+       {{{0.0240f, 0.0000f, 0.0000f, 0.0000f, 0}, {0.0432f, 0.0000f, 0.0425f, 0.4581f, 351}, {0.0723f, 0.0000f, 0.0660f, 0.5433f, 333}, {0.0890f, 0.0000f, 0.0773f, 0.5925f, 300}},
+        {{0.0160f, 0.0000f, 0.0000f, 0.0000f, 0}, {0.0265f, 0.0000f, 0.0425f, 0.4581f, 351}, {0.0417f, 0.0000f, 0.0660f, 0.5433f, 333}, {0.0890f, 0.0000f, 0.0773f, 0.5925f, 300}}},
+       {{{0.0364f, 0.0000f, 0.0410f, 0.7070f, 376}, {0.0697f, 0.0000f, 0.0774f, 0.7989f, 367}, {0.1147f, 0.0000f, 0.1244f, 0.9521f, 333}, {0.1620f, 0.0000f, 0.1502f, 1.0335f, 300}},
+        {{0.0234f, 0.0000f, 0.0410f, 0.7070f, 376}, {0.0426f, 0.0000f, 0.0774f, 0.7989f, 367}, {0.0754f, 0.0000f, 0.1244f, 0.9521f, 333}, {0.1620f, 0.0000f, 0.1502f, 1.0335f, 300}}}},
+      {{{{0.0062f, 0.0000f, 0.0000f, 1.2074f, 376}, {0.0190f, 0.0000f, 0.0000f, 1.2149f, 367}, {0.0575f, 0.0000f, 0.0000f, 1.0202f, 333}, {0.0973f, 0.0000f, 0.0000f, 1.0143f, 300}},
+        {{0.0028f, 0.0000f, 0.0000f, 1.2074f, 376}, {0.0117f, 0.0000f, 0.0000f, 1.2149f, 367}, {0.0409f, 0.0000f, 0.0000f, 1.0202f, 333}, {0.0768f, 0.0000f, 0.0000f, 1.0143f, 300}}},
+       {{{0.0111f, 0.0000f, 0.0000f, 1.2162f, 376}, {0.0460f, 0.0000f, 0.0000f, 0.8398f, 351}, {0.0869f, 0.0000f, 0.0000f, 0.7613f, 333}, {0.1294f, 0.0000f, 0.0000f, 0.7508f, 300}},
+        {{0.0031f, 0.0000f, 0.0000f, 1.2162f, 376}, {0.0293f, 0.0000f, 0.0000f, 0.8398f, 351}, {0.0536f, 0.0000f, 0.0000f, 0.7613f, 333}, {0.0794f, 0.0000f, 0.0000f, 0.7508f, 300}}},
+       {{{0.0361f, 0.0000f, 0.0000f, 0.6968f, 336}, {0.0692f, 0.0000f, 0.0000f, 0.5745f, 334}, {0.1200f, 0.0000f, 0.0000f, 0.4312f, 266}, {0.1662f, 0.0000f, 0.0000f, 0.4188f, 250}},
+        {{0.0231f, 0.0000f, 0.0000f, 0.6968f, 336}, {0.0421f, 0.0000f, 0.0000f, 0.5745f, 334}, {0.0659f, 0.0000f, 0.0000f, 0.4312f, 266}, {0.0850f, 0.0000f, 0.0000f, 0.4188f, 250}}}}};
+    for (int ahead = 0; ahead < 2; ++ahead) for (int fast = 0; fast < 3; ++fast) for (int part = 0; part < 2; ++part) for (unsigned d = 0; d < 4; ++d) {
+      const float v = fast == 0 ? 2 : fast == 1 ? 4 : 6.5f, slow = part ? v/2 : v/4, *w = was[ahead][fast][part][d];
+      const float dropped = (v-slow)*times[d]/1000, measure = fmaxf(T.pop_m, T.pop_accel*times[d]*times[d]/1e6f);
+      const Slowed g = slowed(v, slow, ahead != 0, times[d]);
+      printf("  %g m/s believed, then %g m/s, the presented eye %s, %g ms a frame: step change %.4f m (%.4f m), %.4f m in front of the wanted eye "
+             "(%.4f m), %.4f m away from it in a frame followed (%.4f m), %.4f m carried (%.4f m), settled in %.0f ms (%.0f ms)\n", (double)v, (double)slow,
+             ahead ? "ahead" : "behind", (double)times[d], (double)g.change, (double)w[0], (double)g.past, (double)w[1], (double)g.away, (double)w[2],
+             (double)g.carried, (double)w[3], (double)g.settled, (double)w[4]);
+      if (ahead) { CHECK(fabsf(g.change-w[0]) < .0002f && fabsf(g.past-w[1]) < .0002f && fabsf(g.away-w[2]) < .0002f && fabsf(g.carried-w[3]) < .0002f
+                         && fabsf(g.settled-w[4]) < 1); continue; }
+      CHECK(g.change <= w[0]+.0005f && g.away <= w[2]+.0005f && g.carried <= w[3]+.0005f && g.settled <= w[4]+1);
+      CHECK(g.past < .005f);
+      if (dropped > measure+.009f) CHECK(g.change < w[0]-.007f && g.away < w[2]-.009f && g.carried < w[3]-.009f);
+    }
   }
   printf("camera continuity: %d checks, %d failed\n", checks, failed);
   return failed != 0;
