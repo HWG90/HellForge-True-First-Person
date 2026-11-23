@@ -943,3 +943,17 @@ All 46 test scripts and the harness's python tests pass. The matrix in Stable: 3
 any phase; jump-vault 0.085 m (the body's own lunge when a jump begins while walking, as read from the trace on
 feel.39), swaps 0.043 and 0.048 m, stim 0.036 m.
 
+The soaks owed on feel.41: Stable, seed 3: 248 actions, 18,077 frames, nothing missed; Bodycam (ticked through the
+panel, unticked after), seed 6: 259 actions, 18,111 frames, nothing missed. Judged by `tools/harness/replay.py` (the
+vector measure, exact frames):
+
+| Run | Filter's steps of 0.06 m or more | Largest | Carried | Longest carry after a change of camera |
+|---|---|---|---|---|
+| feel.40, Stable, seed 3 | 12 | 0.214 m | 180.8 m-frames | 833 ms |
+| feel.41, Stable, seed 3 | 5 | 0.090 m | 106.3 m-frames | 501 ms |
+| feel.41, Bodycam, seed 6 | 4 | 0.071 m | (the log holds both runs) | |
+
+The same seed is not the same play (the timing of each action against the game differs from run to run), so the drop
+from 12 to 5 is more than the one filter change accounts for in the replay of the feel.40 log (12 to 9); it is one
+run against one run. Nothing got worse.
+
