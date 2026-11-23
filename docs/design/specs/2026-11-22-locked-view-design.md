@@ -957,3 +957,186 @@ The same seed is not the same play (the timing of each action against the game d
 from 12 to 5 is more than the one filter change accounts for in the replay of the feel.40 log (12 to 9); it is one
 run against one run. Nothing got worse.
 
+
+### After feel.41 (2026-11-22): the nine steps of its soaks by cause (branch `round2`; offline, not yet in a build)
+
+The two soaks of feel.41 (`/home/goose/.cache/tfp-soak-10.modlog`, Stable, and `tfp-soak-11.modlog`, the same session
+continued in Bodycam, which holds the first) replayed through the filter: 9 steps of 0.06 m or more by the vector
+measure are the filter's where the replay is exact. That figure is with `replay.py`'s default for the build that
+wrote the log, which is still feel.40's filter (9a3470b): it shows the feel.41 log in 3,156 of the 3,327 rows whose
+state is known. With the filter that wrote the log (`--logged 66ee111`) all 3,327 are exact and there is a tenth
+(02:30:34.577). Both are given below. A log of feel.41 or later wants `--logged` with its own build.
+
+**The steps** (all in the native view; "taken" is the log's `taken=` in the nine frames before the step, the step's
+own frame in brackets, and the two after; "own" is the wanted eye's own change of step, "curve" the change of the
+correction's step in that frame, both as vectors, which add up to the shown one only when they point the same way):
+
+| Time | Vector | Lengths | Own | Curve | Root's change | Carried | Taken | What it is |
+|---|---|---|---|---|---|---|---|---|
+| 02:21:31.078 | 0.062 | 0.047 | 0.035 | 0.028 | 0.000 | 0.064 | `- - - - - - - edge - [-] jump - ` | C |
+| 02:21:31.445 | 0.064 | 0.062 | 0.048 | 0.015 | 0.000 | 0.000 | `- jump jump jump - - - - - [-] jump` | D |
+| 02:21:44.166 | 0.060 | 0.060 | 0.056 | 0.004 | 0.000 | 0.075 | `- jump jump jump - - - jump - [-] - jump` | D |
+| 02:22:52.808 | 0.090 | 0.023 | 0.026 | 0.072 | 0.079 | 0.231 | `- - - - - - - jump root [jump+root] jump jump` | A |
+| 02:22:52.842 | 0.078 | 0.061 | 0.079 | 0.054 | 0.012 | 0.203 | `- - - - - - jump root jump+root [jump] jump -` | E |
+| 02:29:59.588 | 0.071 | 0.031 | 0.069 | 0.006 | 0.064 | 0.080 | `- - edge jump - - - - root [root] - jump` | E |
+| 02:29:59.622 | 0.063 | 0.063 | 0.068 | 0.010 | 0.004 | 0.033 | `- edge jump - - - - root root [-] jump jump` | E |
+| 02:31:12.739 | 0.066 | 0.052 | 0.006 | 0.072 | 0.000 | 0.055 | `jump - - - - - - jump jump [-] - -` | B |
+| 02:34:34.959 | 0.062 | 0.020 | 0.020 | 0.079 | 0.001 | 0.091 | `jump jump - jump jump - jump jump jump [-] - -` | B |
+| 02:30:34.577 (the tenth) | 0.061 | 0.060 | 0.069 | 0.129 | 0.011 | 0.170 | `- jump - jump - jump - jump jump [-] -` | D |
+
+**By cause.**
+
+A. *The root keeps a turning it began the frame before, under an eye that does not go round with it* (1:
+   02:22:52.808, the largest). A fault of the filter, mended. A dive forwards out of a sprint ("Motion: action=dive").
+   The body leaves the ground and rolls: its root's axes turn by 0.063, 0.057, 0.052, 0.048 rad a frame about the
+   root's own forward, and the rig eye is 1.25 m above the root, so it goes 0.07 m a frame sideways in the root's
+   frame while it goes straight on in the world (its step in the world changed by 0.026 m). The frame the axes left
+   their course in read as the root re-seated, rightly. In the next the root kept the turning, the filter took that
+   for its course (THE COMPARISON), and the eye, not going round, was 0.068 m off the speed kept for it in the
+   root's frame; with the turning left out it was 0.019 m off. The frame and the two after it were taken up as
+   jumps, each holding the presented eye against axes that rolled on: it went 0.080, 0.060, 0.043 and 0.027 m to
+   the side in four frames where the wanted eye went 0.017 m a frame, and 0.16 m of the correction was sideways.
+   Neither rule of THE TURNING saw it: the axes were on their (new) course, and the average over 100 ms had one
+   frame of evidence (0.016 m against the 0.020 m asked for).
+B. *A run's last frame a hair under the measure* (2: 02:31:12.739, 02:34:34.959). A fault of the filter, mended;
+   the same as three of the four of the feel.40 soaks that were marked not mended. At 02:31:12.739 the native view
+   was entered after a swap, the body prone and still, and the rig eye was re-seated in three frames, 0.053, 0.052
+   and 0.045 m. 0.048 and 0.046 m off the kept speed were jumps; the third was 0.0396 m off it against a measure of
+   0.0406 m at that frame time, ended the run and was shown whole on the curve's steepest frame: the presented eye
+   went 0.008 and then 0.060 m. At 02:34:34.959 it shows four frames later: the frame at .827 was 0.0375 m off the
+   kept speed against 0.0411 m, was followed and averaged into the kept speed, half of a speed the eye did not have
+   (1.29 m/s); the next three frames were jumps against it while the presented eye went on at it, and the frame the
+   eye stopped in was "slowing down" and followed: 0.041 m one way and then 0.021 m the other.
+C. *A followed frame under the measure on a curve that was begun steeper than asked for* (1: 02:21:31.078). The
+   filter's, and not mended. The rig eye's own first move after a change of camera, 0.035 m (under the measure,
+   followed, as designed), in the second frame of the curve begun at the change of camera from 0.089 m with the
+   0.78 m/s the catch-up before it still had: 149 ms long by its distance alone, so 45 m/s^2 where 24 is asked for
+   and 0.028 m of change in that frame. The sum is what was behind 00:26:06.399 of the feel.40 soak as well.
+D. *The measure counting the eye's own move* (3: 02:21:31.445, 02:21:44.166 and the tenth, 02:30:34.577). Not
+   faults. At .445 the rig eye stops (0.043 to 0.005 m a frame, 0.048 m of change) in the frame a catch-up ends
+   (its last 0.021 and 0.004 m): the filter adds 0.015 m, and the step is 0.003 m short of counting as the game's
+   own (the wanted eye's change must be 0.8 of the shown). At 02:21:44.166 the rig eye goes to and fro as the
+   weapon comes back after an action (0.056 m), and at 02:30:34.577 it swings against the root after a swap in a
+   sprint (0.069 m; the filter shows 0.061 m): both count as the filter's only because 0.03 m or more is carried in
+   those frames, which a player does not see as a step. The filter adds 0.004 m to the one and takes 0.008 m off
+   the other.
+E. *The body's own change of speed in one frame, the eye a frame later* (3: 02:22:52.842, 02:29:59.588 and .622).
+   The design working ("the body's own travel is not a jump"; cause 1 of the feel.40 soaks). At 02:22:52.842 it is
+   the same dive as A a frame on: the root lost a third of its speed as the body left the ground (its step 0.190 to
+   0.121 m) and the eye's step in the world followed in the next frame (0.190 to 0.116 m, 0.079 m). At
+   02:29:59.588 a dive begun straight after a swap: the root's step 0.096, 0.140, 0.203 m, the eye's 0.083, 0.139,
+   0.202 m a frame later (0.069 and 0.068 m), shown as 0.071 and 0.063 m.
+
+**What was changed** (`src/camera_continuity.h`; the tests are built from the logged frames,
+`tests/reference/soak-11-steps.h`, and fail on main's filter with the logged steps, 0.090 and 0.066 m).
+
+1. For A, THE ONSET: a frame in which the root keeps a course it took up alone the frame before is followed, not
+   taken up, when its step is a jump in the root's frame and none with the turning left out (the two half the
+   measure apart), the axes are on that course within half the measure and their turn of the frame moves the eye by
+   half the measure or more, and the eye has not been seen to go round with the root of late. What is carried keeps
+   its direction in the world in that frame and the eye's speed in the root's frame is believed at once, the turning
+   in it. 02:22:52.808: 0.090 to 0.039 m, one jump taken up in five frames where three were, 0.027 m of the
+   correction to the side where 0.157 m was. The step after it, E's, is 0.085 m where it was 0.078 m (the eye's own
+   0.079 m; the frame before it is no longer held back), and the frame after that 0.058 m where it was 0.034 m.
+   Made up, at four frame times (the soaks ran at 30 frames a second only): a body running at 6 m/s whose root
+   begins to roll at 1.8, 4 or 8 rad/s under an eye 1.25 m up that goes straight on, with and without a re-seat of
+   0.15 m two frames before. Main's filter was right in 14 of the 24 and in the other 10 carried the eye round:
+   up to 0.83 m to the side and 1.01 m carried (8 rad/s at 8 ms), 0.113 m of step change (1.8 rad/s at 50 ms).
+   Now nothing is taken up for the roll in any of the 24 (0.032 m of step change at most, the re-seat's own). An eye
+   that does go round with the roll is the same to the digit in all 24. The three conditions each came from a case
+   that went wrong without it: without "of late" a rig re-seated in an even turn of 6 to 12 rad/s at 50 ms a frame
+   was let through whole (six of the 864 cases of the existing test); without "a course kept from the frame
+   before" a body thrown while it turns carried 0.67 m for 0.37 m (nine of its 72 cases; the two readings differ
+   there by the speeds kept for them, not by a turn); without "the turn moves the eye" the frame 00:30:53.388 of
+   the second feel.40 soak, whose kept course does not turn, was followed and made 0.135 m where 0.055 and 0.085 m
+   had been.
+2. For B: once in a run, within its time, a frame that is under the measure by a tenth of it at most and goes the
+   way the jump before it went (within 45 degrees) is taken up with the run. Nothing is believed for it; the kept
+   speed stands as in every frame of a run. 02:31:12.739: 0.066 to 0.028 m (0.018 m more carried); 02:34:34.959:
+   0.062 to 0.027 m. Of the feel.40 soaks: 00:36:03.183 0.068 to 0.029 m, 00:33:35.314 0.074 to 0.051 m,
+   00:33:35.513 0.085 to 0.046 m (0.06 m more carried), 00:39:30.882 0.063 to 0.028 m; four under the count as well
+   (0.051 to 0.054 m, now 0.019 to 0.039 m). No frame of the four logs got worse by more than 0.002 m.
+   What it costs, made up at four frame times: a re-seat of 0.15 m and one more frame at 0.97 of the measure the
+   same way, then rest: the step changed by 0.040, 0.042, 0.051 and 0.112 m (8, 16.7, 33.3, 50 ms a frame), now by
+   0.001, 0.005, 0.016 and 0.029 m, with 0.027 to 0.063 m more carried and 32 to 100 ms longer to settle. When the
+   eye goes on like that for eight frames (a motion, not a re-seat's end) the same more is carried, as long, and the
+   step is 0.001 to 0.004 m more. That is why it is once in a run: with every such frame taken up, at 8 ms a frame,
+   0.28 m more was carried and it took 230 ms longer. A frame the other way, or at 0.8 of the measure, is as before.
+   Tried and not kept: three quarters of the measure (soak 11 down to 5, but the dying-down probe at 8 ms carried
+   0.027 m more and settled 8 ms later); the same with a speed believed when such a frame comes after the run's time
+   (two frames of the logs worse: 02:21:31.078 0.062 to 0.068 m, 00:32:09.176 0.040 to 0.050 m).
+
+**Replayed** (exact frames, by the vector measure; soaks 8 and 9 are the feel.40 logs with the filter under test;
+"by 66ee111" and "by 9a3470b" say which filter decides what is exact):
+
+| Log | Filter | Filter's steps | largest (m) | game's own | reduced | by lengths | metre-frames | longest carry (ms) |
+|---|---|---|---|---|---|---|---|---|
+| Soak 8 | main | 9 | 0.214, 0.142, 0.107 | 5 | 2 | 5 | 180.9 | 468 |
+| Soak 8 | round2 | 9 | 0.214, 0.142, 0.107 | 5 | 2 | 5 | 181.0 (+0.1 %) | 468 |
+| Soak 9 | main | 20 | 0.214, 0.142, 0.137 | 9 | 5 | 9 | 315.0 | 566 |
+| Soak 9 | round2 | 16 | 0.214, 0.142, 0.137 | 9 | 5 | 7 | 316.4 (+0.4 %) | 566 |
+| Soak 10, by 66ee111 | main | 5 | 0.090, 0.078, 0.064 | 7 | 2 | 2 | 119.7 | 566 |
+| Soak 10, by 66ee111 | round2 | 4 | 0.085, 0.064, 0.062 | 7 | 1 | 2 | 119.9 (+0.2 %) | 501 |
+| Soak 10, by 9a3470b | main | 5 | 0.090, 0.078, 0.064 | 7 | 2 | 2 | 106.3 | 501 |
+| Soak 10, by 9a3470b | round2 | 4 | 0.085, 0.064, 0.062 | 7 | 1 | 2 | 107.3 (+0.9 %) | 501 |
+| Soak 11, by 66ee111 | main | 10 | 0.090, 0.078, 0.071 | 7 | 3 | 4 | 210.7 | 566 |
+| Soak 11, by 66ee111 | round2 | 7 | 0.085, 0.071, 0.064 | 7 | 2 | 4 | 211.9 (+0.6 %) | 501 |
+| Soak 11, by 9a3470b | main | 9 | 0.090, 0.078, 0.071 | 7 | 2 | 3 | 173.5 | 501 |
+| Soak 11, by 9a3470b | round2 | 6 | 0.085, 0.071, 0.064 | 7 | 1 | 3 | 175.6 (+1.2 %) | 501 |
+
+With change 1 alone soaks 8 and 9 are main's to the digit, soak 10 is 4 and soak 11 is 9 (8 by 9a3470b), with 0.5 %
+less carried. What is left in soak 11: C (1), D (3), E (3). The older soaks with fitted axes, where the replay
+follows (2, 3 and 6): 15, 20 and 11 on main, 14, 20 and 12 now. The one more in soak 6 (22:37:22.227, 0.070 m) is in a
+stretch where the fit turns the axes by 0.22, 0.85 and 0.36 rad in three frames and the replay carries 0.53 m where
+the log carried 0.30 m; it is the onset rule acting on turns the game did not make, and is noted, not explained away:
+axes that really jumped about like that (a body thrown about) are not in any log with real axes.
+
+**The probes** (`tools/harness/probes.py`, `probe_filter.c`; `tests/test_harness_probes.py` runs them with the
+harness tests). The made-up scenes the check of the feel.41 branch was made with, each at 8, 16.7, 33.3 and 50 ms a
+frame, with main's numbers recorded as the bound (`tools/harness/probes-main.txt`): the largest change of the
+presented step as a vector (m), the largest correction carried (m), the time to settle (ms to the last frame over
+0.005 m). The branch is the same as main to the last digit in all 84 (21 scenes at four frame times); the filter
+of feel.40 is worse in two (dying-down at 33.3 and 50 ms), which the test holds the comparison to.
+
+| Scene | 8 ms | 16.7 ms | 33.3 ms | 50 ms |
+|---|---|---|---|---|
+| a re-seat of 0.15 m, standing | 0.0014, 0.1500, 168 | 0.0055, 0.1500, 167 | 0.0187, 0.1500, 166 | 0.0325, 0.1500, 150 |
+| the same, walking at 4 m/s | 0.0014, 0.1500, 168 | 0.0055, 0.1500, 167 | 0.0187, 0.1500, 166 | 0.0325, 0.1500, 150 |
+| 0.09 m in each of two frames, then creeping 0.5 mm a frame | 0.0019, 0.1793, 192 | 0.0056, 0.1769, 200 | 0.0156, 0.1687, 200 | 0.0900, 0.0000, 0 |
+| 0.05 m in each of three frames, then creeping | 0.0016, 0.1472, 184 | 0.0046, 0.1393, 184 | 0.0120, 0.1167, 200 | 0.0500, 0.0000, 0 |
+| 0.15 m against the way of an eye going 2 m/s | 0.0014, 0.1500, 168 | 0.0055, 0.1500, 167 | 0.0187, 0.1500, 166 | 0.0325, 0.1500, 150 |
+| 0.15 m along its way | 0.0014, 0.1500, 168 | 0.0055, 0.1500, 167 | 0.0187, 0.1500, 166 | 0.0325, 0.1500, 150 |
+| the start of a sprint, no re-seat | 0.0017, 0.0000, 0 | 0.0072, 0.0000, 0 | 0.0279, 0.0000, 0 | 0.0611, 0.0000, 0 |
+| head to native in a sprint, 1.17 m apart | 0.0027, 1.1718, 384 | 0.0113, 1.1718, 384 | 0.0406, 1.1718, 366 | 0.0824, 1.1718, 350 |
+| a flicker of 0.19 m, 2 to 12 frames (the worst) | 0.0014, 0.1900, 160 | 0.0068, 0.1900, 267 | 0.0244, 0.1900, 500 | 0.0417, 0.1900, 650 |
+| a motion dying down (0.26, 0.21, 0.136, 0.083, 0.053 m a frame) | 0.0341, 0.7308, 408 | 0.0368, 0.6982, 434 | 0.0250, 0.6168, 466 | 0.0480, 0.5436, 450 |
+| the root 0.6 m on in one frame, the eye a frame later | 0.0015, 0.6000, 368 | 0.0061, 0.6000, 367 | 0.0220, 0.6000, 400 | 0.0465, 0.6000, 400 |
+
+At 50 ms a frame the measure is 0.09 m (36 m/s^2 times the frame time squared), so the two spread re-seats are no
+jumps there and are shown as they come. None of these scenes has a frame in the tenth under the measure or a root
+that turns, which is why neither change moves them; what the changes do in scenes that have is in 1 and 2 above and
+in the tests.
+
+**What was not changed, and why.**
+
+- C, the curve begun steeper than asked for. Two lengths for a curve that starts with a speed were tried on top of
+  the two changes. *Every restarted curve allows for its whole start speed* (the earlier section's "considered and
+  left", measured now): three existing checks fail (a start at 3 m/s, twice; soak 8's stop in a sprint), soak 9
+  carries 339.6 metre-frames (+7.8 % on main), the longest carry is 635 ms on all four logs (468 and 566), and 37
+  of the 84 probes are worse (the spread re-seats settle 17 to 50 ms later). *Only the part of the start speed that
+  makes the correction grow*: one existing check fails (soak 8's stop in a sprint), soak 9 carries 323.0
+  metre-frames (+2.5 %) and soak 11 218.9 (+3.9 %), the longest carry is 601 ms on soaks 9 to 11, and 28 probes are
+  worse (a flicker settles up to 150 ms later). Both take soak 9 from 16 to 12, and neither removes 02:21:31.078.
+  Outside the conditions; not done.
+- D is the measure. To count 02:21:31.445 as the game's own the judge's 0.8 would have to be 0.75; the two with a
+  correction carried are the game's own by any reading. The judge was left as it is, so the figures stay comparable.
+- E is the design, as before: handing the root's change of speed to the curve carries the eye into the ground on a
+  landing (the feel.40 section).
+- Not looked into: the 16 left in soak 9 beyond the ones named above and in the feel.40 sections (00:24:56.788,
+  00:25:52.009, 00:27:08.298, 00:30:10.655, 00:30:53.355 and .421, 00:33:32.074, 00:37:57.933, 00:39:30.581).
+  00:30:53.355 and .421 (0.117 and 0.085 m with 0.97 m carried) come from a speed kept across a change of camera in
+  a sprint and are the next thing to look at.
+
+Tests on the branch: `tests/run-camera-continuity.sh` 2,462 checks (2,396 on main, all unchanged), the other four
+`run-camera-*.sh` as on main (2,765, 229, 643, 260), the harness's python tests 24 (21 and the three for the
+probes), all 46 `tests/run-*.sh` pass, `build.sh --feel` builds. Nothing here has been run in the game.
