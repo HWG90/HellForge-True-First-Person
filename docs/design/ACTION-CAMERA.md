@@ -272,8 +272,11 @@ Built offline; nothing of this section has run in the game.
    stored as its weapon's eye for 200 ms; the eye hold of that exit still starts from it.
 4. *The trace* (`tfp_camera_trace_edge` / `tfp_camera_trace_read`, `src/mod_view.c` `trace_note`). For the 0.5 s
    after each State edge (native view entered or left, hold begun or ended) and the six frames before it:
-   `Trace: t=<ms from the edge> kind=<top request> eye_world=(x y z) step=<m> wanted=(x y z) correction=<m> lease=<record> pose_armed=<0/1> entry_ease=<0..1> source=<head|native|repeat>`
+   `Trace: t=<ms from the edge> kind=<top request> eye_world=(x y z) step=<m> wanted=(x y z) correction=<m> lease=<record> pose_armed=<0/1> entry_ease=<0..1> source=<head|native|repeat> root=(x y z) axes=(nine) looked=<0/1> taken=<jump|edge|root|restart|start|-> quiet=<0/1> tick=<ms>`
    one line per camera call, from the helper's own record of what it presented. `tools/harness/trace.py` reads them.
+   From `root=` on the line holds what the continuity was given in that call (the body root and its axis rows,
+   whether jumps were looked for, full aim, the helper's clock) and what it did; `tools/harness/replay.py` runs the
+   filter again from them, the logged build's and the present one, and counts the steps each makes.
 5. *Lines.* `Smooth: +N changes of camera and +M rig moves taken up, largest correction X m` once a second when
    either count rose. `Entry: the native view's eye was X m (level, up) from the head camera's last eye on its first frame`:
    the rig eye of the first native frame against the head camera's last eye, both in the world.

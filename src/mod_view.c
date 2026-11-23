@@ -370,7 +370,8 @@ static void entry_note(void) {
  *   wanted       the eye before the continuity correction; correction: the length of what is carried
  *   lease        the controller's native request record (0: none) when the line is written, pose_armed likewise
  *   entry_ease   the eased entry's progress (1: not easing)
- *   source       head (the head camera), native (the game's first-person camera), repeat (its last argument repeated) */
+ *   source       head (the head camera), native (the game's first-person camera), repeat (its last argument repeated)
+ *   root, axes, looked, taken, quiet, tick: what the continuity was given and what it did (below) */
 static void trace_note(void) {
   static bool was_leased, was_holding;
   const bool leased = wire.log.has_lease, holding = wire.controller.holding, edge = leased != was_leased || holding != was_holding;
@@ -392,17 +393,23 @@ static void trace_note(void) {
      * a root whose axes turned 0.26 rad in one frame carried the eye 0.18 m, and the lines could not say so); looked:
      * jumps within the camera were looked for; taken:
      * what the continuity did with the frame (jump, edge: taken up; root: the root alone re-seated, nothing taken
-     * up; restart). Without the root a jump of the root cannot be told from a jump of the eye in these lines. */
-    char taken[40] = "";
-    snprintf(taken, sizeof taken, "%s%s%s%s", r->what & TFP_CAMERA_TRACE_JUMP ? "+jump" : "", r->what & TFP_CAMERA_TRACE_EDGE ? "+edge" : "",
-             r->what & TFP_CAMERA_TRACE_ROOT ? "+root" : "", r->what & TFP_CAMERA_TRACE_RESTART ? "+restart" : "");
-    say("Trace: t=%.1f kind=%u eye_world=(%.4f %.4f %.4f) step=%.4f wanted=(%.4f %.4f %.4f) correction=%.4f lease=0x%llx pose_armed=%d entry_ease=%.2f source=%s"
-        " root=(%.4f %.4f %.4f) axes=(%.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f) looked=%d taken=%s",
+     * up; restart; start: it began from nothing in this frame). Without the root a jump of the root cannot be told
+     * from a jump of the eye in these lines. quiet: full aim, nothing is taken up. tick: the frame's time on the
+     * helper's clock (ms). With these the line holds all the continuity was given, and tools/harness/replay.py can
+     * run it again frame for frame (the soaks of 2026-11-22 on feel.40: without the time across edges, full aim and
+     * the starts, and with places to 0.1 mm, 29 of 3447 frames could not be replayed: two decisions that fell
+     * within the rounding). */
+    char taken[48] = "";
+    snprintf(taken, sizeof taken, "%s%s%s%s%s", r->what & TFP_CAMERA_TRACE_JUMP ? "+jump" : "", r->what & TFP_CAMERA_TRACE_EDGE ? "+edge" : "",
+             r->what & TFP_CAMERA_TRACE_ROOT ? "+root" : "", r->what & TFP_CAMERA_TRACE_RESTART ? "+restart" : "",
+             r->what & TFP_CAMERA_TRACE_START ? "+start" : "");
+    say("Trace: t=%.1f kind=%u eye_world=(%.5f %.5f %.5f) step=%.4f wanted=(%.5f %.5f %.5f) correction=%.4f lease=0x%llx pose_armed=%d entry_ease=%.2f source=%s"
+        " root=(%.5f %.5f %.5f) axes=(%.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f) looked=%d taken=%s quiet=%d tick=%.3f",
         (double)r->ms, r->kind, (double)r->eye[0], (double)r->eye[1], (double)r->eye[2], (double)r->step, (double)r->wanted[0], (double)r->wanted[1],
         (double)r->wanted[2], (double)r->correction, lease, (int)(pose.armed != 0), (double)r->entry_ease, sources[r->source < 4 ? r->source : 0],
         (double)r->root[0], (double)r->root[1], (double)r->root[2], (double)r->axes[0], (double)r->axes[1], (double)r->axes[2], (double)r->axes[3],
         (double)r->axes[4], (double)r->axes[5], (double)r->axes[6], (double)r->axes[7], (double)r->axes[8],
-        (int)((r->what & TFP_CAMERA_TRACE_LOOKED) != 0), taken[0] ? taken + 1 : "-");
+        (int)((r->what & TFP_CAMERA_TRACE_LOOKED) != 0), taken[0] ? taken + 1 : "-", (int)((r->what & TFP_CAMERA_TRACE_QUIET) != 0), r->tick);
   }
 }
 #endif
