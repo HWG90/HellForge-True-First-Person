@@ -9,11 +9,12 @@ sys.path.insert(0, str(ROOT / "tools/harness"))
 import replay  # noqa: E402
 
 
-def line(stamp_ms, t, kind, eye, wanted, carried, root=(0, 0, 0), axes=None, looked=1, taken="-", source="native"):
+def line(stamp_ms, t, kind, eye, wanted, carried, root=(0, 0, 0), axes=None, looked=1, taken="-", source="native", tail=""):
     stamp = "22:00:%02d.%03d" % (stamp_ms // 1000, stamp_ms % 1000)
     extra = " axes=(%s)" % " ".join("%.4f" % a for a in axes) if axes else ""
     return ("%s Trace: t=%.1f kind=%d eye_world=(%.4f %.4f %.4f) step=0.0000 wanted=(%.4f %.4f %.4f) correction=%.4f lease=0x0 pose_armed=1 "
-            "entry_ease=1.00 source=%s root=(%.4f %.4f %.4f)%s looked=%d taken=%s" % (stamp, t, kind, *eye, *wanted, carried, source, *root, extra, looked, taken))
+            "entry_ease=1.00 source=%s root=(%.4f %.4f %.4f)%s looked=%d taken=%s%s" % (stamp, t, kind, *eye, *wanted, carried, source, *root, extra, looked,
+                                                                                       taken, tail))
 
 
 class Frames(unittest.TestCase):
@@ -41,6 +42,41 @@ class Frames(unittest.TestCase):
         self.assertEqual(rows[0]["kind"], 4)
 
 
+class Rows(unittest.TestCase):
+    AXES = (1, 0, 0, 0, 1, 0, 0, 0, 1)
+
+    def test_every_row_is_a_call_of_the_filter(self):
+        # the game set the camera twice in one frame: two calls, one frame
+        lines = ["22:00:00.000 State: one", line(33, 33.0, 6, (1, 0, 0), (1, 0, 0), 0), line(34, 33.7, 4, (1, 0, 0), (1, 0, 0), 0, source="head")]
+        rows = replay.read(lines)
+        self.assertEqual([row["kind"] for row in rows], [6, 4])
+        self.assertEqual(len(replay.merge(rows)), 1)
+
+    def test_an_edge_without_a_state_line_starts_the_time_again(self):
+        lines = ["22:00:00.000 State: one", line(400, 400.0, 6, (1, 0, 0), (1, 0, 0), 0), line(433, 433.0, 6, (1, 0, 0), (1, 0, 0), 0),
+                 line(466, -1.0, 6, (2, 0, 0), (2, 0, 0), 0), line(500, 33.0, 6, (2, 0, 0), (2, 0, 0), 0)]
+        rows = replay.read(lines)
+        gaps = [b["tick"] - a["tick"] for a, b in zip(rows, rows[1:])]
+        self.assertTrue(all(30 < gap < 37 for gap in gaps), gaps)
+
+    def test_the_time_and_full_aim_where_the_line_has_them(self):
+        rows = replay.read(["22:00:00.000 State: one", line(33, 33.0, 6, (1, 0, 0), (1, 0, 0), 0, axes=self.AXES, tail=" quiet=1 tick=5000.125"),
+                            line(66, 66.0, 6, (1, 0, 0), (1, 0, 0), 0, axes=self.AXES, taken="start", tail=" quiet=0 tick=5033.500")])
+        self.assertEqual([(row["quiet"], row["tick"]) for row in rows], [(1, 5000.125), (0, 5033.5)])
+        replay.stretches(rows)
+        self.assertEqual(rows[1]["fresh"], 1)
+
+    def test_the_state_is_known_from_the_first_row_without_a_correction(self):
+        carried = (0.2, 0.1, 0, 0.3, 0.1)
+        lines = ["22:00:00.000 State: one"] + [line(33 * i, 33.0 * i, 6, (1, 0, 0), (1, 0, 0), c, axes=self.AXES) for i, c in enumerate(carried)] + [
+            "22:00:02.000 State: two", line(2033, 33.0, 6, (1, 0, 0), (1, 0, 0), 0, axes=self.AXES)]
+        rows = replay.read(lines)
+        replay.stretches(rows)
+        self.assertEqual([row["known"] for row in rows], [False, False, True, True, True, True])
+        # in the middle of a stretch the replay lets its own correction go; after a pause the filter starts again by itself
+        self.assertEqual([row["fresh"] for row in rows], [0, 0, 2, 0, 0, 0])
+
+
 class Judge(unittest.TestCase):
     def rows(self, eyes, wanted, carried):
         return [{"tick": 33.3 * i, "eye": (e, 0, 0), "wanted": (w, 0, 0), "carried": c, "root": (0, 0, 0), "misfit": 0}
@@ -61,6 +97,72 @@ class Judge(unittest.TestCase):
         rows[1]["misfit"] = 0.3
         self.assertEqual(replay.judge(rows, known=True), [])
         self.assertEqual(len(replay.judge(rows)), 1)
+        # logged axes: "follows" says it (the state known and the replay within 0.005 m)
+        rows = self.rows((0, 0, .1), (0, 0, 0), (0, 0, .1))
+        for row in rows:
+            row["follows"] = True
+        self.assertEqual(len(replay.judge(rows, known=True)), 1)
+        rows[2]["follows"] = False
+        self.assertEqual(replay.judge(rows, known=True), [])
+
+    def test_an_eye_that_turns_round_counts_in_full(self):
+        # 0.04 m forwards and then 0.04 m back: the lengths are alike, the step changed by 0.08 m
+        rows = self.rows((0, .04, 0), (0, 0, 0), (0, .04, 0))
+        self.assertEqual(replay.judge(rows), [])
+        found = replay.judge(rows, vector=True)
+        self.assertEqual([f[0] for f in found], ["filter"])
+        self.assertAlmostEqual(found[0][1], 0.08)
+        self.assertAlmostEqual(found[0][2], 0.0)
+        # the wanted eye turns round as well and nothing is carried: the game's own, by vectors too
+        self.assertEqual([f[0] for f in replay.judge(self.rows((0, .04, 0), (0, .04, 0), (0, 0, 0)), vector=True)], ["game"])
+        # a turn to the side: 0.05 m along x and then 0.05 m along y is 0.07 m of change and none by the lengths
+        rows = [{"tick": 33.3 * i, "eye": e, "wanted": (0, 0, 0), "carried": .05, "root": (0, 0, 0), "misfit": 0}
+                for i, e in enumerate(((0, 0, 0), (.05, 0, 0), (.05, .05, 0)))]
+        self.assertEqual(replay.judge(rows), [])
+        self.assertAlmostEqual(replay.judge(rows, vector=True)[0][1], 0.05 * 2 ** .5)
+        # a step that only grows is the same by both
+        rows = self.rows((0, 0, .1), (0, 0, 0), (0, 0, .1))
+        self.assertAlmostEqual(replay.judge(rows, vector=True)[0][1], replay.judge(rows)[0][1])
+
+
+class Carry(unittest.TestCase):
+    def rows(self, carried, sources, gap=33.0):
+        return [{"tick": gap * i, "carried": c, "source": s, "misfit": 0} for i, (c, s) in enumerate(zip(carried, sources))]
+
+    def test_what_is_carried_summed_over_the_frames(self):
+        rows = self.rows((0, .2, .1, .04, 0), ("head",) * 5)
+        metres, longest = replay.carry(rows)
+        self.assertAlmostEqual(metres, 0.34)
+        self.assertEqual(longest, (0, None))  # no change of camera
+
+    def test_the_longest_time_over_the_limit_after_a_change_of_camera(self):
+        #                 change           under                 change       still over at the end
+        carried = (0, 0, .30, .20, .10, .04, 0, 0, .2, .2, 0, 0, .5, .4, .3, .2, .1)
+        sources = ("head",) * 2 + ("native",) * 10 + ("head",) * 5
+        rows = self.rows(carried, sources)
+        metres, (longest, where) = replay.carry(rows)
+        self.assertAlmostEqual(metres, sum(carried))
+        # the first: over 0.05 m in three frames, under it in the fourth, 99 ms after the change; the second 132 ms to
+        # the last row; "native" and "repeat" are one camera; what is taken up without a change of camera is not counted
+        self.assertAlmostEqual(longest, 132.0)
+        self.assertIs(where, rows[12])
+        self.assertAlmostEqual(replay.carry(rows[:12])[1][0], 99.0)
+        rows = self.rows((0, .3, .3, 0), ("native", "repeat", "native", "native"))
+        self.assertEqual(replay.carry(rows)[1], (0, None))
+
+    def test_only_where_the_replay_is_exact_and_without_a_pause(self):
+        rows = self.rows((0, .3, .3, .3, .3, 0), ("head",) + ("native",) * 5)
+        for row in rows:
+            row["follows"] = True
+        rows[3]["follows"] = False
+        metres, (longest, _) = replay.carry(rows, known=True)
+        self.assertAlmostEqual(metres, 0.9)
+        self.assertAlmostEqual(longest, 33.0)  # known to the row before the one that is not exact
+        rows = self.rows((0, .3, .3, .3, .3, 0), ("head",) + ("native",) * 5)
+        rows[3]["tick"] += 1000
+        for row in rows[4:]:
+            row["tick"] += 1000
+        self.assertAlmostEqual(replay.carry(rows)[1][0], 33.0)
 
 
 if __name__ == "__main__":

@@ -1010,7 +1010,7 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
      * left the eye behind the head for up to half a second. On foot the head-frame jump of a swap is still taken up,
      * and native frames are as before. smooth_detect is called first: it keeps the watch on every frame. */
     const bool detect = smooth_detect(p, kind, source, tick) && !p->lock_down && !(source == SMOOTH_HEAD && p->lock_off_foot);
-    const uint64_t jumps = smooth.jumps, edges = smooth.edges, reseats = smooth.reseats, restarts = smooth.restarts;
+    const uint64_t jumps = smooth.jumps, edges = smooth.edges, reseats = smooth.reseats, restarts = smooth.restarts; const bool began = !smooth.known;
     /* The eye in the world goes with it: the root re-seated by itself is not the eye jumping (camera_continuity.h). */
     correction = tfp_continuity_step_in(&smooth, wanted_relative, wanted, root_basis, source == SMOOTH_REPEAT ? SMOOTH_NATIVE : source, detect, p->full_ads, tick,
                                         p->c.max_gap_ms, &smooth_tuning, relative);
@@ -1018,7 +1018,8 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
       for (unsigned axis = 0; axis < 3; ++axis) shown[component] += relative[axis]*root_basis[axis*3+component]; }
     else correction = 0;
     what = (detect ? TFP_CAMERA_TRACE_LOOKED : 0u) | (smooth.jumps != jumps ? TFP_CAMERA_TRACE_JUMP : 0u) | (smooth.edges != edges ? TFP_CAMERA_TRACE_EDGE : 0u)
-        | (smooth.reseats != reseats ? TFP_CAMERA_TRACE_ROOT : 0u) | (smooth.restarts != restarts ? TFP_CAMERA_TRACE_RESTART : 0u);
+        | (smooth.reseats != reseats ? TFP_CAMERA_TRACE_ROOT : 0u) | (smooth.restarts != restarts ? TFP_CAMERA_TRACE_RESTART : 0u)
+        | (began ? TFP_CAMERA_TRACE_START : 0u) | (p->full_ads ? TFP_CAMERA_TRACE_QUIET : 0u);
   }
   if (atomic_load_explicit(&trace_on, memory_order_relaxed)) {
     TraceFrame *row = &trace.frames[trace.head++ % TRACE_RING];
@@ -1746,7 +1747,7 @@ uint32_t tfp_camera_trace_read(TfpCameraTraceRow *rows, uint32_t capacity) {
     row->ms = (float)(frame->tick-trace.edge); row->kind = frame->kind; row->source = frame->source;
     memcpy(row->eye, frame->eye, 12); memcpy(row->wanted, frame->wanted, 12);
     row->step = frame->step; row->correction = frame->correction; row->entry_ease = frame->entry_ease;
-    memcpy(row->root, frame->root, 12); memcpy(row->axes, frame->axes, 36); row->what = frame->what;
+    memcpy(row->root, frame->root, 12); memcpy(row->axes, frame->axes, 36); row->what = frame->what; row->tick = frame->tick;
   }
   policy_release();
   return count;

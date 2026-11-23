@@ -303,7 +303,19 @@ int main() {
     count = tfp_camera_trace_read(rows, 64);
     CHECK(count == 6 && rows[5].kind == 4 && rows[5].source == 1 && rows[2].kind == 6);
     CHECK(rows[2].what == 0 && rows[3].what == TFP_CAMERA_TRACE_LOOKED); // the change of kind opens the time jumps are looked for
+    // tick: the frame's time on the helper's clock, which `ms` counts from the edge
+    CHECK(rows[5].tick - rows[4].tick > 30 && rows[5].tick - rows[4].tick < 36 && std::fabs((rows[5].tick - rows[4].tick) - (rows[5].ms - rows[4].ms)) < .01);
+    g.native(0, true); g.frame(33.3); // full aim: the row says the continuity was told to take nothing up
+    count = tfp_camera_trace_read(rows, 64);
+    CHECK(count == 1 && (rows[0].what & TFP_CAMERA_TRACE_QUIET) && !(rows[0].what & TFP_CAMERA_TRACE_START));
     g.end();
+    fresh(true, true, true); // the continuity's first frame says so, and only that one
+    Game first; first.pose(0, 0, 0, 0); first.look(0, 0); first.hip(); first.begin();
+    standing(first, 3, 33.3, true);
+    tfp_camera_trace_edge();
+    count = tfp_camera_trace_read(rows, 64);
+    CHECK(count == 3 && (rows[0].what & TFP_CAMERA_TRACE_START) && !(rows[1].what & TFP_CAMERA_TRACE_START) && !(rows[2].what & TFP_CAMERA_TRACE_START));
+    first.end();
     fresh(true, true, false); // the trace switched off: nothing kept
     Game h; h.pose(0, 0, 0, 0); h.look(0, 0); h.hip(); h.begin();
     standing(h, 5, 33.3, false); tfp_camera_trace_edge(); standing(h, 5, 33.3, false);

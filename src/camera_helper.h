@@ -224,13 +224,17 @@ void tfp_camera_continuity_stats(TfpCameraContinuityStats *out);
  * source: 1 head camera, 2 native view, 3 the last native argument repeated. root: the body root the eye was
  * measured against, axes: that root's axis rows (the eye in the root's frame is axes times (eye - root); the
  * continuity works there, and a root whose axes turn in one frame moves that eye without moving the root). what:
- * TFP_CAMERA_TRACE_* of the frame. */
+ * TFP_CAMERA_TRACE_* of the frame. tick: the frame's time on the helper's own clock (ms), so that the time between
+ * two frames is known across edges too. With tick, QUIET and START the rows hold all the continuity was given
+ * (tools/harness/replay.py runs it again from them). */
 enum { TFP_CAMERA_TRACE_LOOKED = 1,  /* jumps within the camera were looked for */
        TFP_CAMERA_TRACE_JUMP = 2,    /* a jump within the camera was taken up */
        TFP_CAMERA_TRACE_EDGE = 4,    /* a change of camera was taken up */
        TFP_CAMERA_TRACE_ROOT = 8,    /* the body root alone was re-seated: nothing taken up for it */
-       TFP_CAMERA_TRACE_RESTART = 16 /* the continuity started again (a teleport, a pause) */ };
-typedef struct TfpCameraTraceRow { float ms; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; float root[3]; uint32_t what; float axes[9]; } TfpCameraTraceRow;
+       TFP_CAMERA_TRACE_RESTART = 16, /* the continuity started again (a teleport, a pause) */
+       TFP_CAMERA_TRACE_START = 32,  /* the continuity began from nothing in this frame (its first, or the first after the helper forgot it) */
+       TFP_CAMERA_TRACE_QUIET = 64   /* full aim: the continuity was told to take nothing up */ };
+typedef struct TfpCameraTraceRow { float ms; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; float root[3]; uint32_t what; float axes[9]; double tick; } TfpCameraTraceRow;
 void tfp_camera_trace_edge(void);
 uint32_t tfp_camera_trace_read(TfpCameraTraceRow *rows, uint32_t capacity);
 #endif

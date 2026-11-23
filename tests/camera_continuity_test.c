@@ -3,6 +3,8 @@
 #include "camera_continuity.h"
 #include <stdio.h>
 #include "reference/soak-6-steps.h"
+#include "reference/soak-8-steps.h"
+#include "reference/soak-9-runs.h"
 static int checks, failed;
 #define CHECK(c) do { ++checks; if (!(c)) { ++failed; printf("FAILED line %d: %s\n", __LINE__, #c); } } while (0)
 static const TfpContinuityTuning T = TFP_CONTINUITY_DEFAULT;
@@ -107,6 +109,112 @@ static Soak soak(const SoakFrame *frames, int count, int from) {
   }
   return s;
 }
+/* Logged rows (tests/reference/soak-8-steps.h; every row is one call of the filter) through the filter, judged as the
+ * soak's judge does (tools/harness/replay.py). Two rows under 5 ms apart from another camera or with the same eye are
+ * one frame, the later. For frames a, b, c, 5 to 80 ms apart, the presented eye's step changes by
+ * | |c-b| - |b-a| |; a change of 0.06 m or more is the game's own when the wanted eye's step changes by at least 0.8
+ * of it and under 0.03 m is carried in b and c, reduced when the wanted eye's changes by over 1.2 of it, and
+ * otherwise the filter's. `step`: the largest of the filter's among the frames c from row `from` to row `to`
+ * (0: none); `logged`: the same of the eye the log shows; `apart`: how far the presented eye is from the logged one
+ * at most in those rows.
+ * That measure does not see a change of direction (an eye that goes 0.04 m forwards and then 0.04 m back has changed
+ * its step by 0.08 m and by nothing in length). `turned`, `logged_turned`: the same judged by the change of the step
+ * as a vector, | (c-b) - (b-a) |, of the presented eye and of the wanted one: what replay.py counts now. */
+typedef struct Judged { float step, logged, apart, turned, logged_turned; } Judged;
+static float judged_step(const float (*eye)[3], const float (*wanted)[3], const float *carried, const float *ms, const int *row, int frames, int from, int to,
+                         bool vector) {
+  float worst = 0;
+  for (int i = 2; i < frames; ++i) {
+    if (row[i] < from || row[i] > to || ms[i-1]-ms[i-2] < 5 || ms[i-1]-ms[i-2] > 80 || ms[i]-ms[i-1] < 5 || ms[i]-ms[i-1] > 80) continue;
+    float shown[2] = {0, 0}, own[2] = {0, 0};
+    for (int k = 0; k < 3; ++k) for (int n = 0; n < 2; ++n) {
+      shown[n] += (eye[i-n][k]-eye[i-n-1][k])*(eye[i-n][k]-eye[i-n-1][k]); own[n] += (wanted[i-n][k]-wanted[i-n-1][k])*(wanted[i-n][k]-wanted[i-n-1][k]); }
+    float change = fabsf(sqrtf(shown[0])-sqrtf(shown[1])), game = fabsf(sqrtf(own[0])-sqrtf(own[1]));
+    if (vector) { change = game = 0;
+      for (int k = 0; k < 3; ++k) { const float e = eye[i][k]-2*eye[i-1][k]+eye[i-2][k], w = wanted[i][k]-2*wanted[i-1][k]+wanted[i-2][k]; change += e*e; game += w*w; }
+      change = sqrtf(change); game = sqrtf(game); }
+    if (change < .06f || (game >= .8f*change && carried[i-1] < .03f && carried[i] < .03f) || game > 1.2f*change) continue;
+    if (change > worst) worst = change;
+  }
+  return worst;
+}
+static Judged judged(const SoakFrame *rows, int count, int from, int to) {
+  enum { MOST = 128 };
+  static float eye[MOST][3], logged[MOST][3], wanted[MOST][3], carried[MOST], was[MOST], ms[MOST]; static int row[MOST];
+  TfpContinuity c; memset(&c, 0, sizeof c);
+  Judged j = {0, 0, 0, 0, 0}; int frames = 0; float first = 0;
+  for (int i = 0; i < count && i < MOST; ++i) {
+    const SoakFrame *f = &rows[i]; float relative[3] = {0}, out[3], world[3], apart = 0, same = 0, correction = 0;
+    for (int a = 0; a < 3; ++a) for (int k = 0; k < 3; ++k) relative[a] += (f->wanted[k]-f->root[k])*f->axes[a*3+k];
+    const float length = tfp_continuity_step_in(&c, relative, f->wanted, f->axes, (uint32_t)f->source, f->looked != 0, false, 1000.0+(double)f->ms, 250, &T, out);
+    for (int k = 0; k < 3; ++k) { world[k] = f->root[k]; for (int a = 0; a < 3; ++a) world[k] += out[a]*f->axes[a*3+k];
+      apart += (world[k]-f->logged[k])*(world[k]-f->logged[k]); correction += (f->logged[k]-f->wanted[k])*(f->logged[k]-f->wanted[k]);
+      if (i) same += (f->logged[k]-f[-1].logged[k])*(f->logged[k]-f[-1].logged[k]); }
+    if (i >= from && i <= to && sqrtf(apart) > j.apart) j.apart = sqrtf(apart);
+    const bool again = frames && f->ms-first >= 0 && f->ms-first < 5 && (f->source != f[-1].source || sqrtf(same) < .002f);
+    if (!again) { ++frames; first = f->ms; }
+    const int n = frames-1;
+    memcpy(eye[n], world, sizeof world); memcpy(logged[n], f->logged, sizeof world); memcpy(wanted[n], f->wanted, sizeof world);
+    carried[n] = length; was[n] = sqrtf(correction); ms[n] = f->ms; row[n] = i;
+  }
+  j.step = judged_step(eye, wanted, carried, ms, row, frames, from, to, false);
+  j.logged = judged_step(logged, wanted, was, ms, row, frames, from, to, false);
+  j.turned = judged_step(eye, wanted, carried, ms, row, frames, from, to, true);
+  j.logged_turned = judged_step(logged, wanted, was, ms, row, frames, from, to, true);
+  return j;
+}
+/* Logged rows through the filter to the end of a run of jumps, the row `at` (the first that is no jump). `off`: how
+ * far the speed the filter believes after that row is from the wanted eye's real one, its way against the root over
+ * the 100 ms from the run's last jump on (the row before `at`; m/s; the root stands in these rows). `grown`: the most the correction carried grows
+ * from one row to the next after `at`, to row `to` (the wanted eye rests there: nothing is left to take up). */
+typedef struct Rested { float off, grown, believed, real; } Rested;
+static Rested rested(const SoakFrame *rows, int count, int at, int to) {
+  TfpContinuity c; memset(&c, 0, sizeof c);
+  Rested r = {0, 0, 0, 0}; float believed[3] = {0}, then[3] = {0}, last[3] = {0}, before = 0, span = 0;
+  for (int i = 0; i < count && i <= to; ++i) {
+    const SoakFrame *f = &rows[i]; float relative[3] = {0}, out[3];
+    for (int a = 0; a < 3; ++a) for (int k = 0; k < 3; ++k) relative[a] += (f->wanted[k]-f->root[k])*f->axes[a*3+k];
+    const float carried = tfp_continuity_step_in(&c, relative, f->wanted, f->axes, (uint32_t)f->source, f->looked != 0, false, 1000.0+(double)f->ms, 250, &T, out);
+    if (i == at-1) memcpy(then, relative, sizeof then);
+    if (i == at) memcpy(believed, c.speed, sizeof believed);
+    if (i >= at && f->ms-rows[at-1].ms <= 110) { memcpy(last, relative, sizeof last); span = (f->ms-rows[at-1].ms)/1000; }
+    if (i > at && carried-before > r.grown) r.grown = carried-before;
+    before = carried;
+  }
+  float off = 0, real = 0;
+  for (int k = 0; k < 3; ++k) { const float v = span > 0 ? (last[k]-then[k])/span : 0; off += (believed[k]-v)*(believed[k]-v); real += v*v; }
+  r.off = sqrtf(off); r.real = sqrtf(real); r.believed = tfp_continuity_length(believed);
+  return r;
+}
+/* A rig re-seated in two frames, 0.09 m in each, that then creeps on the same way at 0.5 mm a frame (the body
+ * stands, jumps are looked for). `back`: the most the presented eye goes the other way in one frame, against its
+ * catch-up; `settled`: how long after the first of the two frames more than 0.005 m is still carried (ms). */
+typedef struct Crept { float back, settled, carried; } Crept;
+static Crept crept(float dt) {
+  TfpContinuity c; memset(&c, 0, sizeof c);
+  Crept r = {0, 0, 0}; const int warm = (int)(1000/dt)+4, after = (int)(1600/dt); float shown = 0;
+  for (int n = -warm; n <= after; ++n) {
+    const float basis[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1}, moved = n < 0 ? 0 : n < 2 ? .09f*(float)(n+1) : .18f+.0005f*(float)(n-1);
+    const float eye[3] = {0, .6f, 1.5f+moved}; float out[3];
+    const float carried = tfp_continuity_step_in(&c, eye, eye, basis, NATIVE, true, false, 1000.0+(double)(n+warm)*(double)dt, 250, &T, out);
+    if (n >= 0) { if (shown-out[2] > r.back) r.back = shown-out[2]; if (carried > .005f) r.settled = (float)n*dt; if (carried > r.carried) r.carried = carried; }
+    shown = out[2];
+  }
+  return r;
+}
+/* An eye going at `v` m/s against the root that is re-seated by 0.15 m against its way in one frame and goes on a
+ * little faster (0.3 m/s): the most carried. */
+static float against(float v, float dt) {
+  TfpContinuity c; memset(&c, 0, sizeof c);
+  const int warm = (int)(1000/dt)+4, after = (int)(1600/dt); float most = 0;
+  for (int n = -warm; n <= after; ++n) {
+    const float basis[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1}, t = (float)n*dt/1000, eye[3] = {0, .6f, 1.5f+(n < 0 ? v*t : -.15f+(v+.3f)*t)}; float out[3];
+    const float carried = tfp_continuity_step_in(&c, eye, eye, basis, NATIVE, true, false, 1000.0+(double)(n+warm)*(double)dt, 250, &T, out);
+    if (n >= 0 && carried > most) most = carried;
+  }
+  return most;
+}
+#define ROWS(a) a, (int)(sizeof a/sizeof *a)
 int main(void) {
   Run r;
   /* A still eye and an eye moving evenly: nothing is added, at 30 and at 144 frames a second. */
@@ -547,6 +655,151 @@ int main(void) {
     printf("soak 6, after a change of camera: step change at most %.3f m (the log: %.3f m), %.3f m beyond the root's own, %.3f m carried\n",
            (double)camera.change, (double)camera.logged_change, (double)camera.beyond, (double)camera.carried);
     CHECK(camera.beyond < .03f);
+  }
+  /* The soaks of 2026-11-22 on 0.6.0-feel.40 (tests/reference/soak-8-steps.h; the root's axes are the logged ones):
+   * eleven steps of 0.06 to 0.16 m were counted as the filter's by the lengths of the steps. Four of them came at
+   * the end of a run of jumps, and a fifth had it on top of the body's own (below). NOT MENDED: three of the four are
+   * still there, and the filter is only held to adding nothing to them.
+   * A run ends at the first frame that is no jump, and that frame is followed as an ordinary one: the presented eye,
+   * which went on at the kept speed through the run, takes the wanted eye's step in that frame (under the measure
+   * off the kept speed, or it were a jump) while the curve begun at the last jump is at its steepest: up to 0.04 m
+   * and 0.027 m at 30 frames a second, together over the 0.06 m that is counted.
+   *  - 00:36:03.183, the native view after two quick swaps, the body standing: the rig eye went 0.070, 0.063 and
+   *    0.060 m in three frames and stood again (the kept speed: 0.022 m a frame). 0.049 and 0.042 m off the kept
+   *    speed were jumps; 0.039 m was 0.001 m under the measure, and the presented eye went 0.003 m and then 0.070 m.
+   *  - 00:33:35.314, the native view after a swap in a sprint: the rig eye all but stopped, two frames 0.046 and
+   *    0.053 m off the kept speed, the third 0.039 m: 0.143 m and then 0.081 m.
+   *  - 00:26:06.399, the native view entered again after a swap in a dive: the rig re-seated by 0.5 m a frame after
+   *    the change of camera, one jump; the frame after it, 0.02 m off the kept speed, was followed, and the one after
+   *    that is the step: the rig eye's own slowing (0.025 m, followed as a motion slowing down) on the curve's
+   *    0.030 m. 0.078 m by the lengths, 0.066 m now.
+   *  - 00:30:10.988, the same after a swap in a sprint, 0.064 m: gone with the speed believed for a motion dying
+   *    down (below), which gave the frames before it another speed.
+   * The mending that was tried for these and taken out is THE RUN'S END IS NO SPEED, below. Its four checks were
+   * "the log has the step and the filter has none of 0.06 m" for each; three are now "no more than the log's". */
+  {
+    const Judged three = judged(ROWS(soak9_three_frames), 2, 20);
+    printf("soak 9, three frames of the rig: the filter's largest step %.3f m (the log: %.3f m)\n", (double)three.step, (double)three.logged);
+    CHECK(three.logged > .06f && three.step < three.logged+.005f);
+    /* from the frame after the body's own change of speed (row 20, below) */
+    const Judged stop = judged(ROWS(soak9_sprint_swap), 21, 42);
+    printf("soak 9, the rig eye stopping after a swap in a sprint: the filter's largest step %.3f m (the log: %.3f m)\n", (double)stop.step, (double)stop.logged);
+    CHECK(stop.logged > .06f && stop.step < stop.logged+.005f);
+    const Judged camera = judged(ROWS(soak8_swap_in_sprint), 2, 28);
+    printf("soak 8, the native view entered after a swap in a sprint: the filter's largest step %.3f m (the log: %.3f m)\n", (double)camera.step, (double)camera.logged);
+    CHECK(camera.logged > .06f && camera.step < .06f);
+    const Judged dive = judged(ROWS(soak8_swap_in_dive), 24, 42);
+    printf("soak 8, the native view entered after a swap in a dive: the filter's largest step %.3f m (the log: %.3f m)\n", (double)dive.step, (double)dive.logged);
+    CHECK(dive.logged > .06f && dive.step < dive.logged+.005f);
+  }
+  /* THE RUN'S END IS NO SPEED. The way those four were to be mended (tried on the branch for 0.6.0-feel.41 and taken
+   * out: the frame that ends a run taken up, and what the run's jump frames and it agree on believed as the eye's
+   * new speed and handed to the curve) hid them from the count by lengths and made a fault of its own, which that
+   * count could not see: the run's frames are the re-seat, and a re-seat is no speed.
+   *  - A rig re-seated in two frames, 0.09 m in each, that then creeps on by 0.5 mm a frame: the two jumps and the
+   *    creeping frame go the same way, none slower than the one before, so 0.09 m a frame was believed for an eye at
+   *    rest and handed to the curve: at 16.7 ms a frame the presented eye was thrown 0.072 m backwards in one frame
+   *    and 0.24 m in all, 0.41 m was carried for a re-seat of 0.18 m, and it took 400 ms (at 8 ms: 0.058 m a frame,
+   *    0.41 m in all, 0.59 m carried). Without that hand-over it eases 0.18 m in 200 ms and never goes back.
+   *  - In the second soak, twice (tests/reference/soak-9-runs.h): 00:27:21.652, the rig re-seated by 0.08 and
+   *    0.49 m and standing: 2.38 m/s believed for an eye going 0.01 m/s, and what was carried grew from 0.446 to
+   *    0.532 m over the next two frames while the wanted eye stood; 00:30:02.242, re-seated by 0.07, 0.14 and
+   *    0.18 m: 2.80 m/s believed for 0.2 m/s, and the next two frames were jumps for it.
+   *  - An eye going 2 m/s re-seated by 0.15 m against its way: the jump goes the other way from the frames after it,
+   *    one frame agrees with itself, no speed was believed (0) and the eye that went on was taken up frame after
+   *    frame: 0.21 to 0.23 m carried for 0.15 m.
+   * What the eye does after the run is its speed. These hold the filter to what it does without that hand-over,
+   * whatever is tried next for the four. */
+  {
+    static const float times[3] = {16.7f, 8.0f, 33.3f};
+    for (int i = 0; i < 3; ++i) {
+      const Crept r = crept(times[i]);
+      printf("a rig re-seated in two frames that creeps on, %.1f ms a frame: %.4f m back in a frame at most, %.3f m carried, settled after %.0f ms\n",
+             (double)times[i], (double)r.back, (double)r.carried, (double)r.settled);
+      CHECK(r.back < .01f);
+      CHECK(r.settled <= 250);
+      const float carried = against(2, times[i]);
+      printf("an eye going 2 m/s re-seated 0.15 m against its way, %.1f ms a frame: %.3f m carried\n", (double)times[i], (double)carried);
+      CHECK(carried < .16f);
+    }
+    const Rested rest = rested(ROWS(soak9_reseat_then_rest), 16, 21);
+    printf("soak 9, a rig re-seated in two frames and standing: %.2f m/s believed for %.2f m/s (%.2f m/s off), what is carried grows by %.3f m\n",
+           (double)rest.believed, (double)rest.real, (double)rest.off, (double)rest.grown);
+    CHECK(rest.off < .3f);
+    CHECK(rest.grown < .002f);
+    const Rested three = rested(ROWS(soak9_reseat_in_three), 15, 17);
+    printf("soak 9, a rig re-seated in three frames and all but standing: %.2f m/s believed for %.2f m/s (%.2f m/s off), what is carried grows by %.3f m\n",
+           (double)three.believed, (double)three.real, (double)three.off, (double)three.grown);
+    CHECK(three.off < .3f);
+    CHECK(three.grown < .002f);
+  }
+  /* The four steps again by the change of the step as a vector (what replay.py counts now), which sees a change of
+   * direction: 0.068, 0.088 (00:33:35.513, six frames after the one named above, which is 0.074), 0.064 and 0.078 m
+   * in the log. With the hand-over 00:36:03.183 was gone from the count by lengths and back four frames later as the
+   * eye turning round, 0.074 m. The filter adds nothing to them by this measure either, and the one that is mended
+   * is mended by it too. */
+  {
+    const Judged three = judged(ROWS(soak9_three_frames), 2, 20), stop = judged(ROWS(soak9_sprint_swap), 21, 42);
+    /* the native view's rows: the head camera's before them have a step of their own by this measure (00:30:10.655) */
+    const Judged camera = judged(ROWS(soak8_swap_in_sprint), 15, 28), dive = judged(ROWS(soak8_swap_in_dive), 24, 42);
+    printf("the same four by the change of the step as a vector: %.3f, %.3f, %.3f and %.3f m (the log: %.3f, %.3f, %.3f and %.3f m)\n", (double)three.turned,
+           (double)stop.turned, (double)camera.turned, (double)dive.turned, (double)three.logged_turned, (double)stop.logged_turned, (double)camera.logged_turned,
+           (double)dive.logged_turned);
+    CHECK(three.logged_turned > .06f && three.turned < three.logged_turned+.005f);
+    CHECK(stop.logged_turned > .06f && stop.turned < stop.logged_turned+.005f);
+    CHECK(camera.logged_turned > .06f && camera.turned < .06f);
+    CHECK(dive.logged_turned > .06f && dive.turned < dive.logged_turned+.005f);
+  }
+  /* And one came from the speed believed when a run's time is over. 00:26:06.131, the head camera after a swap in
+   * a dive: the head was thrown and its eye, against the root, went 0.26, 0.21, 0.136 and 0.083 m in four frames,
+   * each slower than the one before. Of four frames that agree the middle was believed, 0.175 m a frame; the next
+   * frame went 0.053 m, shorter than believed and the same way, so it was followed as the motion slowing down, and
+   * the 0.12 m believed too much showed at once: the presented eye went 0.192 m and then 0.115 m while the wanted
+   * eye's step changed by 0.032 m. A motion that is dying down is believed at its newest frame. */
+  {
+    const Judged thrown = judged(ROWS(soak8_swap_in_dive), 2, 23);
+    printf("soak 8, the head thrown in a dive: the filter's largest step %.3f m (the log: %.3f m)\n", (double)thrown.step, (double)thrown.logged);
+    CHECK(thrown.logged > .06f && thrown.step < .06f);
+    /* tfp_continuity_believed by itself: dying down, the newest; otherwise as before (of two the slower, of three or
+     * four the middle); a frame the other way ends what counts */
+    TfpContinuity c; memset(&c, 0, sizeof c);
+    const float dying[4] = {7.8f, 6.3f, 4.1f, 2.5f}, rising[4] = {2.5f, 4.1f, 6.3f, 7.8f}, alike[4] = {3, 9, 3.1f, 3.2f}, turned[4] = {-5, 6, 4, 2};
+    for (int i = 0; i < 4; ++i) { c.recent[i][0] = dying[i]; c.recent[i][1] = rising[i]; c.recent[i][2] = alike[i]; }
+    CHECK(tfp_continuity_believed(&c, 0, 4) == 2.5f && tfp_continuity_believed(&c, 0, 3) == 2.5f);
+    CHECK(fabsf(tfp_continuity_believed(&c, 1, 4)-5.2f) < 1e-5f && tfp_continuity_believed(&c, 1, 3) == 6.3f && tfp_continuity_believed(&c, 1, 2) == 6.3f);
+    CHECK(fabsf(tfp_continuity_believed(&c, 2, 4)-3.15f) < 1e-5f);
+    for (int i = 0; i < 4; ++i) c.recent[i][0] = turned[i];
+    CHECK(tfp_continuity_believed(&c, 0, 4) == 2 && tfp_continuity_believed(&c, 0, 1) == 0);
+  }
+  /* Six of the eleven are the body's own change of speed in one frame, which the filter passes on as it passes on
+   * all the body's travel (positions are in the body's frame). The root alone changes its speed in one frame, the
+   * eye a frame later: the first frame reads as the root re-seated and the eye goes on as it went; in the next the
+   * root's new course is kept and the eye, against the root, has the new speed whole.
+   *  - 00:21:53.294, a swap in a sprint: the root's step went from 0.237 to 0.053 m (the body stopped for two frames),
+   *    the wanted eye's from 0.228 to 0.052 m a frame later, the presented eye's from 0.201 to 0.038 m: 0.163 m of
+   *    the wanted eye's own 0.175 m. It is counted as the filter's only because 0.18 m of the change of camera was
+   *    still carried. Two frames on (.362) the root went on again, 0.053, 0.110, 0.138 m: 0.072 m.
+   *  - 00:33:34.846, the head camera in the same action: the root's step from 0.199 to 0.108 m, the presented eye's
+   *    from 0.204 to 0.104 m a frame later.
+   *  - 00:30:09.385, a sprint begun in the head camera: the root's step 0.000, 0.041, 0.091 m while its axes turned 0.14 and
+   *    0.08 rad; here the end of a run added to it (0.100 m in the log).
+   *  - 00:27:13.539, half a second into a dive backwards, and 00:38:46.845, a dive begun: the same, 0.094 and 0.098 m of the wanted eye's
+   *    own 0.081 and 0.106 m; both are the last frames of their Trace windows and are not among the rows here.
+   * The filter must not add to these. (To carry the root's change of speed over to the curve hides most of them, at
+   * 0.06 m of eye ahead of the body for each m/s; the landing in soak6_turn_after_hold, a root that stops from
+   * 7.5 m/s in one frame, then carries 0.79 m of eye into the ground. Not done.) */
+  {
+    const Judged sprint = judged(ROWS(soak8_stop_in_sprint), 2, 42);
+    printf("soak 8, the body stopped in a sprint for two frames: the largest step %.3f m (the log: %.3f m)\n", (double)sprint.step, (double)sprint.logged);
+    CHECK(sprint.step < sprint.logged+.005f);
+    const Judged head = judged(ROWS(soak9_sprint_swap), 2, 20);
+    printf("soak 9, the same in the head camera: the largest step %.3f m (the log: %.3f m)\n", (double)head.step, (double)head.logged);
+    CHECK(head.step < head.logged+.005f);
+    /* the root's own step changes by 0.050 m in that frame, and the end of a run is on top of it, not mended (above;
+     * the check was "under the root's 0.050 m and the measure" while the hand-over was in) */
+    const Judged begun = judged(ROWS(soak8_sprint_begun), 2, 15);
+    printf("soak 8, a sprint begun: the largest step %.3f m (the log: %.3f m)\n", (double)begun.step, (double)begun.logged);
+    CHECK(begun.logged > .09f && begun.step < begun.logged+.005f);
   }
   printf("camera continuity: %d checks, %d failed\n", checks, failed);
   return failed != 0;
