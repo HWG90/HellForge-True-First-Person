@@ -1,4 +1,4 @@
-# True First Person for HellForge: test build 0.6.0-feel.40
+# True First Person for HellForge: test build 0.6.0-feel.41
 
 For HellForge on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
@@ -45,6 +45,17 @@ keep their values. "View kick when thrown" works in both.
 To get the old behaviour back: tick **Bodycam**. Your slider values are still there.
 
 Tested in the game: ten actions in each style (Stable: no kick at all; Bodycam: 2.4 to 5.8 degrees); I have not played it yet.
+
+## Fixed in 0.6.0-feel.41
+
+- **The camera catching up after a dive or a swap** settles sooner: when a movement of the head was dying down, the
+  smoothing went on at its earlier speed for a moment and then had to come back. The longest catch-up after a change
+  of camera in my test runs went from 0.8 s to 0.5 s.
+
+What is still there, measured honestly: in twenty minutes of random overlapping actions the smoothing itself still
+makes about twenty camera steps of 6 cm or more (the largest 21 cm, when you swap weapons in a sprint and the body
+nearly stops in one frame). An attempt to remove more of them made the camera reverse in some cases, and I took it
+out again.
 
 ## Fixed in 0.6.0-feel.39
 

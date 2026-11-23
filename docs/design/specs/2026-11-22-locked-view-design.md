@@ -936,3 +936,10 @@ The three steps are marked "not mended" in the tests, which hold the filter to a
 Considered and left: counting the curve's start speed in its length for every jump (the curves begun in a catch-up
 reach 36 to 53 m/s^2 against the 24 asked for, 0.04 to 0.06 m a frame per frame at 30 frames a second) changed no
 count and broke the test of a start at 3 m/s.
+
+### feel.41 in the game (2026-11-22)
+
+All 46 test scripts and the harness's python tests pass. The matrix in Stable: 34 of 35, nothing missed, no kick in
+any phase; jump-vault 0.085 m (the body's own lunge when a jump begins while walking, as read from the trace on
+feel.39), swaps 0.043 and 0.048 m, stim 0.036 m.
+
