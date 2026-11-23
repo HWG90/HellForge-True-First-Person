@@ -215,6 +215,24 @@ static void rolling(bool rides, bool reseat, float w, float dt, float *change, f
     memcpy(two, one, sizeof two); memcpy(one, shown, sizeof one);
   }
 }
+/* A rig eye re-seated by 0.15 m in one frame that goes on the same way (`way` 1) or back (-1) by `part` of the measure
+ * a frame for `frames` frames and then rests, the body standing: the most the presented eye's step changes from frame
+ * to frame, and the most carried. */
+static void tailed(float dt, float part, int frames, int way, float *change, float *carried) {
+  TfpContinuity c; memset(&c, 0, sizeof c);
+  const int warm = (int)(1000/dt)+4, after = (int)(1600/dt); const float measure = fmaxf(T.pop_m, T.pop_accel*dt*dt/1e6f);
+  float z = 1.5f, one = 0, two = 0;
+  *change = *carried = 0;
+  for (int i = -warm; i <= after; ++i) {
+    const float basis[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    if (i == 0) z += .15f;
+    if (i >= 1 && i <= frames) z += (float)way*part*measure;
+    const float eye[3] = {0, .6f, z}; float out[3];
+    const float length = tfp_continuity_step_in(&c, eye, eye, basis, NATIVE, true, false, 1000.0+(double)(i+warm)*(double)dt, 250, &T, out);
+    if (i >= 0) { if (fabsf(out[2]-2*one+two) > *change) *change = fabsf(out[2]-2*one+two); if (length > *carried) *carried = length; }
+    two = one; one = out[2];
+  }
+}
 /* Logged rows through the filter. `jumps`: how many of the rows `from` to `to` were taken up as jumps; `aside`: how
  * far the presented eye is to the side of the wanted one at most in those rows: level, and across the way the body
  * goes in that row (its root's step in the world). An eye held back or let run on along the body's way is not aside. */
@@ -899,6 +917,47 @@ int main(void) {
     }
     printf("a roll begun under an eye that goes straight on, 24 cases: step change at most %.3f m, %.3f m carried, %.3f m to the side\n", (double)worst,
            (double)most, (double)far);
+  }
+  /* A RUN'S LAST FRAME A HAIR UNDER THE MEASURE. The same soaks, 02:31:12.739 (tests/reference/soak-11-steps.h): the
+   * native view entered after a swap, the body prone and still; the rig eye re-seated in three frames, 0.053, 0.052
+   * and 0.045 m, and standing after them. 0.048 and 0.046 m off the kept speed were jumps; the third was 0.0396 m
+   * off it against a measure of 0.0406 m at that frame time, ended the run and was followed: the presented eye went
+   * 0.008 m and then 0.060 m, the frame's own 0.045 m on the 0.015 m of the curve begun a frame before, and its step
+   * changed by 0.066 m where the wanted eye's changed by 0.006 m. This is what was behind three of the four steps
+   * marked NOT MENDED above (0.039 m against 0.040 m each time). Once in a run such a frame, under the measure by a
+   * tenth of it at most and going the way the jump before it went, is taken up with the run. Nothing is believed
+   * for it: the kept speed stands, as in every frame of a run (THE RUN'S END IS NO SPEED holds as it is). */
+  {
+    const Judged third = judged(ROWS(soak11_reseat_in_three), 10, 15);
+    printf("soak 11, a rig re-seated in three frames, the third a hair under the measure: the filter's largest step %.3f m (the log: %.3f m)\n",
+           (double)third.turned, (double)third.logged_turned);
+    CHECK(third.logged_turned > .06f && third.turned < .06f);
+    /* and two of the three of the feel.40 soaks, by both measures (00:36:03.183 and 00:33:35.314; the third,
+     * 00:26:06.399, is no run's end and stands) */
+    const Judged three = judged(ROWS(soak9_three_frames), 2, 20), stop = judged(ROWS(soak9_sprint_swap), 21, 42);
+    printf("soak 9, three frames of the rig and the rig eye stopping after a swap in a sprint: %.3f and %.3f m by the vector, %.3f and %.3f m by the lengths\n",
+           (double)three.turned, (double)stop.turned, (double)three.step, (double)stop.step);
+    CHECK(three.turned < .06f && three.step < .06f);
+    CHECK(stop.turned < .06f && stop.step < .06f);
+    /* Made up, at 8 to 50 ms a frame: 0.15 m in one frame and one more frame at 0.97 of the measure the same way. The
+     * step changed by 0.040 to 0.112 m (the filter of 0.6.0-feel.41); now by 0.030 m at most, for one measure more
+     * carried at most. Only once in a run: when the eye goes on like that for eight frames it is a motion, the second
+     * such frame is followed as it was before, and no more than that one measure more is carried (without the
+     * limit, at 8 ms a frame: 0.28 m more and 230 ms longer). A frame the other way, or 0.8 of the measure, is not
+     * taken up: 0.15 m carried and no more. */
+    static const float times[] = {8, 16.7f, 33.3f, 50};
+    for (unsigned d = 0; d < 4; ++d) {
+      const float measure = fmaxf(T.pop_m, T.pop_accel*times[d]*times[d]/1e6f); float change, carried, on, on_carried, back, back_carried, less, less_carried;
+      tailed(times[d], .97f, 1, 1, &change, &carried);
+      tailed(times[d], .97f, 8, 1, &on, &on_carried);
+      tailed(times[d], .97f, 1, -1, &back, &back_carried);
+      tailed(times[d], .8f, 1, 1, &less, &less_carried);
+      printf("  0.15 m and a frame at 0.97 of the measure, %g ms a frame: step change %.4f m, %.3f m carried; eight such frames: %.4f m, %.3f m\n",
+             (double)times[d], (double)change, (double)carried, (double)on, (double)on_carried);
+      CHECK(change <= .03f && carried <= .15f+measure);
+      CHECK(on_carried <= .15f+measure);
+      CHECK(back_carried <= .1505f && less_carried <= .1505f);
+    }
   }
   printf("camera continuity: %d checks, %d failed\n", checks, failed);
   return failed != 0;
