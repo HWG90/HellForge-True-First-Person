@@ -56,14 +56,13 @@
  *    alone: the frame the time runs out in can itself be a jump (seen in the game 2026-11-22: a rig eye going back
  *    and forth by 0.19 m from frame to frame; the last flip, believed as 6 m/s, sent the presented eye off at that
  *    speed while the rig stood). A flicker is no speed at any frame time; a motion that begins and goes on is.
- *    A run ends in the same way at the first frame that is no jump, where one comes before the time is over: the
- *    presented eye has gone on at the kept speed through the run, and to follow that frame as an ordinary one gives
- *    it the wanted eye's speed in one frame while the curve of the last jump goes on as it was (seen in the soaks of
- *    2026-11-22 on 0.6.0-feel.40, tests/reference/soak-8-steps.h: after two quick swaps a rig eye that went 0.07 m
- *    a frame for three frames, 0.049 and 0.042 m off the kept speed and then 0.039 m, 0.001 m under the measure; the
- *    presented eye went 0.003 m and then 0.070 m). So that frame is taken up as well, the eye's speed is what the
- *    run's frames and it agree on, and the difference goes into the curve. A frame that is the motion slowing down
- *    ends the run as before: it is followed.
+ *    A run that ends before its time, at a frame that is no jump, ends without a speed believed: that frame is
+ *    followed as any other. (Tried on the soaks of 2026-11-22 and taken out again: that frame taken up as well and
+ *    what the run's frames and it agree on handed to the curve as the eye's new speed. The run's frames are the
+ *    re-seat, and a re-seat is no speed: a rig re-seated in two frames that then crept on was believed to be going at
+ *    the re-seat's speed and the presented eye was thrown backwards, 0.07 m in a frame and 0.24 m in all at 60 frames
+ *    a second; a re-seat against the eye's way left one frame that agreed with itself, no speed was believed and the
+ *    eye that went on was taken up frame after frame. tests/camera_continuity_test.c, THE RUN'S END IS NO SPEED.)
  *  - The catch-up is a cubic with zero end speed whose length follows from the distance, so that its largest
  *    acceleration is ease_accel: sqrt(6 * distance / ease_accel), between min_ms and max_ms. A new jump during a
  *    catch-up starts the curve again from the correction's present value and speed.
@@ -331,11 +330,8 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
   const bool over = size > limit;
   const bool jump = !quiet && !edge && detect && over && !slowing;
   const bool within = !c->run || (tick >= c->run_started && tick-c->run_started <= TFP_CONTINUITY_RUN_MS);
-  /* A run ends when its time is over (jumps for longer than the run: a new speed, not a re-seated rig) or at the
-   * first frame that is no jump. Either way the frame is taken up and the new speed goes into the curve. */
-  const bool ended = c->run && !jump && !edge && !quiet && detect && !slowing;
-  const bool believe = (jump && !within) || ended;
-  const bool take = !quiet && size > 1e-4f && (edge || jump || ended);
+  const bool believe = jump && !within; /* jumps for longer than the run: a new speed, not a re-seated rig */
+  const bool take = !quiet && size > 1e-4f && (edge || jump);
   if (take) {
     float next[3], from_speed[3], rate = 0;
     for (unsigned i = 0; i < 3; ++i) { next[i] = value[i]-difference[i]; from_speed[i] = speed[i]; }
@@ -345,7 +341,7 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
       /* This frame is still taken up, so the presented eye goes on at the old speed; the wanted eye's speed is
        * now the new one, and the difference of the two goes into the correction's curve. The new one is what the
        * run's frames and this one agree on (tfp_continuity_believed): a frame that is itself a jump does not pass
-       * for a speed, nor does the one frame that ends a run (a flicker that rests for a frame). */
+       * for a speed. */
       float fresh[3]; for (unsigned i = 0; i < 3; ++i) fresh[i] = tfp_continuity_believed(c, i, c->run+1);
       const float fast = tfp_continuity_length(fresh);
       if (fast > 8) for (unsigned i = 0; i < 3; ++i) fresh[i] *= 8/fast;
