@@ -9,6 +9,7 @@
 #include "camera_lock.h"
 #include "camera_continuity.h"
 #include "camera_damp.h"
+#include "camera_glide.h"
 #include "camera_math.h"
 #include <stdatomic.h>
 
@@ -168,6 +169,7 @@ typedef struct Policy {
   bool hold_eye, native_eye_valid, eye_delta_active, eye_returning;
   float native_eye[3], eye_delta[3]; double native_eye_tick, eye_hold_started, eye_swap_tick; uint32_t control_mask, eye_hold_frames;
   uint32_t weapon_key, native_weapon_key, stretch_key, stretch_key_frames, eye_glides;
+  TfpEyeGlide eye_glide; /* beyond retail: the glide of eye_delta under way in the frames the lock holds (src/camera_glide.h) */
   bool guard_only, guard_grace; double last_view_tick; uint32_t guard_grace_frames;
   bool hold_seated, seated_now, anchor_ads, native_full_ads, ads_gap_active; double ads_gap_started; uint32_t ads_gap_frames, ads_learned; double last_native_tick; uint32_t exit_holds;
   float head_apart; /* beyond retail: head to neck on a body that is down, for the Dead line */
@@ -1342,7 +1344,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
             bool eye_held = false;
             if (policy.hold_eye && policy.presentation_enabled) {
               if (from_native) {
-                policy.eye_delta_active = false; policy.eye_returning = false;
+                policy.eye_delta_active = false; policy.eye_returning = false; tfp_eye_glide_reset(&policy.eye_glide);
                 if (policy.native_eye_valid && tick >= policy.native_eye_tick && tick-policy.native_eye_tick <= policy.c.max_gap_ms) {
                   float square = 0;
                   for (unsigned axis = 0; axis < 3; ++axis) { policy.eye_delta[axis] = policy.native_eye[axis]-desired_relative[axis]; square += policy.eye_delta[axis]*policy.eye_delta[axis]; }
@@ -1358,7 +1360,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
                 /* Beyond retail: the eye let go (hands empty for longer than the tolerance) and a weapon whose eye
                  * is known is being drawn. Start from where the eye is and glide to that eye, so the native view
                  * returns to a camera that is already there. */
-                memset(policy.eye_delta, 0, sizeof policy.eye_delta);
+                memset(policy.eye_delta, 0, sizeof policy.eye_delta); tfp_eye_glide_reset(&policy.eye_glide);
                 policy.eye_delta_active = true; policy.eye_returning = true; policy.eye_hold_started = tick; policy.eye_swap_tick = tick;
               }
               if (policy.eye_delta_active) {
@@ -1370,15 +1372,15 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
                     || (policy.control_mask == 0 && tick >= policy.eye_swap_tick && tick-policy.eye_swap_tick <= idle));
                 /* A different weapon is coming up and its eye is known: glide there during the swap. */
                 const EyeMemory *incoming = keep && (policy.weapon_key != policy.native_weapon_key || policy.eye_returning) ? eye_memory_find(policy.weapon_key) : NULL;
+                /* (Beyond retail, in a frame the lock holds: a way of up to 0.2625 m is glided from rest to rest, so its
+                 * first frame is no jump for the continuity to take up; a longer one is retail's there too. And an eye
+                 * that is under way when there is no eye to go to any more comes to rest, it does not stop in the
+                 * frame. src/camera_glide.h.) */
                 if (incoming) {
-                  const float step = dt > 0 ? 1-expf(-dt/.07f) : 0; bool moved = false;
-                  for (unsigned axis = 0; axis < 3; ++axis) {
-                    const float change = (incoming->delta[axis]-policy.eye_delta[axis])*step;
-                    if (fabsf(change) > 1e-6f) moved = true;
-                    policy.eye_delta[axis] += change;
-                  }
-                  if (moved) ++policy.eye_glides;
-                }
+                  if (policy.lock_now ? tfp_eye_glide_lock_step(&policy.eye_glide, policy.eye_delta, incoming->delta, dt)
+                                      : tfp_eye_glide_retail(policy.eye_delta, incoming->delta, dt)) ++policy.eye_glides;
+                } else if (policy.lock_now && keep) tfp_eye_glide_rest(&policy.eye_glide, policy.eye_delta, dt);
+                if (!policy.lock_now || !keep) tfp_eye_glide_reset(&policy.eye_glide);
                 if (!keep) {
                   const float fade = dt > 0 ? expf(-dt/.08f) : 1; float square = 0;
                   for (unsigned axis = 0; axis < 3; ++axis) { policy.eye_delta[axis] *= fade; square += policy.eye_delta[axis]*policy.eye_delta[axis]; }

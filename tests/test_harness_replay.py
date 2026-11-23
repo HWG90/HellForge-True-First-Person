@@ -164,6 +164,80 @@ class Carry(unittest.TestCase):
             row["tick"] += 1000
         self.assertAlmostEqual(replay.carry(rows)[1][0], 33.0)
 
+    def test_a_carry_that_settled_and_one_the_trace_cut_off(self):
+        # settles in the fourth frame after the change: 99 ms; nothing was cut off
+        rows = self.rows((0, 0, .30, .20, .10, .04, 0), ("head",) * 2 + ("native",) * 5)
+        found = replay.carries(rows)
+        self.assertAlmostEqual(found["settled"][0], 99.0)
+        self.assertIs(found["settled"][1], rows[2])
+        self.assertEqual((found["cut"], found["counts"]), ((0, None, 0.0), (1, 0)))
+        # the rows end with 0.2 m still carried: cut off, 99 ms, and nothing settled
+        rows = self.rows((0, 0, .5, .4, .3, .2), ("head",) * 2 + ("native",) * 4)
+        found = replay.carries(rows)
+        self.assertEqual((found["settled"], found["counts"]), ((0, None), (0, 1)))
+        self.assertAlmostEqual(found["cut"][0], 99.0)
+        self.assertIs(found["cut"][1], rows[2])
+        self.assertAlmostEqual(found["cut"][2], 0.2)
+        # a pause (the trace window ended) cuts it off as the end of the rows does, with what the last row before it carried
+        rows = self.rows((0, 0, .5, .4, .3, 0, 0), ("head",) * 2 + ("native",) * 5)
+        for row in rows[5:]:
+            row["tick"] += 1000
+        found = replay.carries(rows)
+        self.assertAlmostEqual(found["cut"][0], 66.0)
+        self.assertAlmostEqual(found["cut"][2], 0.3)
+        self.assertEqual(found["settled"], (0, None))
+        # so does a frame in which the replay is not exact (with `known`)
+        rows = self.rows((0, .3, .25, .2, .1, 0), ("head",) + ("native",) * 5)
+        for row in rows:
+            row["follows"] = True
+        rows[3]["follows"] = False
+        found = replay.carries(rows, known=True)
+        self.assertAlmostEqual(found["cut"][0], 33.0)
+        self.assertAlmostEqual(found["cut"][2], 0.25)
+        self.assertEqual(found["settled"], (0, None))
+
+    def test_both_in_one_log_and_the_old_figure_is_the_longer(self):
+        #                 change           under                 change       still over at the end
+        carried = (0, 0, .30, .20, .10, .04, 0, 0, .2, .2, 0, 0, .5, .4, .3, .2, .1)
+        rows = self.rows(carried, ("head",) * 2 + ("native",) * 10 + ("head",) * 5)
+        found = replay.carries(rows)
+        self.assertAlmostEqual(found["settled"][0], 99.0)
+        self.assertIs(found["settled"][1], rows[2])
+        self.assertAlmostEqual(found["cut"][0], 132.0)
+        self.assertIs(found["cut"][1], rows[12])
+        self.assertAlmostEqual(found["cut"][2], 0.1)
+        self.assertEqual(found["counts"], (1, 1))
+        metres, (longest, where) = replay.carry(rows)
+        self.assertAlmostEqual(longest, 132.0)
+        self.assertIs(where, rows[12])
+        # the other way about: the longer one settled
+        rows = self.rows((0, .5, .4, .3, .2, .04, 0, .3, .3), ("head",) + ("native",) * 5 + ("head",) + ("native",) * 2)
+        found = replay.carries(rows)
+        self.assertAlmostEqual(found["settled"][0], 132.0)
+        self.assertAlmostEqual(found["cut"][0], 33.0)
+        self.assertAlmostEqual(replay.carry(rows)[1][0], 132.0)
+
+    def test_the_line_says_which(self):
+        def row(at):
+            return {"at": at}
+        start = "  carried: 257.1 metre-frames; more than 0.05 m for 835 ms at most after a change of camera (07:04:10.351)"
+        line = replay.carry_line(257.1, {"settled": (801.0, row("07:10:10.927")), "cut": (835.0, row("07:04:10.351"), 0.18), "counts": (51, 37)})
+        self.assertTrue(line.startswith(start), line)  # as it was printed before, to there
+        self.assertIn("cut off by the end of the trace with 0.180 m still carried", line)
+        self.assertIn("the longest that settled: 801 ms (07:10:10.927)", line)
+        self.assertIn("51 settled, 37 cut off", line)
+        line = replay.carry_line(10.0, {"settled": (801.0, row("07:10:10.927")), "cut": (467.0, row("07:04:10.351"), 0.07), "counts": (5, 3)})
+        self.assertTrue(line.startswith("  carried: 10.0 metre-frames; more than 0.05 m for 801 ms at most after a change of camera (07:10:10.927)"), line)
+        self.assertIn("which settled", line)
+        self.assertIn("the longest cut off by the end of the trace: 467 ms (07:04:10.351), 0.070 m still carried", line)
+        # nothing cut off, nothing settled, no change of camera at all
+        line = replay.carry_line(10.0, {"settled": (99.0, row("22:00:00.066")), "cut": (0, None, 0.0), "counts": (1, 0)})
+        self.assertIn("which settled; none was cut off by the end of the trace", line)
+        line = replay.carry_line(10.0, {"settled": (0, None), "cut": (99.0, row("22:00:00.066"), 0.2), "counts": (0, 1)})
+        self.assertIn("cut off by the end of the trace with 0.200 m still carried; none settled", line)
+        self.assertEqual(replay.carry_line(0.3, {"settled": (0, None), "cut": (0, None, 0.0), "counts": (0, 0)}),
+                         "  carried: 0.3 metre-frames; more than 0.05 m for 0 ms at most after a change of camera")
+
 
 if __name__ == "__main__":
     unittest.main()
