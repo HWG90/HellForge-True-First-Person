@@ -96,6 +96,29 @@
  *    the re-seat's speed and the presented eye was thrown backwards, 0.07 m in a frame and 0.24 m in all at 60 frames
  *    a second; a re-seat against the eye's way left one frame that agreed with itself, no speed was believed and the
  *    eye that went on was taken up frame after frame. tests/camera_continuity_test.c, THE RUN'S END IS NO SPEED.)
+ *    THE LENT SPEED. At a change of camera the speed kept is the camera before's; the new camera's own is not known
+ *    until a frame of it has been followed or a run's time is over. Frames of the new camera that are jumps against
+ *    that speed are taken up, and in each the presented eye went on at it whole: the old camera's motion shown under
+ *    the new camera's eye. Seen in the soak of 2026-11-22 on 0.6.0-feel.42 (tests/reference/soak-14-steps.h): a dive
+ *    begun, the head camera's eye thrown forwards at 5 m/s against the root (0.166 m a frame), and the native view
+ *    entered in that frame. The rig eye was re-seated by 0.29 m in its first frame and stood in the second: jumps
+ *    both against the lent speed, and the presented eye went 0.33 m on the head camera's way under a rig eye that
+ *    had never gone it. In the third frame the rig eye moved 0.086 m another way, which against 0.166 m reads as the
+ *    motion slowing down and is followed: the lent speed dropped whole in one frame, 0.180 m of step change for the
+ *    rig eye's own 0.076 m. (The same at 00:30:53.355 of the second feel.40 soak: 2.5 m/s lent, 0.117 m for 0.055 m.
+ *    A rig eye that stands in its second frame is "slowing down" against any speed: made up, 0.177 m at 33 ms a
+ *    frame and 0.283 m at 50 ms.)
+ *    So from the change of camera on, in every frame that is taken up until the new camera's speed is known, the
+ *    presented eye is let down from the lent speed by pop_accel (what is no jump at any frame time), as far as the
+ *    speed whose step in one frame is the measure: to drop the rest at once is then no jump either. What is asked of
+ *    a frame (jump, slowing, a run's end) is asked against the lent speed whole, as before: only what the presented
+ *    eye does in the frames taken up is changed, and what is handed to the curve when a run's time is over is what
+ *    the presented eye still had. A lent speed under that of the measure (a walk, a sprint's bob) is not touched.
+ *    (Tried: the kept speed itself let down, so that the frames are asked against less. The 0.180 m went as well,
+ *    and the rig eye's own motion in its third frame was then a run of jumps and a speed believed, two curves begun
+ *    later: more than 0.05 m was carried for 469 ms after that change of camera where it had been 435 ms. Without
+ *    the floor, either way, a creep of 0.04 m/s was let down too and a step of the logs went from 0.05993 to
+ *    0.06005 m.)
  *  - The catch-up is a cubic with zero end speed whose length follows from the distance, so that its largest
  *    acceleration is ease_accel: sqrt(6 * distance / ease_accel), between min_ms and max_ms. A new jump during a
  *    catch-up starts the curve again from the correction's present value and speed.
@@ -117,6 +140,7 @@ typedef struct TfpContinuity {
   bool known, active, moving; /* moving: the wanted eye's speed is known (a step has been seen since the start) */
   uint32_t source, run;
   bool neared;                           /* the present run has had its frame under the measure */
+  bool lent; float left;                 /* the kept speed is the camera before's (THE LENT SPEED); how much of it the presented eye still has (1: all) */
   double tick, started, run_started; /* run_started: the first jump of the present run */
   float wanted[3], speed[3], shown[3];   /* last frame: the wanted eye, its smoothed speed (m/s), the presented eye */
   float from[3], from_speed[3], duration; /* the correction's curve: value and speed at `started`, length in ms */
@@ -383,7 +407,13 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
   const bool take = !quiet && size > 1e-4f && (edge || jump);
   if (take) {
     float next[3], from_speed[3], rate = 0;
-    for (unsigned i = 0; i < 3; ++i) { next[i] = value[i]-difference[i]; from_speed[i] = speed[i]; }
+    /* THE LENT SPEED: the presented eye is let down from it, as far as the speed whose step in a frame is the measure. */
+    if (edge) { c->lent = true; c->left = 1; }
+    if (c->lent) {
+      const float fast = tfp_continuity_length(c->speed)*c->left, slower = fmaxf(fast-t->pop_accel*dt, fminf(fast, measure/dt));
+      if (fast > 0 && isfinite(fast)) c->left *= slower/fast;
+    } else c->left = 1;
+    for (unsigned i = 0; i < 3; ++i) { next[i] = value[i]-difference[i]-(1-c->left)*expected[i]; from_speed[i] = speed[i]; }
     float length = tfp_continuity_length(next);
     if (length > t->max_m) { for (unsigned i = 0; i < 3; ++i) next[i] *= t->max_m/length; length = t->max_m; }
     if (believe) {
@@ -395,7 +425,8 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
       const float fast = tfp_continuity_length(fresh);
       if (fast > 8) for (unsigned i = 0; i < 3; ++i) fresh[i] *= 8/fast;
       if (placed) for (unsigned k = 0; k < 3; ++k) for (unsigned a = 0; a < 3; ++a) c->loose_speed[k] += (fresh[a]-c->speed[a])*basis[a*3+k];
-      for (unsigned i = 0; i < 3; ++i) { from_speed[i] += c->speed[i]-fresh[i]; c->speed[i] = fresh[i]; }
+      for (unsigned i = 0; i < 3; ++i) { from_speed[i] += c->left*c->speed[i]-fresh[i]; c->speed[i] = fresh[i]; }
+      c->lent = false; /* the new camera's speed is known */
       rate = tfp_continuity_length(from_speed);
     }
     /* The curve's length: its largest acceleration is ease_accel where max_ms allows (6 d / T^2 + 4 v / T). */
@@ -408,7 +439,7 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
     c->neared = c->run && (c->neared || !over);
     /* otherwise the wanted eye's speed is kept: after a jump it goes on as it went */
   } else {
-    c->run = 0; c->neared = false;
+    c->run = 0; c->neared = false; c->lent = false;
     const float k = over || !c->moving ? 1 : 1-expf(-dt/.05f); /* a new speed is believed at once, an ordinary frame is averaged in */
     for (unsigned i = 0; i < 3; ++i) c->speed[i] += (step[i]/dt-c->speed[i])*k;
     const float fast = tfp_continuity_length(c->speed);
