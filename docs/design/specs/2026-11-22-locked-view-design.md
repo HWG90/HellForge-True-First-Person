@@ -778,3 +778,20 @@ Not as first asked: the 0.05 m jerk was to move the eye under 0.005 m. A first-o
 
 Open: none of this has been seen in the game. Whether 350 ms reads as steady or as a camera on a string during a
 stim, and whether a Stable camera should take any kick from a landing, is for the next session played by hand.
+
+### feel.40 in the game (2026-11-22)
+
+Both styles, ten actions each (walk, back, strafe, crouch, dive, grenade, melee, stim, reload, swap), nothing missed:
+Stable 0.0 degrees of kick in all ten, steps up to 0.037 m; Bodycam, ticked through the panel, 2.4 to 5.8 degrees
+(walk 3.7, back 4.0, strafe 4.5, crouch 2.4, dive 5.3, grenade 5.7, melee 3.7, stim 5.8, reload 4.7, swap 5.4), steps
+up to 0.043 m. The checkbox saves and takes effect at once; it was left unticked.
+
+The soak of seed 3 in Stable stopped itself after 94 actions (3.5 minutes): the game window was no longer in front
+and the input helper refuses then. Up to there: nothing missed, nothing flagged, and no step change of 0.06 m or more
+in 784 traced frames, where the same seed on feel.39 had 19 in 2,121 (7 of them the filter's). A full run is owed.
+
+A thing the soak logs show and that is not a fault as far as the logs can say: the arm drive's `Rest:` line reads the
+socket 0.18 m and about 98 degrees off the rig's own for seconds on end in soaks (two thirds of the seconds, on
+feel.39 as well), beginning without a new binding. In a soak the player walks into walls and stands there, where the
+body turns the weapon aside; the rig's own pose is not what the arms should match then. Not seen in a capture yet.
+

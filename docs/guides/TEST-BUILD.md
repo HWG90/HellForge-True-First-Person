@@ -1,4 +1,4 @@
-# True First Person for HellForge: test build 0.6.0-feel.39
+# True First Person for HellForge: test build 0.6.0-feel.40
 
 For HellForge on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
@@ -27,7 +27,7 @@ DBF-MCM is no longer needed. The mod has its own panel.
 
 ## New: camera style (Stable or Bodycam)
 
-Not in a build yet. From playing 0.6.0-feel.39: the camera moved too much, and what was asked for was the bodycam
+In 0.6.0-feel.40. From playing 0.6.0-feel.39: the camera moved too much, and what was asked for was the bodycam
 look as a choice beside a steadier, traditional first-person camera.
 
 There is a new checkbox **Bodycam** on the Locked view tab, above the kick sliders. It changes at once, no restart.
@@ -44,7 +44,7 @@ keep their values. "View kick when thrown" works in both.
 
 To get the old behaviour back: tick **Bodycam**. Your slider values are still there.
 
-Tested outside the game only; I have not played it yet.
+Tested in the game: ten actions in each style (Stable: no kick at all; Bodycam: 2.4 to 5.8 degrees); I have not played it yet.
 
 ## Fixed in 0.6.0-feel.39
 
