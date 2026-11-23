@@ -1392,3 +1392,12 @@ of 35. The death phase failed this time because the player really died in it (mo
 no harm): one frame missed in kind 4 with helper error 7, the avatar replaced at the respawn, which is the known
 hand-over and no change of this build.
 
+The soaks owed on feel.44, new seeds: Stable, seed 7: 236 actions, 18,136 frames; Bodycam, seed 8 (ticked through
+the panel, unticked after; saved style Stable once the game had closed): 262 actions, 18,136 frames. Nothing missed
+in either, no new crash dump. Flagged: the jump begun while walking four times (0.111 to 0.173 m: the body's own
+lunge, the root going up to 0.4 m a frame), a swap in a dive 0.074 m, quick swaps 0.062 m. By `replay.py` over all
+frames: Stable 11 of the filter's steps of 0.06 m or more and 133.3 metre-frames carried; the Bodycam part 17 more
+and 161.9 metre-frames; 468 ms the longest carry after a change of camera in both. Bodycam makes more of them than
+Stable: its eye damping is shorter and its lag limit tighter, so more of the head's own motion reaches the filter.
+Logs: `/home/goose/.cache/tfp-soak-17.modlog`, `tfp-soak-18.modlog`.
+
