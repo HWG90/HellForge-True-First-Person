@@ -625,6 +625,27 @@ int main(void) {
     printf("soak 8, the native view entered in a dive backwards: the filter's largest step %.3f m (the log: %.3f m)\n", (double)dive.step, (double)dive.logged);
     CHECK(dive.logged > .06f && dive.step < .06f);
   }
+  /* And one came from the speed believed when a run's time is over. 00:26:06.131, the head camera in a dive
+   * backwards: the head was thrown and its eye, against the root, went 0.26, 0.21, 0.136 and 0.083 m in four frames,
+   * each slower than the one before. Of four frames that agree the middle was believed, 0.175 m a frame; the next
+   * frame went 0.053 m, shorter than believed and the same way, so it was followed as the motion slowing down, and
+   * the 0.12 m believed too much showed at once: the presented eye went 0.192 m and then 0.115 m while the wanted
+   * eye's step changed by 0.032 m. A motion that is dying down is believed at its newest frame. */
+  {
+    const Judged thrown = judged(ROWS(soak8_dive_back), 2, 23);
+    printf("soak 8, the head thrown in a dive backwards: the filter's largest step %.3f m (the log: %.3f m)\n", (double)thrown.step, (double)thrown.logged);
+    CHECK(thrown.logged > .06f && thrown.step < .06f);
+    /* tfp_continuity_believed by itself: dying down, the newest; otherwise as before (of two the slower, of three or
+     * four the middle); a frame the other way ends what counts */
+    TfpContinuity c; memset(&c, 0, sizeof c);
+    const float dying[4] = {7.8f, 6.3f, 4.1f, 2.5f}, rising[4] = {2.5f, 4.1f, 6.3f, 7.8f}, alike[4] = {3, 9, 3.1f, 3.2f}, turned[4] = {-5, 6, 4, 2};
+    for (int i = 0; i < 4; ++i) { c.recent[i][0] = dying[i]; c.recent[i][1] = rising[i]; c.recent[i][2] = alike[i]; }
+    CHECK(tfp_continuity_believed(&c, 0, 4) == 2.5f && tfp_continuity_believed(&c, 0, 3) == 2.5f);
+    CHECK(fabsf(tfp_continuity_believed(&c, 1, 4)-5.2f) < 1e-5f && tfp_continuity_believed(&c, 1, 3) == 6.3f && tfp_continuity_believed(&c, 1, 2) == 6.3f);
+    CHECK(fabsf(tfp_continuity_believed(&c, 2, 4)-3.15f) < 1e-5f);
+    for (int i = 0; i < 4; ++i) c.recent[i][0] = turned[i];
+    CHECK(tfp_continuity_believed(&c, 0, 4) == 2 && tfp_continuity_believed(&c, 0, 1) == 0);
+  }
   /* Six of the eleven are the body's own change of speed in one frame, which the filter passes on as it passes on
    * all the body's travel (positions are in the body's frame). The root alone changes its speed in one frame, the
    * eye a frame later: the first frame reads as the root re-seated and the eye goes on as it went; in the next the

@@ -183,17 +183,24 @@ static inline void tfp_continuity_begin(TfpContinuity *c, const float *value, co
  *  - Of two frames that agree, the slower; of three or four, the middle. A rig re-seated in the frame a motion
  *    begins is one frame far off and the rest alike: the rest is the speed. (The run's way divided by its time
  *    would take the re-seat for speed, and gives 2.7 m/s for an odd number of flips.)
+ *  - Frames that are each slower than the one before are a motion dying down, and its speed is the newest frame's.
+ *    The middle is then too much, and too much is the side that shows: the next frame is shorter than believed and
+ *    the same way, so it is followed as the motion slowing down, and the difference is in the presented eye at once
+ *    (seen in the soak of 2026-11-22 on 0.6.0-feel.40: a head thrown in a dive, 0.26, 0.21, 0.136 and 0.083 m a
+ *    frame, 0.175 m believed, 0.053 m in the next frame, and 0.077 m of step change for the wanted eye's 0.032 m).
  *  Believing too little is the safe side: the next frame is then a jump again and the next run settles it. */
 static inline float tfp_continuity_believed(const TfpContinuity *c, unsigned axis, unsigned count) {
-  float sorted[TFP_CONTINUITY_SPEED_FRAMES] = {0}; unsigned agree = 0; float after = 0;
+  float sorted[TFP_CONTINUITY_SPEED_FRAMES] = {0}; unsigned agree = 0; float after = 0, newest = 0; bool dying = true;
   if (count > TFP_CONTINUITY_SPEED_FRAMES) count = TFP_CONTINUITY_SPEED_FRAMES;
   for (unsigned i = 0; i < count; ++i) {
     const float v = c->recent[(c->recent_at+TFP_CONTINUITY_SPEED_FRAMES-1-i)%TFP_CONTINUITY_SPEED_FRAMES][axis];
     if (i && v*after < 0) break;
+    if (!i) newest = v; else if (!(fabsf(v) > fabsf(after))) dying = false;
     unsigned at = i; while (at > 0 && sorted[at-1] > v) { sorted[at] = sorted[at-1]; --at; }
     sorted[at] = v; after = v; agree = i+1;
   }
   if (agree < 2) return 0;
+  if (dying) return newest;
   if (agree == 2) return fabsf(sorted[0]) < fabsf(sorted[1]) ? sorted[0] : sorted[1];
   return agree & 1 ? sorted[agree/2] : (sorted[agree/2-1]+sorted[agree/2])/2;
 }
