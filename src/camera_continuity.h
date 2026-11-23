@@ -68,7 +68,19 @@
  *    max(pop_m, pop_accel * dt * dt). A change of source takes up any difference. Jumps within a source are looked
  *    for only where the caller says so (`detect`: the short time after something that can re-seat the rig); anywhere
  *    else a change of speed is the eye's own motion and is followed. A step shorter than the speed predicted, in the
- *    same direction, is the motion slowing down and is followed, not taken up. Jumps in a row are taken up for
+ *    same direction, is the motion slowing down and is followed, not taken up. THE STOP: so is a step of next to
+ *    nothing (under TFP_CONTINUITY_STOP of the measure and a quarter of the step predicted) whichever way it points:
+ *    an eye that stops dead has no direction, and its last millimetres point where they will. Seen in the Bodycam
+ *    soak of 2026-11-23 on 0.6.0-feel.44 (tests/reference/soak-18-steps.h): a rig eye going 1.9 m/s against a
+ *    standing root stopped in one frame, its 4 mm against its way: a jump of 0.064 m, taken up, and the next frame's
+ *    3 mm too; the presented eye went 0.117 m past an eye that stood, and when the third frame's 3 mm pointed
+ *    forwards the frame was followed and the kept speed dropped whole on the catch-up begun, 0.076 m of step change
+ *    for the eye's own 0.001 m. (Made up, 4 m/s at 33 ms a frame, all four frames against the way: the run's time
+ *    out and the speed handed to the curve, 0.56 m past an eye that stood.) Only as the first frame, not in a run of
+ *    jumps: there the frames before were taken up already, and to follow one then is to drop the kept speed after
+ *    it was carried on (on the logs, without that: 0.065 and 0.080 m where 0.031 and under 0.06 m had been). And
+ *    not against a speed kept from the camera before (THE LENT SPEED), which is let down, not dropped.
+ *    Jumps in a row are taken up for
  *    TFP_CONTINUITY_RUN_MS at most (a time, not a number of frames); then the new speed is believed, and the
  *    difference between the two speeds goes into the correction's curve, so the presented eye keeps its speed in
  *    that frame and gathers the new one along the curve. The new speed is what the run's last frames agree on
@@ -133,6 +145,7 @@ typedef struct TfpContinuityTuning { float pop_m, pop_accel, ease_accel, min_ms,
 #define TFP_CONTINUITY_DEFAULT {.04f, 36.0f, 24.0f, 100.0f, 400.0f, 1.6f, 2.5f} /* max_m 1.0 and teleport_m 1.5 until 0.6.0-feel.39: a change of camera in a sprint is 1.2 m */
 #define TFP_CONTINUITY_RUN_MS 70.0   /* jumps in a row are taken up for this long without a change of source */
 #define TFP_CONTINUITY_NEAR .9f       /* of the measure: once in a run a frame from here on counts as a jump, if it goes the way of the jump before it */
+#define TFP_CONTINUITY_STOP .2f       /* of the measure: a step under this (and a quarter of the step predicted) is the eye stopping, whichever way it points */
 #define TFP_CONTINUITY_QUIET_MS 80.0f
 #define TFP_CONTINUITY_SPEED_FRAMES 4u /* the frames looked at for the speed believed when a run's time is over */
 
@@ -396,7 +409,10 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
   c->recent_at = (c->recent_at+1)%TFP_CONTINUITY_SPEED_FRAMES;
   const float limit = measure;
   const float along = step[0]*expected[0]+step[1]*expected[1]+step[2]*expected[2];
-  const bool slowing = along >= 0 && tfp_continuity_length(step) < tfp_continuity_length(expected);
+  const float gone = tfp_continuity_length(step), meant = tfp_continuity_length(expected);
+  /* THE STOP: a step of next to nothing, whichever way it points, against the camera's own speed and not in a run. */
+  const bool stopped = !c->run && !c->lent && gone < TFP_CONTINUITY_STOP*measure && gone < meant/4;
+  const bool slowing = (along >= 0 || stopped) && gone < meant;
   const bool over = size > limit;
   const bool within = !c->run || (tick >= c->run_started && tick-c->run_started <= TFP_CONTINUITY_RUN_MS);
   /* A run's last frame a hair under the measure: once in a run, within its time, a frame that goes the way the jump
