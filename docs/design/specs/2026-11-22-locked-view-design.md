@@ -1377,3 +1377,18 @@ style, all at the moment of a switch or in the panel: ticking Bodycam while Stab
 lag pulls the eye up to 0.15 m in one frame; ticking it with camera damping 0 while a thrown kick eases snaps the
 kick to the raw one; the greyed sliders show no tooltip (the host answers "not hovered" for a disabled item).
 
+### feel.44 (2026-11-23)
+
+The three review findings fixed, each with a test that failed first: a lower lag limit of the head-camera eye comes
+into force at 0.55 m a second and its time constant is held until it has arrived (0.150 m in one frame before; 0.023,
+0.012 and 0.005 m at 30, 60 and 144 frames a second now); a kick whose damping is switched off goes on from the kick
+shown and reaches the raw one in 150 ms (3.6 to 4.0 degrees in a frame before, 0.8 at most now, for a 10 degree nod);
+a greyed row's tooltip hangs on an unseen item laid over it outside the disabled block.
+
+In the game: 46 test scripts and the python tests pass; the tooltip of the greyed "View kick strength" shows in the
+real host (`work/captures/feel44-tooltip-greyed.png`); Bodycam ticked and unticked through the panel while crouched
+with the stratagem list open: 0.019 and 0.025 m, nothing missed; saved style Stable after the game closed. Matrix: 34
+of 35. The death phase failed this time because the player really died in it (most runs the phase's own grenades do
+no harm): one frame missed in kind 4 with helper error 7, the avatar replaced at the respawn, which is the known
+hand-over and no change of this build.
+

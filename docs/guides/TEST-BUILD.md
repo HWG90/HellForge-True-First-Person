@@ -1,4 +1,4 @@
-# True First Person for HellForge: test build 0.6.0-feel.43
+# True First Person for HellForge: test build 0.6.0-feel.44
 
 For HellForge on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
@@ -45,6 +45,16 @@ keep their values. "View kick when thrown" works in both.
 To get the old behaviour back: tick **Bodycam**. Your slider values are still there.
 
 Tested in the game: ten actions in each style (Stable: no kick at all; Bodycam: 2.4 to 5.8 degrees); I have not played it yet.
+
+## Fixed in 0.6.0-feel.44
+
+Found by a review of the camera style, before anyone played it:
+
+- **Switching between Stable and Bodycam in the middle of a movement** could pull the eye up to 15 cm, or snap the
+  view's tilt, in one frame. A switch is eased now. Tested in the game, both ways, while crouched with the stratagem
+  list open: 2 to 2.5 cm.
+- **The greyed sliders** (kick strength, kick limit, camera damping while Bodycam is off) show their descriptions
+  again when you point at them. Seen in the game.
 
 ## Fixed in 0.6.0-feel.43
 
