@@ -1042,13 +1042,18 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
  * it) does not swing the eye. Only in the ordinary camera's frames (kind 4) of a body on foot that the lock holds:
  * a body that is down or off foot is followed, full aim keeps the sights on the eye, and the native view is the
  * game's own. When one of those begins while a lag is carried, the lag is let go over a few frames (40 ms), not in
- * one, and nothing new is damped meanwhile. `eye` is the wanted eye in the world and takes the damped one, before
+ * one, and nothing new is damped meanwhile. A change of the camera style or of the camera damping option while a
+ * lag is carried does not move the eye by itself either: a lower limit comes into force at a bounded rate, and a lag
+ * the option leaves no damping for is let go at that rate. `eye` is the wanted eye in the world and takes the damped one, before
  * the continuity sees it. True: the state is kept for the next frame; the caller forgets it in every frame that
  * returns false or does not come here, so it starts from the true eye after those. */
 static bool lock_damp_eye(Policy *p, uint32_t kind, const float *root, const float *root_basis, const float *head, double tick, float *eye) {
   const TfpCameraStyle style = tfp_camera_style(atomic_load_explicit(&lock_bodycam, memory_order_relaxed) != 0, lock_damp_ms);
   const float damp_ms = style.eye_damp_ms;
-  const bool damp = kind == 4 && !p->lock_down && !p->lock_off_foot && !p->full_ads && !p->ads_gap_active && damp_ms > 0;
+  /* on_foot: a frame the damping is for. Without it the lag is let go on 40 ms; with it and no time constant
+   * (Bodycam with the camera damping option at 0, come to while a lag was carried) more slowly, src/camera_damp.h. */
+  const bool on_foot = kind == 4 && !p->lock_down && !p->lock_off_foot && !p->full_ads && !p->ads_gap_active;
+  const bool damp = on_foot && damp_ms > 0;
   float relative[3] = {0}, damped[3] = {0}, behind[3] = {0}, lag = 0;
   for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
     relative[axis] += (head[component]-root[component])*root_basis[axis*3+component];
@@ -1056,7 +1061,8 @@ static bool lock_damp_eye(Policy *p, uint32_t kind, const float *root, const flo
     if (!tfp_finite3(relative)) return false;
     lag = tfp_eye_damp_follow(&lock_eye_damp, relative, tick, p->c.max_gap_ms, damp_ms, style.eye_lag_m, damped);
     for (unsigned axis = 0; axis < 3; ++axis) behind[axis] = damped[axis]-relative[axis];
-  } else if (!((lag = tfp_eye_damp_release(&lock_eye_damp, tick, p->c.max_gap_ms, behind)) > 0)) return false;
+  } else if (!((lag = on_foot ? tfp_eye_damp_release_slowly(&lock_eye_damp, tick, p->c.max_gap_ms, behind)
+                              : tfp_eye_damp_release(&lock_eye_damp, tick, p->c.max_gap_ms, behind)) > 0)) return false;
   if (lag > 0 && tfp_finite3(behind)) {
     for (unsigned component = 0; component < 3; ++component) for (unsigned axis = 0; axis < 3; ++axis)
       eye[component] += behind[axis]*root_basis[axis*3+component];
