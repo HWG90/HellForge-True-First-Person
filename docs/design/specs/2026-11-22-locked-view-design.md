@@ -820,9 +820,10 @@ aim (`quiet=`), the filter's first frame (`start` in `taken=`), and places to 0.
    as it went; in the next the root's new course is kept and the eye, against the root, has the new speed whole. In
    three of them the wanted eye's own step changed as much (0.175, 0.081, 0.106 m): they count as the filter's only
    because 0.05 to 0.18 m was still carried. This is the design ("the body's own travel is not a jump") and is left.
-   Handing the root's change of speed to the curve was tried: it hides all six, at 0.06 m of eye ahead of the body
-   per m/s (0.33 m for the stop at .294), and on a landing (soak 6, a root that stops from 7.5 m/s in a frame) it
-   carried 0.79 m of eye into the ground, which `soak6_turn_after_hold` forbids. Not done.
+   Handing the root's change of speed to the curve was tried: it hides five of the six (not 00:30:09.385), at
+   0.06 m of eye ahead of the body per m/s with the curve at its longest (worked out, not measured: about 0.3 m for
+   the stop at .294), and on a landing (soak 6, a root that stops from 7.5 m/s in a frame) it carried 0.79 m of eye
+   into the ground, which `soak6_turn_after_hold` forbids. Not done.
 2. *The end of a run of jumps* (4, and part of 00:30:09.385: 00:26:06.399 0.078 m, 00:30:10.988 0.064 m,
    00:33:35.314 0.062 m, 00:36:03.183 0.067 m). A run ended at the first frame that was no jump, and that frame was
    followed as an ordinary one: the presented eye, held at the kept speed through the run, took the wanted eye's

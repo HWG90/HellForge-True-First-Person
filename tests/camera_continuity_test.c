@@ -660,7 +660,7 @@ int main(void) {
    *    0.08 rad; here the end of a run added to it (0.100 m in the log).
    *  - 00:27:13.539, a sprint ended, and 00:38:46.845, a dive begun: the same, 0.094 and 0.098 m of the wanted eye's
    *    own 0.081 and 0.106 m; both are the last frames of their Trace windows and are not among the rows here.
-   * The filter must not add to these. (To carry the root's change of speed over to the curve would hide them, at
+   * The filter must not add to these. (To carry the root's change of speed over to the curve hides most of them, at
    * 0.06 m of eye ahead of the body for each m/s; the landing in soak6_turn_after_hold, a root that stops from
    * 7.5 m/s in one frame, then carries 0.79 m of eye into the ground. Not done.) */
   {
