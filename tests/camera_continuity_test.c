@@ -8,6 +8,7 @@
 #include "reference/soak-11-steps.h"
 #include "reference/soak-14-steps.h"
 #include "reference/soak-18-steps.h"
+#include "reference/soak-19-steps.h"
 static int checks, failed;
 #define CHECK(c) do { ++checks; if (!(c)) { ++failed; printf("FAILED line %d: %s\n", __LINE__, #c); } } while (0)
 static const TfpContinuityTuning T = TFP_CONTINUITY_DEFAULT;
@@ -399,6 +400,42 @@ static Hitch hitched(float v, float hitch, int frames, float after, bool placed,
     memcpy(gap, now, sizeof gap);
   }
   return h;
+}
+/* THE TRIAL, made up: as `hitched` with one frame of nothing, and then the frame that goes on as the eye went (a
+ * frame's travel forwards), and after it `count` frames whose steps are `then` (forwards and sideways, in frames'
+ * travel), and from there `on` frames' travel forwards a frame for two seconds (0: at rest). From the frame that goes
+ * on: `beyond`, the furthest the presented eye is outside where the wanted eye has been at any time (along each axis
+ * of the root's frame, the frame it moves in); `carried`, `settled` (ms, the frame that goes on being the first),
+ * `change` and `own` as there. */
+typedef struct Trial { float beyond, carried, settled, change, own; } Trial;
+static Trial tried(float v, float dt, bool placed, const float (*then)[2], int count, float on, bool show) {
+  TfpContinuity c; memset(&c, 0, sizeof c);
+  Trial r = {0, 0, 0, 0, 0};
+  const float cy = cosf(.3f), sy = sinf(.3f), basis[9] = {cy, sy, 0, -sy, cy, 0, 0, 0, 1}, travel = v*dt/1000;
+  float eye[3] = {.1f, .3f, 1.5f}, one[3] = {0}, two[3] = {0}, wanted_one[3] = {0}, wanted_two[3] = {0}, low[3], high[3];
+  memcpy(low, eye, sizeof low); memcpy(high, eye, sizeof high);
+  for (int n = 0; n <= 42+count+(int)(2000/dt); ++n) {
+    const float root[3] = {3*(float)n*dt/1000, 0, 0}; float out[3], world[3], d = 0, w = 0;
+    if ((n && n <= 40) || n == 42) eye[1] += travel;
+    else if (n > 42 && n <= 42+count) { eye[1] += then[n-43][0]*travel; eye[0] += then[n-43][1]*travel; }
+    else if (n > 42) eye[1] += on*travel;
+    for (int k = 0; k < 3; ++k) { world[k] = root[k]; for (int a = 0; a < 3; ++a) world[k] += eye[a]*basis[a*3+k]; }
+    const double tick = 1000.0+(double)n*(double)dt;
+    const float length = placed ? tfp_continuity_step_in(&c, eye, world, basis, NATIVE, true, false, tick, 250, &T, out)
+                                : tfp_continuity_step(&c, eye, NATIVE, true, false, tick, 250, &T, out);
+    for (int k = 0; k < 3; ++k) { const float e = out[k]-2*one[k]+two[k], f = eye[k]-2*wanted_one[k]+wanted_two[k]; d += e*e; w += f*f;
+      low[k] = fminf(low[k], eye[k]); high[k] = fmaxf(high[k], eye[k]); }
+    if (n > 41) {
+      for (int k = 0; k < 3; ++k) { if (out[k]-high[k] > r.beyond) r.beyond = out[k]-high[k]; if (low[k]-out[k] > r.beyond) r.beyond = low[k]-out[k]; }
+      if (sqrtf(d) > r.change) r.change = sqrtf(d);
+      if (sqrtf(w) > r.own) r.own = sqrtf(w);
+      if (length > r.carried) r.carried = length;
+      if (length > .001f) r.settled = (float)(n-41)*dt;
+      if (show && n <= 50) printf("%s%.3f", n == 42 ? "" : ", ", (double)(out[1]-(.3f+40*travel)));
+    }
+    memcpy(two, one, sizeof two); memcpy(one, out, sizeof one); memcpy(wanted_two, wanted_one, sizeof two); memcpy(wanted_one, eye, sizeof one);
+  }
+  return r;
 }
 #define ROWS(a) a, (int)(sizeof a/sizeof *a)
 int main(void) {
@@ -1267,6 +1304,63 @@ int main(void) {
     CHECK(before.apart < .005f);
     CHECK(load.logged_most > .05f && load.most < .005f);
     CHECK(after.turned < .06f && after.step < .06f); /* its last step is under what the soak's judge counts */
+  }
+  /* A stop that is no hitch: 07:04:11.051 of the Stable soak of 2026-11-23 on 0.6.0-feel.44 (soak19_stop), the one
+   * frame of the tenth log THE HITCH acted on. The eye is thrown about in a dive, 0.2 m and more carried; row 37 ends
+   * a run of jumps with a speed believed (1.9 m/s), row 38 all but stands (0.006 m, followed as a stop), row 39 goes
+   * 0.051 m. That is within the measure of the step the speed before the stop would have made, and with the speed of
+   * any stop kept for a frame row 39 was followed as the eye going on: 0.064 m of step change for the wanted eye's
+   * 0.042 m, while the curve of the 0.25 m carried was at its steepest, a step the filter before did not make. The
+   * speed before that stop was believed one frame earlier and no frame had gone on at it: no eye going steadily.
+   * Such a speed is not kept at a stop; row 39 is a jump, as it was, and every row is the log's. */
+  {
+    const Judged all = judged(ROWS(soak19_stop), 0, 42), there = judged(ROWS(soak19_stop), 37, 42);
+    const Borne load = borne(ROWS(soak19_stop), 39, 39);
+    printf("soak 19, a stop straight after a run of jumps: the filter %.4f m from the log at most, %.3f m carried in the frame after it (the log: %.3f m), "
+           "its largest step from there %.3f m (the log: %.3f m)\n", (double)all.apart, (double)load.most, (double)load.logged_most, (double)there.turned,
+           (double)there.logged_turned);
+    CHECK(all.apart < .005f);
+    CHECK(load.logged_most > .3f && fabsf(load.most-load.logged_most) < .005f);
+    CHECK(there.turned <= there.logged_turned+.001f);
+  }
+  /* THE TRIAL, made up (the second check's scene O and its like): the eye stops from a speed whose step is over the
+   * measure, the next frame goes on as it went (followed: THE HITCH), and the frame after that does not: it goes back
+   * by that step and the eye is at rest, the game's own flicker of one frame after a stop. With the frame that goes on
+   * believed at once the step back was a jump of two steps against it, taken up: the presented eye ran one step more
+   * forwards, to where the wanted eye never was (0.067 to 0.200 m beyond it), and came back over 200 to 400 ms with
+   * twice a frame's travel carried. The filter before THE HITCH took the frame that goes on up and the step back too:
+   * a frame's travel carried, 117 to 150 ms. Now the speed of the frame that goes on is on trial for one frame: the
+   * step back is followed as the game's own, nothing is carried, and the presented eye is nowhere the wanted eye has
+   * not been. The same for what else can come after that frame: half a step back, two steps back, a step sideways,
+   * the flicker twice, back and on going back, on at twice the speed; held to that where a frame's travel is over
+   * the measure (elsewhere no speed is dropped at the stop and nothing here acts). */
+  {
+    static const float times[] = {8, 16.7f, 33.3f, 50};
+    static const float back[][2] = {{-1, 0}}, half[][2] = {{-.5f, 0}}, two[][2] = {{-2, 0}}, side[][2] = {{0, 1}}, twice[][2] = {{-1, 0}, {1, 0}, {-1, 0}};
+    static const struct { const char *name; const float (*then)[2]; int count; float on; } scenes[] = {
+      {"a step back, at rest", back, 1, 0}, {"half a step back, at rest", half, 1, 0}, {"two steps back, at rest", two, 1, 0},
+      {"a step sideways, at rest", side, 1, 0}, {"back, on, back, at rest", twice, 3, 0}, {"a step back and on going back", back, 1, -1},
+      {"on at twice the speed", NULL, 0, 2}};
+    /* the filter before THE HITCH on "a step back, at rest": settled (ms), 2 and 4 m/s at each frame time; it carried a frame's travel */
+    static const float was[2][4] = {{0, 134, 133, 150}, {128, 117, 133, 150}};
+    for (unsigned s = 0; s < sizeof scenes/sizeof *scenes; ++s) for (int fast = 0; fast < 2; ++fast) for (unsigned d = 0; d < 4; ++d) {
+      const float v = fast ? 4 : 2; Trial worst = {0, 0, 0, 0, 0};
+      for (int placed = 0; placed < 2; ++placed) {
+        const Trial r = tried(v, times[d], placed != 0, scenes[s].then, scenes[s].count, scenes[s].on, false);
+        if (r.beyond > worst.beyond) worst.beyond = r.beyond;
+        if (r.carried > worst.carried) worst.carried = r.carried;
+        if (r.settled > worst.settled) worst.settled = r.settled;
+        if (r.change-r.own > worst.change-worst.own || !placed) { worst.change = r.change; worst.own = r.own; }
+        /* where a frame's travel is under the measure nothing was dropped at the stop and no frame is on trial: as it was */
+        if (v*times[d]/1000 > fmaxf(T.pop_m, T.pop_accel*times[d]*times[d]/1e6f)) CHECK(r.beyond <= .01f); /* never where the wanted eye has not been */
+        if (!s) { CHECK(r.carried <= v*times[d]/1000+.002f || r.carried <= .0602f); CHECK(r.settled <= was[fast][d]+1); }
+      }
+      printf("  %g m/s, %g ms a frame, stop, on, then %s: %.4f m beyond where the wanted eye has been, step change %.4f m (the eye's own %.4f m), "
+             "%.4f m carried, settled in %.0f ms\n", (double)v, (double)times[d], scenes[s].name, (double)worst.beyond, (double)worst.change,
+             (double)worst.own, (double)worst.carried, (double)worst.settled);
+    }
+    printf("  4 m/s, 33.3 ms a frame, stop, on, a step back, at rest: the presented eye from the frame that goes on (m; wanted 0.133, 0, 0): ");
+    (void)tried(4, 33.3f, false, back, 1, 0, true); printf("\n");
   }
   printf("camera continuity: %d checks, %d failed\n", checks, failed);
   return failed != 0;
