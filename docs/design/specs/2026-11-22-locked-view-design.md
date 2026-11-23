@@ -1150,3 +1150,9 @@ after 14 actions (the game window was not in front) and is owed again. By `repla
 both soaks): 5 of the filter's steps of 0.06 m or more, 98.1 metre-frames carried, 435 ms the longest carry after a
 change of camera.
 
+The Stable soak owed on feel.42, seed 3: 248 actions, 18,068 frames, nothing missed, three flagged. By `replay.py`:
+5 of the filter's steps of 0.06 m or more, 85.4 metre-frames carried, 467 ms the longest carry. The largest is new in
+kind: 04:00:51.667, 0.180 m by vector (0.052 m by lengths) with 0.801 m carried, the wanted eye's own change 0.076 m
+and the root's 0.009 m: a change of direction of the presented eye while a large correction from a swap in a sprint
+is being caught up. It goes to a third round (`/home/goose/.cache/tfp-soak-14.modlog`).
+
