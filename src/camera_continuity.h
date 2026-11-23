@@ -44,6 +44,26 @@
  *        eye that goes round with a root turning evenly, however fast, is the other way about (its step changes
  *        more without the turning) and is read in the root's frame as before, a re-seat in a turn too.
  *    In a frame the axes are off their course what is carried keeps its direction in the world whatever the step.
+ *    THE ONSET. A root that begins to turn is off its course for one frame, which reads as the root re-seated; in the
+ *    next it keeps the new turning, and that is its course from there (THE COMPARISON). An eye that does not go
+ *    round with it is then off the speed kept for it in the root's frame by the turn times its distance from the
+ *    root, frame after frame: jumps in the root's frame alone, and to take them up is to hold the presented eye
+ *    against axes that turn on. Seen in the soak of 2026-11-22 on 0.6.0-feel.41 (tests/reference/soak-11-steps.h):
+ *    a dive out of a sprint, the root's axes rolling by 0.06 rad a frame under a rig eye 1.25 m above it that went
+ *    straight on; three frames were taken up, the presented eye went 0.21 m to the side and its step changed by
+ *    0.090 m where the wanted eye's changed by 0.026 m. (Made up, the same roll at 8 rad/s and 8 ms a frame: 0.83 m
+ *    to the side.) So a frame in which the root keeps a course it took up alone the frame before is followed, not
+ *    taken up, when
+ *      - its step is a jump in the root's frame and none with the turning left out, the two half the measure apart;
+ *      - the root's axes are on that course within half the measure, seen at the eye, and their turn of this frame
+ *        moves the eye by half the measure or more in the root's frame (a kept course that does not turn makes no
+ *        such jump: the two readings then differ by the speeds kept for them, as they did at 00:30:53.388 of the
+ *        second feel.40 soak, where following the frame made 0.135 m of 0.055 m); and
+ *      - the eye has not been seen to go round with the root of late (its step changing more without the turning
+ *        than with it, by half the measure over 100 ms: a rig re-seated in a fast even turn can be under the
+ *        measure without the turning by chance).
+ *    What is carried keeps its direction in the world in that frame, and the eye's speed in the root's frame is
+ *    believed at once, the new turning in it, so the frames after are measured against it as any others.
  *  - A jump is a frame whose step differs from the wanted eye's own recent speed by more than
  *    max(pop_m, pop_accel * dt * dt). A change of source takes up any difference. Jumps within a source are looked
  *    for only where the caller says so (`detect`: the short time after something that can re-seat the rig); anywhere
@@ -244,7 +264,7 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
     for (unsigned a = 0; a < 3; ++a) for (unsigned b = 0; b < 3; ++b) for (unsigned k = 0; k < 3; ++k) turn[a*3+b] += basis[a*3+k]*c->basis[b*3+k];
     for (unsigned a = 0; a < 3; ++a) for (unsigned k = 0; k < 3; ++k) moved[a] += (root[k]-c->root[k])*basis[a*3+k];
   }
-  float rest[3] = {0}, off[9] = {0}, rest_size = size; bool reseat = false;
+  float rest[3] = {0}, off[9] = {0}, rest_size = size; bool reseat = false, kept = false; /* kept: the course is the one tried last frame */
   if (placed && c->coursed) {
     /* The course that fits this frame best. One that the root took up only last frame, in a frame it was off its
      * course, counts once it is kept: that was a new speed (a throw), not a re-seat, and it is the course from here. */
@@ -259,6 +279,7 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
     /* how far the root's axes alone are off their course, seen at the eye (the root where it is) */
     for (unsigned a = 0; a < 3; ++a) { swing[a] = wanted[a]; for (unsigned k = 0; k < 3; ++k) swing[a] -= (world[k]-root[k])*even[a*3+k]; }
     swing_size = tfp_continuity_length(swing);
+    kept = best >= 2;
     if (best >= 2) for (unsigned i = 0; i < 3; ++i) { c->root_speed[i] = c->tried_speed[i]; c->root_along[i] = c->tried_along[i]; c->spin[i] = c->tried_spin[i]; }
     for (unsigned i = 0; i < 3; ++i) rest[i] = difference[i]-part[i];
     rest_size = tfp_continuity_length(rest);
@@ -270,7 +291,7 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
   }
   /* The same step with the root's turning left out (THE TURNING above): against the root's place (on its course, if
    * it was re-seated), along the world's axes, here turned into the root's present ones. */
-  float loose[3] = {0}, free_step[3] = {0}, held_step[3], loose_size = rest_size; bool freely = false;
+  float loose[3] = {0}, free_step[3] = {0}, held_step[3], loose_size = rest_size; bool freely = false, onset = false;
   for (unsigned i = 0; i < 3; ++i) held_step[i] = reseat ? c->speed[i]*dt+rest[i] : step[i]; /* the step in the root's frame, a re-seated root on its course */
   if (placed) {
     for (unsigned k = 0; k < 3; ++k) { free_step[k] = world[k]-even_root[k]; for (unsigned a = 0; a < 3; ++a) free_step[k] -= c->wanted[a]*c->basis[a*3+k]; }
@@ -283,6 +304,7 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
        * the filter kept (a run of jumps keeps one, and in a body thrown while it turns the two kept speeds part by
        * themselves). */
       const bool swung = !reseat && swing_size > measure, both = rest_size > measure && loose_size > measure;
+      const bool rides = c->loose_off-c->held_off > measure/2; /* as it stood before this frame */
       if (!edge && c->stepped) {
         float held[3], free[3]; const float fade = 1-expf(-dt/.1f);
         for (unsigned i = 0; i < 3; ++i) { held[i] = held_step[i]-c->held_step[i]*dt; free[i] = free_step[i]-c->loose_step[i]*dt; }
@@ -290,8 +312,15 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
         if (isfinite(held_size) && isfinite(free_size)) { c->held_off += (held_size-c->held_off)*fade; c->loose_off += (free_size-c->loose_off)*fade; }
       }
       const bool apart = !edge && rest_size > measure && c->held_off-c->loose_off > measure/2;
-      freely = isfinite(loose_size) && (apart || (swung && (edge || both)));
-      if (freely || swung) { /* what is carried does not go round with the axes */
+      /* THE ONSET: the root keeps the course it took up alone last frame, and the jump is that course's turning seen
+       * at an eye that does not go round with it. The frame is followed in the root's frame. */
+      float spun[3] = {c->wanted[0], c->wanted[1], c->wanted[2]}; /* how far the axes' turn of this frame moves the eye in the root's frame */
+      tfp_continuity_turn(turn, spun);
+      for (unsigned i = 0; i < 3; ++i) spun[i] -= c->wanted[i];
+      onset = kept && !edge && rest_size > measure && !(loose_size > measure) && rest_size-loose_size > measure/2 && !rides
+              && tfp_continuity_length(spun) > measure/2 && swing_size < measure/2;
+      freely = !onset && isfinite(loose_size) && (apart || (swung && (edge || both)));
+      if (freely || swung || onset) { /* what is carried does not go round with the axes */
         tfp_continuity_turn(turn, c->from); tfp_continuity_turn(turn, c->from_speed);
         tfp_continuity_curve(c, tick, value, speed);
       }
@@ -328,7 +357,7 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
   const float along = step[0]*expected[0]+step[1]*expected[1]+step[2]*expected[2];
   const bool slowing = along >= 0 && tfp_continuity_length(step) < tfp_continuity_length(expected);
   const bool over = size > limit;
-  const bool jump = !quiet && !edge && detect && over && !slowing;
+  const bool jump = !quiet && !edge && detect && over && !slowing && !onset;
   const bool within = !c->run || (tick >= c->run_started && tick-c->run_started <= TFP_CONTINUITY_RUN_MS);
   const bool believe = jump && !within; /* jumps for longer than the run: a new speed, not a re-seated rig */
   const bool take = !quiet && size > 1e-4f && (edge || jump);
