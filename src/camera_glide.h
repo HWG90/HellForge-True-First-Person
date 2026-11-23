@@ -44,14 +44,14 @@ static inline bool tfp_eye_glide_retail(float *value, const float *target, float
  *        frame and the speed the filter still keeps for it is lent to the native view (THE LENT SPEED there): at
  *        50 ms a frame in a sprint the presented eye's step changed by 0.101 to 0.104 m in the frame after, where it
  *        had been 0.086 m. And a way of 0.63 m (the logged swap) needs 23 m/s^2, is taken up in part, and a frame
- *        of that swap showed 0.081 m of step change where the log had 0.054 m.
+ *        of that swap showed 0.081 m of step change where retail's glide gave 0.054 m.
  *      - 300 ms for ways up to the 0.378 m that 14 m/s^2 allows in it: the same at 50 ms a frame in a sprint for a
  *        way of 0.37 m, 0.086 to 0.089 m for 0.071 m.
  *    With 250 ms a frame at 20 frames a second is left between the glide's end and the swap's, and over 96 made-up
  *    swaps (0.07 to 0.47 m, a walk and a sprint, 8 to 50 ms a frame, both camera styles) the presented eye's step
- *    changes by more in none. What is left as it was: in that soak 50 of the 69 glides were longer than 0.2625 m (27
- *    of them 0.37 to 0.47 m), 10 were between that and the 0.105 m from which retail's first frame is a jump at 30
- *    frames a second.
+ *    changes by more in none. What is left as it was: in that soak 50 of the 69 glides were longer than 0.2625 m (34
+ *    of them 0.37 to 0.47 m); of the 10 between that and the 0.105 m from which retail's first frame is a jump at 30
+ *    frames a second, five were taken up (0.058 to 0.118 m carried), and those are what the gentle glide is for.
  *  - The glide is a place for every time, not a step for every frame: the same place at the same time whatever the
  *    frames, a long frame included.
  *  - A target that changes while the eye is under way (a second swap inside the first) begins a glide from where the
