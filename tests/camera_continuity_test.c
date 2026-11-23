@@ -7,6 +7,7 @@
 #include "reference/soak-9-runs.h"
 #include "reference/soak-11-steps.h"
 #include "reference/soak-14-steps.h"
+#include "reference/soak-18-steps.h"
 static int checks, failed;
 #define CHECK(c) do { ++checks; if (!(c)) { ++failed; printf("FAILED line %d: %s\n", __LINE__, #c); } } while (0)
 static const TfpContinuityTuning T = TFP_CONTINUITY_DEFAULT;
@@ -325,6 +326,43 @@ static void lent(float v, float apart, bool moves, float dt, float *change, floa
       if (sqrtf(d) > *change) *change = sqrtf(d);
       if (length > *carried) *carried = length;
       if (length > .005f) *settled = (float)n*dt; }
+    memcpy(two, one, sizeof two); memcpy(one, out, sizeof one);
+  }
+}
+/* THE STOP, made up: the body stands, the native view, jumps looked for. The rig eye goes forwards at `v` m/s for
+ * twelve frames and stops dead: `back` m in each of the next four frames (against the way it went when negative; a
+ * stop's last millimetres have no way of their own), then rest. `change`: the most the presented eye's step changes
+ * from frame to frame (as a vector) from the stop on; `past`: how far the presented eye goes on past the wanted one
+ * at most; `carried`: the most carried from the stop on. */
+static void stopped(float v, float back, float dt, float *change, float *past, float *carried) {
+  TfpContinuity c; memset(&c, 0, sizeof c);
+  float eye[3] = {.1f, .3f, 1.5f}, one[3] = {0}, two[3] = {0};
+  *change = *past = *carried = 0;
+  for (int n = 0; n < 60; ++n) {
+    float out[3];
+    if (n && n <= 12) eye[1] += v*dt/1000; else if (n > 12 && n <= 16) eye[1] += back;
+    const float length = tfp_continuity_step(&c, eye, NATIVE, true, false, 1000.0+(double)n*(double)dt, 250, &T, out);
+    if (n > 12) { float d = 0; for (int k = 0; k < 3; ++k) { const float e = out[k]-2*one[k]+two[k]; d += e*e; }
+      if (sqrtf(d) > *change) *change = sqrtf(d);
+      if (out[1]-eye[1] > *past) *past = out[1]-eye[1];
+      if (length > *carried) *carried = length; }
+    memcpy(two, one, sizeof two); memcpy(one, out, sizeof one);
+  }
+}
+/* The same after a change of camera: the head camera's eye goes forwards at `v` m/s (jumps are not looked for in it),
+ * the view changes to a rig eye in the same place, and that eye goes `back` m in each frame from its second on. The
+ * speed kept is then the camera before's (THE LENT SPEED) and is let down, not dropped. */
+static void stopped_lent(float v, float back, float dt, float *change, float *carried) {
+  TfpContinuity c; memset(&c, 0, sizeof c);
+  float eye[3] = {.1f, .3f, 1.5f}, one[3] = {0}, two[3] = {0};
+  *change = *carried = 0;
+  for (int n = 0; n < 60; ++n) {
+    float out[3];
+    if (n && n <= 12) eye[1] += v*dt/1000; else if (n > 13 && n <= 17) eye[1] += back;
+    const float length = tfp_continuity_step(&c, eye, n <= 12 ? HEAD : NATIVE, n > 12, false, 1000.0+(double)n*(double)dt, 250, &T, out);
+    if (n > 12) { float d = 0; for (int k = 0; k < 3; ++k) { const float e = out[k]-2*one[k]+two[k]; d += e*e; }
+      if (sqrtf(d) > *change) *change = sqrtf(d);
+      if (length > *carried) *carried = length; }
     memcpy(two, one, sizeof two); memcpy(one, out, sizeof one);
   }
 }
@@ -1053,6 +1091,58 @@ int main(void) {
       CHECK(times[d] < 30 || (change < .125f && still < .125f && carried < was[far][d][1]-.02f && still_carried <= carried+.0005f));
       lent(1, far ? .8f : .4f, true, times[d], &change, &carried, &settled);
       CHECK(fabsf(change-slow[far][d][0]) < .0002f && fabsf(carried-slow[far][d][1]) < .0002f);
+    }
+  }
+  /* THE STOP. The Bodycam soak of 2026-11-23 on 0.6.0-feel.44 (tests/reference/soak-18-steps.h), 06:18:40.922: the
+   * native view after a swap, the body standing. The rig eye had gathered way for nine frames, 0.072 m a frame in the
+   * end (1.9 m/s), and stopped dead in row 27: 0.004 m, and that against the way it had gone. A step shorter than the
+   * one expected is the motion slowing down and is followed, but only "in the same direction": these 4 mm were a jump
+   * of 0.064 m, taken up, and so were the next frame's 3 mm. The presented eye went on at 1.9 m/s past an eye that
+   * stood, 0.117 m in two frames, until in row 29 the 3 mm happened to point forwards: slowing down, followed, and
+   * the kept speed dropped whole on top of the catch-up begun: 0.076 m of step change, where the rig eye's own
+   * change in that frame was 0.001 m. Now a step of next to nothing is the eye stopping whichever way it points:
+   * row 27 is followed, what shows is the rig eye's own stop, and nothing is carried for it. */
+  {
+    const Judged stop = judged(ROWS(soak18_stop), 27, 30), before = judged(ROWS(soak18_stop), 0, 26);
+    const Borne load = borne(ROWS(soak18_stop), 27, 30);
+    printf("soak 18, a rig eye that stops dead: the filter's largest step %.3f m (the log: %.3f m); %.3f m carried at most in the four rows from "
+           "the stop on (the log: %.3f m)\n", (double)stop.turned, (double)stop.logged_turned, (double)load.most, (double)load.logged_most);
+    CHECK(before.apart < .005f); /* up to the stop the filter shows what the log shows */
+    CHECK(stop.logged_turned > .07f && stop.turned < .06f);
+    CHECK(load.logged_most > .11f && load.most < .005f);
+  }
+  /* The same made up, at 8 to 50 ms a frame (the soaks ran at 30 frames a second only): an eye going 2 or 4 m/s that
+   * stops dead, its last steps 3 mm against its way. Where the step of that speed is over the measure (2 m/s from
+   * 33.3 ms a frame, 4 m/s from 16.7 ms) the filter of 0.6.0-feel.44 took the stop up for the time of a run and then
+   * believed it, the kept speed handed to the curve: the presented eye went 0.13 to 0.40 m past an eye that stood and
+   * came back. Now it goes no further than the eye does, and the step changes by the eye's own stop (the speed times
+   * the frame time), no more. Where that step is under the measure nothing was taken up and nothing is.
+   * What is as it was, to the digit (the bounds are the filter of feel.44, measured): the last steps 3 mm along the
+   * way; 20 mm against it, which is no step of nothing (a rig re-seated against the eye's way) and is taken up; and
+   * a speed kept from the camera before, where a stop followed would drop that speed whole in one frame. */
+  {
+    static const float times[] = {8, 16.7f, 33.3f, 50};
+    /* along the way: step change, past the eye, carried; 20 mm against it: the same; the speed lent: step change, carried */
+    static const float was[2][4][8] = {
+      {{0.0130f, 0.0000f, 0.0000f, 0.0360f, 0.0000f, 0.0000f, 0.0193f, 0.0160f}, {0.0304f, 0.0000f, 0.0000f, 0.0362f, 0.1917f, 0.1917f, 0.0389f, 0.0334f},
+       {0.0636f, 0.0000f, 0.0000f, 0.0236f, 0.3212f, 0.3212f, 0.0266f, 0.1265f}, {0.0970f, 0.0000f, 0.0000f, 0.0347f, 0.3171f, 0.3171f, 0.0391f, 0.2462f}},
+      {{0.0290f, 0.0000f, 0.0000f, 0.0330f, 0.2021f, 0.2021f, 0.0356f, 0.0320f}, {0.0638f, 0.0000f, 0.0000f, 0.0702f, 0.3238f, 0.3238f, 0.0422f, 0.2000f},
+       {0.1302f, 0.0000f, 0.0000f, 0.0497f, 0.6405f, 0.6405f, 0.0513f, 0.1733f}, {0.1970f, 0.0000f, 0.0000f, 0.0805f, 0.6624f, 0.6624f, 0.0900f, 0.2582f}}};
+    for (int fast = 0; fast < 2; ++fast) for (unsigned d = 0; d < 4; ++d) {
+      const float v = fast ? 4 : 2, own = v*times[d]/1000, *w = was[fast][d];
+      float change, past, carried, along, along_past, along_carried, far, far_past, far_carried, lent_change, lent_carried;
+      stopped(v, -.003f, times[d], &change, &past, &carried);
+      stopped(v, .003f, times[d], &along, &along_past, &along_carried);
+      stopped(v, -.02f, times[d], &far, &far_past, &far_carried);
+      stopped_lent(v, -.003f, times[d], &lent_change, &lent_carried);
+      printf("  %g m/s stopped dead, %g ms a frame: step change %.4f m (the eye's own %.4f m), %.4f m past the eye, %.4f m carried; 3 mm along the "
+             "way %.4f, %.4f, %.4f; 20 mm against it %.4f, %.4f, %.4f; the speed lent %.4f, %.4f\n", (double)v, (double)times[d], (double)change,
+             (double)own, (double)past, (double)carried, (double)along, (double)along_past, (double)along_carried, (double)far, (double)far_past,
+             (double)far_carried, (double)lent_change, (double)lent_carried);
+      CHECK(change <= own+.0035f && past < .005f && carried < .005f);
+      CHECK(fabsf(along-w[0]) < .0002f && fabsf(along_past-w[1]) < .0002f && fabsf(along_carried-w[2]) < .0002f);
+      CHECK(fabsf(far-w[3]) < .0002f && fabsf(far_past-w[4]) < .0002f && fabsf(far_carried-w[5]) < .0002f);
+      CHECK(fabsf(lent_change-w[6]) < .0002f && fabsf(lent_carried-w[7]) < .0002f);
     }
   }
   printf("camera continuity: %d checks, %d failed\n", checks, failed);
