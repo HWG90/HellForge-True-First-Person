@@ -1,4 +1,4 @@
-# True First Person for HellForge: test build 0.6.0-feel.44
+# True First Person for HellForge: test build 0.6.0-feel.45
 
 For HellForge on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
@@ -45,6 +45,27 @@ keep their values. "View kick when thrown" works in both.
 To get the old behaviour back: tick **Bodycam**. Your slider values are still there.
 
 Tested in the game: ten actions in each style (Stable: no kick at all; Bodycam: 2.4 to 5.8 degrees); I have not played it yet.
+
+## Fixed in 0.6.0-feel.45
+
+Found in the logs of long scripted runs (random actions back to back), not by playing:
+
+- **The view slid past a dead stop.** When the eye stopped at once, the smoothing sometimes took the stop for a
+  jump and let the view glide up to 12 cm past where it should rest, then pulled it back. A stop is shown as a
+  stop now.
+- **A missed frame while moving** (the eye stands for one frame and goes on) could start a catch-up of 20 to
+  60 cm lasting half a second. It is followed now. This was found by a check, and seen once in the logs in a
+  milder form.
+- **Swapping to a weapon whose eye is close to the old one** (up to 26 cm apart): the eye's glide to the new
+  weapon now starts from rest instead of at full speed. Swaps between weapons further apart glide as before:
+  a gentle glide there made single frames worse in tests, so it is not in.
+
+Tested in the game: the scripted run of 35 actions passes, and ten minutes of random actions in each camera style
+(264 and 266 actions) left no frame out of first person and did not crash. I have not played it yet.
+
+What you can still see: in those runs 15 of the 530 actions had one camera step of 6 to 18 cm, most of them a
+dive or a jump begun while walking, or a movement begun within a second of a swap. After a sprint with a swap
+the view can sit 7 to 47 cm off the game's eye for about a second while it catches up evenly.
 
 ## Fixed in 0.6.0-feel.44
 

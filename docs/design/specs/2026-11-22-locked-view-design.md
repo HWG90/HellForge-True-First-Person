@@ -1908,3 +1908,36 @@ stop.
 Tests now: `tests/run-camera-continuity.sh` 2,922 checks (2,817 and 105 new), damp 3,403, death 229, lock 2,377,
 smooth 301; the harness's python tests 30, both probe tests with their recorded bounds as they were; all 46
 `tests/run-*.sh` pass; `build.sh --feel` builds. Nothing here has been run in the game.
+
+
+## feel.45 in the game (2026-11-23)
+
+feel.45 is main at b8a591b: THE STOP (round 4), THE HITCH and THE TRIAL (round 5 and its second check), the gentle
+glide for a near swap (`docs/design/specs/2026-11-23-swap-glide.md`), `replay.py` saying whether a carry settled,
+and `soak.py` switching the view on and refusing to pass with no frame judged (a 20-minute run on 2026-11-23 had
+printed "ok" 507 times with the view never on).
+
+Before it, feel.44, Stable, 20 minutes, seed 9 (`/home/goose/.cache/tfp-soak-19.modlog`): 508 actions, 36,119
+frames, 0 missed, 12 flagged (0.060 to 0.205 m), 17 of the filter's steps. Its steps by cause are in
+`/home/goose/.cache/tfp-soak19-analysis/REPORT.md`: C five times, R2/T at a set-off three, R1 two or three, J one,
+L one (prone out of an emote, 0.182 m, three times in 508 actions and the largest), and three new ones met once
+each (U, V, W). The "467 ms" longest carries of the earlier logs were the trace window ending, not the eye
+settling: in a sprint with a swap more than 0.05 m was carried for at least 1,169 ms with no rule broken.
+
+feel.45, one session (`/home/goose/.cache/tfp-soak-20.modlog`, outputs in `/home/goose/.cache/tfp-feel45/`):
+
+- Matrix, Stable: 35 of 35.
+- Soak, Stable, seed 10: 264 actions, 18,097 frames, 0 missed, 8 flagged, largest 0.177 m (walk, dive, swap).
+- Soak, Bodycam, seed 11 (ticked through the panel, unticked after): 266 actions, 18,151 frames, 0 missed, 7
+  flagged, largest 0.152 m (a dive backwards).
+- No crash dump; the view came back in the native view at the end of both.
+- Replay of the whole session (matrix and both soaks, where exact): 21 of the filter's steps, 19 the game's own,
+  largest 0.147 m; 336 metre-frames; of 88 carries after a change of camera 74 settled (the longest 734 ms) and
+  14 were cut off by the trace (the longest 833 ms with 0.123 m still carried).
+
+Left as it is, with the frames to build tests from in the analysis: "slowing down" dropping a large kept speed in
+one frame (L, V, U's tail), C, U, R2/T at a set-off, W; the glide for swaps over 0.2625 m (34 of 69 swaps in soak
+19), where a gentle glide carried far less but showed 0.081 m for 0.054 m in one logged frame. From the review of
+the glide: a near swap with under about 170 ms of head camera hands back with more left than retail's glide
+(0.062 m against 0.023 m), not met in the logs; no test pins the glide's state across a far then a near swap.
+Nothing of feel.45 has been played by hand.
