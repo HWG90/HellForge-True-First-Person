@@ -795,3 +795,9 @@ socket 0.18 m and about 98 degrees off the rig's own for seconds on end in soaks
 feel.39 as well), beginning without a new binding. In a soak the player walks into walls and stands there, where the
 body turns the weapon aside; the rig's own pose is not what the arms should match then. Not seen in a capture yet.
 
+The owed soaks on feel.40, Stable: seed 3, 247 actions, 18,081 frames; seed 5, 269 actions, 18,146 frames; nothing
+missed in either. Classified as before: seed 3 has 7 steps of 0.06 m or more that are the filter's own (0.163 m the
+largest), where feel.39 had 7 on the same seed (0.174 m); seed 5 adds 4. So reading a step with the root's turning
+left out did not lower the count in play, and did not raise it. It stays: with `axes=` in the Trace these two logs
+can be replayed exactly (`/home/goose/.cache/tfp-soak-8.modlog`, `tfp-soak-9.modlog` on the machine that ran them).
+
