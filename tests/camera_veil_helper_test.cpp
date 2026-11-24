@@ -109,13 +109,18 @@ int main() {
     CHECK(veil().frames == 1);
     g.end();
   }
-  // ---- 7. A native frame while the veil is open (the view back in the native view before the body was switched
-  // off): forwarded as it is, and counted as a frame not cleared. ----
+  // ---- 7. A native frame while the veil is open (a leave that goes straight back to the native view within a tick:
+  // soak 27, 12:42:10.736, 12:42:36.644, 12:45:24.412): not moved, counted among the frames but
+  // not as left behind the head (that count is the head-camera frames the veil did not clear). A head-camera frame
+  // after it, the veil still open, is moved again. ----
   {
     Game g; leave(g, true, true, -.22f, &first);
     g.native(); g.frame(33.3);
-    const TfpCameraVeilStats s = veil();
-    CHECK(s.frames == 2 && s.moved == 1 && s.behind == 1);
+    TfpCameraVeilStats s = veil();
+    CHECK(s.frames == 2 && s.moved == 1 && s.behind == 0);
+    g.hip(2); g.frame(33.3);
+    s = veil();
+    CHECK(std::fabs(ahead_of_head(g) - TFP_CAMERA_VEIL_CLEAR) < .002f && s.frames == 3 && s.moved == 2 && s.behind == 0);
     tfp_camera_veil_tick(true);
     g.end();
   }

@@ -289,21 +289,21 @@ Why it is safe: no engine call is added, nothing is written to any mesh, unit or
 replaces this argument of the game's camera setter in every frame the lock holds; the veil changes three floats of it
 before the same call, inside the same policy lock. The hook and the tick are both the game thread ("Hook: camera first
 fired on thread 660 ... (the tick is thread 660)"). It needs the lock (no veil in the game's own view), head visibility
-active (armed by the tick, whatever rows of the head it owns: until the first leave of a session it owns none, and
-that leave drew the head all the same: 12:41:45.163 "owns head 0", 12:41:50.071 31 meshes, 5 of the head), and a finite eye no more than a metre from where it was.
+active (armed by the tick, whatever rows of the head it owns: until the first leave of a session it owns none, and that
+leave drew the head all the same: 12:41:45.163 "owns head 0", 12:41:50.071 31 meshes, 5 of the head), and a finite eye
+no more than a metre from where it was.
 
 The tick (`src/mod_view.c` `head_note`): after the runtime's update, `tfp_camera_veil_from_head` with the tick, which
 calls `tfp_camera_veil_tick` (closes it when the update found meshes drawn again and left none drawn) and
-`tfp_camera_set_veil` (armed while the view is on and the module is active; a tick that cannot be read switches it
-off). The first build armed it only while the module owned rows of the head, which left out the first leave of every
-session (the review of round 14). Tests: `tests/camera_veil_helper_test.cpp` (`tests/run-camera-veil.sh`, the 53rd
-script) on the fake game memory of `tests/camera_smooth_test.cpp`: not armed, nothing changes; the Scythe's eye moved
-to 0.10 m in front for both frames of a leave in the order soak 27 has (the first frame before its tick) and back to
-the held eye after the closing tick; the other order (one frame); no re-show (closed
-after two ticks); an eye in front already; switched off while open; a native frame while open (counted behind); no
-lock, no veil; what the tick hands it (armed on a kind-6 tick that owns no head row, closed by the tick that found
-the body and left none of it drawn, not by one that left some drawn, not armed with the view off, the module not
-active or no tick).
+`tfp_camera_set_veil` (armed while the view is on and the module is active; a tick that cannot be read switches it off).
+The first build armed it only while the module owned rows of the head, which left out the first leave of every session
+(the review of round 14). Tests: `tests/camera_veil_helper_test.cpp` (`tests/run-camera-veil.sh`, the 53rd script) on
+the fake game memory of `tests/camera_smooth_test.cpp`: not armed, nothing changes; the Scythe's eye moved to 0.10 m in
+front for both frames of a leave in the order soak 27 has (the first frame before its tick) and back to the held eye
+after the closing tick; the other order (one frame); no re-show (closed after two ticks); an eye in front already;
+switched off while open; a native frame while open (counted among the frames, not behind); no lock, no veil; what the
+tick hands it (armed on a kind-6 tick that owns no head row, closed by the tick that found the body and left none of it
+drawn, not by one that left some drawn, not armed with the view off, the module not active or no tick).
 
 ### The `Head:` line now ends with the veil's counts
 
@@ -312,18 +312,24 @@ active or no tick).
 ```
 
 - `leaves`: leaves of the native view the veil opened at; `frames`: frames drawn while it was open (two a leave: the
-  first head-camera frame, before the tick that sees the leave, and the frame with the body); `eye moved clear`: of them, frames whose eye it moved.
-- `left behind the head`: frames drawn while it was open whose eye was not proven 0.10 m in front of the head (a native
-  frame, a body off foot, a frame the helper did not present). **It must read 0.** A rise of it is a line by itself.
+  first head-camera frame, before the tick that sees the leave, and the frame with the body); `eye moved clear`: of
+  them, frames whose eye it moved.
+- `left behind the head`: frames drawn while it was open, other than the native view, whose eye was not proven 0.10 m
+  in front of the head (a body off foot, a frame the helper did not present). On foot it reads 0. A rise of it is a
+  line by itself. Native frames are left out (the review of round 14): a leave that goes straight back to the native
+  view within a tick draws native frames while the veil is open (soak 27: 12:42:10.736, 12:42:36.644, 12:45:24.412),
+  and those are the game's own camera, which the veil never moves; they are counted in `frames` only.
 
 ### What only the game can show
 
-- That a game session's `Head:` lines read `left behind the head on 0` with `leaves` close to the number of
-  "left the native view" lines, and `frames` about two a leave (the first head-camera frame comes before the tick that sees the leave; one where
-  it does not).
+- That a game session's `Head:` lines read `left behind the head on 0` (on foot) with `leaves` close to the number of
+  "left the native view" lines, and `frames` about two a leave (the first head-camera frame comes before the tick
+  that sees the leave; one where it does not; more where a leave goes straight back to the native view).
+- Whether the body shows in a native frame drawn while the veil is open (a leave straight back within a tick): the
+  veil does not move those frames.
 - That the helmet is gone from the frame of a leave: the capture script of feel.50 again, the grenade (shot 10) at
   0.40 s, and swaps away from the Scythe with a burst of captures around the leave (`tools/harness/burst.py`).
-- How the one-frame step forward looks and feels next to the helmet it replaces. If it shows, the distance (0.10 m) is
+- How the two-frame step forward looks and feels next to the helmet it replaces. If it shows, the distance (0.10 m) is
   one constant; the head camera's own eye is 0.18 m in front of the head.
 - Whether looking steeply down in that frame shows the chest (the veil only moves the eye forward of the head; the
   body is drawn below it all the same). The old frame showed the helmet there too.

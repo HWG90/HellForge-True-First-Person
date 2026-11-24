@@ -14,8 +14,9 @@
  * Round 14 (soak 27 settled it: the game switches the body on at every leave of the native view, in its own update
  * after the mod's tick, and the module switches it off on the next tick: one frame with the body drawn) adds the
  * veil's counts (src/camera_helper.h tfp_camera_set_veil): leaves it opened at, frames it covered (two a leave: the
- * first head-camera frame, drawn before the tick that sees the leave, and the frame with the body), frames whose eye it moved in front of the head, and frames left behind the head, which is
- * the number that must stay 0. A rise of that number is a line by itself.
+ * first head-camera frame, drawn before the tick that sees the leave, and the frame with the body), frames whose eye
+ * it moved in front of the head, and frames other than the native view it left behind the head (0 on foot; native
+ * frames drawn while it is open are not counted there). A rise of that number is a line by itself.
  *
  * The binder fills a TfpHeadTick after every update and writes the text where tfp_head_log_step says so. */
 #ifndef TFP_HEAD_LOG_H

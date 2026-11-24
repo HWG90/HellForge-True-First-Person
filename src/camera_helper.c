@@ -1546,7 +1546,9 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
   }
   if (veil_frame) { /* beyond retail, round 14 */
     atomic_fetch_add_explicit(&veil_frames, 1, memory_order_relaxed);
-    if (!veil_clear || output != adjusted) atomic_fetch_add_explicit(&veil_behind, 1, memory_order_relaxed);
+    /* Only frames that are not the native view: a native frame is the game's own camera, which the veil never moves (a
+     * leave that went straight back within a tick draws some while it is open). */
+    if (lock_kind != 6 && (!veil_clear || output != adjusted)) atomic_fetch_add_explicit(&veil_behind, 1, memory_order_relaxed);
   }
   atomic_fetch_add_explicit(&forwarded, 1, memory_order_relaxed); call_original(camera, unit, output);
   if (diagnostics_changed) publish_diagnostics(&policy);

@@ -225,10 +225,11 @@ void tfp_camera_orphan_stats(TfpCameraOrphanStats *out);
  * off). That is two frames a leave, about 66 ms: in every leave soak 27 traced (131) the first head-camera frame is
  * drawn before the tick that sees the leave, the body still hidden, and the frame with the body comes after that
  * tick. The first is veiled too: from the hook it cannot be told from the first frame of a leave whose tick came
- * first, which would be the frame with the body. While it is open, a head-camera frame of a body on foot whose eye is less than TFP_CAMERA_VEIL_CLEAR in front
- * of the head, along the level view direction, is drawn with the eye moved forward to that distance; height, side and
- * rotation stay. Only the position handed to the game in that frame changes: the eye the swap holds and glides, the
- * continuity, the damping and the trace row are those of the eye before it.
+ * first, which would be the frame with the body. While it is open, a head-camera frame of a body on foot whose eye
+ * is less than TFP_CAMERA_VEIL_CLEAR in front of the head, along the level view direction, is drawn with the eye
+ * moved forward to that distance; height, side and rotation stay. Only the position handed to the game in that frame
+ * changes: the eye the swap holds and glides, the continuity, the damping and the trace row are those of the eye
+ * before it.
  * set_veil: each tick: the view is on and head visibility active, whatever rows of the head it owns: until the first
  * leave of a session it owns none, and that leave draws the head as every other does (soak 27, 12:41:45.163 and
  * 12:41:50.071). false: no veil opens, an open one closes.
@@ -238,9 +239,11 @@ void tfp_camera_orphan_stats(TfpCameraOrphanStats *out);
 void tfp_camera_set_veil(bool armed);
 void tfp_camera_veil_tick(bool hidden);
 /* Counts since the start: leaves the veil opened at; frames drawn while it was open; of them, frames whose eye it moved;
- * frames whose eye was not proven TFP_CAMERA_VEIL_CLEAR in front of the head (a native frame, a body off foot, a frame
- * the helper did not present): the body may have been in the view, so this one must stay 0. largest_m: the largest
- * move since the start. */
+ * behind: of them, frames other than the native view whose eye was not proven TFP_CAMERA_VEIL_CLEAR in front of the
+ * head (a body off foot, a frame the helper did not present, an eye it would not move): the body may have been in
+ * the view. Native frames drawn while it is open (a leave that goes straight back within a tick) are counted in
+ * `frames` only: they are the game's own camera, which the veil never moves. On foot `behind` stays 0. largest_m: the
+ * largest move since the start. */
 typedef struct TfpCameraVeilStats { uint64_t leaves, frames, moved, behind; float largest_m; } TfpCameraVeilStats;
 void tfp_camera_veil_stats(TfpCameraVeilStats *out);
 /* The tick's whole part in the veil (src/mod_view.c head_note calls it after head visibility's update, `tick` filled as
