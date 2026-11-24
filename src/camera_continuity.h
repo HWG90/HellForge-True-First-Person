@@ -293,7 +293,7 @@ typedef struct TfpContinuity {
   float largest;                         /* the largest correction carried since the reader last cleared it */
   bool traversal;                        /* round 24, set by the caller before each frame: a clamber's or a vault's (THE CLIMB) */
   bool settle_ok;                        /* round 24, set by the caller before each frame: THE SETTLE may begin or go on in it */
-  bool settling; uint32_t settle_source, steady; double settle_since; float settle[3], settle_step[3]; /* THE SETTLE: the eye held, in the root's frame; the new camera's last step there */
+  bool settling; uint32_t settle_source, steady; double settle_since; float settle[3], settle_step[3], settle_from; /* THE SETTLE: the eye held, in the root's frame; the new camera's last step there; how far apart the two were when it began */
   uint64_t settles;                      /* settles begun */
 } TfpContinuity;
 
@@ -751,13 +751,18 @@ static inline float tfp_continuity_step_cut(TfpContinuity *c, const float *wante
     if (!c->settling) { /* begun: the eye as this change of camera presents it, from here on fixed against the root */
       c->settling = true; c->settle_source = source; c->steady = 0; c->settle_since = tick; ++c->settles;
       for (unsigned i = 0; i < 3; ++i) { c->settle[i] = wanted[i]+value[i]; c->settle_step[i] = 0; }
+      c->settle_from = tfp_continuity_length(value);
     } else { /* steady: its step against the root is no jump against the step before it (it goes on evenly, or stands) */
       float moved[3], change[3];
       for (unsigned i = 0; i < 3; ++i) { moved[i] = wanted[i]-c->wanted[i]; change[i] = moved[i]-c->settle_step[i]; c->settle_step[i] = moved[i]; }
       c->steady = tfp_continuity_length(change) < measure ? c->steady+1 : 0;
     }
     for (unsigned i = 0; i < 3; ++i) held[i] = c->settle[i]-wanted[i];
-    if (!c->settle_ok || source != c->settle_source || quiet || !tfp_finite3(held)) c->settling = false; /* the frame's own answer stands */
+    /* the frame's own answer stands: another camera, full aim, not allowed, or the new camera's eye gone away from the
+     * held one by more than TFP_CONTINUITY_SETTLE_M (no re-seat: the body's own motion; soak 14, 04:02:12.999, the rig
+     * 0.9 m away within 250 ms of the entry; ended with an ease from rest there, its first step was 0.196 m) */
+    if (!c->settle_ok || source != c->settle_source || quiet || !tfp_finite3(held) || tfp_continuity_length(held) > c->settle_from+TFP_CONTINUITY_SETTLE_M)
+      c->settling = false;
     else {
       const bool over = c->steady >= TFP_CONTINUITY_SETTLE_FRAMES || tick-c->settle_since >= TFP_CONTINUITY_SETTLE_MS;
       float duration = t->max_ms, from_speed[3] = {0, 0, 0};
