@@ -1,5 +1,7 @@
 /* The "Gate:" line (src/gate_log.h): what is counted, when a second is worth a line, and the words. */
 #include "gate_log.h"
+#include <fenv.h>
+#include <math.h>
 static int checks, failed;
 #define CHECK(c) do { ++checks; if (!(c)) { ++failed; printf("FAILED line %d: %s\n", __LINE__, #c); } } while (0)
 static bool same(const char *a, const char *b) { if (strcmp(a, b)) printf("  got:  %s\n  want: %s\n", a, b); return !strcmp(a, b); }
@@ -80,6 +82,24 @@ int main(void) {
   CHECK(strlen(text) == 63);
   tfp_gate_line(&s, true, text, sizeof text);
   CHECK(strlen(text) < sizeof text-1 && strstr(text, "the first second of a native entry"));
+  /* Values that are no numbers (the game's memory can hold anything): counted as frames, left out of the least and
+   * most, and noting them leaves no floating-point flag behind: the count runs inside the game's own call. */
+  memset(&g, 0, sizeof g);
+  feclearexcept(FE_ALL_EXCEPT);
+  { TfpGateFrame f = scythe(false, false, -.2f); f.row_asked = f.row_read = true; f.row_11ac = NAN; f.lens = NAN; tfp_gate_note(&g, &f);
+    f.target = INFINITY; f.lens = 1; f.request_88 = NAN; tfp_gate_note(&g, &f); }
+  CHECK(fetestexcept(FE_ALL_EXCEPT) == 0);
+  tfp_gate_take(&g, &s);
+  CHECK(s.frames == 2 && s.lens_frames == 2 && s.lens_valued == 0 && s.row_frames == 2 && s.row_valued == 0 && s.applied == 2);
+  tfp_gate_line(&s, false, text, sizeof text);
+  CHECK(strstr(text, "; the lens read was no number; request+0x88 = ") && strstr(text, ", +0x11ac no number"));
+  { TfpGateFrame f = scythe(false, false, -.2f); f.row_asked = f.row_read = true; f.row_11ac = .5f; tfp_gate_note(&g, &f);
+    f.lens = NAN; f.row_11ac = NAN; tfp_gate_note(&g, &f); f = scythe(true, false, 0); f.row_asked = f.row_read = true; f.row_11ac = .25f; tfp_gate_note(&g, &f); }
+  CHECK(fetestexcept(FE_ALL_EXCEPT) == 0);
+  tfp_gate_take(&g, &s);
+  CHECK(s.lens_frames == 3 && s.lens_valued == 2 && s.row_valued == 2 && s.row11ac_min == .25f && s.row11ac_max == .5f);
+  tfp_gate_line(&s, false, text, sizeof text);
+  CHECK(strstr(text, "lens target 60.0 to 90.0 degrees, lens 63.8 to 67.6;") && strstr(text, "+0x11ac 0.2500 to 0.5000"));
   memset(&s, 0, sizeof s);
   CHECK(!tfp_gate_worth(&s)); /* no frames: nothing to say */
   printf("gate log: %d checks, %d failed\n", checks, failed);
