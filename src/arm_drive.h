@@ -224,6 +224,46 @@ bool tfp_arm_drive_release(void);
 /* NULL, or why the mod still holds something in the game. */
 const char *tfp_arm_drive_held(void);
 
+/* The support hand on the weapon's grip (round 23, 2026-11-24; src/offhand_grip.h, docs/design/specs/2026-11-24-offhand-grip.md).
+ * Off at the start and until this is called with true. on: the left hand of the drawn arms reaches the weapon's left-hand
+ * grip node (name 67C94E4B; a foregrip's or vertical grip's own node when one is fitted) as the gun is drawn, whenever the
+ * body's left hand is on that node in the world (the game pins it there, also while the rig is the view), by a two-bone
+ * reach of the upper arm, forearm and hand (rig nodes 10, 12, 13) on the poses the drive writes, with its step limits.
+ * one_handed: a handgun at the hip, held in one hand: the hand stays as the body holds it. While aiming the copy fades out
+ * (the drive's weight) and the game's own aim pose holds the gun; the reach is not asked for then. */
+void tfp_arm_drive_set_grip(bool on, bool one_handed);
+/* What the grip did in the driven frames since the last call, for the "Grip:" line (the call empties it). */
+enum {
+  TFP_ARM_GRIP_OFF = 0,   /* switched off */
+  TFP_ARM_GRIP_ONE_HANDED,/* a handgun at the hip */
+  TFP_ARM_GRIP_AIMING,    /* the copy is not shown (the drive's weight is 0): the game's aim pose */
+  TFP_ARM_GRIP_NO_GUN,    /* no gun on the rig */
+  TFP_ARM_GRIP_NO_NODE,   /* none of the gun's units carries a grip node */
+  TFP_ARM_GRIP_STALE,     /* the gun's units were not where the rig puts them, and no earlier reading of the grip is kept */
+  TFP_ARM_GRIP_FREE,      /* the body's left hand is not on any grip node (a reload, a weapon the game does not pin) */
+  TFP_ARM_GRIP_HELD,      /* the hand is on the grip */
+  TFP_ARM_GRIP_EASING,    /* on its way to the grip or back */
+  TFP_ARM_GRIP_FAR,       /* the grip is too far from the drawn hand or out of the arm's reach: as the body holds it */
+  TFP_ARM_GRIP_POSE,      /* the arm's pose was not usable this frame */
+  TFP_ARM_GRIPS
+};
+typedef struct TfpArmDriveGrip {
+  uint32_t frames, held;          /* driven frames with the grip switched on; of those, held on the grip */
+  uint32_t state;                 /* TFP_ARM_GRIP_* of the last frame */
+  uint32_t nodes, units;          /* grip nodes found on the gun's units, and those units, in the last frame */
+  bool attachment;                /* the node in use is on an attachment, not on the gun itself */
+  bool found;                     /* a node is in use */
+  float body_m;                   /* the body's left hand from the node in use, last frame */
+  float to_m, most_to_m;          /* the drawn hand from the grip as drawn: last frame, and the most while held */
+  float step_degrees, limit_degrees; /* the largest change of a joint's correction in one frame, and that frame's allowance */
+  float weight;                   /* last frame */
+} TfpArmDriveGrip;
+void tfp_arm_drive_grip_take(TfpArmDriveGrip *out);
+/* "60 frames, 60 held: on the attachment's grip (2 grip nodes on 3 units), the body's hand 0.002 m from it; hand 0.000 m from
+ * the grip (most 0.004), largest joint step 3.1 degrees (allowed 12.0), weight 1.00". A static buffer. */
+const char *tfp_arm_drive_grip_line(const TfpArmDriveGrip *grip);
+const char *tfp_arm_drive_grip_state_name(uint32_t state);
+
 void tfp_arm_drive_stats(TfpArmDriveStats *out);
 /* The log's words for an alignment taken or replaced: "aligned (weapon 472, at rest for 363 ms, layers 75:68:36,
  * confirmed, moved 0.213 m / 12.4 degrees from the one in use, eased); standing". A static buffer: game thread only. */
