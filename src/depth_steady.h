@@ -172,11 +172,12 @@ static inline uint32_t tfp_steady_passed(const TfpSteadySecond *s) {
   uint32_t n = 0; for (unsigned i = 1; i < TFP_STEADY_REASONS; ++i) n += s->passed[i];
   return n;
 }
-/* Worth a line: something was added, or a frame was passed for its values or for the game's scaling, or (switched
+/* Worth a line: something was added, or a frame was passed for its values or for the game's scaling, or more than two
+ * frames went by without the evaluator's lens (one or two are a lease beginning), or (switched
  * off) the game's own depth moved by more than a millimetre, which is what would have been held. A calm second is not. */
 static inline bool tfp_steady_worth(const TfpSteadySecond *s) {
   if (!s->frames) return false;
-  if (s->shifted || s->passed[TFP_STEADY_RANGE] || s->passed[TFP_STEADY_SCALED]) return true;
+  if (s->shifted || s->passed[TFP_STEADY_RANGE] || s->passed[TFP_STEADY_SCALED] || s->passed[TFP_STEADY_NO_LENS] > 2) return true; /* more than two frames without the lens: it is not being held, and the log has to say so */
   if (!s->off || !(s->gated.count+s->clear.count)) return false;
   float least = s->gated.count ? s->gated.least : s->clear.least, most = s->gated.count ? s->gated.most : s->clear.most;
   if (s->clear.count && s->clear.least < least) least = s->clear.least;

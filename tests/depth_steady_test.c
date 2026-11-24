@@ -268,6 +268,9 @@ int main(void) {
     tfp_steady_note(&log, TFP_STEADY_NO_LENS, 0, 0, 0, 0, .3f); tfp_steady_note(&log, TFP_STEADY_NO_LENS, 0, 0, 0, 0, .3f);
     tfp_steady_take(&log, &s);
     CHECK(!tfp_steady_worth(&s));
+    for (int i = 0; i < 3; ++i) tfp_steady_note(&log, TFP_STEADY_NO_LENS, 0, 0, 0, 0, .3f);
+    tfp_steady_take(&log, &s);
+    CHECK(tfp_steady_worth(&s)); /* three frames without the lens: nothing is being held, and that is worth saying */
     tfp_steady_note(&log, TFP_STEADY_NO_LENS, 0, 0, 0, 0, .3f); tfp_steady_note(&log, TFP_STEADY_SCALED, 1, .2f, 0, 0, .3f); tfp_steady_note(&log, TFP_STEADY_RANGE, 0, 0, 0, 0, NAN);
     tfp_steady_note(&log, 99, 0, 0, 0, 0, .3f);
     tfp_steady_take(&log, &s);
