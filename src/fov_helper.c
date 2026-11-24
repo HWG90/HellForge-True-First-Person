@@ -639,10 +639,10 @@ static volatile uint32_t lock_frame_open, lock_frame_aim; /* open: the hooked ca
 static bool lock_recent(double at, double tick) { return at > 0 && tick >= at && tick - at <= TFP_FOV_LOCK_STALE_MS; }
 static float lock_field(void *camera, float native, float applied, bool aiming, bool decides) {
   const float wanted = lock_radians;
-  lock_seen_native = native;
   if ((uint64_t)(uintptr_t)camera != atomic_load_explicit(&lock_camera, memory_order_relaxed)) {
     tfp_fov_lock_reset(&lock_state); lock_shown = 0; lock_frame_open = 0; lock_frame_at = lock_tail_at = 0; return applied;
   }
+  lock_seen_native = native; /* the armed camera's only: the "Aim:" line's game field of view (review N3) */
   const float aim_field = lock_aim;
   /* A chosen field of view in aim holds with the lock off too: this frame's aim, or the hooked call's, decides. */
   const bool chosen_aim = aim_field > 0 && (decides ? aiming : lock_frame_aim != 0);

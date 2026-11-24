@@ -160,6 +160,10 @@ int main() {
     // next frame begins from what the game shows, not from the locked value. ----
     CHECK(frame(dt, true) == NATIVE);
     CHECK(stats().shown_radians == 0 && stats().applied == 121);
+    // the game's field of view the "Aim:" line reports is the armed camera's, not another camera's (review N3)
+    sent.seen = false;
+    tfp_fov_setter_from(W.a[A_GAME] + HERE.call + 6, reinterpret_cast<void *>(W.a[A_CAMERA] + 0x800), .3f);
+    CHECK(sent.seen && sent.radians == .3f && stats().game_radians == NATIVE);
     CHECK(frame(dt) == base && stats().shown_radians == base);
     float next = frame(dt);
     CHECK(next > base && next < base + (LOCKED - base) * .2f);
