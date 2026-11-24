@@ -257,6 +257,22 @@ as hard for the rest), to the head camera's own eye:
   weapon whose eye is remembered (the eye's return, `TFP_ACTION_EYE_RETURN`, now also while the eye is being let go,
   where it waited for the fade to end before), which glides on to that eye at the release's rates, not the swap's
   250 ms;
+- that take-over carries the eye's speed only as far as it can lose it before the new eye (`tfp_eye_glide_take_over`,
+  THE TAKE-OVER): along the way the eye is going, all of it when v^2 <= 2 a d (a: the running glide's own hardest rate,
+  13.5 m/s^2 at least; d: the way to the new eye along the motion), on a glide shortened where it must be so that it
+  comes to rest along the motion at the new eye itself; otherwise none of it, the eye eased to rest on its line at that
+  rate (v^2 / 2a further on, never past where it was going: a release from rest never goes faster than that rate stops
+  at its own target) and then from rest straight to the new eye. (The review of round 19 found the take-over carrying
+  all of it: an emote with the rifle up, the sidearm drawn 260 to 360 ms into the release, the eye going 2 m/s toward
+  the head camera's eye and the sidearm's 0.07 m short of it; it went up to 0.026 m past the head camera's eye for a
+  held 0.44 m and 0.063 m for 0.70 m, and came back.) Arithmetic alone (`tests/camera_glide_test.c`, `take_over`): the
+  other eye drawn every frame (every second at 8 ms) from 0 to 450 ms into the release, forward and reverse, 0.44 and
+  0.70 m, on a line and 0.06 m off it, 8 to 50 ms a frame: 0.000002 m outside the span of the held eye, the incoming eye
+  and the head camera's own at most (was 0.071), never past the head camera's eye (was 0.069), no frame over the judge's
+  limit or that frame of the release alone, at the incoming eye within 533 ms of the draw. Through the helper (`hold_release`,
+  scene 8; drawn every 10 ms while the release is under way, continuity off and on): outside the span 0 (was up to
+  0.063 m), past the head camera's eye 0 (was 0.062), the highest point ahead of the head node 0.180, the head
+  camera's eye, as on main (was 0.194 to 0.243), largest change of step that of the release alone (0.0009 to 0.043 m);
 - without the lock it is retail's fade, unchanged (`tests/run-native.sh`).
 
 Through the helper (`tests/camera_glide_helper_test.cpp`, `hold_release`, on the fake game memory, continuity off and
@@ -278,7 +294,8 @@ The head camera's eye now stays off the head for up to 450 ms more than the fade
 
 - The eye only moves along the line from the held eye to the head camera's own eye, towards the latter, and never
   past it: it was at the held eye, 0.44 m off, for the 900 ms before, and the release shortens that, it adds no new
-  place off that line. Passing through the head on that line is what the fade did too, in three frames.
+  place off that line. Passing through the head on that line is what the fade did too, in three frames. A take-over
+  keeps the eye inside the span of the held eye, the incoming eye and the head camera's own, never past the latter.
 - What is around the head is hidden in the head camera: head visibility takes the head (5 meshes), torso and shoulders
   (31 meshes) out of the camera's sight on the tick after the view leaves the native view, and nothing in the logs
   shows them drawn again inside a head-camera stretch. Soak 27: at each of the three releases the last `Head:` line
