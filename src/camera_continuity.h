@@ -162,6 +162,26 @@
  *    later: more than 0.05 m was carried for 469 ms after that change of camera where it had been 435 ms. Without
  *    the floor, either way, a creep of 0.04 m/s was let down too and a step of the logs went from 0.05993 to
  *    0.06005 m.)
+ *    THE LET-DOWN AT A SLOWING. A frame followed as the motion slowing down drops the kept speed whole. Straight after
+ *    frames taken up the presented eye was still going at that speed (all of one believed when a run's time was over,
+ *    what was left of a lent one), and it is the presented eye's step that drops. Seen in the Stable soak of 2026-11-23
+ *    on 0.6.0-feel.45 (tests/reference/soak-slowing-steps.h): the native view entered in a swap, the rig eye thrown
+ *    forwards for four frames, 4.7 m/s believed (0.156 m a frame) with the presented eye 0.87 m behind and gathering
+ *    that speed along the curve; the next frame went 0.048 m the same way, and the presented eye, which had 0.87 m to
+ *    catch up, was thrown back: 0.114 m of step change, 0.046 m further from the eye it was closing on, and 0.061 m in
+ *    the frame after. In a dive, 6.4 m/s believed and 0.044 m gone: 0.144, 0.080 and 0.066 m, 0.131 m further behind.
+ *    So in such a frame (followed as slowing down, over the measure, the frame before taken up; not a stop, which is
+ *    THE STOP's) the part of the speed dropped that points at the wanted eye is kept by the presented eye and let down
+ *    by pop_accel a frame, as a lent speed is, and sooner where the way to the wanted eye is shorter than that takes:
+ *    it never goes past the wanted eye along that way, nor does the curve take it past (the way counts less what the
+ *    curve's own speed needs: without that, 0.007 m past at 00:25:52.043 of the feel.40 soaks). What it goes is
+ *    taken off what is carried; the curve keeps its end. Only where that part's step is over the measure. The frames are asked as before: none is taken up or
+ *    followed that was not, and the kept speed is the wanted eye's new one at once.
+ *    The part that points away from the wanted eye, or across, is dropped as it was. That is the larger steps of the
+ *    feel.44 soak: going prone out of an emote, 7.7 m/s lent, the presented eye 0.32 m past a rig eye that all but
+ *    stands and 5.3 m/s dropped at once, 0.182 m of step change for the rig eye's own 0.070 m (three times, and 0.074 m
+ *    for a speed believed). To let that down is to go on away from the wanted eye, the eye coasting past a stop: tried
+ *    in several ways and left (docs/design/specs/2026-11-22-locked-view-design.md, round 7).
  *  - The catch-up is a cubic with zero end speed whose length follows from the distance, so that its largest
  *    acceleration is ease_accel: sqrt(6 * distance / ease_accel), between min_ms and max_ms. A new jump during a
  *    catch-up starts the curve again from the correction's present value and speed.
@@ -185,6 +205,7 @@ typedef struct TfpContinuity {
   uint32_t source, run;
   bool neared;                           /* the present run has had its frame under the measure */
   bool lent; float left;                 /* the kept speed is the camera before's (THE LENT SPEED); how much of it the presented eye still has (1: all) */
+  float coast[3];                        /* THE LET-DOWN AT A SLOWING: what the presented eye still has of a speed dropped, towards the wanted eye (m/s) */
   bool paused; float before[3];          /* last frame was followed as the eye stopping (THE STOP); the speed kept until then (THE HITCH) */
   bool calm, fresh;                      /* the last frame was followed; the kept speed was believed when a run's time was over or at once straight after a
                                           * frame taken up, and no frame has been followed since that went on within the measure of it or after another followed */
@@ -408,7 +429,7 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
               && tfp_continuity_length(spun) > measure/2 && swing_size < measure/2;
       freely = !onset && isfinite(loose_size) && (apart || (swung && (edge || both)));
       if (freely || swung || onset) { /* what is carried does not go round with the axes */
-        tfp_continuity_turn(turn, c->from); tfp_continuity_turn(turn, c->from_speed);
+        tfp_continuity_turn(turn, c->from); tfp_continuity_turn(turn, c->from_speed); tfp_continuity_turn(turn, c->coast);
         tfp_continuity_curve(c, tick, value, speed);
       }
       if (freely) { /* nor does the eye's speed: it keeps its direction in the world */
@@ -425,7 +446,7 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
   if (reseat && !freely) {
     /* What is carried, and the eye's speed, keep their direction in the world: they are turned by as much as the
      * root's axes are off their even course. */
-    tfp_continuity_turn(off, c->from); tfp_continuity_turn(off, c->from_speed); tfp_continuity_turn(off, c->speed); tfp_continuity_turn(off, c->before);
+    tfp_continuity_turn(off, c->from); tfp_continuity_turn(off, c->from_speed); tfp_continuity_turn(off, c->coast); tfp_continuity_turn(off, c->speed); tfp_continuity_turn(off, c->before);
     tfp_continuity_turn(off, c->held);
     for (unsigned i = 0; i < TFP_CONTINUITY_SPEED_FRAMES; ++i) tfp_continuity_turn(off, c->recent[i]);
     tfp_continuity_curve(c, tick, value, speed);
@@ -475,6 +496,26 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
   const bool jump = !quiet && !edge && detect && (over || near) && !slowing && !onset && !resumed && !returned;
   const bool believe = jump && !within; /* jumps for longer than the run: a new speed, not a re-seated rig */
   const bool take = !quiet && size > 1e-4f && (edge || jump);
+  /* THE LET-DOWN AT A SLOWING: the frame before was taken up and this one is followed as slowing down. What the
+   * presented eye still had of the kept speed, less this frame's own, as far as it points at the wanted eye. */
+  if (!take && !quiet && !c->calm && over && slowing && !stopped) {
+    const float share = c->lent ? c->left : 1, far = tfp_continuity_length(value); float on = 0;
+    for (unsigned i = 0; i < 3; ++i) on -= far > 1e-6f ? (share*c->speed[i]-step[i]/dt)*value[i]/far : 0;
+    if (isfinite(on) && on*dt > measure) for (unsigned i = 0; i < 3; ++i) c->coast[i] = -on*value[i]/far;
+  }
+  /* How far the presented eye goes on in this frame on what it still has: pop_accel less than in the frame before,
+   * and no more than leaves it room to come to rest at the wanted eye at that rate (n frames more). The room is the
+   * way to the wanted eye less what the curve needs for the speed it has: a cubic from `d` closing at `v` with `T` to
+   * go passes its end when d is under v T / 3. */
+  float glide[3] = {0, 0, 0};
+  { const float fast = tfp_continuity_length(c->coast), down = t->pop_accel*dt*dt; float room = 0, closing = 0, most = 0;
+    if (fast > 0 && isfinite(fast) && !quiet && down > 0) {
+      for (unsigned i = 0; i < 3; ++i) { room -= value[i]*c->coast[i]/fast; closing += speed[i]*c->coast[i]/fast; }
+      if (c->active && closing > 0) room -= closing*(float)(c->started+c->duration-tick)/3000;
+      if (room > 0) { const float n = floorf((sqrtf(1+8*room/down)-1)/2); most = (room+down*n*(n+1)/2)/(n+1); }
+    }
+    const float go = fminf(fast*dt-down, most);
+    for (unsigned i = 0; i < 3; ++i) { glide[i] = go > 0 ? c->coast[i]/fast*go : 0; c->coast[i] = go > 0 ? glide[i]/dt : 0; } }
   if (take) {
     float next[3], from_speed[3], rate = 0;
     /* THE LENT SPEED: the presented eye is let down from it, as far as the speed whose step in a frame is the measure. */
@@ -483,7 +524,7 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
       const float fast = tfp_continuity_length(c->speed)*c->left, slower = fmaxf(fast-t->pop_accel*dt, fminf(fast, measure/dt));
       if (fast > 0 && isfinite(fast)) c->left *= slower/fast;
     } else c->left = 1;
-    for (unsigned i = 0; i < 3; ++i) { next[i] = value[i]-difference[i]-(1-c->left)*expected[i]; from_speed[i] = speed[i]; }
+    for (unsigned i = 0; i < 3; ++i) { next[i] = value[i]-difference[i]-(1-c->left)*expected[i]+glide[i]; from_speed[i] = speed[i]; }
     float length = tfp_continuity_length(next);
     if (length > t->max_m) { for (unsigned i = 0; i < 3; ++i) next[i] *= t->max_m/length; length = t->max_m; }
     if (believe) {
@@ -510,6 +551,10 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
     if (believe) c->fresh = true; /* believed in this frame: no frame has gone on at it yet */
     /* otherwise the wanted eye's speed is kept: after a jump it goes on as it went */
   } else {
+    if (tfp_continuity_length(glide) > 0 && c->active) { /* the curve as it was, from where the eye now is: its end is not put off */
+      for (unsigned i = 0; i < 3; ++i) value[i] += glide[i];
+      tfp_continuity_begin(c, value, speed, tick, (float)(c->started+c->duration-tick));
+    }
     c->run = 0; c->neared = false; c->lent = false;
     /* the kept speed is dropped whole in this frame: what it was is kept for one frame more, unless it was believed
      * only the frame before, out of a run of jumps or straight after a frame taken up (the eye was not going steadily) */
