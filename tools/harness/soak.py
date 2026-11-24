@@ -15,7 +15,9 @@ The view is switched on at the start if it is not, and is not toggled (toggling 
 The camera style (Bodycam or Stable) is the log's: the last "Camera style:" line before the first action is printed
 at the top, a change of style inside the run where it falls, and the summary says whether the run had one style. No
 argument and no file name says it (the two feel.49 soaks of 2026-11-24 were named the wrong way round). The summary
-also counts the flagged frames by whose they are, and how many of the eye's own lie along the view.
+also counts the flagged frames by whose they are, and how many of the eye's own lie along the view. Round 19: the eye
+judged is the eye shown (the row's eye plus the helmet veil's move, veil=), and a frame flagged for the veil alone is
+"the veil's", counted apart from the eye's own.
 """
 import random
 import sys
@@ -57,7 +59,7 @@ def counted(pops):
     """The summary's words for the frames at or over the limit: how many, whose, the largest."""
     counts = matrix.whose_counts(pops)
     flagged = [p for p in pops if p["whose"] != "body"]
-    return (f"{len(flagged)} frames flagged ({counts['own']} the eye's own, {counts['along']} of them along the view; {counts['filter']} the filter's), "
+    return (f"{len(flagged)} frames flagged ({counts['own']} the eye's own, {counts['along']} of them along the view; {counts['filter']} the filter's; {counts['veil']} the veil's), "
             f"largest {max([0.0] + [p['beyond'] for p in flagged]):.3f} m; {counts['body']} the body's own, not counted")
 
 

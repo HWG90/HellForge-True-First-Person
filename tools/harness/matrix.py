@@ -124,8 +124,9 @@ def style_summary(start, lines):
 
 
 def whose_counts(pops):
-    """How many of the listed frames are whose: own, filter, body; along: those of the eye's own that lie along the view."""
-    counts = {"own": 0, "filter": 0, "body": 0, "along": 0}
+    """How many of the listed frames are whose: own, filter, body, veil (round 19); along: those of the eye's own that
+    lie along the view."""
+    counts = {"own": 0, "filter": 0, "body": 0, "veil": 0, "along": 0}
     for p in pops:
         counts[p["whose"]] += 1
         counts["along"] += _along_named(p)
@@ -138,9 +139,22 @@ def _along_named(p):
     return p["whose"] == "own" and p.get("along") is not None and p["along"] >= POP_M and p["across"] < POP_M
 
 
+def _shown(row):
+    """The eye shown in a frame: the row's eye plus the helmet veil's move of it (round 19; trace.frames "veil")."""
+    veil = row.get("veil")
+    return [e + v for e, v in zip(row["eye"], veil)] if veil else row["eye"]
+
+
+def _veil(row):
+    return _length(row["veil"]) if row.get("veil") else 0.0
+
+
 def measure(rows):
     """One dict for every three consecutive frames of `rows` (trace.frames), named for the third:
-      shown    how much the presented eye's step changed, as a vector: |(c-b) - (b-a)|
+      shown    how much the presented eye's step changed, as a vector: |(c-b) - (b-a)|. The presented eye is the eye
+               shown: the row's eye plus veil= where the line has it (round 19: the helmet veil moved the eye handed
+               to the game up to 0.32 m forward for a frame or two at a leave of the native view, after the row was
+               written, and no judge saw it)
       lengths  the same by the lengths of the two steps, ||c-b| - |b-a||: the measure until round 10 (2026-11-24).
                It does not see a change of direction: 0.04 m forwards and then 0.04 m back is 0.08 m and counted 0;
                the arc of 08:12:09.5 in the Stable soak of that day, eight frames of 0.07 to 0.10 m, read as one 0.100.
@@ -148,9 +162,11 @@ def measure(rows):
       body     what was taken off for the body's own change of step (0: nothing)
       after    how many frames after the root's that is: 0 (with the root), 1 (with the rig eye), None (nothing)
       beyond   shown less that: what is judged against POP_M
-      whose    "body" (shown is POP_M or more and beyond is not), "own" (the wanted eye makes 0.8 of it and under
-               OWN_M is carried: the eye's own start or stop, the filter did nothing), "filter" (anything else), or
-               None under POP_M
+      whose    "body" (shown is POP_M or more and beyond is not), "veil" (one of the three frames was moved by the
+               veil, and the same measure of the eye before it is under POP_M: the veil's alone), "own" (the wanted eye
+               makes 0.8 of it, of the eye before the veil where the veil moved one of the frames, and under OWN_M is carried: the eye's own start or stop, the filter did nothing),
+               "filter" (anything else), or None under POP_M
+      veil     the largest move of the veil in the three frames (m; 0: none)
       along, across  the vector that is judged (the shown eye's change, less the body's where that is taken off) split
                along the third frame's view= and across it; None where the line has no view=. Printed, and "the eye's
                own" is named "along the view" where that is where it lies. Nothing is excused or counted otherwise
@@ -186,8 +202,9 @@ def measure(rows):
         a, b, c = rows[i - 2:i + 1]
         if not (0 < b["tick"] - a["tick"] <= GAP_MS and 0 < c["tick"] - b["tick"] <= GAP_MS):
             continue
-        one, two = _sub(b["eye"], a["eye"]), _sub(c["eye"], b["eye"])
-        change = {"eye": _sub(two, one), "lengths": abs(_length(two) - _length(one)), "wanted": None, "root": None}
+        one, two = _sub(_shown(b), _shown(a)), _sub(_shown(c), _shown(b))
+        change = {"eye": _sub(two, one), "lengths": abs(_length(two) - _length(one)), "wanted": None, "root": None,
+                  "bare": _sub(_sub(c["eye"], b["eye"]), _sub(b["eye"], a["eye"])), "veil": max(_veil(a), _veil(b), _veil(c))}
         for key in ("wanted", "root"):
             if a[key] and b[key] and c[key]:
                 change[key] = _sub(_sub(c[key], b[key]), _sub(b[key], a[key]))
@@ -214,11 +231,13 @@ def measure(rows):
         c, b = rows[i], rows[i - 1]
         shown = _length(change["eye"])
         beyond, body, after, judged = shown, 0.0, None, change["eye"]
+        bare = _length(change["bare"])   # the same measure of the eye before the veil
         if i in lunge:
             root = changes[lunge[i]]["root"]
             left = _length(_sub(change["eye"], root))
             if left < beyond:
                 beyond, body, after, judged = left, _length(root), i - lunge[i], _sub(change["eye"], root)
+                bare = min(bare, _length(_sub(change["bare"], root)))
         along = across = None
         view = c.get("view")
         if view and _length(view) > 0.5:
@@ -229,13 +248,16 @@ def measure(rows):
         if shown >= POP_M:
             if beyond < POP_M:
                 whose = "body"
-            elif wanted is not None and wanted >= 0.8 * shown and b["carried"] < OWN_M and c["carried"] < OWN_M:
+            elif change["veil"] > 0 and bare < POP_M:
+                whose = "veil"
+            elif wanted is not None and wanted >= 0.8 * (bare if change["veil"] > 0 else shown) and b["carried"] < OWN_M and c["carried"] < OWN_M:
                 whose = "own"
             else:
                 whose = "filter"
         found.append({"at": c["at"], "written": c["written"], "tick": c["tick"], "kind": c["kind"], "looked": c["looked"], "taken": c["taken"], "carried": c["carried"], "shown": shown,
                       "lengths": change["lengths"], "wanted": wanted, "root": _length(change["root"]) if change["root"] else None,
-                      "body": body, "after": after, "beyond": beyond, "whose": whose, "along": along, "across": across})
+                      "body": body, "after": after, "beyond": beyond, "whose": whose, "along": along, "across": across,
+                      "veil": change["veil"]})
     return found
 
 
@@ -258,8 +280,11 @@ def pop_lines(result, indent="       "):
     out = []
     for p in result.get("pops", []):
         body = "the body's own" + {0: "", 1: " a frame after the root, with the wanted eye"}.get(p.get("after"), "") + ", not counted"
-        who = {"body": body, "own": "the eye's own, along the view" if _along_named(p) else "the eye's own (nothing carried)", "filter": "the filter's"}[p["whose"]]
+        who = {"body": body, "own": "the eye's own, along the view" if _along_named(p) else "the eye's own (nothing carried)", "filter": "the filter's",
+               "veil": "the veil's (the eye moved in front of the head at a leave of the native view)"}[p["whose"]]
         split = "" if p.get("along") is None else f" (along the view {p['along']:.3f}, across {p['across']:.3f})"
+        if p.get("veil"):
+            split += f", veil {p['veil']:.3f}"
         wanted = "-" if p["wanted"] is None else f"{p['wanted']:.3f}"
         root = "-" if p["root"] is None else f"{p['root']:.3f}"
         when = p["at"] if p.get("written", p["at"]) == p["at"] else f"{p['at']} (written {p['written']})"

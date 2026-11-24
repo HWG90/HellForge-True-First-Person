@@ -413,9 +413,80 @@ class CameraStyle(unittest.TestCase):
             out = [f"19:00:{second:02d}.000 Camera style: {style} (words)", HELD]
             return out + [viewed(1000.0 * second + 33.0 * i, (0.0, 1.0 + x, 2.0), (0.0, 1.0, 0.0), looked=0) for i, x in enumerate(eyes)]
         text = soak.judge_log(stretch(1, "Bodycam") + stretch(5, "Stable") + [viewed(9000.0, (5.0, 1.0, 2.0), (0.0, 1.0, 0.0))])
-        self.assertEqual(text[0], "camera style: Bodycam (the log's line of 19:00:01.000), 30 frames held, 0 missed: 2 frames flagged (2 the eye's own, 2 of them along the view; 0 the filter's), largest 0.100 m; 0 the body's own, not counted")
-        self.assertEqual(text[1], "camera style: Stable (the log's line of 19:00:05.000), 30 frames held, 0 missed: 2 frames flagged (2 the eye's own, 2 of them along the view; 0 the filter's), largest 0.100 m; 0 the body's own, not counted")
+        self.assertEqual(text[0], "camera style: Bodycam (the log's line of 19:00:01.000), 30 frames held, 0 missed: 2 frames flagged (2 the eye's own, 2 of them along the view; 0 the filter's; 0 the veil's), largest 0.100 m; 0 the body's own, not counted")
+        self.assertEqual(text[1], "camera style: Stable (the log's line of 19:00:05.000), 30 frames held, 0 missed: 2 frames flagged (2 the eye's own, 2 of them along the view; 0 the filter's; 0 the veil's), largest 0.100 m; 0 the body's own, not counted")
         self.assertEqual(len(text), 2)
+
+
+def drawn(ms, eye, view, veil=None, kind=6, **more):
+    """A Trace line as round 19 on writes it: what the arm drive drew, and veil= last (the helmet veil's move of the
+    eye handed to the game, or 0)."""
+    tail = "0" if veil is None else f"({veil[0]:.5f} {veil[1]:.5f} {veil[2]:.5f})"
+    return viewed(ms, eye, view, kind=kind, **more) + f" sock=0.00000 arms=0 eye_edge=0 veil={tail}"
+
+
+class Veil(unittest.TestCase):
+    """Round 19: the helmet veil (src/camera_helper.c veil_apply) moves the eye handed to the game after the Trace row is
+    written; round 18 found it moving the shown eye up to 0.32 m forward for one or two frames at most leaves of the
+    native view, and no judge saw it. Now the row says the move (veil=), and the judge measures the shown eye, eye +
+    veil. A frame flagged only for the veil is "the veil's", counted apart from the eye's own. A row without veil=
+    (before round 19) or with veil=0 reads as before."""
+    VIEW = (0.0, 1.0, 0.0)
+    MOVE = (0.0, 0.32, 0.0)   # the LAS-5 Scythe's held eye 0.22 m behind the head, moved to 0.10 m in front
+
+    def leave(self, dt, veiled=(1, 2), walk=0.0, own=None):
+        """Eight native frames, then the head camera; the eye goes on at `walk` metres a frame along y, the veil moves
+        the head-camera frames numbered in `veiled` (1: the first). `own`: (frame, metres) an eye's own jump along x."""
+        out = ["19:00:00.000 State: left the native view", HELD]
+        for i in range(16):
+            eye = [0.0, 1.0 + walk * i, 2.0]
+            if own and i >= own[0]:
+                eye[0] += own[1]
+            head = i - 7
+            out.append(drawn(dt * i, eye, self.VIEW, veil=self.MOVE if head in veiled else None, kind=4 if head >= 1 else 6,
+                             wanted=eye, root=(0.0, walk * i, 0.0), looked=0))
+        return out
+
+    def test_the_veils_frames_are_flagged_as_the_veils_at_every_frame_time(self):
+        for dt in (8.0, 16.7, 33.3, 50.0):
+            for walk in (0.0, 0.04):
+                result = matrix.judge(self.leave(dt, walk=walk))
+                self.assertFalse(result["pass"], (dt, walk))
+                self.assertGreater(result["largest_jump_m"], 0.3, (dt, walk))
+                pops = result["pops"]
+                self.assertTrue(pops)
+                self.assertTrue(all(p["whose"] == "veil" for p in pops), [(p["whose"], p["beyond"]) for p in pops])
+                self.assertTrue(all(abs(p["veil"] - 0.32) < 1e-6 for p in pops))
+                counts = matrix.whose_counts(pops)
+                self.assertEqual((counts["veil"], counts["own"], counts["filter"]), (len(pops), 0, 0))
+                text = matrix.pop_lines(result)
+                self.assertTrue(all("the veil's" in t and "veil 0.320" in t for t in text), text)
+
+    def test_one_veiled_frame_is_two_changes_of_step(self):
+        # veil_second.txt: only the frame with the body moved: in, and out again
+        result = matrix.judge(self.leave(33.3, veiled=(2,)))
+        self.assertEqual([round(p["beyond"], 3) for p in result["pops"]], [0.32, 0.64, 0.32])
+        self.assertEqual({p["whose"] for p in result["pops"]}, {"veil"})
+
+    def test_the_row_keeps_the_eye_before_the_veil(self):
+        rows = trace.frames(self.leave(33.3))
+        self.assertEqual([r["veil"] for r in rows[7:11]], [None, list(self.MOVE), list(self.MOVE), None])
+        self.assertEqual(rows[8]["eye"], [0.0, 1.0, 2.0])
+
+    def test_without_the_veil_the_figures_are_as_before(self):
+        plain = self.leave(33.3, veiled=(), own=(10, 0.2))
+        old = [line.split(" sock=")[0] for line in plain]   # a feel.51 line: no sock=, no veil=
+        keep = lambda r: [(p["tick"], round(p["shown"], 6), round(p["beyond"], 6), p["whose"]) for p in r["pops"]]
+        self.assertEqual(keep(matrix.judge(plain)), keep(matrix.judge(old)))
+        self.assertTrue(all(p["whose"] == "own" for p in matrix.judge(plain)["pops"]))
+        self.assertTrue(all(p["veil"] == 0 for p in matrix.judge(old)["pops"]))
+
+    def test_an_eyes_own_jump_under_the_veil_is_still_the_eyes_own(self):
+        # the eye jumps 0.2 m sideways in the second veiled frame: over the limit without the veil, so not the veil's
+        result = matrix.judge(self.leave(33.3, own=(9, 0.2)))
+        whose = {p["tick"]: p["whose"] for p in result["pops"]}
+        self.assertEqual(whose[1000000 + 33.3 * 9], "own")
+        self.assertIn("veil", whose.values())
 
 
 class SeenInTheGame(unittest.TestCase):

@@ -34,5 +34,14 @@ class SoakWholeLog(unittest.TestCase):
         self.assertEqual([p["tick"] for p in soak.unlisted(whole, soak.listed([whole[0]]))], [182331190.535])
 
 
+class SoakCounts(unittest.TestCase):
+    def test_the_veils_frames_are_counted_apart(self):
+        # Round 19: a frame flagged for the helmet veil's move is the veil's, not the eye's own.
+        pops = [{"whose": "own", "beyond": 0.07, "along": None}, {"whose": "veil", "beyond": 0.32, "along": 0.32, "across": 0.0},
+                {"whose": "body", "beyond": 0.01, "along": None}]
+        self.assertEqual(soak.counted(pops), "2 frames flagged (1 the eye's own, 0 of them along the view; 0 the filter's; 1 the veil's), "
+                                             "largest 0.320 m; 1 the body's own, not counted")
+
+
 if __name__ == "__main__":
     unittest.main()

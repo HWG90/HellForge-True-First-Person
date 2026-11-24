@@ -31,6 +31,8 @@ GAP_MS = 80.0   # two traced frames further apart than this are not consecutive 
 # and what the arm drive drew in the frame and whether the eye opened the window itself (round 13: sock, arms, eye_edge).
 VIEW = re.compile(r" view=\(([-\d. ]+)\)")
 DRAWN = re.compile(r" sock=(-?[\d.]+) arms=(\d+)(?: eye_edge=(\d))?")
+# Round 19: the helmet veil's move of the eye handed to the game, after eye_edge=: "veil=0" or "veil=(x y z)".
+VEIL = re.compile(r" veil=(?:\(([-\d. ]+)\)|0\b)")
 
 
 def newest():
@@ -71,7 +73,9 @@ def frames(lines):
     view (the unit vector the view pointed along; None where the line has none), sock (m: the weapon socket as the arm
     drive drew it less the game's own, along the view), arms (0 not driven or not known, 1 driven and the game's joint
     values put back, 2 driven and the written values left, 3 driven in a hold) and eye_edge (1: the eye opened the
-    window itself); those three are None on a line from before round 13.
+    window itself); those three are None on a line from before round 13. veil: how far the helmet veil moved the eye
+    handed to the game in that frame (round 19), a vector, or None where it moved nothing or the line does not say
+    (before round 19). "eye" is the eye before the veil; the eye shown is eye + veil.
     windows() ends a window at every State line, and frames on either side of one were never measured against each
     other (the Stable soak of 2026-11-24: 0.120 m at a landing, 08:18:55.525, with "State: left the native view"
     between its frames); nor were the frames a stretch of the log begins with before its first State line. Here a
@@ -102,6 +106,8 @@ def frames(lines):
         row["view"] = numbers(view[1]) if view else None
         row["sock"], row["arms"] = (float(drawn[1]), int(drawn[2])) if drawn else (None, None)
         row["eye_edge"] = int(drawn[3]) if drawn and drawn[3] else None
+        veil = VEIL.search(line)
+        row["veil"] = numbers(veil[1]) if veil and veil[1] else None
         if group and row["t"] < group[-1]["t"] - 1:   # an edge without a State line: t starts again
             groups.append(group)
             group = []
