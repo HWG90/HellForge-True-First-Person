@@ -12,6 +12,9 @@
  * still changes depth, Shift still makes it fine; the arrows still move; the help line reads
  * "Wheel: depth   Arrows: move". What it cannot show: which keys the overlay host polls in the game
  * (src/mod_editor.c KEYS). */
+#ifdef TFP_ED_RETAIL_PAGE_KEYS
+#error "this test checks the shipped editor: build without TFP_ED_RETAIL_PAGE_KEYS"
+#endif
 #include "placement_editor.h"
 #include <math.h>
 #include <stdio.h>
