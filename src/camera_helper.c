@@ -1430,7 +1430,8 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
                 /* Beyond retail: the eye let go (hands empty for longer than the tolerance) and a weapon whose eye
                  * is known is being drawn. Start from where the eye is and glide to that eye, so the native view
                  * returns to a camera that is already there. (Round 19: while it is being let go, from where it is
-                 * and the way it is going: the release glides on to that eye. That glide stays a release until it ends,
+                 * and the way it is going: the release glides on to that eye, carrying the eye's speed only as far as
+                 * it can lose it before that eye, src/camera_glide.h THE TAKE-OVER. That glide stays a release until it ends,
                  * so this branch runs again in every frame of it and starts the hold anew each time: the 2500 ms hold
                  * counts from the take-over's end, up to its 300 to 450 ms later than from the weapon being drawn.
                  * Left so: the take-over ends at the incoming eye, where the hold then keeps it.) */
