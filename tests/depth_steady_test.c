@@ -46,6 +46,21 @@ static void scene_frame(Scene *s, TfpSteady *state, const TfpSteadyInput *in, ui
   *raw_last = raw; *eye_last = eye; *base_last = base;
 }
 
+/* One lease of `frames` frames of node 5: the root follows in `follows` of every `period` frames in which it was moved,
+ * and after each frame moved come `idle` in which nothing is. Returns the frames in which node 5 was moved alone. */
+static unsigned pair_alone(unsigned frames, unsigned period, unsigned follows, unsigned idle, bool *stopped, unsigned *said) {
+  TfpSteadyPair pair; memset(&pair, 0, sizeof pair); unsigned alone = 0, moved = 0; bool now = false;
+  *stopped = false; *said = 0;
+  for (unsigned i = 0; i < frames; ++i) {
+    *stopped = tfp_steady_pair_frame(&pair, 5, &now);
+    if (now) ++*said;
+    if (*stopped || i % (idle+1)) continue;
+    tfp_steady_pair_moved(&pair);
+    if (moved++ % period < follows) tfp_steady_pair_root(&pair); else ++alone;
+  }
+  return alone;
+}
+
 int main(void) {
   /* ---- the game's depth, as the evaluator works it out ---- */
   {
@@ -260,7 +275,7 @@ int main(void) {
     CHECK(tfp_steady_frame(&state, &in, 1, 1016, &delta, &depth, &held) == TFP_STEADY_WORKED && near(delta, .55, 1e-6)); /* what counts is what would be added */
     CHECK(TFP_STEADY_MOST == 1.0f);
   }
-  /* ---- node 5 never keeps moving without its root: two frames running, and the held depth stops for the lease ---- */
+  /* ---- node 5 never keeps moving without its root: two frames running (or three in the lease, below), and the held depth stops for the lease ---- */
   {
     TfpSteadyPair pair; memset(&pair, 0, sizeof pair); bool now = true;
     CHECK(TFP_STEADY_ALONE == 2);
@@ -281,7 +296,47 @@ int main(void) {
     CHECK(tfp_steady_pair_frame(&pair, 1, &now) && !now);                 /* a root that comes later does not start it again */
     CHECK(!tfp_steady_pair_frame(&pair, 2, &now) && !now && pair.alone == 0); /* a new lease does */
     tfp_steady_pair_moved(&pair);
-    CHECK(!tfp_steady_pair_frame(&pair, 3, &now) && !now && pair.alone == 0); /* what the old lease owed is not the new one's */
+    CHECK(!tfp_steady_pair_frame(&pair, 3, &now) && !now && pair.alone == 0 && pair.lost == 0); /* what the old lease owed is not the new one's */
+  }
+  /* ---- and never more than TFP_STEADY_ALONE_LEASE frames alone in one lease, whatever the pattern: a root that comes
+   * every other frame begins the count of frames running again each time, and node 5 would go on alone in half of
+   * all frames ---- */
+  {
+    bool stopped = false, now = false; unsigned said = 0;
+    CHECK(TFP_STEADY_ALONE_LEASE == 3);
+    CHECK(pair_alone(120, 2, 1, 0, &stopped, &said) == 3 && stopped && said == 1);        /* every other frame: 60 of 120 without the rule */
+    CHECK(pair_alone(120, 3, 2, 0, &stopped, &said) == 3 && stopped && said == 1);        /* two in three: 40 */
+    CHECK(pair_alone(120, 10, 9, 0, &stopped, &said) == 3 && stopped && said == 1);       /* nine in ten: 12 */
+    CHECK(pair_alone(120, 2, 1, 3, &stopped, &said) == 3 && stopped && said == 1);        /* the same with frames between in which nothing is moved */
+    CHECK(pair_alone(120, 1, 0, 0, &stopped, &said) == 2 && stopped && said == 1);        /* never: the two running, as before */
+    CHECK(pair_alone(120, 3, 1, 0, &stopped, &said) == 2 && stopped && said == 1);        /* one in three: two running come first */
+    CHECK(pair_alone(4000000, 1, 1, 0, &stopped, &said) == 0 && !stopped && said == 0);   /* a healthy lease, 18 hours of it at 60 a second: never */
+    CHECK(pair_alone(4000000, 1, 1, 2, &stopped, &said) == 0 && !stopped && said == 0);
+    uint32_t seed = 12345; unsigned most = 0;
+    for (unsigned run = 0; run < 2000; ++run) { /* any pattern at all */
+      TfpSteadyPair pair; memset(&pair, 0, sizeof pair); unsigned alone = 0;
+      seed = seed*1664525u+1013904223u; const uint32_t odds = (seed >> 8) % 100u;
+      for (unsigned i = 0; i < 600; ++i) {
+        if (tfp_steady_pair_frame(&pair, 9, &now)) continue;
+        seed = seed*1664525u+1013904223u; if ((seed >> 8) % 4u == 0) continue;            /* nothing moved */
+        tfp_steady_pair_moved(&pair);
+        seed = seed*1664525u+1013904223u; if ((seed >> 8) % 100u < odds) tfp_steady_pair_root(&pair); else ++alone;
+      }
+      if (alone > most) most = alone;
+    }
+    printf("  frames of one lease in which node 5 was moved alone, over 2000 made-up patterns: at most %u\n", most);
+    CHECK(most == TFP_STEADY_ALONE_LEASE);
+    /* one lost frame is borne, and a second one apart from it; the third stops, and says how many and how */
+    TfpSteadyPair pair; memset(&pair, 0, sizeof pair);
+    for (unsigned i = 0; i < 1000; ++i) {
+      CHECK(!tfp_steady_pair_frame(&pair, 4, &now) && !now);
+      tfp_steady_pair_moved(&pair);
+      if (i != 100 && i != 700) tfp_steady_pair_root(&pair);
+    }
+    CHECK(!tfp_steady_pair_frame(&pair, 4, &now) && !now && pair.lost == 2 && pair.alone == 0);
+    tfp_steady_pair_moved(&pair);
+    CHECK(tfp_steady_pair_frame(&pair, 4, &now) && now && pair.lost == 3 && pair.alone == 1);
+    CHECK(tfp_steady_pair_frame(&pair, 4, &now) && !now && pair.lost == 3);
   }
   /* ---- the "Steady:" line ---- */
   {
@@ -323,15 +378,25 @@ int main(void) {
     tfp_steady_line(&s, text, sizeof text);
     CHECK(strstr(text, "; passed in 3 (the evaluator's code is not the pinned one 3)"));
     for (int i = 0; i < 4; ++i) tfp_steady_note(&log, TFP_STEADY_NO_ROOT, i & 1, (i & 1) ? .1f : .24f, 0, 0, .3f);
-    tfp_steady_stopped(&log, 7);
+    tfp_steady_stopped(&log, 7, 2, 2);
     tfp_steady_take(&log, &s);
     CHECK(s.frames == 4 && s.worked == 4 && s.gated.count == 2 && s.clear.count == 2 && s.held.count == 0 && s.passed[TFP_STEADY_NO_ROOT] == 4 && s.stops == 1 && s.stop_lease == 7 && tfp_steady_worth(&s));
     tfp_steady_line(&s, text, sizeof text);
     CHECK(strstr(text, "nothing held; the rig moved to it in 0 frames, its root with it in 0; ") && strstr(text, "; passed in 4 (the root did not follow 4)"));
     CHECK(tfp_steady_stop_line(&s, text, sizeof text));
     printf("  %s\n", text);
-    CHECK(!strcmp(text, "Steady: stopped for lease 7: the rig was moved in 2 frames running and its root did not follow, so the gun moved against the eye; "
-                        "nothing more is held in this lease, and it begins again at the next"));
+    CHECK(!strcmp(text, "Steady: stopped for lease 7: the rig was moved in 2 frames of this lease and its root did not follow (the last 2 running), so the gun moved "
+                        "against the eye in them; nothing more is held in this lease, and it begins again at the next"));
+    {
+      TfpSteadyLog other; memset(&other, 0, sizeof other); TfpSteadySecond o;
+      tfp_steady_note(&other, TFP_STEADY_NO_ROOT, 0, .24f, 0, 0, .3f);
+      tfp_steady_stopped(&other, 8, 3, 1);                               /* a root that came now and then */
+      tfp_steady_take(&other, &o);
+      CHECK(o.stops == 1 && o.stop_lease == 8 && o.stop_lost == 3 && o.stop_running == 1 && tfp_steady_stop_line(&o, text, sizeof text));
+      printf("  %s\n", text);
+      CHECK(!strcmp(text, "Steady: stopped for lease 8: the rig was moved in 3 frames of this lease and its root did not follow (no two of them running), so the gun moved "
+                          "against the eye in them; nothing more is held in this lease, and it begins again at the next"));
+    }
     for (int i = 0; i < 4; ++i) tfp_steady_note(&log, TFP_STEADY_NO_ROOT, i & 1, (i & 1) ? .1f : .24f, 0, 0, .3f);
     tfp_steady_take(&log, &s);
     CHECK(s.stops == 0 && tfp_steady_worth(&s) && !tfp_steady_stop_line(&s, text, sizeof text)); /* later seconds of that lease: a line where the game's depth moved, as with the switch; the stop is said once */

@@ -829,7 +829,8 @@ static int real(void) {
     CHECK(strstr(line, "Steady: 6 frames of the rig, the game's depth worked out in 6: ") && strstr(line, "nothing held; the rig moved to it in 0 frames, its root with it in 0; ")
           && strstr(line, "passed in 6 (depth_steady_off.txt 6); depth_steady_off.txt: nothing is held"));
     /* node 5 never keeps moving without its root. The evaluator's root write not coming (depth_frame is the node 5
-     * half alone): once is borne, twice running stops the held depth for the lease */
+     * half alone): once is borne, twice running stops the held depth for the lease (and so does the third of a
+     * lease, running or not: the scene of the root coming every other frame, in the lease after next) */
     CHECK(tfp_pose_set_depth_steady(1) == 1);
     pose_world_gate(0, 0);
     for (int i = 0; i < 60; i++) root_frame(16);
@@ -851,7 +852,7 @@ static int real(void) {
       CHECK(applied_is(.11, .02, -.12) && root_forwarded[1] == 0);                     /* a root that comes now starts nothing */
       CHECK(tfp_pose_steady_take(&held) == 1 && held.frames == 6 && held.worked == 6 && held.shifted == 4 && held.roots == 1);
       CHECK(held.stops == 1 && held.stop_lease == 1 && held.passed[TFP_STEADY_NO_ROOT] == 2 && tfp_steady_passed(&held) == 2 && tfp_steady_worth(&held));
-      CHECK(tfp_steady_stop_line(&held, line, sizeof line) && strstr(line, "Steady: stopped for lease 1: the rig was moved in 2 frames running and its root did not follow"));
+      CHECK(tfp_steady_stop_line(&held, line, sizeof line) && strstr(line, "Steady: stopped for lease 1: the rig was moved in 3 frames of this lease and its root did not follow (the last 2 running)"));
       tfp_steady_line(&held, line, sizeof line);
       CHECK(strstr(line, "the rig moved to it in 4 frames, its root with it in 1, by ") && strstr(line, "passed in 2 (the root did not follow 2)"));
       for (int i = 0; i < 6; i++) { /* for the rest of the lease: as with the switch, the zoom depth term on and off with the gate */

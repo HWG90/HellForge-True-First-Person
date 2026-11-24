@@ -788,10 +788,10 @@ static bool steady_frame(Policy *p, const DepthObservation *observation, uint64_
   uint8_t request[0x24] = {0}; float depth = 0, held = 0; uint32_t reason = TFP_STEADY_NO_LENS; bool bit = false, stopped_now = false;
   *delta = 0;
   /* The root's half is a second call with proofs of its own (carrier_position_locked). Where node 5 was moved in
-   * TFP_STEADY_ALONE frames running and the root's half was not done, nothing more is held in this lease: the game's
-   * depth is still worked out and counted, as with the switch. */
+   * TFP_STEADY_ALONE frames running and the root's half was not done, or in TFP_STEADY_ALONE_LEASE frames of the
+   * lease, nothing more is held in this lease: the game's depth is still worked out and counted, as with the switch. */
   const bool stopped = tfp_steady_pair_frame(&steady_pair, generation, &stopped_now);
-  if (stopped_now) tfp_steady_stopped(&steady_log, generation);
+  if (stopped_now) tfp_steady_stopped(&steady_log, generation, steady_pair.lost, steady_pair.alone);
   /* The lens locals are the evaluator's stack, read by offset: they are a lens only in the code the zoom depth term
    * pins (depth_code, nine places), and this mirrors that code. The term asks before it reads; so does this. */
   DepthState *s = &p->depth;

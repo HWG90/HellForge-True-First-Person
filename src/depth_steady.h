@@ -44,6 +44,7 @@
 #define TFP_STEADY_GAP_MS 250.0     /* longer without a frame: begin again at the game's own depth */
 #define TFP_STEADY_MOST 1.0f        /* m: a shift over this is not added (the zoom depth term's own limit); its ranges alone would allow 8 */
 #define TFP_STEADY_ALONE 2u         /* frames running in which node 5 was moved and the root did not follow: the held depth stops for the lease */
+#define TFP_STEADY_ALONE_LEASE 3u   /* such frames in one lease, running or not: the same. No lease has more of them than this */
 #define TFP_STEADY_REST .0002f      /* m: this near the settled distance ... */
 #define TFP_STEADY_REST_SPEED .005f /* m/s: ... and this slow, the held distance is the settled one, to the bit */
 
@@ -53,7 +54,7 @@ enum { TFP_STEADY_WORKED = 0, /* the shift was worked out (it is nothing while t
        TFP_STEADY_RANGE = 3,  /* a value that is no number or out of range */
        TFP_STEADY_SCALED = 4, /* the game scales the rig's vector by main row +0x11ac in this frame */
        TFP_STEADY_NO_CODE = 5, /* the evaluator's code is not the pinned one: its stack locals are not read as a lens */
-       TFP_STEADY_NO_ROOT = 6, /* stopped for the lease: the root did not follow node 5 (TFP_STEADY_ALONE) */
+       TFP_STEADY_NO_ROOT = 6, /* stopped for the lease: the root did not follow node 5 (TFP_STEADY_ALONE, TFP_STEADY_ALONE_LEASE) */
        TFP_STEADY_REASONS = 7 };
 static const char *const TFP_STEADY_REASON_TEXT[TFP_STEADY_REASONS] = {
     "worked out", "depth_steady_off.txt", "no lens read for the frame", "values out of range", "the game scales the rig by main row +0x11ac",
@@ -146,10 +147,16 @@ static inline uint32_t tfp_steady_frame(TfpSteady *s, const TfpSteadyInput *in, 
  * The shift is two writes of one evaluation: node 5 forward, the root back along the view. The root's is a second
  * call of the game's with proofs of its own, and it can be refused or not come at all; node 5 then moves alone and
  * the gun goes against the eye, which is worse than holding nothing. So it is counted: a frame in which node 5's
- * float was changed owes a root, and after TFP_STEADY_ALONE such frames running without one the held depth stops for
- * the lease. A frame in which the root followed begins the count again; one in which nothing was moved changes
- * nothing. Only a new lease begins it again. */
-typedef struct TfpSteadyPair { uint64_t lease; uint32_t alone; bool owed, stopped; } TfpSteadyPair;
+ * float was changed owes a root, and the held depth stops for the lease after TFP_STEADY_ALONE such frames running
+ * without one, or after TFP_STEADY_ALONE_LEASE of them in the lease, running or not. A frame in which the root
+ * followed begins the count of frames running again and leaves the lease's count as it is (a root that comes every
+ * other frame would else let node 5 go alone in half of all frames, for as long as the lease lasts); one in which
+ * nothing was moved changes neither. Only a new lease begins them again.
+ * So in one lease node 5 is moved alone in at most TFP_STEADY_ALONE_LEASE frames, whatever the pattern: a frame alone
+ * is counted at the beginning of the next frame, before anything is moved in it, and the frame that reaches either
+ * number moves nothing, nor does any after it. A lease in which the root follows every frame counts nothing, however
+ * long it is. One frame alone is borne (a request that changed between the two calls), and a second apart from it. */
+typedef struct TfpSteadyPair { uint64_t lease; uint32_t alone, lost; bool owed, stopped; } TfpSteadyPair; /* alone: running; lost: in the lease */
 /* The beginning of a frame of node 5, before anything is worked out. True: stopped for this lease, nothing is to be
  * added. `*now`: it stopped with this frame (to be said once). */
 static inline bool tfp_steady_pair_frame(TfpSteadyPair *p, uint64_t lease, bool *now) {
@@ -157,13 +164,14 @@ static inline bool tfp_steady_pair_frame(TfpSteadyPair *p, uint64_t lease, bool 
   if (lease != p->lease) { memset(p, 0, sizeof *p); p->lease = lease; }
   if (p->owed) {
     p->owed = false;
-    if (++p->alone >= TFP_STEADY_ALONE && !p->stopped) { p->stopped = true; *now = true; }
+    ++p->alone; ++p->lost;
+    if ((p->alone >= TFP_STEADY_ALONE || p->lost >= TFP_STEADY_ALONE_LEASE) && !p->stopped) { p->stopped = true; *now = true; }
   }
   return p->stopped;
 }
 /* Node 5's float was changed by the held depth in this frame. */
 static inline void tfp_steady_pair_moved(TfpSteadyPair *p) { p->owed = true; }
-/* The root's half of the same frame was done. */
+/* The root's half of the same frame was done. The lease's count stays. */
 static inline void tfp_steady_pair_root(TfpSteadyPair *p) { p->owed = false; p->alone = 0; }
 
 /* ---- the "Steady:" line: one second of it ---- */
@@ -177,6 +185,7 @@ typedef struct TfpSteadySecond {
   TfpSteadyRange held, delta;              /* the held distance; what node 5's float took, over the frames it was changed */
   TfpSteadyRange argument_gated, argument_clear; /* the game's own forward value for node 5 (request+0x4c), all of it */
   uint32_t stops; uint64_t stop_lease;     /* the held depth stopped for a lease in this second (the root did not follow), and which */
+  uint32_t stop_lost, stop_running;        /* the frames of that lease in which node 5 was moved alone, and how many of them were the last, running */
   uint32_t off;                            /* the switch, as the helper has it */
 } TfpSteadySecond;
 typedef struct TfpSteadyLog { TfpSteadySecond now; } TfpSteadyLog;
@@ -207,13 +216,18 @@ static inline void tfp_steady_root(TfpSteadyLog *g) { ++g->now.roots; }
 /* Node 5's float was changed in this frame, by `added` (what the float took of the shift). Only such a frame asks
  * for the root's half, so "moved" and "its root with it" count the same frames. */
 static inline void tfp_steady_moved(TfpSteadyLog *g, float added) { ++g->now.shifted; tfp_steady_range(&g->now.delta, added); }
-/* The held depth stopped for `lease` with this frame (tfp_steady_pair_frame). */
-static inline void tfp_steady_stopped(TfpSteadyLog *g, uint64_t lease) { ++g->now.stops; g->now.stop_lease = lease; }
+/* The held depth stopped for `lease` with this frame (tfp_steady_pair_frame): after `lost` frames of the lease in
+ * which node 5 was moved alone, the last `running` of them one after the other (the pair's lost and alone). */
+static inline void tfp_steady_stopped(TfpSteadyLog *g, uint64_t lease, uint32_t lost, uint32_t running) {
+  ++g->now.stops; g->now.stop_lease = lease; g->now.stop_lost = lost; g->now.stop_running = running;
+}
 /* The line that says it, once: true where the second holds a stop. */
 static inline bool tfp_steady_stop_line(const TfpSteadySecond *s, char *text, size_t size) {
   if (!s->stops) return false;
-  snprintf(text, size, "Steady: stopped for lease %llu: the rig was moved in %u frames running and its root did not follow, so the gun moved against the eye; "
-           "nothing more is held in this lease, and it begins again at the next", (unsigned long long)s->stop_lease, TFP_STEADY_ALONE);
+  char how[48] = "no two of them running";
+  if (s->stop_running >= 2) snprintf(how, sizeof how, "the last %u running", s->stop_running);
+  snprintf(text, size, "Steady: stopped for lease %llu: the rig was moved in %u frames of this lease and its root did not follow (%s), so the gun moved "
+           "against the eye in them; nothing more is held in this lease, and it begins again at the next", (unsigned long long)s->stop_lease, s->stop_lost, how);
   return true;
 }
 static inline void tfp_steady_take(TfpSteadyLog *g, TfpSteadySecond *out) { *out = g->now; memset(&g->now, 0, sizeof g->now); }

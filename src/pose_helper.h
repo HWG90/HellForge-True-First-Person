@@ -223,7 +223,8 @@ uint32_t tfp_pose_set_depth_off(uint32_t on);
  * Three things make it pass a frame beyond the rule's own: one of the zoom depth term's nine code pins is not this
  * build's (the evaluator's locals are then not read as a lens; asked once a lease, as the term does); a shift of more
  * than 1 m; and the root not following: after TFP_STEADY_ALONE frames running in which node 5 was moved and the
- * root's half was not done, nothing more is held until the next lease.
+ * root's half was not done, or TFP_STEADY_ALONE_LEASE such frames in the lease, nothing more is held until the next
+ * lease.
  * tfp_pose_steady_take: what was counted of it since the last call, for the "Steady:" line and the line that says a
  * stop once (tfp_steady_stop_line); the count begins again. Returns 1, or 0 before the host is set. */
 uint32_t tfp_pose_set_depth_steady(uint32_t mode);
