@@ -283,7 +283,7 @@ static bool draw(TfpEditor *e, double w, double h, TfpEdValue *why) {
     plain(e, TFP_ED_S_ACTION_SUPPORTED, &a, &r);
     supported = is_true(&r.a);
   }
-  TEXT(supported ? "Wheel: depth   Arrows: move   PgUp/PgDn: depth" : "Preset only: automatic action mapping needs a live trace", x,
+  TEXT(supported ? "Wheel: depth   Arrows: move" : "Preset only: automatic action mapping needs a live trace", x,
        top - 142 * scale, 14, TFP_ED_COLOR_TEXT);
   snprintf(line, sizeof line, "%.72s", e->ready ? e->label : "Release the activation click/key to begin");
   TEXT(line, x, top - 174 * scale, 13, TFP_ED_COLOR_TEXT_DIM);
@@ -596,7 +596,9 @@ TfpEdResult tfp_editor_update(TfpEditor *e) {   /* :227-394 */
     if (finite_number(sample.sample.wheel)) next.v[1] = next.v[1] + sample.sample.wheel / 120 * .01 * fine;
     double dt = finite_number(sample.sample.dt) ? fmax(0, fmin(.1, sample.sample.dt)) : 0;
     double step = .15 * dt * fine;
-    static const struct { double key; int axis; double sign; } BINDINGS[] = {{37, 0, -1}, {39, 0, 1}, {38, 2, 1}, {40, 2, -1}, {33, 1, 1}, {34, 1, -1}};
+    /* Retail (:384) also bound Page Up (33) and Page Down (34) to depth. Not here (round 17): Page Up is the
+     * editor's own open/close key and Page Down opens the overlay host's panel list; depth is the wheel's. */
+    static const struct { double key; int axis; double sign; } BINDINGS[] = {{37, 0, -1}, {39, 0, 1}, {38, 2, 1}, {40, 2, -1}};
     for (size_t i = 0; i < sizeof BINDINGS / sizeof BINDINGS[0]; i++)
       if (down(e, BINDINGS[i].key)) next.v[BINDINGS[i].axis] = next.v[BINDINGS[i].axis] + step * BINDINGS[i].sign;
     for (int i = 0; i < 3; i++) next.v[i] = clamp(next.v[i]);

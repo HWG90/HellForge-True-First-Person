@@ -1,6 +1,19 @@
 /* src/placement_editor.c replayed against the retail placement_editor.lua's own answers
  * (tests/vectors/placement_editor_vectors.h, cut by tools/retail_ref/gen_placement_editor.py). The fakes
- * here answer from the same scripted world as tools/retail_ref/run_placement_editor.lua's. */
+ * here answer from the same scripted world as tools/retail_ref/run_placement_editor.lua's.
+ *
+ * One named departure from retail, "no Page Up / Page Down depth" (round 17, 2026-11-24, the user: "remove
+ * PG UP AND PG DOWN from repositioning for depth"). Retail's edit loop asks i_down(33) and i_down(34) right
+ * after i_down(40) and moves the depth while either is held; the C asks neither, and its help line reads
+ * "Wheel: depth   Arrows: move" where retail's adds "   PgUp/PgDn: depth". So that every other recorded
+ * call stays checked:
+ *   - each retail answer drops the two calls' trace entries and the help text's tail (departed_ops), and
+ *     nothing else;
+ *   - the fake world still counts the two calls retail made (retail_page_calls), so every later world
+ *     change lands on the same host call it did for retail;
+ *   - where retail was answered "held" for either key, the depth it moved is the departure itself: that
+ *     operation and the rest of its run are left out and counted in the summary line (effects_fx.h).
+ * The vector file itself is retail's, unchanged. tests/editor_keys_test.c checks the new behaviour. */
 #include "effects_fx.h"
 #include "placement_editor.h"
 #include "vectors/placement_editor_vectors.h"
@@ -114,6 +127,18 @@ static const char *arguments(TfpEdCall which, const TfpEdArgs *a) {
     default: return "";
   }
 }
+/* The departure: retail's i_down(33) and i_down(34), which follow i_down(40). Counted as host calls (their
+ * world changes land where they did), not traced. A "held" answer (and no raise) departs when retail's
+ * step was not zero: the frame time this update sampled was finite and above zero (placement_editor.c,
+ * dt = clamp(sample.dt, 0, .1); step = .15 * dt * fine). */
+static double sampled_dt;
+static void retail_page_calls(void) {
+  static const double PAGE[2] = {33, 34};
+  for (int i = 0; i < 2; i++) {
+    fx_tick();
+    if (!fx_raise(W_x_i_down) && fx_truthy(fx_getk(W_down, PAGE[i])) && isfinite(sampled_dt) && sampled_dt > 0) fx_departed = true;
+  }
+}
 static bool host_call(void *user, TfpEdCall which, const TfpEdArgs *a, TfpEdReply *r) {
   (void)user;
   fx_tick();
@@ -161,10 +186,14 @@ static bool host_call(void *user, TfpEdCall which, const TfpEdArgs *a, TfpEdRepl
       if (fx_world[W_sample].t == 't') {
         r->a.kind = TFP_ED_TABLE; r->sample.click = fx_getk(W_sample_f, 1).t == 't';
         r->sample.x = sample_number(2); r->sample.y = sample_number(3); r->sample.wheel = sample_number(4); r->sample.dt = sample_number(5);
+        sampled_dt = r->sample.dt;
       } else r->a = value_of(fx_world[W_sample]);
       r->b = value_of(fx_world[W_sample_why]);
       break;
-    case TFP_ED_I_DOWN: r->a = value_of(fx_getk(W_down, a->number)); break;
+    case TFP_ED_I_DOWN:
+      r->a = value_of(fx_getk(W_down, a->number));
+      if (a->number == 40) retail_page_calls();
+      break;
     case TFP_ED_I_FOCUSED: r->a = value_of(fx_world[W_focused]); break;
     case TFP_ED_V_DRAW: PAIR(W_draw_ok, W_draw_why); break;
     case TFP_ED_V_RELEASE: PAIR(W_vrelease_ok, W_vrelease_why); break;
@@ -233,10 +262,36 @@ static void dispatch(const FxOp *op) {
   else fx_put("~");
 }
 
+/* retail's answer text without what the departure removes: every " i_down(33) i_down(34)" and the help
+ * line's "   PgUp/PgDn: depth". Counts what it removed. */
+static unsigned removed_calls, removed_help;
+static char *departed_text(const char *expect) {
+  static const char CALLS[] = " i_down(33) i_down(34)", HELP[] = "Wheel: depth   Arrows: move   PgUp/PgDn: depth\"";
+  static const size_t KEEP = sizeof "Wheel: depth   Arrows: move" - 1;
+  char *out = malloc(strlen(expect) + 1), *w = out;
+  if (!out) { fprintf(stderr, "placement_editor: out of memory\n"); exit(2); }
+  for (const char *p = expect; *p;) {
+    if (!strncmp(p, CALLS, sizeof CALLS - 1)) { p += sizeof CALLS - 1; removed_calls++; }
+    else if (!strncmp(p, HELP, sizeof HELP - 1)) { memcpy(w, p, KEEP); w += KEEP; *w++ = '"'; p += sizeof HELP - 1; removed_help++; }
+    else *w++ = *p++;
+  }
+  *w = 0;
+  return out;
+}
+static FxOp departed_ops[sizeof placement_editor_ops / sizeof placement_editor_ops[0]];
+
 int main(void) {
   fx_unused();
   fx_any = W_x_any;
-  return fx_main("placement_editor", PLACEMENT_EDITOR_VECTOR_COMMIT, placement_editor_runs,
-                 (int)(sizeof placement_editor_runs / sizeof placement_editor_runs[0]), placement_editor_ops, placement_editor_events,
-                 placement_editor_slots, W_COUNT, fresh, dispatch);
+  fx_departure = "no Page Up / Page Down depth, tests/placement_editor_test.c";
+  for (size_t i = 0; i < sizeof departed_ops / sizeof departed_ops[0]; i++) {
+    departed_ops[i] = placement_editor_ops[i];
+    departed_ops[i].expect = departed_text(placement_editor_ops[i].expect);
+  }
+  int failed = fx_main("placement_editor", PLACEMENT_EDITOR_VECTOR_COMMIT, placement_editor_runs,
+                       (int)(sizeof placement_editor_runs / sizeof placement_editor_runs[0]), departed_ops, placement_editor_events,
+                       placement_editor_slots, W_COUNT, fresh, dispatch);
+  printf("placement_editor: departure removed %u retail i_down(33) i_down(34) pairs and %u help-line tails from the expected answers\n",
+         removed_calls, removed_help);
+  return failed;
 }

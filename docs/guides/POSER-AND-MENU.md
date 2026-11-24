@@ -78,7 +78,7 @@ MCM keeps each control's value in its own file once you change it. After registe
 
 ## The placement editor
 
-Retail's editor (`src/first_person/placement_editor.lua`) translated to C and compared with the unmodified Lua on 20,094 operations (`tests/run-vectors-placement-editor.sh`): results, state, the order of every call it makes and every item it draws. The panel, the cursor and the mouse come from Goose Overlay Host; the editor needs it loaded.
+Retail's editor (`src/first_person/placement_editor.lua`) translated to C and compared with the unmodified Lua (`tests/run-vectors-placement-editor.sh`): results, state, the order of every call it makes and every item it draws. One named departure: Page Up and Page Down are not depth keys (round 17, below). Of retail's 20,094 recorded operations, 18,654 are compared; the 1,440 left out are the rest of the 16 runs from the point where retail moved the depth because Page Up or Page Down was held. The panel, the cursor and the mouse come from Goose Overlay Host; the editor needs it loaded.
 
 **Open and close:** Page Up (the menu's "Open / close placement editor" key), or the menu's "Edit arms and weapon placement" button. Opening closes the settings menu first and switches first person on if it was off. F8 is HellForge's own editor and is not used.
 
@@ -91,7 +91,7 @@ Retail's editor (`src/first_person/placement_editor.lua`) translated to C and co
 | Right drag | Yaw and pitch |
 | Middle drag | Roll |
 | Wheel | Forward / back (depth) |
-| Arrow keys, Page Down | Move; Page Down pulls back. Page Up would push forward in retail, but it is the editor's own key here, so use the wheel |
+| Arrow keys | Right / left and up / down |
 | Shift | Fine steps (a tenth) |
 | Save weapon / Enter | Saves this action for this weapon and closes |
 | Save all | Saves this action for all weapons and closes |
@@ -120,7 +120,7 @@ Limits are retail's: 50 cm on each axis, 90 degrees on each angle. A weapon swap
 
 ### Decisions you may want different
 
-- **Page Up** both opens the editor and, in retail, moves the weapon forward. Here it only opens and closes; rebind the editor key in the menu to get Page Up back for depth.
+- **Page Up and Page Down are not depth keys** (round 17, at the user's request). In retail, holding either moved the weapon forward or back while an action other than idle was edited, and the help line read "Wheel: depth   Arrows: move   PgUp/PgDn: depth". Here Page Up is the editor's own open/close key and Page Down opens the overlay host's panel list, so both clashed. Depth is the wheel's alone (Shift for fine steps); the help line reads "Wheel: depth   Arrows: move", and the editor no longer reads either key (`src/placement_editor.c`, `src/mod_editor.c`). `tests/run-editor-keys.sh` holds each for a second during an action edit and checks the placement does not move, and that the wheel and the arrows still do. The retail comparison names this departure (`tests/placement_editor_test.c`); retail's vector file is unchanged.
 - The panel sits where retail puts it and is not movable.
 
 ## Unproven until it runs in the game

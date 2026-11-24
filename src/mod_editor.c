@@ -18,7 +18,7 @@ static ULONGLONG first_try, next_try;
 static bool gave_up;
 
 static SRWLOCK lock = SRWLOCK_INIT;
-static const int KEYS[] = {13, 16, 27, 33, 34, 37, 38, 39, 40};
+static const int KEYS[] = {13, 16, 27, 37, 38, 39, 40};   /* Enter, Shift, Esc, the arrows (no Page Up / Page Down: round 17) */
 static struct {
   bool have_frame, open;
   float width, height, mouse_x, mouse_y;
@@ -121,7 +121,7 @@ static bool p_sample(void *u, TfpEditorSample *out) {
 static bool p_down(void *u, int key) {
   bool down;
   (void)u;
-  if (key == toggle_key) return false;   /* the key that closes the editor is not also "depth up" */
+  if (key == toggle_key) return false;   /* the key that opens and closes the editor is never also an edit key */
   AcquireSRWLockExclusive(&lock);
   down = key == 2 ? shared.button[1] : key == 4 ? shared.button[2] : key > 0 && key < 256 && shared.key[key];
   ReleaseSRWLockExclusive(&lock);

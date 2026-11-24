@@ -33,6 +33,12 @@ static const FxEvent *fx_ev;
 static int fx_nev, fx_calls;
 static char fx_out[1 << 20], fx_trace[1 << 20];
 static size_t fx_out_used, fx_trace_used;
+/* A named, documented departure from retail (a test that has one sets fx_departure to its name): the
+ * dispatch sets fx_departed when retail's recorded run reaches a case the C deliberately answers
+ * differently. That operation and the rest of its run (which carries the different state) are left out
+ * of the comparison and counted in the summary line under that name; everything before them is checked. */
+static const char *fx_departure;
+static bool fx_departed;
 
 static struct FxCell *fx_cell(int slot, double key, bool create) {
   uint64_t h;
@@ -160,7 +166,7 @@ static const char *fx_s(int slot) { return fx_world[slot].t == 's' ? fx_world[sl
  * results and the state with fx_put. Returns the process exit code. */
 static int fx_main(const char *label, const char *commit, const FxRun *runs, int nruns, const FxOp *ops, const FxEvent *events,
                    const char *const *slot_names, int nslots, void (*fresh)(void), void (*dispatch)(const FxOp *)) {
-  int total = 0, failed = 0;
+  int total = 0, failed = 0, left_out = 0, left_runs = 0;
   static char line[(2 << 20) + 8];
   if (nslots > FX_SLOTS) { fprintf(stderr, "effects_fx: too many slots\n"); return 2; }
   for (int r = 0; r < nruns; r++) {
@@ -171,9 +177,10 @@ static int fx_main(const char *label, const char *commit, const FxRun *runs, int
     for (int o = 0; o < runs[r].nops; o++, total++) {
       const FxOp *op = &ops[runs[r].first + o];
       fx_ev = events + op->first; fx_nev = op->nev; fx_calls = 0; fx_out_used = fx_trace_used = 0;
-      fx_out[0] = fx_trace[0] = 0;
+      fx_out[0] = fx_trace[0] = 0; fx_departed = false;
       for (int i = 0; i < fx_nev; i++) if (fx_ev[i].at == 0) fx_apply(&fx_ev[i]);
       dispatch(op);
+      if (fx_departed) { left_out += runs[r].nops - o; left_runs++; break; }
       for (int i = 0; i < nslots; i++) if (slot_names[i][0] == 'x' && slot_names[i][1] == '_') fx_world[i] = (FxValue){'n', 0, NULL, 0};
       memcpy(line, fx_out, fx_out_used); memcpy(line + fx_out_used, " | ", 3);
       memcpy(line + fx_out_used + 3, fx_trace, fx_trace_used + 1);
@@ -187,7 +194,9 @@ static int fx_main(const char *label, const char *commit, const FxRun *runs, int
     }
   }
   if (failed) return 1;
-  printf("%s: %d operations in %d runs match retail %s\n", label, total, nruns, commit);
+  if (left_out) printf("%s: %d operations in %d runs match retail %s; %d operations at the ends of %d runs left out (departure: %s)\n", label,
+                      total, nruns, commit, left_out, left_runs, fx_departure ? fx_departure : "unnamed");
+  else printf("%s: %d operations in %d runs match retail %s\n", label, total, nruns, commit);
   return 0;
 }
 /* Not every test uses every helper. */
