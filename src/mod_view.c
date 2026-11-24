@@ -43,6 +43,13 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #define TFP_VIEW_VERSION "0.6.0-view.1"
 #endif
 #include "camera_damp.h"
+#ifdef TFP_FEEL
+#include "aim_log.h"
+#include "near_helper.h"
+#include "pose_helper.h"
+#include "fov_helper.h"
+#include "placement_editor.h"
+#endif
 #define TFP_CONFLICT_ID "goose.first-person-controller"
 
 static const HfApi *hf;
@@ -1063,6 +1070,29 @@ static void steady_note(void) { /* once a second: the rig's depth held steady (s
   tfp_steady_line(&held, line, sizeof line);
   say("%s", line);
 }
+/* Round 20: the sight distance in aim (src/ads_seat.h) and the "Aim:" line (src/aim_log.h), every tick. The near
+ * helper saw the game's sight (its near clip); the pose helper is handed it with the wanted distance and pulls the gun
+ * in full aim; the near helper is handed back how much closer the gun was drawn. */
+static void ads_seat_tick(void) {
+  static TfpAimLog aim_log;
+  float sight = 0, native = 0, applied = 0;
+  const bool near_on = tfp_near_ads_probe(&sight, &native, &applied);
+  tfp_pose_set_ads_seat(near_on ? sight : 0, (float)(tfp_locked_view_ads_sight_cm(&wire)/100));
+  TfpPoseAdsProbe ads;
+  const bool pose_on = tfp_pose_ads_probe(&ads) && ads.armed;
+  tfp_near_set_ads_closer(pose_on ? ads.closer : 0);
+  TfpFovLockStats f; tfp_fov_lock_stats(&f);
+  const TfpEditor *editor = tfp_wire_editor_of(&wire);
+  TfpAimSample sample = {
+    .full_ads = pose_on && ads.full_ads, .weapon = tfp_wire_settings_weapon_name(&wire),
+    .game_fov = f.game_radians > 0 ? f.game_radians : NAN, .shown_fov = f.shown_radians > 0 ? f.shown_radians : NAN,
+    .aim_field = tfp_locked_view_aim_field(&wire), .sight = near_on && sight > 0 ? sight : NAN,
+    .wanted = (float)(tfp_locked_view_ads_sight_cm(&wire)/100), .pull = ads.pull, .closer = ads.closer, .ads_forward = ads.ads_forward,
+    .near_clip = near_on ? applied : NAN, .depth = ads.depth, .editor = editor && tfp_editor_is_active(editor),
+    .editor_action = editor ? tfp_editor_preview_action(editor) : NULL, .now_ms = (double)GetTickCount64()};
+  char line[720];
+  if (tfp_aim_log_step(&aim_log, &sample, line, sizeof line)) say("%s", line);
+}
 #endif
 static void fov_note(void) { /* once a second, on its own: the field-of-view lock also runs with the camera lock off, when lock_note has nothing to say */
   static uint64_t next, told_fov;
@@ -1076,7 +1106,7 @@ static void fov_note(void) { /* once a second, on its own: the field-of-view loc
 }
 static void tick_body(void) {
 #ifdef TFP_FEEL
-  if (stage == RUNNING) { gate_note(); steady_note(); }
+  if (stage == RUNNING) { gate_note(); steady_note(); ads_seat_tick(); }
 #endif
   if (stage == RUNNING) { quit_guard(); fov_lock_tick(); lock_note(); fov_note(); }   /* not earlier: the game module and the guarded reader are set up in WAIT_MODULES */
   if (stage == REFUSED) return;

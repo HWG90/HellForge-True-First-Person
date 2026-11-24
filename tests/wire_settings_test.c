@@ -1577,6 +1577,7 @@ int main(int argc, char **argv) {
     tfp_wire_settings_frame(&wire);
     line = logged("Weapon: key=b2b69248b51ea9a8");
     CHECK(line && strstr(line, "name=\"AR-11 Arbitrator\" family=rifle"));
+    CHECK(tfp_wire_settings_weapon_name(&wire) && !strcmp(tfp_wire_settings_weapon_name(&wire), "AR-11 Arbitrator")); /* round 20: the Aim: line's name */
     char source[48];
     CHECK(!strcmp(tfp_wire_settings_source(&wire, "0123456789abcdef", TFP_ACT_ADS, source, sizeof source), "ads default") ||
           !strncmp(source, "imported(__all)", 15));

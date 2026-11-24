@@ -701,6 +701,12 @@ TFP_SETTINGS_LOCKED(LOCKED_GETTER)
 #undef LOCKED_GETTER
 #undef LOCKED_GETTER_0
 #undef LOCKED_GETTER_1
+const char *tfp_wire_settings_weapon_name(TfpWire *w) {
+  Settings *st = state(w);
+  if (!st || !st->has_weapon) return NULL;
+  const TfpActionWeapon *info = tfp_action_weapon_info(&st->catalogue, st->weapon);
+  return info ? info->name : NULL;
+}
 float tfp_locked_view_aim_field(TfpWire *w) {
   const double aim = tfp_locked_view_fov_aim(w);
   if (aim == 3) return (float)(tfp_locked_view_fov_aim_degrees(w)*3.14159265358979/180);

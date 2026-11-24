@@ -46,11 +46,11 @@ int main(void) {
   char line[700];
   TfpAimSample s; memset(&s, 0, sizeof s);
   s.weapon = "LAS-5 Scythe"; s.game_fov = DEG(61.5); s.shown_fov = DEG(105); s.aim_field = TFP_FOV_AIM_ZOOM; s.sight = .173f; s.wanted = .10f;
-  s.pull = 0; s.closer = 0; s.near = .10f; s.depth = NAN; s.now_ms = 5000;
+  s.pull = 0; s.closer = 0; s.near_clip = .10f; s.depth = NAN; s.now_ms = 5000;
   CHECK(!tfp_aim_log_step(&log, &s, line, sizeof line));                                       /* at the hip: nothing */
   s.full_ads = true; s.now_ms += 16;
   CHECK(!tfp_aim_log_step(&log, &s, line, sizeof line));                                       /* in, settling: not yet */
-  for (int i = 0; i < 30; i++) { s.now_ms += 16; s.pull = .073f; s.closer = .073f; s.shown_fov = DEG(61.5); s.near = .10f; s.depth = .2102f;
+  for (int i = 0; i < 30; i++) { s.now_ms += 16; s.pull = .073f; s.closer = .073f; s.shown_fov = DEG(61.5); s.near_clip = .10f; s.depth = .2102f;
     if (tfp_aim_log_step(&log, &s, line, sizeof line)) break; }
   CHECK(strstr(line, "Aim: in: \"LAS-5 Scythe\"; field of view 61.5 degrees (Aim field of view: the game's zoom; the game asked for 61.5)") == line);
   CHECK(strstr(line, "the game's sight at 0.173 m (its near clip), sight distance in aim 0.100 m: the gun 0.073 m closer (pull 0.073 m, ADS placement forward +0.000 m), near clip 0.100 m"));
@@ -59,7 +59,7 @@ int main(void) {
   /* a zoom level: the game's lens and sight change; said once it has settled */
   s.game_fov = DEG(25.7); s.sight = .35f;
   bool said = false;
-  for (int i = 0; i < 60 && !said; i++) { s.now_ms += 16; s.pull = .25f; s.closer = .25f; s.near = .10f; said = tfp_aim_log_step(&log, &s, line, sizeof line); }
+  for (int i = 0; i < 60 && !said; i++) { s.now_ms += 16; s.pull = .25f; s.closer = .25f; s.near_clip = .10f; said = tfp_aim_log_step(&log, &s, line, sizeof line); }
   CHECK(said && strstr(line, "Aim: changed: \"LAS-5 Scythe\"; field of view 61.5 degrees (Aim field of view: the game's zoom; the game asked for 25.7)"));
   CHECK(strstr(line, "the game's sight at 0.350 m"));
   /* the editor opened while aiming: said, with its action */
@@ -75,7 +75,7 @@ int main(void) {
   s.full_ads = true; s.now_ms += 16; CHECK(!tfp_aim_log_step(&log, &s, line, sizeof line));
   s.full_ads = false; s.now_ms += 16; CHECK(tfp_aim_log_step(&log, &s, line, sizeof line) && strstr(line, "Aim: out after 0.0") && strstr(line, "(a tap: not settled)"));
   /* nothing known: words, not numbers */
-  tfp_aim_log_reset(&log); memset(&s, 0, sizeof s); s.sight = NAN; s.depth = NAN; s.game_fov = NAN; s.shown_fov = NAN; s.near = NAN; s.now_ms = 100; s.aim_field = DEG(50);
+  tfp_aim_log_reset(&log); memset(&s, 0, sizeof s); s.sight = NAN; s.depth = NAN; s.game_fov = NAN; s.shown_fov = NAN; s.near_clip = NAN; s.now_ms = 100; s.aim_field = DEG(50);
   s.full_ads = true;
   for (int i = 0; i < 40 && !tfp_aim_log_step(&log, &s, line, sizeof line); i++) s.now_ms += 16;
   CHECK(strstr(line, "Aim: in: no weapon known; field of view not read (Aim field of view: a chosen 50.0 degrees; the game asked for not read)"));

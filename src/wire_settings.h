@@ -142,6 +142,8 @@ bool tfp_locked_view_fov_zoom_when_aiming(TfpWire *w);
 /* Round 20: "Aim field of view" as src/fov_lock.h takes it: TFP_FOV_AIM_ZOOM, TFP_FOV_AIM_LOCKED or the chosen value in
  * radians. And the stored numbers behind it: fov_aim 1 .. 3, fov_aim_degrees, ads_sight_cm (src/ads_seat.h). */
 float tfp_locked_view_aim_field(TfpWire *w);
+/* The catalogue's name of the weapon in your hands (the placement key the Weapon: line last named); NULL: not known. */
+const char *tfp_wire_settings_weapon_name(TfpWire *w);
 double tfp_locked_view_fov_aim(TfpWire *w);
 double tfp_locked_view_fov_aim_degrees(TfpWire *w);
 double tfp_locked_view_ads_sight_cm(TfpWire *w);
