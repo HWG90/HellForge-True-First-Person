@@ -25,6 +25,7 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "wire_feel.h"
 #include "wire_win_engine.h"
 #include "wire_win_effects.h"
+#include "wire_warp.h"
 #include "engine.h"
 #include "mod_menu.h"
 #include "mod_panel.h"
@@ -537,6 +538,14 @@ static void head_note(void) {
   tick.veil_leaves = veil.leaves, tick.veil_frames = veil.frames, tick.veil_moved = veil.moved, tick.veil_behind = veil.behind;
   tick.veil_largest_m = veil.largest_m, tick.veil_second = veil.second; /* round 19 */
   if (tfp_head_log_step(&seen, &tick, text, sizeof text)) say("%s", text);
+}
+/* ---- the "Warp:" line (round 22; src/wire_warp.h, docs/design/specs/2026-11-24-warp-pack-glow.md) ----------------- */
+static TfpWarp warp;
+static void warp_say(const char *line) { say("%s", line); }
+static void warp_note(void) {
+  TfpHeadTick tick;
+  const bool owns = wire.controller.enabled && tfp_wire_engine_head_tick(&wire, &tick) && tick.active;
+  tfp_wire_warp_tick(&wire, &warp, owns, false, (double)GetTickCount64() / 1000.0, warp_say);
 }
 #endif
 
@@ -1158,6 +1167,7 @@ static void tick_body(void) {
   tfp_wire_frame(&wire, extra);
   entry_note();
   head_note();   /* before the trace: a "Head:" line then stands above the rows of the frames it is about */
+  warp_note();   /* round 22: the Warp Pack's glow */
   orphan_note(); /* before the trace: its edges open a trace window too */
   trace_note();
   tfp_wire_panel_frame(&wire);         /* what the user did in the mod's own panel since the last tick */
