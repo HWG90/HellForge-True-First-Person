@@ -175,6 +175,34 @@ static void layout_25480438(bool on) {
 /* here false: the retail build table on the retail layout. here true: build 25480438's table on its layout. The run
  * "edges" is retail-only: it puts the avatar owner at the last readable addresses, where a row that starts 0x40
  * lower is not the same question. */
+/* Beyond retail: tfp_head_watch, what the last call saw of the camera pass (for the log only). Checked here against
+ * the scripted world's own record of the calls: every camera pass switched off is one "set ... F default", every mesh
+ * found drawn was either switched off or left drawn, and the three cases the "masks" run plays (drawn again from
+ * outside, left drawn, put back by a stop) are all counted somewhere. */
+static struct { double again, again_head, left, put_back, off; } watched;
+static size_t count_in(const char *text, size_t len, const char *what) {
+  size_t n = 0, w = strlen(what);
+  for (size_t i = 0; text && i + w <= len; i++) if (!memcmp(text + i, what, w)) n++;
+  return n;
+}
+static bool watch_ok(const char *call, bool ok, size_t i) {
+  TfpHeadWatch w;
+  TfpHeadResult r;
+  tfp_head_watch(head, &w);
+  tfp_head_result(head, &r);
+  size_t off = count_in(vf_ev.vis.data, vf_ev.vis.len, " F default");
+  if (w.turned_off != (double)off) { fprintf(stderr, "head watch: operation %zu (%s): %g camera passes switched off, the world saw %zu\n", i, call, w.turned_off, off); return false; }
+  if (!strcmp(call, "update") && ok && r.phase == TFP_HEAD_ACTIVE && w.full
+      && w.on_new + w.on_again + w.on_still != w.turned_off + w.left_on) {
+    fprintf(stderr, "head watch: operation %zu: found drawn %g new + %g again + %g still, but %g switched off + %g left\n", i, w.on_new, w.on_again, w.on_still, w.turned_off, w.left_on);
+    return false;
+  }
+  if (w.on_again_head > w.on_again || w.left_on > w.camera_rows || (strcmp(call, "update") && (w.camera_rows || w.on_new || w.on_again))) {
+    fprintf(stderr, "head watch: operation %zu (%s): counts out of range\n", i, call); return false;
+  }
+  watched.again += w.on_again; watched.again_head += w.on_again_head; watched.left += w.left_on; watched.put_back += w.put_back; watched.off += w.turned_off;
+  return true;
+}
 static size_t replay(bool here) {
   size_t count = sizeof head_visibility_vectors / sizeof head_visibility_vectors[0], failures = 0, done = 0;
   const char *dump = getenv("VIS_DUMP");
@@ -215,6 +243,7 @@ static size_t replay(bool here) {
     vf_printf(&out, "%s ret=%s,", call, ok ? "T" : "F");
     text(&out, &why);
     long n = vf_ev.n; uint64_t h1 = vf_ev.h1, h2 = vf_ev.h2;
+    if (!watch_ok(call, ok, i)) { failures = 3; free(line); break; }
     head_state(&out);
     if (n != vf_ev.n || h1 != vf_ev.h1 || h2 != vf_ev.h2) { fprintf(stderr, "head visibility: reading the state made calls\n"); exit(1); }
     vf_events(&out);
@@ -235,6 +264,11 @@ int main(void) {
   }
   size_t retail = replay(false), here = retail ? replay(true) : 0;
   if (!retail || !here) return 1;
+  if (!(watched.again > 0 && watched.again_head > 0 && watched.left > 0 && watched.put_back > 0 && watched.off > 0)) {
+    fprintf(stderr, "head watch: the replay never counted one of: drawn again %g (head %g), left drawn %g, put back %g, switched off %g\n",
+            watched.again, watched.again_head, watched.left, watched.put_back, watched.off);
+    return 1;
+  }
   printf("head visibility: %zu operations match retail head_visibility.lua (commit %s); %zu of them again with build 25480438's table "
          "on a world laid out as that build\n", retail, HEAD_VISIBILITY_VECTOR_COMMIT, here);
   return 0;

@@ -137,6 +137,7 @@ struct TfpHead {
   char *cache_request;
   Setter setter;
   struct { TfpVisIdentity owner; double kind, record, head, tail, weapon, serial, started; bool ads, aim; } epoch;
+  TfpHeadWatch watch;   /* beyond retail: counts of the last call, for the log (head_visibility.h) */
   /* machinery */
   Obj *objects;
   jmp_buf *jump;
@@ -545,6 +546,7 @@ static double mask(TfpHead *h, const Row *row) { return byte_at(h, row->mesh + 0
 static void set_pass(TfpHead *h, Row *row, double index, bool visible, const char *pass) {   /* :184-188 */
   TfpEngineError error = {{0}};
   CHECK(current_setter(h) == row->setter, 185, "Head mesh SDK binding ownership changed");
+  if (!visible && !strcmp(pass, "default")) h->watch.turned_off += 1;   /* beyond retail, for the log: the engine is asked */
   if (!row->setter(h->engine->user, row->handle, (int)index, visible, pass, &error)) engine_raise(h, &error);
   CHECK(current_setter(h) == row->setter, 187, "Head mesh SDK binding changed during visibility update");
 }
@@ -623,6 +625,7 @@ static bool stop(TfpHead *h, TfpVisText *why) {   /* :249-256 */
   TfpVisText unused;
   NMap *layouts = new_nmap(h);
   h->steady = NULL;
+  h->watch.put_back += (double)h->owned->n;   /* beyond retail: for the log */
   if (h->owned->n) has_exiting = view_snapshot(h, &exiting, &unused);
   SMap *keys = skeys(h, h->owned);
   for (size_t i = 0; i < keys->n; i++) {
@@ -1254,6 +1257,16 @@ static void apply(TfpHead *h, void *arg) {   /* :694-756 */
     double current = row->current;
     int count;
     const Pass *list;
+    /* Beyond retail, for the log: the camera pass of a mesh this module wants out of the camera's sight, as found. */
+    const bool camera_row = !row->shadow_only && !row->body_only;
+    if (camera_row) {
+      h->watch.camera_rows += 1;
+      if (has(current, 1)) {
+        if (!row->has_last) h->watch.on_new += 1;
+        else if (has(row->last, 1)) h->watch.on_still += 1;
+        else { h->watch.on_again += 1; if (row->part == PART_HEAD) h->watch.on_again_head += 1; }
+      }
+    }
     if (row->has_last && current == 255 && !has(row->last, 1)) {
       row->bits = 0; sdel(h->owned, key);   /* Complete native/foreign visibility supersedes the old cohort. */
       if (!native_reset(h, row, current, &PASSES[0])) sset(h->ignored, key)->num = row->shadow_suppressed ? 1 : 3;
@@ -1318,6 +1331,7 @@ static void apply(TfpHead *h, void *arg) {   /* :694-756 */
       current = row->written; row->current = current;
     }
     row->last = current; row->has_last = true;
+    if (camera_row && has(current, 1)) h->watch.left_on += 1;   /* beyond retail: for the log */
   }
 }
 static bool unavailable(TfpHead *h, TfpVisText *why) {   /* :687-688, :758-759 */
@@ -1353,6 +1367,7 @@ static bool update(TfpHead *h, TfpVisText *why) {
     h->steady = NULL; refresh = true;
   }
   h->full_observations += 1;
+  h->watch.full = true;
   Resolve r = {&s, refresh, NULL, NULL};
   if (!protect(h, resolve, &r)) return unavailable(h, why);
   h->identity = s.player_identity;
@@ -1378,8 +1393,8 @@ void tfp_head_free(TfpHead *h) {
   free(h->model_shadow_error); free(h->cache_request);
   free(h);
 }
-bool tfp_head_update(TfpHead *h, TfpVisText *why) { bool ok = update(h, why); collect_garbage(h); return ok; }
-bool tfp_head_stop(TfpHead *h, TfpVisText *why) { bool ok = stop(h, why); collect_garbage(h); return ok; }
+bool tfp_head_update(TfpHead *h, TfpVisText *why) { memset(&h->watch, 0, sizeof h->watch); bool ok = update(h, why); collect_garbage(h); return ok; }
+bool tfp_head_stop(TfpHead *h, TfpVisText *why) { memset(&h->watch, 0, sizeof h->watch); bool ok = stop(h, why); collect_garbage(h); return ok; }
 bool tfp_head_shutdown(TfpHead *h, TfpVisText *why) { h->closing = true; return tfp_head_stop(h, why); }   /* :257 */
 bool tfp_head_is_clean(const TfpHead *h) { return h->owned->n == 0; }   /* :248 */
 const char *tfp_head_phase_name(TfpHeadPhase phase) {
@@ -1415,6 +1430,7 @@ TfpHeadHandle tfp_head_sdk_handle(const TfpHead *h, size_t index) {
   const NEntry *e = &h->handles->e[index];
   return (TfpHeadHandle){e->key, e->flag ? (TfpEngineUnit)e->raw : NULL};
 }
+void tfp_head_watch(const TfpHead *h, TfpHeadWatch *out) { *out = h->watch; }
 void tfp_head_debug(const TfpHead *h, TfpHeadDebug *out) {
   memset(out, 0, sizeof *out);
   out->owned = h->owned->n; out->ignored = h->ignored->n;

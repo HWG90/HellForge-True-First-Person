@@ -120,6 +120,23 @@ typedef struct TfpHeadHandle { double ref; TfpEngineUnit unit; } TfpHeadHandle;
 bool tfp_head_sdk_handles(const TfpHead *h, size_t *count, unsigned long long *table);
 TfpHeadHandle tfp_head_sdk_handle(const TfpHead *h, size_t index);
 
+/* Beyond retail, for the log only (docs/design/specs/2026-11-24-helmet-in-view.md): what the last update, stop or
+ * shutdown saw of the camera ("default") pass of the meshes it wants out of the camera's sight (head, torso,
+ * shoulders, backpack, the rig's shoulder pads; not the rows that only own a shadow pass). Counted where the call
+ * already reads and writes; nothing is read or written for it.
+ *   camera_rows   such meshes in this update's full observation (0 on the steady path, which reads no row)
+ *   on_new        found drawn, never seen before by this module (the first update on a body)
+ *   on_again      found drawn, and hidden when this module last looked: the game or another mod switched the pass
+ *                 back on between two updates. on_again_head: those of the head.
+ *   on_still      found drawn, and drawn when it last looked (it was left drawn then too)
+ *   turned_off    camera passes this call switched off
+ *   left_on       still drawn when the update ended (an outside change this module leaves alone until the view,
+ *                 the weapon or the aim changes: retail's rule)
+ *   put_back      rows the call gave back because it ended in a stop (the view is not one it hides in, or a check failed)
+ *   full          the update took the full observation path */
+typedef struct TfpHeadWatch { double camera_rows, on_new, on_again, on_again_head, on_still, turned_off, left_on, put_back; bool full; } TfpHeadWatch;
+void tfp_head_watch(const TfpHead *h, TfpHeadWatch *out);
+
 /* For tests and diagnostics: the state the Lua keeps in upvalues. */
 typedef struct TfpHeadOwnedRow {
   const char *key, *part;

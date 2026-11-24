@@ -489,6 +489,21 @@ static void orphan_note(void) {
 #endif
 
 #ifdef TFP_FEEL
+/* ---- the "Head:" line (src/head_log.h; docs/design/specs/2026-11-24-helmet-in-view.md) ----------------------------
+ * Each tick, after the runtime's update: what head visibility owns of the head, torso and shoulders when that
+ * changes, meshes it had seen hidden and found drawn again, meshes it leaves drawn, and its stopping or starting
+ * while the view is on. Reads the module's own counts; changes nothing. */
+static void head_note(void) {
+  static TfpHeadLog seen;
+  TfpHeadTick tick;
+  char text[640];
+  if (!tfp_wire_engine_head_tick(&wire, &tick)) return;
+  tick.view = wire.controller.enabled;
+  if (tfp_head_log_step(&seen, &tick, text, sizeof text)) say("%s", text);
+}
+#endif
+
+#ifdef TFP_FEEL
 /* ---- the action hold (the Weapon put-away option): the binder's two hooks (src/wire.h TfpWireHold) ----------------
  * Each tick, after the controller decided. The pose helper tolerates an action from the moment a lease runs
  * (armed), not only once the controller holds: HellForge runs this tick before the game's update, so the game's
@@ -1088,6 +1103,7 @@ static void tick_body(void) {
   if (tfp_mod_editor_settled()) tfp_mod_panel_tick(hf, owner, &wire, mcm_wanted, menu_unavailable(), tfp_wire_editor_toggle);
   tfp_wire_frame(&wire, extra);
   entry_note();
+  head_note();   /* before the trace: a "Head:" line then stands above the rows of the frames it is about */
   orphan_note(); /* before the trace: its edges open a trace window too */
   trace_note();
   tfp_wire_panel_frame(&wire);         /* what the user did in the mod's own panel since the last tick */

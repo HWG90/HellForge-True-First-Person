@@ -137,6 +137,7 @@ typedef struct TfpWireEngine {
   bool has_body;
   /* the session log */
   double grip_frames_seen, grip_corr, grip_max_m, grip_max_deg;
+  uint32_t head_kind; /* the camera kind of the snapshot the head module took in its last update, 0: none (the "Head:" line) */
   char result_tag[3];
 } St;
 #define ST(w) ((St *)(w)->ext[TFP_WIRE_EXT_ENGINE])
@@ -1139,6 +1140,7 @@ static bool io_snapshot_for(St *st, Snapshot take, TfpVisSnapshot *out, TfpVisTe
     const TfpLease *lease = st->w->controller.lease;
     if (tfp_action_own_native(lock_view(), s.camera_kind, s.seated, s.record, lease ? lease->request : 0)) out->head_camera_transition = true;
   }
+  if (head) st->head_kind = s.camera_kind;
   remember(st, &s, out);
   return true;
 }
@@ -1401,6 +1403,7 @@ static bool head_call(TfpRtHost *h, HeadCall call, V *o1, V *o2) {
   return true;
 }
 static bool rt_head_update(TfpRtHost *h, V *o1, V *o2) {
+  SH(h)->head_kind = 0; /* an update that stops before it takes a snapshot has no kind to tell */
   St *st = SH(h);
   if (st->state[TFP_WE_HEAD] == TFP_WE_RESOLVED && st->head) head_preflight(st);
   return head_on(st) ? head_call(h, tfp_head_update, o1, o2) : st->off.head_update(h, o1, o2);
@@ -1636,6 +1639,21 @@ static void slug(const char *text, char *out, size_t size) { /* a reason as one 
   size_t n = 0;
   for (; text[n] && n + 1 < size; n++) out[n] = text[n] == ' ' ? '_' : text[n];
   out[n] = 0;
+}
+bool tfp_wire_engine_head_tick(const TfpWire *w, TfpHeadTick *out) {
+  St *st = ST(w);
+  TfpHeadResult r;
+  TfpHeadWatch seen;
+  memset(out, 0, sizeof *out);
+  if (!st || !head_on(st)) return false;
+  tfp_head_result(st->head, &r);
+  tfp_head_watch(st->head, &seen);
+  out->bound = true, out->active = r.phase == TFP_HEAD_ACTIVE, out->phase = tfp_head_phase_name(r.phase), out->kind = st->head_kind;
+  out->rows = (unsigned)r.hidden, out->head = (unsigned)r.hidden_head, out->torso = (unsigned)r.hidden_torso, out->shoulders = (unsigned)r.hidden_shoulders;
+  out->full = seen.full, out->camera_rows = (unsigned)seen.camera_rows, out->on_new = (unsigned)seen.on_new, out->on_again = (unsigned)seen.on_again;
+  out->on_again_head = (unsigned)seen.on_again_head, out->on_still = (unsigned)seen.on_still, out->turned_off = (unsigned)seen.turned_off;
+  out->left_on = (unsigned)seen.left_on, out->put_back = (unsigned)seen.put_back;
+  return true;
 }
 int tfp_wire_engine_head_hidden(const TfpWire *w) {
   St *st = ST(w);
