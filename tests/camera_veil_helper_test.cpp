@@ -360,6 +360,36 @@ int main() {
     CHECK(std::fabs(ahead_of_head(g) - held_ahead) < .002f && veil().leaves == 1);
     g.end();
   }
+  // ---- 15. A leave noted for the tick (veil_second.txt) is dropped when the veil is switched off, and by the helper's
+  // end and begin: the next tick opens nothing. ----
+  {
+    Game g; leave_second = true; leave(g, true, true, -.22f, &first);
+    tfp_camera_set_veil(false); tfp_camera_set_veil(true);
+    tfp_camera_veil_tick(false); g.hip(2); g.frame(33.3);
+    CHECK(std::fabs(ahead_of_head(g) - held_ahead) < .002f && veil().leaves == 0 && veil().frames == 0);
+    g.end();
+  }
+  {
+    Game g; leave_second = true; leave(g, true, true, -.22f, &first);
+    g.end();
+    Game h; h.pose(4, 5, 0, .2f); h.look(.2f, 0); h.hip(); h.begin();
+    tfp_camera_veil_tick(false); h.hip(); h.frame(33.3);
+    CHECK(veil().leaves == 0 && veil().frames == 0);
+    h.end();
+  }
+  // ---- 16. The trace ring (128 rows) wraps after a veiled row: a later frame written into its place says no veil. ----
+  {
+    Game g; leave_trace = true; leave(g, true, true, -.22f, &first);      // the veiled rows: v
+    tfp_camera_veil_tick(false); g.hip(2); g.frame(33.3);                 // v+1
+    tfp_camera_veil_tick(true); g.hip(2); g.frame(33.3);                  // v+2: closed
+    for (int k = 0; k < 127; ++k) { g.hip(2); g.frame(33.3); }          // up to v+129: v and v+1 written over
+    tfp_camera_trace_edge();
+    TfpCameraTraceRow rows[16]; std::memset(rows, 0, sizeof rows);
+    const uint32_t n = tfp_camera_trace_read(rows, 16);
+    CHECK(n == 6);                                                         // v+124 .. v+129
+    for (uint32_t k = 0; k < n; ++k) CHECK(rows[k].kind == 4 && rows[k].veil[0] == 0 && rows[k].veil[1] == 0 && rows[k].veil[2] == 0);
+    g.end();
+  }
   std::printf("camera veil through the helper: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }
