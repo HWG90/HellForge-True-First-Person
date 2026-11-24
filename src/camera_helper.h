@@ -234,6 +234,9 @@ void tfp_camera_orphan_stats(TfpCameraOrphanStats *out);
  * leave of a session it owns none, and that leave draws the head as every other does (soak 27, 12:41:45.163 and
  * 12:41:50.071). false: no veil opens, an open one closes.
  * veil_tick: each tick, after head visibility's update: `hidden` = it found meshes drawn again and left none drawn.
+ * A second leave while the veil is open (a leave that went straight back to the native view within a tick and left
+ * again) keeps it open: the tick that sees that leave counts as the first of two again, unless it found the body drawn
+ * again and switched it off, so the frame with that leave's body is veiled too (round 19).
  * The helper's begin and end forget the last frame's kind and close the veil: a native frame of the old world and the
  * new one's first head-camera frame are no leave.
  * Off (the default) and without the lock: nothing is reached or read. */
@@ -245,11 +248,11 @@ void tfp_camera_veil_tick(bool hidden);
  * traced (that frame drawn before the tick, the frame with the body after it) only the frame that draws the body is
  * moved. The hook notes the leave (the same first frame of the lock that is not the native view after one that was,
  * while armed); the next veil_tick opens the veil if it is still armed and did not find the body drawn again and
- * switched off already, and the tick after that closes it whatever it found. A leave is taken by one tick, opened or
- * not. In the other order (the tick before the first head-camera frame, not seen in soak 27) that frame, the one
+ * switched off already, and the tick after that closes it whatever it found, unless it saw another leave. A leave is
+ * taken by one tick, opened or not. In the other order (the tick before the first head-camera frame, not seen in soak 27) that frame, the one
  * with the body, is not moved. The stats say which way it opens (second). */
 void tfp_camera_set_veil_second(bool on);
-/* Counts since the start: leaves the veil opened at; frames drawn while it was open; of them, frames whose eye it moved;
+/* Counts since the start: leaves the veil opened at or was kept open for; frames drawn while it was open; of them, frames whose eye it moved;
  * behind: of them, frames other than the native view whose eye was not proven TFP_CAMERA_VEIL_CLEAR in front of the
  * head (a body off foot, a frame the helper did not present, an eye it would not move): the body may have been in
  * the view. Native frames drawn while it is open (a leave that goes straight back within a tick) are counted in

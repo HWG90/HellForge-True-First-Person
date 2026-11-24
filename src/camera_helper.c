@@ -1234,8 +1234,12 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
      * Round 19, with veil_second.txt: it only notes the leave, and the tick that sees it opens the veil. */
     if (atomic_exchange_explicit(&veil_last_kind, lock_kind, memory_order_relaxed) == 6 && known_kind && kind != 6 && policy.lock_now
         && atomic_load_explicit(&veil_armed, memory_order_relaxed)) {
-      if (atomic_load_explicit(&veil_second, memory_order_relaxed)) atomic_store_explicit(&veil_pending, 1, memory_order_relaxed);
-      else if (!atomic_exchange_explicit(&veil_open, 1, memory_order_relaxed)) {
+      /* A leave while the veil is open (one that went straight back to the native view and left again) is noted in
+       * either way: the tick that sees it keeps the veil open for one more tick (tfp_camera_veil_tick). */
+      if (atomic_load_explicit(&veil_second, memory_order_relaxed) || atomic_load_explicit(&veil_open, memory_order_relaxed))
+        atomic_store_explicit(&veil_pending, 1, memory_order_relaxed);
+      else {
+        atomic_store_explicit(&veil_open, 1, memory_order_relaxed);
         atomic_store_explicit(&veil_ticks, 0, memory_order_relaxed); atomic_fetch_add_explicit(&veil_leaves, 1, memory_order_relaxed);
       }
     }
@@ -1823,14 +1827,14 @@ void tfp_camera_set_veil(bool on) {
   if (!on) { atomic_store(&veil_open, 0); atomic_store(&veil_pending, 0); }
 }
 void tfp_camera_veil_tick(bool hidden) {
-  if (!atomic_load(&veil_open)) {
-    /* Round 19, veil_second.txt: the tick that sees the leave opens the veil, unless it already found the body drawn
-     * again and switched it off; it counts as the first of the two ticks, so the next one closes it. */
-    if (atomic_exchange(&veil_pending, 0) && atomic_load(&veil_second) && atomic_load(&veil_armed) && !hidden) {
-      atomic_store(&veil_ticks, 1); atomic_store(&veil_open, 1); atomic_fetch_add(&veil_leaves, 1);
-    }
-    return;
-  }
+  /* Round 19: the leave the hook noted, taken once. It is only ever noted while armed (with veil_second.txt) or while
+   * the veil is open, and set_veil(false), set_veil_second(false) and the helper's begin and end drop it. */
+  const bool leave = atomic_exchange(&veil_pending, 0) != 0;
+  /* The tick that sees a leave opens the veil (veil_second.txt) or keeps it open (a second leave while it is open, in
+   * either way), unless it already found the body drawn again and switched it off; it counts as the first of the two
+   * ticks, so the next one closes it. */
+  if (leave && !hidden) { atomic_store(&veil_ticks, 1); atomic_store(&veil_open, 1); atomic_fetch_add(&veil_leaves, 1); return; }
+  if (!atomic_load(&veil_open)) return;
   if (hidden || atomic_fetch_add(&veil_ticks, 1) + 1 >= 2) atomic_store(&veil_open, 0);
 }
 void tfp_camera_set_veil_second(bool on) { atomic_store(&veil_second, on ? 1u : 0u); if (!on) atomic_store(&veil_pending, 0); }

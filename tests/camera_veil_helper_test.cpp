@@ -326,6 +326,40 @@ int main() {
     CHECK(std::fabs(ahead_of_head(g) - held_ahead) < .002f && veil().leaves == 0);
     g.end();
   }
+  // ---- 14. A second leave while the veil is open (a leave that went straight back to the native view within a tick,
+  // then left again: soak 27 had three). The tick that sees the second leave keeps the veil open for one more tick, so
+  // the frame the game draws the body in after it is veiled too, in both ways of opening; the leave is counted. With
+  // veil_second.txt the order is leave, tick (opens), native, leave, tick (keeps it), body frame, tick (closes). ----
+  for (int second = 0; second < 2; ++second) for (double dt : {8.0, 16.7, 33.3, 50.0}) {
+    Game g; leave_second = second != 0; leave_dt = dt; leave(g, true, true, -.22f, &first);
+    tfp_camera_veil_tick(false);           // the tick that sees leave 1: open
+    g.native(); g.frame(dt);               // straight back
+    g.hip(2); g.frame(dt);                 // leave 2, the veil open: moved
+    CHECK(std::fabs(ahead_of_head(g) - TFP_CAMERA_VEIL_CLEAR) < .002f);
+    tfp_camera_veil_tick(false);           // the tick that sees leave 2: kept open
+    g.hip(2); g.frame(dt);                 // the frame with the body: moved
+    CHECK(std::fabs(ahead_of_head(g) - TFP_CAMERA_VEIL_CLEAR) < .002f);
+    tfp_camera_veil_tick(false);           // closed: the count of two ticks from leave 2's tick
+    g.hip(2); g.frame(dt);
+    CHECK(std::fabs(ahead_of_head(g) - held_ahead) < .002f);
+    for (int k = 0; k < 3; ++k) {          // and it stays closed: no leave is left to open it again
+      tfp_camera_veil_tick(false); g.hip(2); g.frame(dt);
+      CHECK(std::fabs(ahead_of_head(g) - held_ahead) < .002f);
+    }
+    const TfpCameraVeilStats s = veil();
+    CHECK(s.leaves == 2 && s.behind == 0);
+    g.end();
+  }
+  {
+    // A second leave whose tick finds the body drawn again and switched off: closed by that tick, as a first leave's.
+    Game g; leave_second = true; leave(g, true, true, -.22f, &first);
+    tfp_camera_veil_tick(false); g.native(); g.frame(33.3); g.hip(2); g.frame(33.3);
+    tfp_camera_veil_tick(true); g.hip(2); g.frame(33.3);
+    CHECK(std::fabs(ahead_of_head(g) - held_ahead) < .002f);
+    tfp_camera_veil_tick(false); g.hip(2); g.frame(33.3);
+    CHECK(std::fabs(ahead_of_head(g) - held_ahead) < .002f && veil().leaves == 1);
+    g.end();
+  }
   std::printf("camera veil through the helper: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }
