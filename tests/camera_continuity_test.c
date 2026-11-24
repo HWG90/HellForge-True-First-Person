@@ -1931,8 +1931,11 @@ int main(void) {
     /* a frame in which jumps are looked for is no cut (the native view's rule takes it, or not) */
     PLAIN_START(); plain_frame(&c, root, 0, low, HEAD, true, false, tick, true);
     CHECK(c.cuts == 0);
-    /* nor is one in full aim (quiet: nothing is taken up) */
-    PLAIN_START(); plain_frame(&c, root, 0, low, HEAD, false, true, tick, true);
+    /* nor is one in full aim (quiet: nothing is taken up), and the head's move there counts as its speed: the frame
+     * after it, out of full aim and the head on down as far, is no cut either (it was moving) */
+    PLAIN_START(); plain_frame(&c, root, 0, low, HEAD, false, true, tick, true); tick += 33.3;
+    CHECK(c.cuts == 0);
+    plain_frame(&c, root, 0, lower, HEAD, false, false, tick, true);
     CHECK(c.cuts == 0);
     /* nor a change of camera in that frame: it is taken up as a change of camera, and counted so */
     PLAIN_START(); plain_frame(&c, root, 0, low, NATIVE, false, false, tick, true);

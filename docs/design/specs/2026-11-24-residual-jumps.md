@@ -755,3 +755,37 @@ carried), where it called the same frames the game's own before. The game's own 
 3. Whether a cut ever fires where it should not: a head-camera frame of a body on foot that moves 0.25 m against
    the root from rest for a reason of its own (an animation not seen in these soaks).
 4. That a throw out of an emote still sets `off_foot` in its first moving frame, as soak 28's did.
+
+### After the review of round 19
+
+The review held the cause and the fix for the emote cases and found:
+
+1. **A flick of the mouse was a cut.** The head handed to the filter was the head camera's eye less the damping,
+   0.18 m ahead of the head node along the level view. In kind 4 the root does not turn with the view, so a turn of
+   about 88 degrees or more in one frame after a calm frame moved that eye a chord of up to 0.36 m: flicks of 95 and
+   180 degrees at 8, 16.7 and 33.3 ms were cuts, the eye 0.265 / 0.360 m off (0.18 m behind the head node) for about
+   300 ms. Now the helper gives the head node itself (`smoothed`, the point `lock_damp_eye` damps), which does not
+   move on a view turn: no cut, the eye on the head camera's eye in every frame, as main. The node moves 0.255 to
+   0.553 m against the root in the eleven real cut frames (soak 27 12:52:57.770 is the least, against the 0.25 m bound).
+2. **The root moving alone was a cut.** The root alone 0.5 m, the head and the eye still in the world: cut, the eye
+   0.500 m off. A cut now also needs the head to jump as far in the world (the real cuts: 0.330 to 0.578 m); the
+   root alone is read as before (Bodycam 0.060 m, Stable 0.310 m off at most, as main).
+3. **The ease's end.** Soak 30 16:37:35.009, 300 ms after a cut, the step change went 0.009 -> 0.029 m where the
+   cubic ended (it brakes hardest in its last frame). A cut is now eased on the quartic (1-s)^3 (d (1+3s) + v T s),
+   at rest at its end with no acceleration, its length reckoned for its start (12 d / T^2 at ease_accel, up to
+   max_ms times the square root of 2). Over the ten cuts, the 15 frames after each against main: the most a frame's
+   step change is beyond main's 0.020 -> 0.008 m, summed 0.260 -> 0.141 m. (The quintic, at rest at both ends,
+   brakes in its middle as hard as the cubic at its end: 0.021 and 0.429 m.)
+4. **Exclusions not pinned.** Tests now pin each: a third cut in a row, a frame looked at, full aim, a change of
+   camera, the frame after a start and after a restart, a head without the world, kind 5, a body that is down, and
+   the first frame out of full aim. The ADS gap stays unpinned on purpose: it starts with a change of camera and
+   lasts under 250 ms, inside the 600 ms in which jumps are looked for after one, so it cannot be told apart.
+5. Scenario 17 drops the head 0.5 m in one frame again: with the smooth eye on that is a cut (the trace says so,
+   the damping still runs at its 0.10 m, the eye is not moved in that frame), and the native view after it starts
+   from where the eye is. Scenario 20 drops in one frame with the smooth eye off, in two with it on.
+
+The node is smoothed by the head camera's own 0.06 m lag, so a made-up 0.4 m cut moves it 0.34 m: under the bound at
+50 ms a frame (0.375 m, prone's 0.30 m in such a frame from rest stays shown), and shown as before there; at 50 ms a
+0.55 m cut is a cut. The replay rebuilds the node from `damp=` and `view=` (feel.48 on); older lines are replayed
+without the head. Soaks 8 to 30 replayed against main: soaks 8 to 26 the same to the digit; 27 to 30 eleven cut frames
+(the ten cuts), 21 frames better by more than 0.02 m of step change, none worse (before: one, 16:37:35.009).
