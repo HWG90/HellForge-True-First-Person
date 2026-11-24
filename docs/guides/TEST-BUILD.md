@@ -1,4 +1,4 @@
-# True First Person for HellForge: test build 0.6.0-feel.48
+# True First Person for HellForge: test build 0.6.0-feel.50
 
 For HellForge on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
@@ -45,6 +45,24 @@ keep their values. "View kick when thrown" works in both.
 To get the old behaviour back: tick **Bodycam**. Your slider values are still there.
 
 Tested in the game: ten actions in each style (Stable: no kick at all; Bodycam: 2.4 to 5.8 degrees); I have not played it yet.
+
+## Fixed in 0.6.0-feel.50
+
+- **The view no longer lurches when the arms move.** The game places the first-person view by where the rig
+  holds the gun, and the mod's animated arms were moving that point. So a melee threw the view 0.7 m in one
+  frame, and dives, aiming, reloads and the arms settling after a swap all slid it forward and back. The mod
+  now gives the game its own values back after drawing the arms. This was in every build with Animated arms.
+- **Checked in the game (2026-11-24, solo missions):** the same runs of random actions before and after. In
+  the Stable style 17 in 100 actions had a jump of the view over my limit (0.06 m) before and 10 in 100 after;
+  in Bodycam 23 before and 12 after. Aiming, pistol aiming, melee and prone with a stim left the list. No
+  crash.
+- The gun can now sit a little nearer or farther than before in the middle of an action, because the view no
+  longer moves to hide it. At rest it is where it was.
+- **Not fixed, and you will see it:** for a moment after a grenade throw begins, and sometimes at a weapon
+  swap, the back of your own helmet fills the view. It is being worked on.
+- **Not fixed:** a backward dive still throws the view (up to 0.6 m in one frame); smaller jumps remain in
+  dives, vaults, going prone and reloads (0.06 to 0.14 m).
+- For testing: `arms_live_keep.txt` beside the DLL brings the old behaviour back.
 
 ## Fixed in 0.6.0-feel.48
 
