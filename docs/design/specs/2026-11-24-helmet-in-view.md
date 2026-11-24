@@ -337,3 +337,55 @@ the head; a new world (the helper ended and begun again) does not open a veil fr
   body is drawn below it all the same). The old frame showed the helmet there too.
 - Crouched and prone leaves (40 of 146): the head node is the body's own, so the rule is the same, but no capture
   has looked at one.
+
+## Round 19: what the veil shows is logged
+
+Round 18 compared feel.50 and feel.51 (`~/.cache/tfp-soak-27.modlog` against `-28`, `-29` and `-30`). The veil moves the
+eye handed to the game in a frame or two at most leaves of the native view (soak 30, Stable: 66 leaves, 73 frames
+moved; soaks 28 and 29, Bodycam: 90 and 88), by `TFP_CAMERA_VEIL_CLEAR` less where the held eye was: 0.32 m with the
+LAS-5 Scythe's eye 0.22 m behind the head. No log and no judge saw it:
+
+- `veil_apply` (`src/camera_helper.c`) runs after `smooth_present` has written the frame's Trace row and after
+  `last_head_world` is kept, so every row holds the eye before the veil, and the judges measure that eye.
+- The `Head:` line counted the moved frames but did not print `largest_m`.
+
+So a step of up to 0.32 m forward and back again on screen was judged as no step. Nothing about what is shown changed
+in round 19; the log now says it:
+
+- **`veil=` on the Trace row**, the last field: the move as a vector in the world, `veil=(x y z)`, or `veil=0` where the
+  veil moved nothing. The setter writes it into the frame's own row (`trace.frames[(trace.head-1) % TRACE_RING]`, only
+  where that row's tick is this frame's) right after `veil_apply`. `eye_world` stays the eye before the veil, which is
+  what the continuity was given; the eye shown is `eye_world + veil`.
+- **The `Head:` line** ends `..., left behind the head on N, largest move 0.321 m, opens at the first head-camera
+  frame` (or `opens at the tick that sees the leave (veil_second.txt)`). Neither field makes a line by itself.
+- **The judges** (`tools/harness/matrix.py measure`, so `soak.py` and `matrix.py` alike) measure the shown eye. A frame
+  over the limit with a veiled frame among its three, whose eye before the veil is under it, is **the veil's**: listed
+  as such with `veil 0.320` on its line, and counted apart (`...; 0 the filter's; 3 the veil's`). Where the eye before
+  the veil is over the limit as well, it stays the eye's own or the filter's, judged on that eye. Rows without `veil=`
+  (every log before round 19) and rows with `veil=0` are judged exactly as before: soaks 8 to 30 give the same replay
+  output as on main, and the same judge output but for the added `0 the veil's` (`~/.cache/tfp-round19/before` and
+  `after`).
+- `tools/harness/replay.py` reads `veil=` into `row["veil"]` and uses nothing of it: it replays the filter, which
+  never saw the veil.
+
+### A test switch: `veil_second.txt` (off by default)
+
+The analyst of round 18 proposed opening the veil at the tick that sees the leave instead of at the first
+head-camera frame. In the order soak 27 traced in all 131 leaves (the first head-camera frame drawn before that tick
+with the body still hidden, the frame with the body after it) that moves only the frame that draws the body: one
+frame of 0.32 m forward and back instead of two. With the file `veil_second.txt` beside the DLL
+(`tfp_camera_set_veil_second`):
+
+- the hook only notes the leave; the next tick opens the veil if it is still armed and did not itself find the body
+  drawn again and switch it off; the tick after that closes it whatever it found. A leave is taken by one tick.
+- In the other order (the tick before the first head-camera frame; not seen in soak 27) that frame is the one with the
+  body, and it is not moved.
+- The log says it once at the start (`Test: veil_second.txt: ...`) and on every `Head:` line.
+
+### What only the game can show
+
+- How much of a session's flagged frames the veil is: a soak on this build, judged with `soak.py --log`, now counts
+  them; the size per leave is on the Trace rows.
+- Whether one veiled frame (`veil_second.txt`) still hides the helmet at every leave: that needs the order of soak
+  27 to hold in the game, and a burst of captures around the leave (`tools/harness/burst.py`).
+- Whether the step forward and back reads as a jolt at all next to the helmet it replaces, with one frame or two.
