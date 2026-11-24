@@ -199,15 +199,18 @@ uint32_t tfp_pose_set_entry_animation(uint32_t milliseconds, float drop, float b
  * lease runs and the controller would hold an action, because the game's first write of an action comes
  * before the tick that sees the action (HellForge runs the tick before the game's update). */
 uint32_t tfp_pose_set_hold(uint32_t on);
-/* ---- the "Gate:" line (not in retail; docs/design/specs/2026-11-23-gate-flip.md) ----
+/* ---- the "Gate:" line and the depth switch (not in retail; docs/design/specs/2026-11-23-gate-flip.md) ----
  * tfp_pose_gate_take: what the helper counted of the game's unzoom gate and of its own zoom-depth term since the last
  * call (src/gate_log.h), for the log; the count begins again. `out` is the caller's own memory. Returns 1, or 0 before
  * the host is set. Counting changes nothing the helper does and reads nothing more from the game.
  * tfp_pose_set_gate_reads(1): the helper also reads the avatar's main row on every frame it writes the rig root (two
  * guarded reads: 0x3e bytes at avatar owner + 0x53d8b0 + index*0x1238 and the float at +0x11ac), for the same line.
- * Off at the start. */
+ * Off at the start.
+ * tfp_pose_set_depth_off(1): the zoom-depth term adds nothing on any frame (reason 11 in the depth statistics), so
+ * neither the rig nor its root is shifted for the optic. A test switch (depth_off.txt): off at the start. */
 uint32_t tfp_pose_gate_take(TfpGateSecond *out);
 uint32_t tfp_pose_set_gate_reads(uint32_t on);
+uint32_t tfp_pose_set_depth_off(uint32_t on);
 typedef struct TfpPoseHoldProbe {
   uint32_t hold, armed, error;   /* the mode; whether a lease is armed; tfp_pose_error() */
   uint64_t node5_calls;          /* position-setter calls for node 5 of the watched rig, counted from the first tfp_pose_set_hold on */

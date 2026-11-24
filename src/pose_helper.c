@@ -676,10 +676,10 @@ static float depth_pass(DepthState *state, uint32_t reason) {
   if (reason == 1) ++state->observed.ads_bypassed; else ++state->observed.unsupported;
   return 0;
 }
-/* Not in retail: what the "Gate:" line reports (src/gate_log.h), under the policy lock, and a switch the binder
- * sets: gate_reads, the avatar's main row is read too. */
+/* Not in retail: what the "Gate:" line reports (src/gate_log.h), under the policy lock, and two switches the binder
+ * sets. gate_reads: the avatar's main row is read too. depth_off: the depth term adds nothing (depth_off.txt). */
 static TfpGateLog gate;
-static _Atomic uint32_t gate_reads;
+static _Atomic uint32_t gate_reads, depth_off;
 /* One frame in which the rig root is written, after the depth term is settled. `added`: what it added. The gate
  * bytes and the lens are the ones read with the evaluator's locals in this frame, whatever the term did with them. */
 static void gate_frame(const DepthObservation *observation, uint64_t native_stack, float added) {
@@ -724,6 +724,8 @@ static float depth_delta(Policy *p, const DepthObservation *observation, uint64_
   const float current = field_f32(request, 0x10), previous = field_f32(request, 0x1C), prior = field_f32(request, 0x20);
   const float target = field_f32(frame, 0x18), lens = field_f32(frame, 0x1C), mix = field_f32(request, 8);
   if (request[0xD] > 1 || request[0xF] != 0 || frame[0] != 0 || frame[1] > 1 || field_f32(request, 0x18) != 0) return depth_pass(s, 4);
+  /* Not in retail: depth_off.txt. The term adds nothing on any frame, as on a gated one. */
+  if (atomic_load_explicit(&depth_off, memory_order_relaxed)) return depth_pass(s, TFP_GATE_SWITCHED_OFF);
   if (field_u32(request, 4) != field_u32(frame, 0x1C)
       || !isfinite(target) || target < .0002f || target > 2.96f || !isfinite(lens) || lens < .0002f || lens > 2.96f
       || !isfinite(prior) || prior < 0 || prior > 2.96f || !isfinite(current) || !isfinite(previous)
@@ -2018,9 +2020,11 @@ uint32_t tfp_pose_gate_take(TfpGateSecond *out) {
   policy_acquire();
   tfp_gate_take(&gate, out);
   policy_release();
+  out->depth_off = atomic_load_explicit(&depth_off, memory_order_relaxed);
   return 1;
 }
 uint32_t tfp_pose_set_gate_reads(uint32_t on) { atomic_store_explicit(&gate_reads, on ? 1 : 0, memory_order_relaxed); return 1; }
+uint32_t tfp_pose_set_depth_off(uint32_t on) { atomic_store_explicit(&depth_off, on ? 1 : 0, memory_order_relaxed); return 1; }
 void tfp_pose_set_host(const TfpPoseHost *h) { host = *h; }
 void tfp_pose_reset_for_tests(void) {
   for (unsigned i = 0; i < SLOT_COUNT; ++i) { atomic_store(&originals[i], 0); slots[i] = 0; possible[i] = false; }
@@ -2044,7 +2048,7 @@ void tfp_pose_reset_for_tests(void) {
   memset(entry_positions, 0, sizeof entry_positions); entry_position_next = 0; entry_position_writes = 0;
   atomic_store(&entry_position_enabled, 1);
   atomic_store(&hold_mode, 0); atomic_store(&hold_probe, 0); atomic_store(&hold_node5_calls, 0);
-  memset(&gate, 0, sizeof gate); atomic_store(&gate_reads, 0);
+  memset(&gate, 0, sizeof gate); atomic_store(&gate_reads, 0); atomic_store(&depth_off, 0);
 }
 /* Not in retail (pose_helper.h). */
 uint32_t tfp_pose_set_hold(uint32_t on) {

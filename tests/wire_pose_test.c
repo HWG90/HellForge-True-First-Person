@@ -679,7 +679,7 @@ static int real(void) {
   CHECK(strstr(fragment, "look=refused(2)") && logged("Refused: look gain: the look evaluator's code proof is not established on build 25480438") == 1);
   CHECK(logged("Retail's two extra hooks are installed") == 1);
 
-  /* ---- the "Gate:" line's counts (src/gate_log.h; not retail's) ---- */
+  /* ---- the "Gate:" line's counts and the depth switch (src/gate_log.h; neither is retail's) ---- */
   {
     TfpGateSecond g;
     char line[640];
@@ -691,7 +691,7 @@ static int real(void) {
     CHECK(fabsf(depth) > .01f && fabsf(depth) < 1 && near(forwarded[0] - NATIVE[0], .11, 2e-6) && near(forwarded[2] - NATIVE[2], -.12, 2e-6));
     CHECK(tfp_pose_gate_take(&g) == 1 && g.generation == 1 && g.frames == 4 && g.lens_frames == 4 && g.applied == 4 && g.nothing == 0 && tfp_gate_passed(&g) == 0);
     CHECK(near(g.correction_min, depth, 2e-6) && near(g.correction_max, depth, 2e-6) && g.avatar_set == 0 && g.request_set == 0 && !tfp_gate_worth(&g));
-    CHECK(g.row_asked == 0 && g.row_frames == 0 && near(g.target_min, g.target_max, 0) && near(g.lens_min * 57.29578, 36, .01));
+    CHECK(g.row_asked == 0 && g.row_frames == 0 && g.depth_off == 0 && near(g.target_min, g.target_max, 0) && near(g.lens_min * 57.29578, 36, .01));
     /* the avatar bit set every other frame: the depth term goes on and off with it, as it did before this was counted */
     for (int i = 0; i < 6; i++) {
       pose_world_gate(i % 2 == 0, 0);
@@ -714,6 +714,24 @@ static int real(void) {
     tfp_gate_line(&g, false, line, sizeof line);
     CHECK(strstr(line, "; request+0x8f set in 3, changed 5 times; ") && strstr(line, "main row read in 6: +5 set in 3, changed 5 times, +0x3d set in 6, +0x11ac 0.2500 to 0.3750"));
     CHECK(tfp_pose_set_gate_reads(0) == 1);
+    /* depth_off.txt: nothing is added on any frame, gated or clear, and the line says why */
+    pose_world_gate(0, 0);
+    CHECK(tfp_pose_set_depth_off(1) == 1);
+    for (int i = 0; i < 4; i++) {
+      pose_world_gate(i == 3, 0);
+      depth_frame(16);
+      CHECK(applied_is(.11, .02, -.12));
+    }
+    CHECK(tfp_pose_gate_take(&g) == 1 && g.frames == 4 && g.applied == 0 && g.nothing == 0 && g.passed[TFP_GATE_SWITCHED_OFF] == 3 && g.passed[TFP_GATE_GATED] == 1);
+    CHECK(g.depth_off == 1 && g.avatar_changes == 1 && g.row_asked == 0 && tfp_gate_worth(&g));
+    tfp_gate_line(&g, true, line, sizeof line);
+    CHECK(strstr(line, "passed in 4 (unzoom gate or request state 1, depth_off.txt 3)")
+          && strstr(line, "; main row not read; depth_off.txt: the mod's zoom depth is forced to nothing; the first second of a native entry"));
+    CHECK(tfp_pose_set_depth_off(0) == 1);
+    pose_world_gate(0, 0);
+    depth_frame(16);
+    CHECK(applied_is(.11, .02 + (double)depth, -.12)); /* and back */
+    CHECK(tfp_pose_gate_take(&g) == 1 && g.frames == 1 && g.applied == 1 && g.depth_off == 0 && g.avatar_changes == 1);
   }
 
   /* ---- finish: every slot holds the game's function again ---- */
