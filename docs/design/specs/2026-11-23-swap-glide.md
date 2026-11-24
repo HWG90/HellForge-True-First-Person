@@ -259,8 +259,10 @@ as hard for the rest), to the head camera's own eye:
   250 ms;
 - that take-over carries the eye's speed only as far as it can lose it before the new eye (`tfp_eye_glide_take_over`,
   THE TAKE-OVER): along the way the eye is going, all of it when v^2 <= 2 a d (a: the running glide's own hardest rate,
-  13.5 m/s^2 at least; d: the way to the new eye along the motion), on a glide shortened where it must be so that it
-  comes to rest along the motion at the new eye itself; otherwise none of it, the eye eased to rest on its line at that
+  13.5 m/s^2 at least; d: the way to the new eye along the motion) and the new eye is no further on along the motion
+  than where the eye was going (d <= the way to that), on a glide shortened where it must be so that it comes to rest
+  along the motion at the new eye itself; otherwise none of it (a new eye too near ahead, beyond where the eye was
+  going, behind, or too far aside for the speed), the eye eased to rest on its line at that
   rate (v^2 / 2a further on, never past where it was going: a release from rest never goes faster than that rate stops
   at its own target) and then from rest straight to the new eye. (The review of round 19 found the take-over carrying
   all of it: an emote with the rifle up, the sidearm drawn 260 to 360 ms into the release, the eye going 2 m/s toward
@@ -269,7 +271,16 @@ as hard for the rest), to the head camera's own eye:
   other eye drawn every frame (every second at 8 ms) from 0 to 450 ms into the release, forward and reverse, 0.44 and
   0.70 m, on a line and 0.06 m off it, 8 to 50 ms a frame: 0.000002 m outside the span of the held eye, the incoming eye
   and the head camera's own at most (was 0.071), never past the head camera's eye (was 0.069), no frame over the judge's
-  limit or that frame of the release alone, at the incoming eye within 533 ms of the draw. Through the helper (`hold_release`,
+  limit or that frame of the release alone, at the incoming eye within 533 ms of the draw. An incoming eye beyond the
+  head camera's own along the release's way (the second review of round 19: carried onto it, the path bulged out of the
+  span, 0.0147 to 0.0156 m through the helper for a sidearm's eye 2 cm ahead and 3 cm aside, up to 0.075 m in 3-D
+  pairs) is eased to first (`take_over_ahead`: 0.02, 0.05 and 0.10 m ahead, on the line and 0.03 and 0.06 m off it,
+  the rest as above): 0.000009 m outside the span at most (was 0.0248), no frame over the bound, at the incoming eye
+  within 600 ms of the draw; through the helper (`hold_release`, scene 9: four sidearm eyes 0.02 to 0.08 m ahead of
+  the head camera's, 0 to 0.06 m aside) outside the span 0.00000 m (was 0.0052 to 0.0305), no frame over the judge's
+  limit or the release alone. `take_over_rates` pins the conditions one call at a time: a new eye too near to lose the
+  speed in, or too far aside for the carried glide's time, is eased to (nothing planned harder than 13.5 m/s^2), and
+  the ease runs at the running glide's own hardest rate where that is above 13.5 m/s^2. Through the helper (`hold_release`,
   scene 8; drawn every 10 ms while the release is under way, continuity off and on): outside the span 0 (was up to
   0.063 m), past the head camera's eye 0 (was 0.062), the highest point ahead of the head node 0.180, the head
   camera's eye, as on main (was 0.194 to 0.243), largest change of step that of the release alone (0.0009 to 0.043 m);
@@ -295,7 +306,12 @@ The head camera's eye now stays off the head for up to 450 ms more than the fade
 - The eye only moves along the line from the held eye to the head camera's own eye, towards the latter, and never
   past it: it was at the held eye, 0.44 m off, for the 900 ms before, and the release shortens that, it adds no new
   place off that line. Passing through the head on that line is what the fade did too, in three frames. A take-over
-  keeps the eye inside the span of the held eye, the incoming eye and the head camera's own, never past the latter.
+  keeps the eye inside the span of the held eye, the incoming eye and the head camera's own (to 0.05 mm in the
+  arithmetic, 1 mm through the helper, as tested), and along the release's way never further on than the further of
+  the head camera's eye and the incoming eye: past the head camera's eye only toward an incoming eye that is itself
+  past it, and then no further than that eye. The speed is carried only onto an incoming eye no further on along the
+  motion than where the eye was going (in a release, the head camera's eye); onto one beyond it the eye is eased to
+  rest on its line first, at or short of where it was going, and goes from rest straight to the incoming eye.
 - What is around the head is hidden in the head camera: head visibility takes the head (5 meshes), torso and shoulders
   (31 meshes) out of the camera's sight on the tick after the view leaves the native view, and nothing in the logs
   shows them drawn again inside a head-camera stretch. Soak 27: at each of the three releases the last `Head:` line
