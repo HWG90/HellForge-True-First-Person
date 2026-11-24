@@ -789,3 +789,114 @@ The node is smoothed by the head camera's own 0.06 m lag, so a made-up 0.4 m cut
 0.55 m cut is a cut. The replay rebuilds the node from `damp=` and `view=` (feel.48 on); older lines are replayed
 without the head. Soaks 8 to 30 replayed against main: soaks 8 to 26 the same to the digit; 27 to 30 eleven cut frames
 (the ten cuts), 21 frames better by more than 0.02 m of step change, none worse (before: one, 16:37:35.009).
+
+## Round 24: clambers and pick-ups
+
+The report (feel.51, mostly Stable): "Camera has jerks and unintended movement when picking up things like backpacks,
+equipment, or clambering." The log is ~/.cache/tfp-soak-31-user.modlog (2026-11-24, 20:14 to 20:36); the diagnosis
+with its verifiers' corrections is ~/.cache/tfp-round24/pickup-clamber-diagnosis.md.
+
+### What the rows say
+
+**A. High clambers (proven, the main cause).** Three climbs on mask 0x22 (gun stowed, head camera), 20:27:42,
+20:27:50, 20:28:13, all Stable. The root rises 1.8 m in about 0.3 s. The window in which jumps are looked for
+(`smooth_detect`, 600 ms) was opened at the hand-off to the head camera and again at every change of mask
+(0 -> 0x22 -> 0x20), and it looks at head-camera frames too. The head's crouch onto the ledge against the rising root
+is a step change of about 0.1 m a frame in the root's frame: four frames were taken up as jumps (Trace 20:27:42.860 to
+.917), the run's speed (the head going up with the root) was handed to the ease-out, and the shown eye went on rising
+after the head stopped: 0.646 m carried, the shown eye 0.885 m from the head camera's own eye, then a sink of 0.4 to
+0.7 m over 0.3 s at 0.04 to 0.09 m a frame. Stable's eye damping (350 ms, 0.25 m) lagged on top, and again in the
+stand-up after the third clamber, which runs on mask 2 (the gun drawn) and held the eye 0.25 m under the rising head.
+The replay of the logged filter matches the log to the digit in all three windows.
+
+**B. Backpacks (real; the mechanism not proven).** 20:27:07, 20:32:10, 20:34:19: the native view leaves for "Native
+camera request or firearm changed" and comes back 0.6 s later; the rig eye is 0.22 to 0.25 m under the head camera's
+and re-seats itself against the root for about 300 ms (forward 0.32 -> 0 m, up 1.53 -> 1.76 m) while the body turns
+0.1 rad a frame. After the change of camera and two or three re-seats were taken up, what was carried grew again with
+nothing taken up: 0.068 -> 0.235 m at 20:32:10 (the window's figure: 0.154 m). Which part of the filter grows it is
+not proven; zeroing from_speed trimmed it a quarter.
+
+**Smaller.** Low vaults held in the native view (0x20): the game's own rig dip of about 0.3 m, about halved by the
+filter, part of it a frame late; not changed here. Every native return eases a 0.17 to 0.24 m offset (class E): not
+changed except after a backpack. Support-weapon pick-ups run on mask 2 through the swap path (other rounds).
+`TFP_ACTION_PICKUP_MASK` (0x22) was a clamber all along: renamed `TFP_ACTION_CLAMBER_MASK`.
+
+### What changed
+
+- `src/camera_traversal.h` (new; the helper and `tools/harness/replay_filter.c` both use it): mask bit 0x20 is a
+  traversal. A head-camera frame under it while the root moves (0.5 m/s, lingering 300 ms) is not looked at for jumps;
+  a change of mask into, out of or within the traversal masks opens no window (weapon, request, camera and the
+  binder's events still do); the head camera's eye damping is let go (40 ms, as at full aim) in a traversal and for
+  600 ms after the mask leaves the bit (the stand-up).
+- `src/camera_continuity.h` THE CLIMB: a run of jumps whose time is over in a clamber's head-camera frame hands no
+  speed to the curve. Tried in the native view held through a vault too: soaks 20, 23, 24 and 25 had 6 frames worse by
+  over 0.02 m (up to 0.118 -> 0.154 m, soak 25 10:13:51.545): there the run is the rig's re-seat and its speed keeps
+  the eye from stopping short. Head camera only.
+- `src/camera_continuity.h` THE SETTLE: after the binder's `tfp_camera_settle_arm` (mod_view.c, on a leave of the
+  native view for "Native camera request or firearm changed"), the next change of camera into the native view on mask
+  0 within 2 s, of 0.10 m or more, holds the shown eye fixed against the root until the rig's step against the root is
+  no jump against the one before for 3 frames (or 350 ms), then eases once, the curve starting against the rig's own
+  even motion. It lets go with the frame's own answer if the rig goes 0.10 m further from the held eye than at the
+  start. Tried and left: allowed at every entry on mask 0 (soaks 8-31: 554 frames worse, floats up to 1.05 m);
+  "steady" as under 0.5 m/s (the climb at 20:32:10 never was; the one ease was 0.28 m); an ease from rest at the
+  release (at 50 ms a frame a step change of 0.074 m for the rig's own 0.046 m); ending the hold with that ease when
+  the rig goes away (soak 14 04:02:13.232, a first step of 0.196 m).
+- In camera_helper.c only `smooth_detect`, `smooth_present` (the filter's hints, the settle arm) and `lock_damp_eye`
+  change; the eye-return and hold code that round19-hold-release works on is not touched.
+- Log: the Trace line ends with `turn=(x y z)`, the direction the frame is shown with (the forward axis of the
+  rotation handed to the game, in the world), and says `settle` in taken= while THE SETTLE holds; the Head line says
+  "hiding was let go for N ms with the view on" when hiding comes back.
+- Harness: replay.py reads the control mask, the camera style, the window opened only by a traversal mask and the
+  settle arm from the log, and replay_filter.c makes the helper's decisions again (detect, the damping from the
+  logged state on, the filter's hints). --from/--to prints each filter's offset from the raw target (the wanted eye
+  less the damping), the same once the root stopped, the float, and the regrowth. trace.py `held_offsets`: the float,
+  the least offset from the raw target over 300 ms; matrix.py fails a phase on a float over 0.26 m (Stable's damping
+  holds 0.25 m by design) and has the phases clamber-low and clamber-high.
+
+### Tests
+
+- camera_smooth_test scenario 28: a high clamber in the head camera through the helper (0x22 then 0x20, a stand-up
+  on mask 2, native view after), Stable and Bodycam, 8 / 16.7 / 33.3 / 50 ms a frame. Written first: the shown eye was
+  0.69 to 1.0 m from the head camera's eye (0.37 to 0.74 m once the root stopped). Now 0.083 m at most and 0.060 m once
+  the root stopped (the head camera's own smoothing). It also checks the head-camera rows' `turn`.
+- camera_traversal_test: the rules, the root's motion and the linger at the four frame times.
+- camera_continuity_test: THE CLIMB (a run that turns, carried once still 0.405-0.784 m against 0.767-1.108 m
+  without) and THE SETTLE (a made-up backpack return at the four frame times: no regrowth either way, the step change
+  0.006 / 0.015 / 0.016 / 0.040 m against 0.007 / 0.013 / 0.025 / 0.046 m without, let go 100 to 300 ms later).
+- test_harness_round24: the float and the context readers, the matrix's float, and the replay windows of the user's
+  log (skipped without it).
+
+### The replay windows (the user's log; logged filter cc0a95f -> this branch)
+
+| window | offset from the raw target | once the root stopped | float (300 ms) | regrowth |
+|---|---|---|---|---|
+| 20:27:42.7-43.4 clamber | 0.885 -> 0.218 m | 0.577 -> 0.000 m | 0.373 -> 0.000 m | 0.193 -> 0.000 m |
+| 20:27:50.4-51.1 clamber | 0.860 -> 0.249 m | 0.513 -> 0.000 m | 0.376 -> 0.000 m | 0.177 -> 0.000 m |
+| 20:28:13.1-14.8 clamber | 0.720 -> 0.240 m | 0.467 -> 0.052 m | 0.367 -> 0.000 m | 0.089 -> 0.000 m |
+| 20:32:10.2-10.8 backpack | 0.449 -> 0.479 m | - | 0.068 -> 0.055 m | 0.154 -> 0.045 m |
+| 20:27:07.0-07.7 backpack | 0.258 -> 0.258 m | - | 0.076 -> 0.115 m | 0 -> 0 |
+| 20:34:19.6-20.4 backpack | 0.508 -> 0.508 m | - | 0.093 -> 0.166 m | 0 -> 0 |
+
+The offset at the clambers is the change of camera at the hand-off (0.218 m) or the native return; the backpacks'
+largest offset is the change of camera itself, now held and eased once.
+
+### The soaks through the filter (8 to 31, main's filter -> this branch's, with its rules)
+
+Filter's steps 389 -> 388; metre-frames 4707.0 -> 4684.2; frames whose step change is worse by more than 0.02 m: 20,
+better: 31. Soaks 8 to 13, 15, 17, 18, 20, 22, 23, 28, 29 no frame worse. Soak 31: 23 -> 19 steps, 88.6 -> 62.7
+metre-frames, float 0.376 -> 0.181 m, 8 worse (the largest 20:28:14.010, 0.005 -> 0.089 m: the stand-up's own 0.19 m
+root drop, which Stable's damping had absorbed and now shows), 21 better. The other worse frames are 0.03 to 0.09 m:
+soak 14 04:02:13.131 (a settle after a firearm change, float 0.271 -> 0.375 m), soak 19 07:09:34.002, soak 24
+08:38:58.377 and 08:37:26.263, soak 27 12:52:24.585, soak 30 16:38:33.635. Against the logged filters (all rounds
+since): 385 -> 388 steps, 4705.3 -> 4692.9 metre-frames, 61 worse, 133 better (most of both from rounds before this).
+
+### What only the game can show
+
+- Whether the clamber now reads as the body climbing: the shown eye follows the head with no float, and Stable no
+  longer smooths the head's bob in a climb or the 600 ms after it (the stand-up's 0.19 m drop is now seen).
+- Whether the backpack return looks better held and eased once than drifting; and how it looks with the arms drawn
+  at a rig up to 0.48 m from the shown eye for up to 350 ms.
+- The clamber-low / clamber-high matrix phases have not been run (they need the body facing a ledge), nor in Bodycam:
+  the user's log has no Bodycam clamber.
+- Whether the direction snaps at the head-camera hand-off (now logged as `turn=`), and whether the helmet is seen in
+  the 200 to 240 ms head hiding lets go at a backpack's attach (now timed on the Head line). Both unproven.
