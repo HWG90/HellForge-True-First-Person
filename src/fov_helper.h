@@ -136,6 +136,8 @@ void tfp_fov_note_lens(bool gated, float target, float lens);
  * place of the game's value, in full aim with the lock on and "Aim field of view" the game's zoom). Both false, the
  * start-up value: retail's helper (no clock read for it). steady false: the game's value, as feel.51. */
 void tfp_fov_set_aim_watch(bool count, bool steady);
+/* What tfp_fov_set_aim_watch set, and the lens the last tfp_fov_note_lens noted (0: none). Reads only. */
+void tfp_fov_aim_watch_probe(bool *count, bool *steady, float *noted_lens);
 /* One second of full aim (the lock on or off), for the "Aim:" line. Taken (and cleared) once a second by the binder. */
 typedef struct TfpFovAimSecond {
   uint32_t frames, noted, gated, changes, corrected; /* hooked frames in full aim; with the evaluator's numbers; gated; gate changes; the optic's own zoom shown instead of the gate's */

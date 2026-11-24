@@ -260,7 +260,7 @@ static bool rt_shutdown(TfpRtHost *h, V *o1, V *o2) { return answer(h, tfp_edito
 static TfpEdResult open_editor(Ed *st, const char *kind) {
   TfpOpsSnapshot s;
   TfpOpsText why;
-  const bool aiming = tfp_ops_player_snapshot(&st->w->ops, &s, &why) == TFP_OPS_TRUE && s.controller_active;
+  const bool aiming = tfp_editor_motion_full_aim(tfp_ops_player_snapshot(&st->w->ops, &s, &why), &s);
   bool on_ads = false;
   const TfpEdResult r = tfp_editor_motion_open(st->editor, kind, aiming, &on_ads);
   if (on_ads)

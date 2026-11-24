@@ -50,6 +50,8 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "pose_helper.h"
 #include "fov_helper.h"
 #include "placement_editor.h"
+#include "editor_motion.h"
+#include "aim_bind.h"
 #endif
 #define TFP_CONFLICT_ID "goose.first-person-controller"
 
@@ -956,7 +958,7 @@ static void start(void) {
     else say("Ready: rig depth held steady: in the hip view the first-person rig and its root rest at the selected optic's distance instead of following "
              "the lens target the unzoom gate switches; a \"Steady:\" line in a second in which something was moved (depth_steady_off.txt switches it off)");
     /* Round 20c: the zoom-shake corrections in full aim, only with zoom_steady.txt */
-    tfp_pose_set_aim_steady(zoom_steady); tfp_fov_set_aim_watch(true, zoom_steady);
+    tfp_aim_bind_switches(zoom_steady); /* src/aim_bind.h */
     if (zoom_steady) say("Test: zoom_steady.txt: in full aim the rig's depth is held at full strength, and with Aim field of view the game's zoom the "
                          "field of view is held at the optic's own zoom while the unzoom gate flips (round 20 zoom-shake corrections)");
     if (!lock_wanted) say("Smooth: eye continuity stays off whatever the option says: the camera lock is off (lock_off.txt)");
@@ -1154,11 +1156,11 @@ static void steady_note(void) { /* once a second: the rig's depth held steady (s
 static void ads_seat_tick(void) {
   float sight = 0, native = 0, applied = 0;
   const bool near_on = tfp_near_ads_probe(&sight, &native, &applied);
-  tfp_pose_set_ads_seat(near_on ? sight : 0, (float)(tfp_locked_view_ads_sight_cm(&wire)/100));
+  const TfpEditor *editor = tfp_wire_editor_of(&wire);
+  tfp_aim_bind_tick(near_on, sight, tfp_locked_view_ads_sight_cm(&wire), tfp_editor_motion_editing_ads(editor)); /* src/aim_bind.h */
   TfpPoseAdsProbe ads;
   const bool pose_on = tfp_pose_ads_probe(&ads) && ads.armed;
   TfpFovLockStats f; tfp_fov_lock_stats(&f);
-  const TfpEditor *editor = tfp_wire_editor_of(&wire);
   TfpAimSample sample = {
     .full_ads = pose_on && ads.full_ads, .weapon = tfp_wire_settings_weapon_name(&wire),
     .game_fov = f.game_radians > 0 ? f.game_radians : NAN, .shown_fov = f.shown_radians > 0 ? f.shown_radians : NAN,

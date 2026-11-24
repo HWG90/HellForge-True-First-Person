@@ -145,9 +145,13 @@ static int frame(void) {
   if (tfp_motion_runtime_update(&runtime, &reason) == TFP_MOTION_RUNTIME_RAISED) { printf("editor ads: motion raised\n"); return 1; }
   return 0;
 }
-static int open_editor(bool aiming) {
+static int open_editor(bool controller_active) {
   bool on_ads = true;
-  if (tfp_editor_motion_open(ed, "weapon", aiming, &on_ads).r1.kind != TFP_ED_TRUE || on_ads != aiming) return 1;   /* as src/wire_editor.c */
+  /* as src/wire_editor.c: full aim is the player snapshot's controller (review 28, I2) */
+  TfpOpsSnapshot snapshot; memset(&snapshot, 0, sizeof snapshot); snapshot.controller_active = controller_active;
+  const bool aiming = tfp_editor_motion_full_aim(TFP_OPS_TRUE, &snapshot);
+  if (aiming != controller_active) return 1;
+  if (tfp_editor_motion_open(ed, "weapon", aiming, &on_ads).r1.kind != TFP_ED_TRUE || on_ads != aiming) return 1;
   for (int i = 0; i < 4 && strcmp(tfp_editor_phase(ed), "active"); i++) if (frame()) return 1;
   return strcmp(tfp_editor_phase(ed), "active") != 0 || frame();
 }
@@ -175,9 +179,18 @@ int main(void) {
 
   /* Which action the binder opens on: ADS in full aim, the editor's own first (idle) otherwise. */
   CHECK(tfp_editor_motion_open_action(true) && !strcmp(tfp_editor_motion_open_action(true), "ads") && tfp_editor_motion_open_action(false) == NULL);
+  /* Whether the player is in full aim (src/wire_editor.c open_editor): the snapshot taken and its controller active */
+  {
+    TfpOpsSnapshot snapshot; memset(&snapshot, 0, sizeof snapshot); snapshot.controller_active = true;
+    CHECK(tfp_editor_motion_full_aim(TFP_OPS_TRUE, &snapshot) && !tfp_editor_motion_full_aim(TFP_OPS_FALSE, &snapshot));
+    CHECK(!tfp_editor_motion_full_aim(TFP_OPS_TRUE, NULL));
+    snapshot.controller_active = false;
+    CHECK(!tfp_editor_motion_full_aim(TFP_OPS_TRUE, &snapshot));
+  }
+  CHECK(!tfp_editor_motion_editing_ads(NULL) && !tfp_editor_motion_editing_ads(ed));   /* round 20c: the near clip's follow */
 
   /* ---- the report: opened on idle while aiming, a drag moves the hip placement, and full aim draws none of it ---- */
-  CHECK(open_editor(false) == 0 && !strcmp(tfp_editor_preview_action(ed), "idle"));
+  CHECK(open_editor(false) == 0 && !strcmp(tfp_editor_preview_action(ed), "idle") && !tfp_editor_motion_editing_ads(ed));
   CHECK(drag(900, 700, 1100, 700) == 0);
   CHECK(live.v[0] > .15 + .05);                       /* the editor did move something: the hip placement */
   CHECK(full_aim_right() == 0 && full_aim_forward() == 0);   /* and in full aim nothing moved: "the weapon would not move" */
@@ -185,7 +198,7 @@ int main(void) {
   for (int i = 0; i < 3; i++) CHECK(frame() == 0);
 
   /* ---- opened in full aim: on the ADS action, and the drag and the wheel move what full aim draws, live ---- */
-  CHECK(open_editor(true) == 0 && !strcmp(tfp_editor_preview_action(ed), "ads"));
+  CHECK(open_editor(true) == 0 && !strcmp(tfp_editor_preview_action(ed), "ads") && tfp_editor_motion_editing_ads(ed));
   const unsigned sends_before = ads_sends;
   input.x = 900; input.y = 700; input.click = true; CHECK(frame() == 0);
   input.x = 1000; CHECK(frame() == 0);
@@ -208,7 +221,7 @@ int main(void) {
   input.enter = true; CHECK(frame() == 0); input.enter = false;
   CHECK(saves == 1 && !strcmp(saved_action, "ads") && has_stored[2] && fabs(stored[2].v[1] - (-.03)) < 1e-9 && fabs(stored[2].v[0] - right) < 1e-9);
   for (int i = 0; i < 5; i++) CHECK(frame() == 0);
-  CHECK(fabs(full_aim_forward() - (-.03)) < 1e-9 && fabs(full_aim_right() - right) < 1e-9);
+  CHECK(fabs(full_aim_forward() - (-.03)) < 1e-9 && fabs(full_aim_right() - right) < 1e-9 && !tfp_editor_motion_editing_ads(ed));
   CHECK(fabs(live.v[0] - .15) < 1e-9 && fabs(live.v[1]) < 1e-9);   /* the hip placement was never touched by it */
 
   /* ---- cancel puts the saved ADS placement back, at once ---- */

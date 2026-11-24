@@ -12,6 +12,7 @@
  * e NULL: no editor is bound; it answers as an idle one. */
 #ifndef TFP_EDITOR_MOTION_H
 #define TFP_EDITOR_MOTION_H
+#include "backend_ops.h"
 #include "motion_runtime.h"
 #include "placement_editor.h"
 #include <string.h>
@@ -40,6 +41,14 @@ static inline TfpMotionRuntimeGot tfp_editor_motion_ads_draft(const TfpEditor *e
   *out = (TfpActionPlacement){v[0], v[1], v[2], v[3], v[4], v[5], TFP_PLACE_ALL};
   return TFP_MOTION_GOT_VALUE;
 }
+/* Round 20c (review 28, B1): the editor is on its "ads" action, so its draft is full aim's ADS placement and the near clip
+ * follows the gun (src/aim_bind.h tfp_aim_bind_tick). e NULL: no. */
+static inline bool tfp_editor_motion_editing_ads(const TfpEditor *e) {
+  return e && tfp_editor_is_active(e) && !strcmp(tfp_editor_preview_action(e), "ads");
+}
+/* Whether the player is in full aim for the binder's open: the controller active in the player snapshot (`got`, what
+ * tfp_ops_player_snapshot answered, and `s`). Not aiming when the snapshot could not be taken. */
+static inline bool tfp_editor_motion_full_aim(TfpOpsResult got, const TfpOpsSnapshot *s) { return got == TFP_OPS_TRUE && s && s->controller_active; }
 /* The binder's open (src/wire_editor.c open_editor; review I2: the test runs this, not a copy): the editor's own request,
  * then, opened in full aim, its ADS action chosen. `*on_ads`: it was. */
 static inline TfpEdResult tfp_editor_motion_open(TfpEditor *e, const char *kind, bool full_aim, bool *on_ads) {

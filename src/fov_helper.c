@@ -644,6 +644,11 @@ static volatile uint32_t aim_watch, aim_steady; /* round 20c (tfp_fov_set_aim_wa
 void tfp_fov_set_aim_watch(bool count, bool steady) { aim_watch = count ? 1u : 0u; aim_steady = count && steady ? 1u : 0u; }
 static double lock_tick(void) { double tick = 0; if (host.seconds && seconds(&tick)) return tick*1000; return lock_clock; }
 void tfp_fov_note_lens(bool gated, float target, float lens) { tfp_aim_lens_note(&aim_lens, gated, target, lens, lock_tick()); }
+void tfp_fov_aim_watch_probe(bool *count, bool *steady, float *noted_lens) {
+  if (count) *count = aim_watch != 0;
+  if (steady) *steady = aim_steady != 0;
+  if (noted_lens) *noted_lens = aim_lens.began ? aim_lens.lens : 0;
+}
 static void aim_range(float *least, float *most, uint32_t count, float v) {
   if (!isfinite(v)) return;
   if (count == 0 || v < *least) *least = v;

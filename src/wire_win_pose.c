@@ -15,6 +15,7 @@
 #include "near_helper.h"
 #include "pose_helper.h"
 #include "fov_helper.h"
+#include "aim_bind.h"
 
 /* The function each pose slot must hold before one of the helper's values goes in: exe RVA and the
  * bytes there. The same numbers as src/pose_helper.c B_EXE_POSITION / _ROTATION / _BRANCH_ROTATION /
@@ -102,8 +103,6 @@ EXCEPTION_DISPOSITION tfp_pose_input_cas_exception(EXCEPTION_RECORD *exception, 
 /* ---- the host --------------------------------------------------------------------------------------- */
 static bool host_read(void *u, uint64_t at, void *out, size_t length) { (void)u; return tfp_win_read(at, out, length); } /* cpp:156 */
 static uint64_t host_tick(void *u) { (void)u; return GetTickCount64(); }                                             /* cpp:265 */
-/* Round 20: the frame's kind-6 lens, read by the held depth, to the field-of-view helper (both in this DLL). */
-static void host_note_lens(void *u, bool gated, float target, float lens) { (void)u; tfp_fov_note_lens(gated, target, lens); }
 static uint32_t host_thread(void *u) { (void)u; return GetCurrentThreadId(); }
 static bool host_writable_slot(void *u, uint64_t at, uint64_t exe) { (void)u; return tfp_win_writable_slot(at, exe); } /* cpp:273-277 */
 static bool host_executable(void *u, uint64_t at) { (void)u; return tfp_win_executable(at); }                          /* cpp:178-182 */
@@ -226,9 +225,8 @@ void tfp_win_pose_hosts(void) {
   host.lock_exclusive = host_lock_exclusive, host.unlock_exclusive = host_unlock_exclusive;
   host.lock_shared = host_lock_shared, host.unlock_shared = host_unlock_shared;
   host.writable32 = host_writable32, host.cas32 = host_cas32, host.region = host_region, host.allocate = host_allocate;
-  host.note_lens = host_note_lens;
+  /* Round 20: the frame's kind-6 lens to the field-of-view helper, and the near clip read from the pose helper in each
+   * of the near helper's own calls (src/aim_bind.h, tested there). */
+  tfp_aim_bind_pose(&host);
   tfp_pose_set_host(&host);
-  /* Round 20: in full aim the near helper reads how far the gun is drawn in from the pose helper in each of its own
-   * calls, so the near clip comes in with the gun in the same frame (src/ads_seat.h, the review's B1). */
-  tfp_near_set_ads_source(tfp_pose_ads_near);
 }
