@@ -1062,7 +1062,10 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
     if (head_given) for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
       head[axis] += (node[component]-root[component])*root_basis[axis*3+component];
     /* The eye in the world goes with it: the root re-seated by itself is not the eye jumping (camera_continuity.h). */
-    smooth.traversal = tfp_traversal(p->control_mask); /* round 24: a run ending in a clamber hands no speed on */
+    /* round 24, THE CLIMB: a run ending in a clamber's head-camera frame hands no speed on. Not in the native view
+     * held through a vault: there the run is the rig's own re-seat and its speed handed on is what keeps the shown eye
+     * from stopping short (soaks 20, 23, 24, 25 replayed: 6 frames worse by over 0.02 m, up to 0.118 -> 0.154 m). */
+    smooth.traversal = source == SMOOTH_HEAD && tfp_traversal(p->control_mask);
     /* round 24, THE SETTLE: the native view coming back on mask 0 (after a backpack is picked up, the gun drawn again)
      * holds the eye until the rig is steady against the root, then eases once */
     if (atomic_exchange_explicit(&settle_arm, 0, memory_order_relaxed)) settle_armed_at = tick;

@@ -188,7 +188,7 @@ static void rules_apply(Rules *r, TfpContinuity *c, Row *row, const float *basis
   if (detect && row->rearm_only == 1 && !in_run) detect = false;
   if (known) detect = tfp_traversal_detect(detect, row->source == 1, mask, moving);
   row->detect = detect;
-  c->traversal = known && tfp_traversal(mask);
+  c->traversal = known && row->source == 1 && tfp_traversal(mask);
 #ifdef TFP_CONTINUITY_SETTLE_MS
   c->settle_ok = known && mask == 0 && row->source == 2 && !row->quiet && ((row->settle_arm >= 0 && row->settle_arm != r->settled_arm) || c->settling);
 #endif

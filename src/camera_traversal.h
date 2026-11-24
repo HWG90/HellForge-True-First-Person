@@ -17,7 +17,8 @@
  *  - a change of mask into, out of or within the traversal masks does not open the window again (a change of
  *    weapon, of the request, of the camera, and the binder's events still do; the native view held through a low
  *    vault keeps its window from the hold's own event, and the rig's re-seats there are still taken up);
- *  - a run of jumps that ends in such a frame hands no speed to the curve (camera_continuity.h, `traversal`);
+ *  - a run of jumps that ends in such a head-camera frame hands no speed to the curve (camera_continuity.h, THE
+ *    CLIMB; not in the native view held through a vault, where that made the shown eye stop short);
  *  - the head camera's eye is not damped: a lag carried is let go on 40 ms (as at full aim), nothing new is damped;
  *    and not for TFP_TRAVERSAL_AFTER_MS after the mask has left the bit either: the clamber at 20:28:13 ends with
  *    the body standing up on mask 2 (the gun being drawn), the head 0.4 m up against the root in 450 ms, and Stable's
