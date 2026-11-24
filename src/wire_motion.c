@@ -322,11 +322,7 @@ static TfpMotionRuntimeGot host_editor_preview_rotation(void *user, TfpActionPla
 /* Round 20 (src/editor_motion.h): while the editor's "ads" action is edited, its draft is the ADS placement, every frame:
  * full aim draws only that one, and before this a drag in full aim moved nothing that is drawn. */
 static bool host_editor_preview_ads(void *user, const TfpMotionRuntimeLease *view, bool *authored, const char **why) {
-  TfpActionPlacement draft;
-  *authored = false;
-  if (tfp_editor_motion_ads_draft(tfp_wire_editor_of(((Motion *)user)->w), &draft) != TFP_MOTION_GOT_VALUE) return true;
-  *authored = true;
-  return host_set_ads_placement(user, view, &draft, why);
+  return tfp_editor_motion_preview_ads(tfp_wire_editor_of(((Motion *)user)->w), host_set_ads_placement, user, view, authored, why);
 }
 static TfpMotionRuntimeGot host_action_placement(void *user, const char *key, TfpAct action, TfpActionPlacement *out) { /* rt:740 */
   Motion *m = user;

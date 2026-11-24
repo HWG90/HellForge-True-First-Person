@@ -258,13 +258,12 @@ static bool rt_cancel(TfpRtHost *h, const char *reason, V *o1, V *o2) { return a
 static bool rt_shutdown(TfpRtHost *h, V *o1, V *o2) { return answer(h, tfp_editor_shutdown(state(W(h))->editor), o1, o2); }
 /* Round 20: opened in full aim, the editor begins on its ADS action (src/editor_motion.h), and says so. */
 static TfpEdResult open_editor(Ed *st, const char *kind) {
-  TfpEdResult r = tfp_editor_request_open(st->editor, kind);
-  if (r.raised || r.r1.kind != TFP_ED_TRUE) return r;
   TfpOpsSnapshot s;
   TfpOpsText why;
   const bool aiming = tfp_ops_player_snapshot(&st->w->ops, &s, &why) == TFP_OPS_TRUE && s.controller_active;
-  const char *first = tfp_editor_motion_open_action(aiming);
-  if (first && tfp_editor_select_action(st->editor, first))
+  bool on_ads = false;
+  const TfpEdResult r = tfp_editor_motion_open(st->editor, kind, aiming, &on_ads);
+  if (on_ads)
     tfp_wire_say(st->w, "Placement editor: opened in full aim: editing the ADS placement (what full aim draws), live; the wheel moves the sight toward you or away");
   return r;
 }

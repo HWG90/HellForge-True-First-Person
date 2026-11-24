@@ -128,13 +128,9 @@ static bool m_sample(void *u, const TfpMotionRuntimeLease *l, TfpLocomotionSampl
 }
 static bool m_editor_active(void *u, bool *active, const char **problem) { (void)u; (void)problem; return tfp_editor_motion_is_active(ed, active); }
 static TfpMotionRuntimeGot m_editor_preview(void *u, TfpActionPlacement *out) { (void)u; return tfp_editor_motion_preview(ed, out); }
-/* What src/wire_motion.c hands the runtime (editor_motion.h): the ADS draft to the pose helper's ADS placement. */
+/* What src/wire_motion.c hands the runtime: the same editor_motion.h function, with this test's ADS placement. */
 static bool m_editor_ads(void *u, const TfpMotionRuntimeLease *l, bool *authored, const char **why) {
-  TfpActionPlacement draft;
-  *authored = false;
-  if (tfp_editor_motion_ads_draft(ed, &draft) != TFP_MOTION_GOT_VALUE) return true;
-  *authored = true;
-  return m_ads(u, l, &draft, why);
+  return tfp_editor_motion_preview_ads(ed, m_ads, u, l, authored, why);
 }
 
 static TfpMotionRuntimeHost host;
@@ -150,9 +146,8 @@ static int frame(void) {
   return 0;
 }
 static int open_editor(bool aiming) {
-  if (tfp_editor_request_open(ed, "weapon").r1.kind != TFP_ED_TRUE) return 1;
-  const char *first = tfp_editor_motion_open_action(aiming);
-  if (first && !tfp_editor_select_action(ed, first)) return 1;
+  bool on_ads = true;
+  if (tfp_editor_motion_open(ed, "weapon", aiming, &on_ads).r1.kind != TFP_ED_TRUE || on_ads != aiming) return 1;   /* as src/wire_editor.c */
   for (int i = 0; i < 4 && strcmp(tfp_editor_phase(ed), "active"); i++) if (frame()) return 1;
   return strcmp(tfp_editor_phase(ed), "active") != 0 || frame();
 }

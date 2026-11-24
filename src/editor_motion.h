@@ -40,6 +40,28 @@ static inline TfpMotionRuntimeGot tfp_editor_motion_ads_draft(const TfpEditor *e
   *out = (TfpActionPlacement){v[0], v[1], v[2], v[3], v[4], v[5], TFP_PLACE_ALL};
   return TFP_MOTION_GOT_VALUE;
 }
+/* The binder's open (src/wire_editor.c open_editor; review I2: the test runs this, not a copy): the editor's own request,
+ * then, opened in full aim, its ADS action chosen. `*on_ads`: it was. */
+static inline TfpEdResult tfp_editor_motion_open(TfpEditor *e, const char *kind, bool full_aim, bool *on_ads) {
+  TfpEdResult r = tfp_editor_request_open(e, kind);
+  *on_ads = false;
+  if (r.raised || r.r1.kind != TFP_ED_TRUE) return r;
+  const char *first = tfp_editor_motion_open_action(full_aim);
+  *on_ads = first && tfp_editor_select_action(e, first);
+  return r;
+}
+/* The motion runtime's editor_preview_ads (src/wire_motion.c host_editor_preview_ads; the test runs this, not a copy):
+ * the ADS draft handed to `send` (the pose helper's ADS placement) while the editor is on its "ads" action. `*authored`:
+ * a draft was sent, so its rotation is drawn as authored for full aim. False: `send` refused. */
+typedef bool (*TfpEditorMotionSendAds)(void *user, const TfpMotionRuntimeLease *view, const TfpActionPlacement *draft, const char **why);
+static inline bool tfp_editor_motion_preview_ads(const TfpEditor *e, TfpEditorMotionSendAds send, void *user, const TfpMotionRuntimeLease *view,
+                                                 bool *authored, const char **why) {
+  TfpActionPlacement draft;
+  *authored = false;
+  if (tfp_editor_motion_ads_draft(e, &draft) != TFP_MOTION_GOT_VALUE) return true;
+  *authored = true;
+  return send(user, view, &draft, why);
+}
 /* What the controller (the hip placement) is handed for the editor's C_SET_PLACEMENT: while the "ads" action is
  * edited, the placement the editor opened with, so editing the ADS placement leaves the hip one alone (in retail the
  * hip took the ADS draft, invisibly in full aim, and slid from it when the aim ended). Else the value given. */
