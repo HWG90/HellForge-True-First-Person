@@ -4,13 +4,14 @@
  *   replay_filter fit|run < rows
  *
  * A row: tick(ms) source detect quiet fresh  wanted x y z  root x y z  logged eye x y z  root axes (9, rows; "run" only)
- *        given  damp x y z
+ *        given  head x y z
  *        quiet: full aim (the filter takes nothing up); fresh: 1 the filter starts from nothing in this row (the helper
  *        forgot it), 2 the log carries no correction in this row and the filter's was not known: it is let go before
  *        the row, and the rest of the state (the eye's speed, the root's course) is kept
- *        given: 1 the helper gives the filter the head before the eye damping in this row (round 19, THE CUT in
- *        src/camera_continuity.h): the wanted eye less `damp`, what the damping added to it in the world. Read only
- *        against a header that has THE CUT (TFP_CONTINUITY_CUT_M); the filter of an older build is run as it was.
+ *        given: 1 the helper gives the filter the head in this row (round 19, THE CUT in src/camera_continuity.h):
+ *        `head`, the point the head camera's eye is built on, in the world, before the eye damping (replay.py
+ *        head_node). Read only against a header that has THE CUT (TFP_CONTINUITY_CUT_M); the filter of an older build
+ *        is run as it was.
  * Out:   presented eye x y z  correction  taken(bits: 1 jump, 2 edge, 4 root, 8 restart, 16 cut)  root axes (9)  misfit(m)
  *
  * The Trace lines of 0.6.0-feel.39 and before do not say how the root's axes stood. "fit" looks for them: in each
@@ -26,7 +27,7 @@
 #include <string.h>
 #include "camera_continuity.h"
 
-typedef struct Row { double tick; unsigned source; int detect, quiet, fresh, given; float wanted[3], root[3], logged[3], damp[3]; } Row;
+typedef struct Row { double tick; unsigned source; int detect, quiet, fresh, given; float wanted[3], root[3], logged[3], head[3]; } Row;
 static const TfpContinuityTuning tuning = TFP_CONTINUITY_DEFAULT;
 
 static float present(TfpContinuity *c, const Row *row, const float *basis, float *shown) {
@@ -34,7 +35,7 @@ static float present(TfpContinuity *c, const Row *row, const float *basis, float
   for (int a = 0; a < 3; ++a) for (int k = 0; k < 3; ++k) relative[a] += (row->wanted[k]-row->root[k])*basis[a*3+k];
 #ifdef TFP_CONTINUITY_CUT_M
   float head[3] = {0};
-  for (int a = 0; a < 3; ++a) for (int k = 0; k < 3; ++k) head[a] += (row->wanted[k]-row->damp[k]-row->root[k])*basis[a*3+k];
+  for (int a = 0; a < 3; ++a) for (int k = 0; k < 3; ++k) head[a] += (row->head[k]-row->root[k])*basis[a*3+k];
   const float carried = tfp_continuity_step_cut(c, relative, row->wanted, basis, row->given ? head : NULL, row->source, row->detect != 0, row->quiet != 0,
                                                 row->tick, 250, &tuning, out);
 #else
@@ -131,7 +132,7 @@ int main(int argc, char **argv) {
               row.wanted+2, row.root, row.root+1, row.root+2, row.logged, row.logged+1, row.logged+2) != 14) break;
     if (count == room) { room *= 2; rows = realloc(rows, (size_t)room*sizeof *rows); axes = realloc(axes, (size_t)room*9*sizeof *axes); }
     for (int i = 0; i < 9; ++i) if (scanf("%f", &axes[count*9+i]) != 1) return 1;
-    if (scanf("%d %f %f %f", &row.given, row.damp, row.damp+1, row.damp+2) != 4) return 1;
+    if (scanf("%d %f %f %f", &row.given, row.head, row.head+1, row.head+2) != 4) return 1;
     rows[count++] = row;
   }
   TfpContinuity c; memset(&c, 0, sizeof c);
