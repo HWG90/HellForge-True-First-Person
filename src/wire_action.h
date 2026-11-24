@@ -1,9 +1,13 @@
 /* What build 25480438 does differently from retail's build during actions, and the binder's answers.
  * Read from the session of 2026-11-18 (log 76bf7718, 0.6.0-feel.8); docs/design/ACTION-CAMERA.md section 5.
  *
- *  - Picking something up runs under action mask 0x22. Retail's head camera accepts 0, 2 and 0x20 only, so the
- *    game's third-person camera was shown (five times, each a 2.7 to 2.8 m jump). The head camera, and the head
- *    hiding that belongs to it, now accept 0x22 as they accept a vault's 0x20.
+ *  - A high clamber (a ledge at head height, the gun stowed) runs under action mask 0x22, then 0x20 (a vault's).
+ *    Retail's head camera accepts 0, 2 and 0x20 only, so the game's third-person camera was shown (five times, each a
+ *    2.7 to 2.8 m jump). The head camera, and the head hiding that belongs to it, now accept 0x22 as they accept a
+ *    vault's 0x20. The session of 2026-11-18 read 0x22 as picking something up ("the best reading, not a proven
+ *    one", docs/design/ACTION-CAMERA.md); the user's log of 2026-11-24 (feel.51) has three 0x22 episodes, all
+ *    clambers (the root 1.8 m up in each), and pick-ups on other masks: a backpack on 0, a support weapon on 2
+ *    (round 24).
  *  - A stim is mask 2, then 0 for about 650 ms, then 2 (retail's build: mask 64, the native view stays). Retail's
  *    held eye tolerates 300 ms of mask 0, so the eye let go mid-stim and the native view came back with a cut of
  *    0.42 to 0.58 m. The tolerance is 900 ms here, and after it has let go (a grenade held longer) the eye glides
@@ -19,18 +23,18 @@
 #include <stdint.h>
 #include <string.h>
 
-#define TFP_ACTION_PICKUP_MASK 0x22u
+#define TFP_ACTION_CLAMBER_MASK 0x22u /* a high clamber; named the pick-up mask until round 24 */
 #define TFP_ACTION_EYE_IDLE_MS 900u
 #define TFP_ACTION_EYE_RETURN true
 #define TFP_ACTION_AIM_GUARD_SECONDS 0.15 /* full aim younger than this is beginning, not ending */
 #define TFP_ACTION_PROBE_GAP_SECONDS 0.001
 #define TFP_ACTION_PROBES_PER_FRAME 3u /* each asks Windows: few, for wineserver's sake */
 
-/* backend.lua:224 head_camera_transition, with the pick-up mask beside the vault's. */
+/* backend.lua:224 head_camera_transition, with the clamber's mask beside the vault's. */
 static inline bool tfp_action_head_camera(bool retail_answer, uint32_t camera_kind, bool seated, const uint8_t controller_bytes[6]) {
   uint32_t mask;
   memcpy(&mask, controller_bytes, 4);
-  return retail_answer || (camera_kind == 4 && !seated && mask == TFP_ACTION_PICKUP_MASK && controller_bytes[5] == 0);
+  return retail_answer || (camera_kind == 4 && !seated && mask == TFP_ACTION_CLAMBER_MASK && controller_bytes[5] == 0);
 }
 
 /* Beyond retail, and only with the camera lock (0.6.0-feel.26; seen in the game 2026-11-23). A stim on this build

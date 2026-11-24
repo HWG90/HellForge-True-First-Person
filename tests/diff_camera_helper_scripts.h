@@ -867,7 +867,7 @@ static float apart(Run &r) {
   float a[3] = {}, b[3] = {}; if (!r.forwarded_position(0, a) || !r.forwarded_position(1, b)) fail("a frame forwarded no position");
   return std::sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
 }
-// The pick-up action (mask 0x22) is given the head camera, as retail gives it to a vault (mask 0x20).
+// The high clamber (mask 0x22; read as a pick-up until round 24) is given the head camera, as retail gives it to a vault (mask 0x20).
 static void script_extra_mask(Run &r, bool set) {
   Clock c; start(r, c); r.weapon_key(r.gen, KEY_A);
   tfp_camera_set_action_tuning(set ? 0x22 : 0, 300, false);
@@ -930,7 +930,7 @@ static void script_eye_return_steps(Run &r, double dt) {
   r.end(r.gen);
 }
 static void register_scripts() {
-  add("beyond retail: pick-up mask 0x22 given the head camera", [](Run &r) { script_extra_mask(r, true); });
+  add("beyond retail: the high clamber mask 0x22 given the head camera", [](Run &r) { script_extra_mask(r, true); });
   add("beyond retail: mask 0x22 without the value is retail's", [](Run &r) { script_extra_mask(r, false); });
   for (double dt : {16.0, 1000.0 / 144}) {
     char name[96]; std::snprintf(name, sizeof name, "beyond retail: eye held through a stim, step %.2f ms", dt); add(name, [=](Run &r) { script_eye_idle(r, dt); });

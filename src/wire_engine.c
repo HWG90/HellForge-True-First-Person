@@ -1061,7 +1061,7 @@ static void vis_snapshot(const TfpOpsSnapshot *s, TfpVisSnapshot *t) {
   t->avatar_index = s->avatar_index, t->body = s->body;
   t->has_viewmodel = true, t->viewmodel = s->viewmodel;
   t->safe = s->safe, t->seated = s->seated, t->weapon_transition = s->weapon_transition;
-  /* The pick-up mask of build 25480438 beside the vault's (src/wire_action.h): the head camera shows it, so the head hides. */
+  /* The high clamber's mask of build 25480438 beside the vault's (src/wire_action.h): the head camera shows it, so the head hides. */
   t->head_camera_transition = tfp_action_head_camera(s->head_camera_transition, s->camera_kind, s->seated, s->controller_bytes);
   t->controller_active = s->controller_active, t->aiming = s->aiming;
   t->has_controller_bytes = true, t->controller_len = 6; memcpy(t->controller_bytes, s->controller_bytes, 6);
@@ -1122,7 +1122,7 @@ typedef TfpOpsResult (*Snapshot)(TfpOps *, TfpOpsSnapshot *, TfpOpsText *);
 /* Beyond retail (the camera lock; tfp_wire_engine_set_lock_view, src/wire_action.h tfp_action_own_native). Head
  * hiding lets go when its snapshot is neither safe nor a weapon swap. While the game presents the lease's own
  * first-person request under the lock, the head module's snapshot (and only its: `head`) says "the head camera's
- * transition", which is the answer the module already takes for a vault and a pick-up. */
+ * transition", which is the answer the module already takes for a vault and a high clamber. */
 static bool (*lock_view)(void);
 void tfp_wire_engine_set_lock_view(bool (*lock)(void)) { lock_view = lock; }
 static bool io_snapshot_for(St *st, Snapshot take, TfpVisSnapshot *out, TfpVisText *why, bool head) {

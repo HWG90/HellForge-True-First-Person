@@ -841,7 +841,7 @@ static void start(void) {
     }
   }
   /* What build 25480438 does differently during actions (src/wire_action.h). */
-  tfp_camera_set_action_tuning(TFP_ACTION_PICKUP_MASK, TFP_ACTION_EYE_IDLE_MS, TFP_ACTION_EYE_RETURN);
+  tfp_camera_set_action_tuning(TFP_ACTION_CLAMBER_MASK, TFP_ACTION_EYE_IDLE_MS, TFP_ACTION_EYE_RETURN);
   /* The camera lock (docs/design/specs/2026-11-22-locked-view-design.md): first person through every action and camera. */
   tfp_camera_set_lock(lock_wanted, .35f, 8.0f, 300.0f, .7f, 35.0f, tfp_camera_damping_ms(60), false); /* the options' defaults (the Stable camera); lock_note sets the saved ones */
 #ifdef TFP_FEEL
@@ -855,9 +855,9 @@ static void start(void) {
                   : "Test: lock_off.txt: the camera lock is off");
   tfp_camera_set_continuity(false, lock_wanted && trace_wanted); /* the continuity itself: option_smooth, once the settings are read */
   if (lock_wanted && !trace_wanted) say("Test: trace_off.txt: no \"Trace:\" lines after State edges");
-  say("Ready: action camera: the head camera also takes the pick-up action (mask 0x%x); the eye is held through %u ms without an action "
+  say("Ready: action camera: the head camera also takes a high clamber (mask 0x%x); the eye is held through %u ms without an action "
       "(a stim) and glides back before the weapon returns; the aim button is read from Windows, again as the script update begins",
-      TFP_ACTION_PICKUP_MASK, TFP_ACTION_EYE_IDLE_MS);
+      TFP_ACTION_CLAMBER_MASK, TFP_ACTION_EYE_IDLE_MS);
 #ifdef TFP_FEEL
   tfp_win_mouse_engine(&mouse_engine);
   eng_set_script_probe(aim_script_probe);
