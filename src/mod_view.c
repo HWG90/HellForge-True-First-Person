@@ -924,6 +924,14 @@ static void lock_note(void) { /* once a second while the view is on: frames by c
           (double)c.largest_m, (unsigned long long)c.restarts);
     told_jumps = c.jumps; told_edges = c.edges; told_reseats = c.reseats;
   }
+  /* The eye going back and forth (src/camera_alternation.h): counted, nothing is done. A second without it writes nothing. */
+  static TfpCameraAlternationStats told_alternation; TfpCameraAlternationStats a; tfp_camera_alternation_stats(&a);
+  if (a.frames != told_alternation.frames)
+    say("Alternation: %llu frames of the eye going back and forth (would be held; nothing is done), largest move %.3f m; jumps were looked for in "
+        "%llu of them; the fire flag was set in %llu (flag byte 12 bit 0x40, not proven on this build); kind %u",
+        (unsigned long long)(a.frames - told_alternation.frames), (double)a.largest_m, (unsigned long long)(a.looked - told_alternation.looked),
+        (unsigned long long)(a.fire - told_alternation.fire), a.kind);
+  told_alternation = a;
 }
 static void fov_note(void) { /* once a second, on its own: the field-of-view lock also runs with the camera lock off, when lock_note has nothing to say */
   static uint64_t next, told_fov;

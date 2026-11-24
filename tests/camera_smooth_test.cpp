@@ -350,6 +350,29 @@ int main() {
     CHECK(stats.jumps == 1);
     g.end();
   }
+  // ---- 9b. The eye going back and forth every frame, away from any event (the game's unzoom gate flipping,
+  // docs/design/specs/2026-11-23-gate-flip.md): counted for the "Alternation:" line and shown as the game put it;
+  // nothing is held. Counted from the second return on and for 70 ms after the last move; with the binder's word the
+  // frames count as looked at; in full aim nothing counts. ----
+  {
+    fresh(true, true);
+    Game g; g.pose(0, 0, 0, .3f); g.look(.3f, -.2f); g.hip(); g.begin();
+    standing(g, 12, 33.3, false); standing(g, 40, 33.3, true);
+    TfpCameraAlternationStats seen{}; tfp_camera_alternation_stats(&seen);
+    CHECK(seen.frames == 0 && seen.largest_m == 0);
+    for (int i = 0; i < 12; ++i) { g.eye[1] += (i & 1) ? .2f : -.2f; g.native(); g.frame(33.3); CHECK(g.from_rig_eye() < 1e-4f && !g.forwarded_own); }
+    standing(g, 10, 33.3, true);
+    tfp_camera_alternation_stats(&seen);
+    CHECK(seen.frames == 12 && seen.looked == 0 && seen.fire == 0 && seen.kind == 6 && std::fabs(seen.largest_m - .2f) < .01f);
+    tfp_camera_alternation_stats(&seen);
+    CHECK(seen.frames == 12 && seen.largest_m == 0); // the largest move is the one since the last call
+    tfp_camera_continuity_event();
+    for (int i = 0; i < 12; ++i) { g.eye[1] += (i & 1) ? .2f : -.2f; g.native(); g.frame(33.3); }
+    standing(g, 30, 33.3, true);
+    tfp_camera_alternation_stats(&seen);
+    CHECK(seen.frames == 24 && seen.looked == 12);
+    g.end();
+  }
   // ---- 9a. 500 ms after the word a one-frame move is still taken up (seen in the game 2026-11-22: walking out of
   // an emote, the rig re-seated 0.10 m in one frame half a second after the view came back). ----
   {
