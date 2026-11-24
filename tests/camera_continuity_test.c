@@ -1613,8 +1613,9 @@ int main(void) {
    * frame is 0.043 m at 33.3 ms, and the eye is that much further on: 0.677 to 0.717 m (16.7 ms: 0.557 to 0.603 m;
    * 50 ms: 0.746 to 0.780 m), the step change 0.080 to 0.082 m and 0.165 to 0.170 m. A rig eye that stands after one
    * frame at half of 7 m/s (a dive's landing; a stop, followed, no frame taken up): 0.046 to 0.048 m, 0.069 to 0.076 m
-   * and, at 50 ms, 0.128 to 0.121 m. Those two are the let-down's first frame, not a frame taken up, and are held to
-   * what they are. */
+   * and, at 50 ms, 0.128 to 0.121 m. Those two are the let-down itself while the wanted eye is still ahead (its first
+   * frame; at 16.7 ms the frames of the run too, 0.022 m), not its going on past a wanted eye, and are held to what
+   * they are. */
   {
     static const float times[] = {8, 16.7f, 33.3f, 50};
     static const struct { const char *name; float v, part; int scene; float is[4][3]; } scenes[] = {
