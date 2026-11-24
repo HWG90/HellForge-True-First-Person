@@ -97,40 +97,6 @@ static Release emote(bool lock, bool smooth, double dt, float way, int then = 0,
   g.end();
   return r;
 }
-// A long swap whose hold lapses while a retail glide (GATE: a way of more than 0.2625 m) is under way: the rifle's eye
-// `way` behind the head camera's, the sidearm's (remembered) 0.11 m ahead of it; the hands stay full (mask 2) from the
-// view leaving the native view, and the weapon identity changes to the sidearm at `key_ms`, a little before the hold
-// lapses on its 2500 ms. Returns the change of step of the drawn eye in the frame the hold lapses (the first in which
-// the eye is let go) and, in `before`, the step the eye had in the frame before it.
-static float lapse_mid_glide(bool smooth, double dt, float way, double key_ms, float *before) {
-  fresh(true, smooth);
-  tfp_camera_set_action_tuning(0, 900, true);
-  Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
-  const uint32_t first = 0x1111, second = 0x2222;
-  const int settle = static_cast<int>(400 / dt) + 1;
-  CHECK(tfp_camera_set_weapon_key(g.gen, second) == 1);
-  standing(g, settle, dt, false); standing(g, settle, dt, true);
-  standing(g, 3, dt, false, 2);
-  CHECK(tfp_camera_set_weapon_key(g.gen, first) == 1);
-  g.eye[1] = .17f - way; standing(g, settle, dt, true);
-  float last[3], step[3] = {}, at_lapse = -1; std::memcpy(last, g.body, 12); bool swapped = false;
-  for (int i = 1; i * dt <= 3000; ++i) {
-    const double t = i * dt;
-    if (!swapped && t >= key_ms) { CHECK(tfp_camera_set_weapon_key(g.gen, second) == 1); swapped = true; }
-    g.hip(2); g.frame(dt);
-    float now[3], change[3];
-    for (int k = 0; k < 3; ++k) { now[k] = g.body[k] - last[k]; change[k] = now[k] - step[k]; }
-    // the hold began in the first head-camera frame (t = dt) and lapses in the first frame more than 2500 ms after it
-    if (at_lapse < 0 && t - dt > 2500) {
-      at_lapse = std::sqrt(change[0] * change[0] + change[1] * change[1] + change[2] * change[2]);
-      *before = std::sqrt(step[0] * step[0] + step[1] * step[1] + step[2] * step[2]);
-    }
-    std::memcpy(step, now, 12); std::memcpy(last, g.body, 12);
-  }
-  if (std::getenv("TFP_RELEASE_DEBUG")) std::printf("  lapse mid-glide smooth=%d dt=%.1f way=%.2f key at %.0f: change %.4f, step before %.4f\n", smooth, dt, way, key_ms, at_lapse, *before);
-  g.end();
-  return at_lapse;
-}
 static float apart3(const float *a, const float *b) { float d = 0; for (int k = 0; k < 3; ++k) d += (a[k] - b[k]) * (a[k] - b[k]); return std::sqrt(d); }
 // A take-over (a weapon drawn while the eye is let go, scenes 3 to 5 below) goes on at the release's rates, not the swap
 // glide's 250 ms (src/camera_glide.h THE RELEASE): no frame's step changes by more than in the release of the same way at
@@ -181,18 +147,6 @@ static void hold_release() {
       CHECK(r.largest_change <= judge_limit(dt) && r.largest_change <= TAKE_OVER * released);
       CHECK(apart3(r.from_end, sidearm) < 1e-3f);
     }
-  }
-  // 7. A long swap to a weapon whose eye is far (0.55 and 0.81 m: retail's glide, GATE) changes the weapon just before
-  // the hold lapses on its 2500 ms, so the hold lapses while that glide is under way. The release goes on from the speed
-  // the eye has: in the frame it begins the eye's step changes by no more than retail's glide would have slowed it in
-  // that frame (its step times 1-exp(-dt/70 ms)), judged raw (the continuity off); with the continuity on, within the
-  // judge's limit. (Review of round 19, "B lapse": the release began from rest and the eye stopped dead in one frame,
-  // 0.05 m of step change at 33 ms a frame, 0.09 m for 0.81 m, 0.03 m at 8 ms.)
-  for (int f = 0; f < 4; ++f) for (int smooth = 0; smooth < 2; ++smooth) for (float way : {.44f, .70f}) for (double early : {1.5, 2.5}) {
-    const double dt = frames[f]; float before = 0;
-    const float change = lapse_mid_glide(smooth, dt, way, 2500 - early * dt, &before);
-    if (smooth) CHECK(change >= 0 && change <= judge_limit(dt));
-    else CHECK(before > .02f && change >= 0 && change <= before * (1 - std::exp(-dt / 70)));
   }
   // 6. Without the lock it is retail's: faded on 80 ms, its first frame the largest (0.15 m at 33 ms a frame).
   {

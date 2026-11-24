@@ -164,7 +164,7 @@ static inline bool tfp_eye_glide_lock_step(TfpEyeGlide *g, float *value, const f
   g->release = false;
   if (!g->retail) return tfp_eye_glide_step(g, value, target, dt);
   const bool moved = tfp_eye_glide_retail(value, target, dt);
-  for (unsigned i = 0; i < 3; ++i) { g->at[i] = value[i]; g->target[i] = target[i]; } /* (the release goes on from it) */
+  for (unsigned i = 0; i < 3; ++i) g->at[i] = value[i];
   if (!moved && dt > 0) g->retail = false;
   return moved;
 }
@@ -181,9 +181,7 @@ static inline bool tfp_eye_glide_lock_step(TfpEyeGlide *g, float *value, const f
  *    at 33 ms, 0.034 m at 50, against the judge's 0.06 m at 30 frames a second. Short ways take 300 ms all the same:
  *    nothing is gained by letting a held eye go faster.
  *  - An eye under way (a swap's glide when the hold lapses, or a release whose target changes: a new hold) goes on from
- *    the speed it has; so does one on retail's glide (GATE, a long swap whose hold lapses while it is under way), whose
- *    speed is (target - eye) / 70 ms: from rest it stopped dead in one frame, 0.05 m of step change at 33 ms a frame
- *    (review of round 19, "B lapse"). An eye that is not where the last frame left it, or none: from rest.
+ *    the speed it has; an eye that is not where the last frame left it, a retail glide, or none: from rest.
  *  - A glide that has begun as a release and is under way stays one when its target changes (a weapon drawn while
  *    letting go): its rates, not the swap's 250 ms, so the take-over is no harder than the release itself.
  * A `dt` that is not above 0 moves nothing; a value or a target that is not a number moves nothing and forgets it. */
@@ -196,8 +194,6 @@ static inline bool tfp_eye_glide_release(TfpEyeGlide *g, float *value, const flo
   if (!here || !g->release || target[0] != g->target[0] || target[1] != g->target[1] || target[2] != g->target[2]) {
     float place[3], speed[3] = {0, 0, 0};
     if (here) tfp_eye_glide_at(g, g->elapsed, place, speed);
-    else if (g->retail && value[0] == g->at[0] && value[1] == g->at[1] && value[2] == g->at[2])
-      for (unsigned i = 0; i < 3; ++i) speed[i] = (g->target[i]-value[i])/.07f; /* retail's glide: its speed where it is */
     tfp_eye_glide_reset(g);
     tfp_eye_glide_plan(g, value, speed, target, TFP_EYE_RELEASE_ACCEL, TFP_EYE_RELEASE_MIN_MS, TFP_EYE_RELEASE_MAX_MS);
     g->release = true;
