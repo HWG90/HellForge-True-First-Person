@@ -5,24 +5,28 @@ hear what breaks.
 
 ## Install
 
-Take the **complete** ZIP unless you already run NEST for HellForge.
+Take the **complete** ZIP unless you already run DBF-MCM and NEST for HellForge.
 
 1. Close the game and the HellForge launcher.
-2. Unpack the ZIP into HellForge's `mods` folder. It adds:
+2. Unpack the ZIP into HellForge's `mods` folder. It adds three folders:
    - `true-first-person`: the mod.
-   - `overlay-host`: NEST 0.8.3-tfp.1, the shared in-game UI the settings panel and the weapon placement
-     editor draw through.
+   - `mcm`: DBF-MCM 0.1.74-hellforge.3, the settings menu. With it, every option is on the mod's
+     "True First Person" page.
+   - `overlay-host`: NEST 0.8.3-tfp.1, the shared in-game UI the menu, the settings panel and the weapon
+     placement editor draw through.
 3. Switch off any other first-person mod (First Person Controller, First Person + VR Mode, the rig trial).
    Two of them cannot run together.
-4. Start HellForge and check that both are switched on in the mod list.
+4. Start HellForge and check that all three are switched on in the mod list.
 
-DBF-MCM is no longer needed. The mod has its own panel.
+If you already have `mcm` or `overlay-host`, keep yours when they are newer and take only
+`true-first-person` (or the smaller `-test.zip`, which holds just the mod). Without DBF-MCM the mod opens its
+own panel with the same pages instead.
 
 ## Use
 
 - **F11** switches first person on and off. Use it in a mission, on foot, with a weapon in hand.
-- **F10** opens the settings panel "True First Person" (also in NEST's list, Page Down). Three tabs:
-  First person, Bob and sway, Locked view.
+- **F10** opens the settings: the "True First Person" page in DBF-MCM, or without DBF-MCM the mod's own
+  panel (also in NEST's list, Page Down). Three pages: First person, Bob and sway, Locked view.
 - **Page Up** opens the weapon placement editor.
 
 ## New: camera style (Stable or Bodycam)
