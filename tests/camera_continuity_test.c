@@ -11,6 +11,7 @@
 #include "reference/soak-19-steps.h"
 #include "reference/soak-slowing-steps.h"
 #include "reference/soak-21-alternation.h"
+#include "reference/soak-30-cut.h"
 static int checks, failed;
 #define CHECK(c) do { ++checks; if (!(c)) { ++failed; printf("FAILED line %d: %s\n", __LINE__, #c); } } while (0)
 static const TfpContinuityTuning T = TFP_CONTINUITY_DEFAULT;
@@ -590,6 +591,86 @@ static Flipped flipped(float far, float dt_ms, float blind_ms) {
     last = r.shown[0];
   }
   return f;
+}
+/* THE CUT (round 19). Before the filter had it the head was never given: the same calls without it, so these checks
+ * can be watched failing on the filter of 0.6.0-feel.51. */
+#ifdef TFP_CONTINUITY_CUT_M
+#define CUT_STEP(c, rel, world, basis, head, source, detect, tick, out) \
+  tfp_continuity_step_cut(c, rel, world, basis, head, source, detect, false, tick, 250, &T, out)
+#define CUTS(c) ((c)->cuts)
+#else
+#define CUT_STEP(c, rel, world, basis, head, source, detect, tick, out) \
+  ((void)(head), tfp_continuity_step_in(c, rel, world, basis, source, detect, false, tick, 250, &T, out))
+#define CUTS(c) ((void)(c), 0u)
+#endif
+/* Logged head-camera rows (tests/reference/soak-30-cut.h) through the filter, the head given where the helper gives it
+ * (a head-camera frame of a body on foot; `always`: in every head-camera row, off foot too). The presented eye's step
+ * is measured against the root's place in the world (the eye less the root: a root that turns does not move it, a
+ * root that goes on does not count), and its change from frame to frame as a vector, | (c-b) - (b-a) |, for frame c:
+ *   cut      that change in the frame `cut` (the game's pose cut)
+ *   next     the same in the frame after it, less the wanted eye's own step against the root there (the arc's start)
+ *   arc      the most that change is beyond the wanted eye's own, in the frames from `cut`+2 on (both steps after the cut)
+ *   logged   the change in the frame `cut` as the log shows it
+ *   cuts     cuts taken up; taken: jumps and changes of camera taken up from `cut`+2 on (the arc is followed)
+ *   apart    the most the presented eye is from the wanted one where nothing is cut (0: the filter did nothing) */
+typedef struct CutScene { float cut, next, arc, logged, apart; unsigned cuts, taken; } CutScene;
+static CutScene cut_scene(const HeadFrame *rows, int count, int cut, bool always) {
+  TfpContinuity c; memset(&c, 0, sizeof c);
+  CutScene s = {0, 0, 0, 0, 0, 0, 0}; float shown[3][3] = {{0}}, wanted[3][3] = {{0}}, logged[3][3] = {{0}};
+  for (int i = 0; i < count; ++i) {
+    const HeadFrame *f = &rows[i]; float relative[3] = {0}, head[3] = {0}, out[3], world[3], apart = 0;
+    for (int a = 0; a < 3; ++a) for (int k = 0; k < 3; ++k) { relative[a] += (f->wanted[k]-f->root[k])*f->axes[a*3+k];
+      head[a] += (f->wanted[k]-f->damp[k]-f->root[k])*f->axes[a*3+k]; }
+    const bool given = f->kind == 4 && f->source == HEAD && (always || !f->off_foot);
+    const uint64_t taken = c.jumps+c.edges;
+    CUT_STEP(&c, relative, f->wanted, f->axes, given ? head : NULL, (uint32_t)f->source, f->looked != 0, 1000.0+(double)f->ms, out);
+    if (i >= cut+2) s.taken += (unsigned)(c.jumps+c.edges-taken);
+    for (int k = 0; k < 3; ++k) { world[k] = 0; for (int a = 0; a < 3; ++a) world[k] += out[a]*f->axes[a*3+k]; /* the eye less the root */
+      apart += (world[k]+f->root[k]-f->wanted[k])*(world[k]+f->root[k]-f->wanted[k]); }
+    for (int n = 0; n < 2; ++n) for (int k = 0; k < 3; ++k) { shown[n][k] = shown[n+1][k]; wanted[n][k] = wanted[n+1][k]; logged[n][k] = logged[n+1][k]; }
+    for (int k = 0; k < 3; ++k) { shown[2][k] = world[k]; wanted[2][k] = f->wanted[k]-f->root[k]; logged[2][k] = f->logged[k]-f->root[k]; }
+    if (CUTS(&c) == 0 && sqrtf(apart) > s.apart) s.apart = sqrtf(apart);
+    if (i < 2) continue;
+    float e = 0, w = 0, l = 0, own = 0;
+    for (int k = 0; k < 3; ++k) { const float de = shown[2][k]-2*shown[1][k]+shown[0][k], dw = wanted[2][k]-2*wanted[1][k]+wanted[0][k];
+      const float dl = logged[2][k]-2*logged[1][k]+logged[0][k], sw = wanted[2][k]-wanted[1][k];
+      e += de*de; w += dw*dw; l += dl*dl; own += sw*sw; }
+    e = sqrtf(e); w = sqrtf(w); l = sqrtf(l); own = sqrtf(own);
+    if (i == cut) { s.cut = e; s.logged = l; }
+    if (i == cut+1) s.next = e-own;
+    if (i >= cut+2 && e-w > s.arc) s.arc = e-w;
+  }
+  s.cuts = (unsigned)CUTS(&c);
+  return s;
+}
+/* A made-up pose cut out of an emote, `dt` ms a frame: the head stands against a standing root (the emote), then in one
+ * frame is `far` m further on against the root, the root lunging at 5 m/s from that frame; after it the head goes on
+ * against the root from rest at `accel` m/s^2 up to `top` m/s (a dive's own arc). `jump` false: no cut, a motion that only
+ * begins (the head from rest at `accel` from the first frame). Measured as cut_scene does (the eye less the root):
+ * the change of the presented eye's step in the frame of the cut, the most beyond the wanted eye's own after it, what
+ * is carried at most, how long until it is under 0.01 m (ms from the cut), and the cuts taken. */
+typedef struct MadeCut { float cut, after, carried, settled; unsigned cuts; } MadeCut;
+static MadeCut made_cut(float far, float accel, float top, float dt_ms, bool jump) {
+  TfpContinuity c; memset(&c, 0, sizeof c);
+  MadeCut m = {0, 0, 0, 0, 0}; const float dt = dt_ms/1000; float head = 0, speed = 0, root = 0, shown[3] = {0}, wanted[3] = {0};
+  const float basis[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1}; const int rest = (int)(300/dt_ms), total = rest+(int)(800/dt_ms);
+  for (int i = 0; i < total; ++i) {
+    if (i == rest && jump) head += far;
+    if (i > rest || (!jump && i == rest)) { speed += accel*dt; if (speed > top) speed = top; head += speed*dt; }
+    if (i >= rest) root += 5*dt;
+    const float relative[3] = {.1f, head, 1.5f}, world[3] = {.1f, root+head, 1.5f}; float out[3];
+    const float carried = CUT_STEP(&c, relative, world, basis, relative, HEAD, false, 1000.0+i*(double)dt_ms, out);
+    if (carried > m.carried) m.carried = carried;
+    if (i >= rest && carried > .01f) m.settled = (float)(i-rest+1)*dt_ms;
+    for (int n = 0; n < 2; ++n) { shown[n] = shown[n+1]; wanted[n] = wanted[n+1]; }
+    shown[2] = out[1]; wanted[2] = head;
+    if (i < 2) continue;
+    const float e = fabsf(shown[2]-2*shown[1]+shown[0]), w = fabsf(wanted[2]-2*wanted[1]+wanted[0]);
+    if (i == rest) m.cut = e;
+    if (i > rest+1 && e-w > m.after) m.after = e-w;
+  }
+  m.cuts = (unsigned)CUTS(&c);
+  return m;
 }
 int main(void) {
   Run r;
@@ -1725,6 +1806,60 @@ int main(void) {
       for (int i = 0; i < 5; ++i) frame(&r, 0, 1.5f, 0, NATIVE, false, false, times[d]);
       frame(&r, .2f, 1.5f, 0, NATIVE, false, false, times[d]);
       CHECK(fabsf(r.c.speed[0]-fminf(.2f/dt, 8)) < .01f);
+    }
+  }
+  /* THE CUT (round 19): a move straight out of an emote, the head camera holding the view and the gun out of the hands.
+   * The game cuts the pose in one frame and the head camera rode it: nothing was looked for (no event in 600 ms), so
+   * the whole cut was shown (0.27 to 0.62 m of step change). The rows of five soaks. */
+  {
+    static const struct { const HeadFrame *rows; int count, cut, frames; const char *name; } scenes[] = {
+      {soak30_sprint, (int)(sizeof soak30_sprint/sizeof *soak30_sprint), 6, 1, "feel.51 Stable, sprint out of an emote"},
+      {soak30_dive_back, (int)(sizeof soak30_dive_back/sizeof *soak30_dive_back), 6, 1, "feel.51 Stable, dive-back out of an emote"},
+      {soak29_dive, (int)(sizeof soak29_dive/sizeof *soak29_dive), 6, 1, "feel.51 Bodycam, dive out of an emote"},
+      {soak29_dive_back, (int)(sizeof soak29_dive_back/sizeof *soak29_dive_back), 6, 1, "feel.51 Bodycam, dive-back out of an emote"},
+      {soak27_dive_back, (int)(sizeof soak27_dive_back/sizeof *soak27_dive_back), 6, 2, "feel.50 Stable, dive-back, a cut in two frames"},
+    };
+    for (unsigned n = 0; n < sizeof scenes/sizeof *scenes; ++n) {
+      const CutScene s = cut_scene(scenes[n].rows, scenes[n].count, scenes[n].cut+scenes[n].frames-1, false);
+      printf("  %s: the cut's step change %.4f m (the log %.4f), the frame after %.4f beyond the eye's own step, after that %.4f beyond its own; "
+             "%u cuts, %u taken up in the arc\n", scenes[n].name, (double)s.cut, (double)s.logged, (double)s.next, (double)s.arc, s.cuts, s.taken);
+      CHECK(s.logged > .15f);              /* what the log showed, against the root (soak 30 sprint: 0.203 m, the root's 0.16 m jump left out) */
+      CHECK(s.cut < .04f);                 /* the cut is not shown: less than the measure */
+      CHECK(s.next < .03f);                /* the frame after: no more than the head's own start, and the curve */
+      CHECK(s.arc < .03f);                 /* the dive's own arc after it is shown as it is, the curve under it (ease_accel 24 m/s^2) */
+      CHECK(s.cuts == (unsigned)scenes[n].frames);
+      CHECK(s.taken == 0);                 /* followed, not taken up */
+    }
+  }
+  /* What is no cut is as it was: a body thrown (off foot: the helper does not give the head; given all the same, the
+   * head was moving the frame before, 2.7 m/s, and is no cut either), and the held eye let go in an emote (0.156 m from
+   * rest, under TFP_CONTINUITY_CUT_M). */
+  {
+    const CutScene thrown = cut_scene(soak28_thrown, (int)(sizeof soak28_thrown/sizeof *soak28_thrown), 8, false);
+    const CutScene thrown_given = cut_scene(soak28_thrown, (int)(sizeof soak28_thrown/sizeof *soak28_thrown), 8, true);
+    const CutScene held = cut_scene(soak30_held_eye, (int)(sizeof soak30_held_eye/sizeof *soak30_held_eye), 6, false);
+    CHECK(thrown.cuts == 0 && thrown.apart < 1e-4f);
+    CHECK(thrown_given.cuts == 0 && thrown_given.apart < 1e-4f);
+    CHECK(held.cuts == 0 && held.apart < 1e-4f);
+  }
+  /* Made up, at 8, 16.7, 33.3 and 50 ms a frame: a pose cut of 0.4 m out of an emote, then the dive's own arc from rest
+   * at 30 m/s^2 against a root lunging at 5 m/s. The cut is taken up and eased like a change of camera; the arc is
+   * shown as it is, the curve under it. And honest fast motion from rest is no cut at any frame time: the head
+   * from rest at 60 m/s^2 to 7 m/s (a dive's lunge) and at 120 m/s^2 to 7.7 m/s (prone out of an emote, Stable 308 of
+   * the feel.47 soak: 0.13 m and 0.26 m in two frames at 33 ms; 0.29 m in its first frame at 50 ms). */
+  {
+    static const float times[] = {8, 16.7f, 33.3f, 50};
+    for (unsigned d = 0; d < 4; ++d) {
+      const MadeCut m = made_cut(.4f, 30, 3, times[d], true), lunge = made_cut(0, 60, 7, times[d], false), fall = made_cut(0, 120, 7.7f, times[d], false);
+      printf("  a 0.4 m pose cut out of an emote, %g ms a frame: step change %.4f m in its frame, %.4f beyond the arc's own after it, %.3f m carried, "
+             "under 0.01 m after %.0f ms, %u cuts; from rest at 60 and 120 m/s^2: %u and %u cuts\n", (double)times[d], (double)m.cut, (double)m.after,
+             (double)m.carried, (double)m.settled, m.cuts, lunge.cuts, fall.cuts);
+      CHECK(m.cuts == 1);
+      CHECK(m.cut < .04f);
+      CHECK(m.after < fmaxf(.03f, 24*times[d]*times[d]/1e6f+.005f)); /* the curve's own acceleration at most */
+      CHECK(m.settled < 400);
+      CHECK(lunge.cuts == 0 && lunge.carried == 0);
+      CHECK(fall.cuts == 0 && fall.carried == 0);
     }
   }
   printf("camera continuity: %d checks, %d failed\n", checks, failed);
