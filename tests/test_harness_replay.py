@@ -18,7 +18,7 @@ def line(stamp_ms, t, kind, eye, wanted, carried, root=(0, 0, 0), axes=None, loo
 
 
 class NewFields(unittest.TestCase):
-    """0.6.0-feel.49 on: off_foot, damped, damp and view follow tick=. The readers take the line as before."""
+    """Builds after 0.6.0-feel.48: off_foot, damped, damp and view follow tick=. The readers take the line as before."""
 
     def test_a_line_with_the_damping_fields_reads_the_same(self):
         axes = (1, 0, 0, 0, 1, 0, 0, 0, 1)
