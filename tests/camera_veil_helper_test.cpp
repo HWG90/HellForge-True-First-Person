@@ -8,6 +8,7 @@
 #define main camera_smooth_main
 #include "camera_smooth_test.cpp"
 #undef main
+#include "head_log.h"
 
 // How far the drawn eye is in front of the head, along the level view direction (the scripts look level).
 static float ahead_of_head(const Game &g) {
@@ -18,15 +19,16 @@ static float up_of_head(const Game &g) { return g.shown[2] - g.s.head[2]; }
 static TfpCameraVeilStats veil() { TfpCameraVeilStats s; std::memset(&s, 0, sizeof s); tfp_camera_veil_stats(&s); return s; }
 
 // Standing, the weapon `rig_ahead` metres in front of the head (negative: behind it) and 0.13 m above it, in the
-// native view for a second; `armed`: head visibility is active (the tick's tfp_camera_set_veil). Then the swap's first
-// head-camera frame: its drawn eye, how far in front of the head, is returned in `first`.
+// native view for a second; `armed`: head visibility is active (the tick's tfp_camera_set_veil), or `head`: the tick
+// handed to tfp_camera_veil_from_head instead. Then the swap's first head-camera frame: its drawn eye, how far in
+// front of the head, is returned in `first`.
 static float held_ahead, held_up; // the native view's drawn eye in the swap's last native frame: what the hold keeps
-static void leave(Game &g, bool lock, bool armed, float rig_ahead, float *first) {
+static void leave(Game &g, bool lock, bool armed, float rig_ahead, float *first, const TfpHeadTick *head = nullptr) {
   fresh(lock, false);
   g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
   g.eye[0] = 0; g.eye[1] = rig_ahead; g.eye[2] = .13f;
   CHECK(tfp_camera_set_weapon_key(g.gen, 0x1111) == 1);
-  tfp_camera_set_veil(armed);
+  if (head) tfp_camera_veil_from_head(head); else tfp_camera_set_veil(armed);
   standing(g, 30, 33.3, true);
   standing(g, 4, 33.3, true, 2);           // the swap begins: the hold keeps the native view
   held_ahead = ahead_of_head(g); held_up = up_of_head(g);
@@ -38,7 +40,7 @@ int main() {
   W.build(HERE); // the world, as camera_smooth_main sets it up
   W.native_value = W.a[A_EXE] + HERE.setter; W.hook_value = reinterpret_cast<uint64_t>(&hook_marker);
   float first = 0;
-  // ---- 1. Not armed (head visibility not hiding): the frame is as before, the held eye 0.22 m behind the head. ----
+  // ---- 1. Not armed (the view off or head visibility not active): the frame is as before, the held eye 0.22 m behind the head. ----
   {
     Game g; leave(g, true, false, -.22f, &first);
     CHECK(std::fabs(first - held_ahead) < .002f && held_ahead < -.2f);
@@ -120,6 +122,70 @@ int main() {
     Game g; leave(g, false, true, -.22f, &first);
     const TfpCameraVeilStats s = veil();
     CHECK(s.leaves == 0 && s.frames == 0);
+    g.end();
+  }
+  // ---- 9. What the tick hands the veil (tfp_camera_veil_from_head, src/mod_view.c head_note). Armed while the view
+  // is on and head visibility active, whatever it owns of the head: until the first leave of a session it owns no
+  // head row (soak 27, 12:41:45.163: "kind=6 active: owns head 0, torso 0, shoulders 2"), and that first leave drew
+  // 31 meshes again, 5 of them the head's (12:41:50.071), as every other did. ----
+  {
+    TfpHeadTick t; std::memset(&t, 0, sizeof t);
+    t.bound = t.view = t.active = true; t.phase = "active"; t.kind = 6; t.shoulders = 2; t.rows = 5; t.full = true;
+    Game g; leave(g, true, false, -.22f, &first, &t);
+    CHECK(std::fabs(first - TFP_CAMERA_VEIL_CLEAR) < .002f && veil().leaves == 1 && veil().moved == 1);
+    // The next tick (kind 4 now, the head rows taken): nothing found drawn yet, the veil stays open.
+    t.kind = 4; t.head = 9; t.torso = 14; t.shoulders = 8; t.rows = 34;
+    tfp_camera_veil_from_head(&t);
+    g.hip(2); g.frame(33.3);
+    CHECK(std::fabs(ahead_of_head(g) - TFP_CAMERA_VEIL_CLEAR) < .002f);
+    // The tick that found the 31 meshes drawn again and switched all of them off closes it.
+    t.on_again = 31; t.on_again_head = 5; t.turned_off = 31;
+    tfp_camera_veil_from_head(&t);
+    g.hip(2); g.frame(33.3);
+    CHECK(std::fabs(ahead_of_head(g) - held_ahead) < .002f && veil().frames == 2);
+    g.end();
+  }
+  {
+    // The first tick after the leave already finds them and switches all off: closed by that tick, not by the count.
+    TfpHeadTick t; std::memset(&t, 0, sizeof t);
+    t.bound = t.view = t.active = true; t.phase = "active"; t.kind = 6; t.full = true;
+    Game g; leave(g, true, false, -.22f, &first, &t);
+    t.kind = 4; t.on_again = 31; t.on_again_head = 5; t.turned_off = 31;
+    tfp_camera_veil_from_head(&t);
+    g.hip(2); g.frame(33.3);
+    CHECK(std::fabs(ahead_of_head(g) - held_ahead) < .002f && veil().frames == 1);
+    g.end();
+  }
+  {
+    // Found drawn again but some left drawn: that tick does not close it (the second tick does).
+    TfpHeadTick t; std::memset(&t, 0, sizeof t);
+    t.bound = t.view = t.active = true; t.phase = "active"; t.kind = 6; t.full = true;
+    Game g; leave(g, true, false, -.22f, &first, &t);
+    t.kind = 4; t.on_again = 31; t.turned_off = 29; t.left_on = 2;
+    tfp_camera_veil_from_head(&t);
+    g.hip(2); g.frame(33.3);
+    CHECK(std::fabs(ahead_of_head(g) - TFP_CAMERA_VEIL_CLEAR) < .002f);
+    g.end();
+  }
+  for (int which = 0; which < 3; ++which) {
+    // The view off, head visibility not active, or no tick read: not armed, and the next frame is the held eye.
+    TfpHeadTick t; std::memset(&t, 0, sizeof t);
+    t.bound = t.view = t.active = true; t.phase = "active"; t.kind = 6; t.head = 9; t.full = true;
+    if (which == 0) t.view = false;
+    if (which == 1) { t.active = false; t.phase = "idle"; }
+    Game g; leave(g, true, false, -.22f, &first, which == 2 ? nullptr : &t);
+    if (which == 2) { tfp_camera_veil_from_head(nullptr); g.hip(2); g.frame(33.3); }
+    CHECK(std::fabs(ahead_of_head(g) - held_ahead) < .002f && veil().leaves == 0 && veil().moved == 0);
+    g.end();
+  }
+  {
+    // An open veil is closed by a tick that cannot be read.
+    TfpHeadTick t; std::memset(&t, 0, sizeof t);
+    t.bound = t.view = t.active = true; t.phase = "active"; t.kind = 6; t.full = true;
+    Game g; leave(g, true, false, -.22f, &first, &t);
+    tfp_camera_veil_from_head(nullptr);
+    g.hip(2); g.frame(33.3);
+    CHECK(std::fabs(ahead_of_head(g) - held_ahead) < .002f && veil().frames == 1);
     g.end();
   }
   std::printf("camera veil through the helper: %d checks, %d failed\n", checks, failed);

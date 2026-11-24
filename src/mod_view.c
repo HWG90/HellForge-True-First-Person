@@ -513,17 +513,16 @@ static void orphan_note(void) {
  * Each tick, after the runtime's update: what head visibility owns of the head, torso and shoulders when that
  * changes, meshes it had seen hidden and found drawn again, meshes it leaves drawn, and its stopping or starting
  * while the view is on, and the veil's counts. Reads the module's own counts; the one thing it sets is the camera
- * helper's veil (round 14): armed while the module hides the head, closed by the update that switched the body off. */
+ * helper's veil (round 14): armed while the module is active, closed by the update that switched the body off. */
 static void head_note(void) {
   static TfpHeadLog seen;
   TfpHeadTick tick;
   char text[700];
-  if (!tfp_wire_engine_head_tick(&wire, &tick)) { tfp_camera_set_veil(false); return; }
+  if (!tfp_wire_engine_head_tick(&wire, &tick)) { tfp_camera_veil_from_head(NULL); return; }
   tick.view = wire.controller.enabled;
-  /* Round 14, the veil (src/camera_helper.h tfp_camera_set_veil): this tick's update closes the one a leave opened
-   * once it found the body drawn again and left none of it drawn; it stays armed while the module hides the head. */
-  tfp_camera_veil_tick(tick.full && tick.on_again > 0 && tick.left_on == 0);
-  tfp_camera_set_veil(tick.view && tick.active && tick.head > 0);
+  /* Round 14, the veil (src/camera_helper.h tfp_camera_veil_from_head): this tick's update closes the one a leave
+   * opened once it found the body drawn again and left none of it drawn; it stays armed while the module is active. */
+  tfp_camera_veil_from_head(&tick);
   TfpCameraVeilStats veil;
   tfp_camera_veil_stats(&veil);
   tick.veil_leaves = veil.leaves, tick.veil_frames = veil.frames, tick.veil_moved = veil.moved, tick.veil_behind = veil.behind;

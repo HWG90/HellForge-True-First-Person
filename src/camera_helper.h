@@ -226,7 +226,9 @@ void tfp_camera_orphan_stats(TfpCameraOrphanStats *out);
  * of the head, along the level view direction, is drawn with the eye moved forward to that distance; height, side and
  * rotation stay. Only the position handed to the game in that frame changes: the eye the swap holds and glides, the
  * continuity, the damping and the trace row are those of the eye before it.
- * set_veil: each tick: head visibility is active and owns rows of the head (false: no veil opens, an open one closes).
+ * set_veil: each tick: the view is on and head visibility active, whatever rows of the head it owns: until the first
+ * leave of a session it owns none, and that leave draws the head as every other does (soak 27, 12:41:45.163 and
+ * 12:41:50.071). false: no veil opens, an open one closes.
  * veil_tick: each tick, after head visibility's update: `hidden` = it found meshes drawn again and left none drawn.
  * Off (the default) and without the lock: nothing is reached or read. */
 #define TFP_CAMERA_VEIL_CLEAR .10f
@@ -238,6 +240,11 @@ void tfp_camera_veil_tick(bool hidden);
  * move since the start. */
 typedef struct TfpCameraVeilStats { uint64_t leaves, frames, moved, behind; float largest_m; } TfpCameraVeilStats;
 void tfp_camera_veil_stats(TfpCameraVeilStats *out);
+/* The tick's whole part in the veil (src/mod_view.c head_note calls it after head visibility's update, `tick` filled as
+ * the "Head:" line has it, view included). NULL, no tick read: switched off. Otherwise tfp_camera_veil_tick with
+ * `hidden` = the update found meshes drawn again and left none drawn, then tfp_camera_set_veil. */
+struct TfpHeadTick;
+void tfp_camera_veil_from_head(const struct TfpHeadTick *tick);
 typedef struct TfpCameraContinuityStats { uint64_t jumps, edges, restarts; float largest_m; uint64_t reseats; } TfpCameraContinuityStats;
 /* Counts since the start; the largest correction carried since the last call. reseats: frames in which the body
  * root alone was re-seated (a jump in the root's frame with the eye going on evenly in the world; nothing taken up). */

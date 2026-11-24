@@ -281,15 +281,20 @@ Why it is safe: no engine call is added, nothing is written to any mesh, unit or
 replaces this argument of the game's camera setter in every frame the lock holds; the veil changes three floats of it
 before the same call, inside the same policy lock. The hook and the tick are both the game thread ("Hook: camera first
 fired on thread 660 ... (the tick is thread 660)"). It needs the lock (no veil in the game's own view), head visibility
-active and owning head rows (armed by the tick), and a finite eye no more than a metre from where it was.
+active (armed by the tick, whatever rows of the head it owns: until the first leave of a session it owns none, and
+that leave drew the head all the same: 12:41:45.163 "owns head 0", 12:41:50.071 31 meshes, 5 of the head), and a finite eye no more than a metre from where it was.
 
-The tick (`src/mod_view.c` `head_note`): after the runtime's update, `tfp_camera_veil_tick` (closes it when the update
-found meshes drawn again and left none drawn) and `tfp_camera_set_veil` (armed while the view is on and the module is
-active and owns rows of the head). Tests: `tests/camera_veil_helper_test.cpp` (`tests/run-camera-veil.sh`, the 53rd
+The tick (`src/mod_view.c` `head_note`): after the runtime's update, `tfp_camera_veil_from_head` with the tick, which
+calls `tfp_camera_veil_tick` (closes it when the update found meshes drawn again and left none drawn) and
+`tfp_camera_set_veil` (armed while the view is on and the module is active; a tick that cannot be read switches it
+off). The first build armed it only while the module owned rows of the head, which left out the first leave of every
+session (the review of round 14). Tests: `tests/camera_veil_helper_test.cpp` (`tests/run-camera-veil.sh`, the 53rd
 script) on the fake game memory of `tests/camera_smooth_test.cpp`: not armed, nothing changes; the Scythe's eye moved
 to 0.10 m in front and back to the held eye after the closing tick; a frame before its own tick; no re-show (closed
 after two ticks); an eye in front already; switched off while open; a native frame while open (counted behind); no
-lock, no veil.
+lock, no veil; what the tick hands it (armed on a kind-6 tick that owns no head row, closed by the tick that found
+the body and left none of it drawn, not by one that left some drawn, not armed with the view off, the module not
+active or no tick).
 
 ### The `Head:` line now ends with the veil's counts
 

@@ -6,6 +6,7 @@
  * and expression is retail's. "cpp:a-b" above a function is its line range in
  * the retail file. What differs is in docs/translation/CAMERA-HELPER-TRANSLATION.md. */
 #include "camera_helper.h"
+#include "head_log.h"
 #include "camera_lock.h"
 #include "camera_continuity.h"
 #include "camera_alternation.h"
@@ -1800,6 +1801,11 @@ void tfp_camera_set_veil(bool on) {
 void tfp_camera_veil_tick(bool hidden) {
   if (!atomic_load(&veil_open)) return;
   if (hidden || atomic_fetch_add(&veil_ticks, 1) + 1 >= 2) atomic_store(&veil_open, 0);
+}
+void tfp_camera_veil_from_head(const TfpHeadTick *tick) {
+  if (!tick) { tfp_camera_set_veil(false); return; }
+  tfp_camera_veil_tick(tick->full && tick->on_again > 0 && tick->left_on == 0);
+  tfp_camera_set_veil(tick->view && tick->active);
 }
 void tfp_camera_veil_stats(TfpCameraVeilStats *out) {
   out->leaves = atomic_load(&veil_leaves); out->frames = atomic_load(&veil_frames); out->moved = atomic_load(&veil_moved);
