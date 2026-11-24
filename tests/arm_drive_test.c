@@ -1669,6 +1669,180 @@ static void test_rest_recorded(const char *path) {
         seen.most_off_degrees < 6.5f && seen.longest_still_ms < 1200);
 }
 
+/* ---- the game sees its own socket (round 13, 2026-11-24) ----
+ * The game's kind-6 evaluator seats the first-person eye by the rig's weapon socket (node 8; game+0x1287423 to
+ * 0x1287785): it puts the rig so that the socket is at depth D before the eye. The model of it here: the eye's place
+ * along the view is D less the socket's, the socket taken from the record the rig holds when the game next looks at
+ * it, which is after the draw and whatever the drive does after the draw. With the game's values put back that record
+ * is the game's own in every frame and the model eye does not move, whatever the body's hand does; with the written
+ * values left, every move of the drawn socket along the view moves the eye the other way. */
+static const float *view_axis(void) { return rig_world[TFP_GRAFT_RIG_EYE].values + 4; } /* the rig eye's forward: the Trace line's view= */
+static float model_eye(void) {
+  const float depth = .2102f; /* D as the game held it in the soaks of 2026-11-24 */
+  const TfpGraftLocal socket = socket_shown();
+  const float *root = rig_world[TFP_GRAFT_RIG_ROOT].values, *view = view_axis();
+  float along = 0;
+  for (unsigned i = 0; i < 3; i++) {
+    float world = root[12 + i];
+    for (unsigned j = 0; j < 3; j++) world += socket.position[j] * root[4 * j + i];
+    along += world * view[i];
+  }
+  return depth - along;
+}
+/* The recorded body with its arms and gun `metres` further along the view: every node but the root and the head (the
+ * arms are seen from the head, in the view's axes). */
+static void pushed(float metres, TfpGraftMatrix *out) {
+  memcpy(out, body_now, sizeof body_now);
+  for (unsigned i = 1; i < TFP_GRAFT_BODY_NODES; i++)
+    if (bn[i] != TFP_GRAFT_NAME_HEAD)
+      for (unsigned k = 0; k < 3; k++) out[i].values[12 + k] += metres * view_axis()[k];
+}
+/* One tick and one primary draw `ms` after the one before, and what follows the draw. drawn: the rig as it was drawn. */
+static bool frame_after(double ms, TfpGraftLocal drawn[TFP_GRAFT_RIG_NODES]) {
+  static double clock;
+  if (clock < (double)clock_ms) clock = (double)clock_ms;
+  clock += ms, clock_ms = (uint64_t)clock;
+  tfp_arm_drive_set_rest(clock_ms, stance, pose_key);
+  const bool after = tfp_arm_drive_render(WORLD, true);
+  if (drawn) rig_locals(drawn);
+  if (after) tfp_arm_drive_after_render();
+  return after;
+}
+static bool game_own(void) {
+  TfpGraftLocal now[TFP_GRAFT_RIG_NODES];
+  rig_locals(now);
+  return !memcmp(now, game_locals, sizeof now);
+}
+/* A melee as the soak of 2026-11-24 had it (10:17:00): the hand and the gun 0.8 m along the view in 100 ms, 70 ms
+ * there, back in 100 ms. */
+static float melee_at(double ms) { return ms < 0 ? 0 : ms < 100 ? .8f * (float)(ms / 100) : ms < 170 ? .8f : ms < 270 ? .8f * (float)((270 - ms) / 100) : 0; }
+static void test_game_sees_its_own_socket(void) {
+  static const double times[] = {8, 16.7, 33.3, 50};
+  /* what the binder asks for: put back, unless arms_live_keep.txt is beside the DLL; arms_live_restore.txt changes nothing */
+  CHECK(tfp_arm_drive_put_back(false, false) && tfp_arm_drive_put_back(false, true) && !tfp_arm_drive_put_back(true, false) && !tfp_arm_drive_put_back(true, true));
+  static TfpGraftMatrix body[TFP_GRAFT_BODY_NODES];
+  static TfpGraftLocal put_back[64][TFP_GRAFT_RIG_NODES], kept[TFP_GRAFT_RIG_NODES];
+  float sock[64];
+  for (unsigned at = 0; at < 4; at++) {
+    const double dt = times[at];
+    const unsigned frames = (unsigned)(400 / dt) + 2 < 64 ? (unsigned)(400 / dt) + 2 : 64;
+    /* put back after every draw: the rule */
+    rest_start();
+    tfp_arm_drive_set(true, true, 1);
+    CHECK(frame_after(dt, NULL) && game_own());
+    const float eye = model_eye();
+    CHECK(fabsf(stats().draw.sock_m) < .0005f && stats().draw.mode == TFP_ARM_DRAW_PUT_BACK); /* aligned on the rig's own socket */
+    float most = 0;
+    for (unsigned n = 0; n < frames; n++) {
+      const float push = melee_at(n * dt - 30);
+      pushed(push, body), body_is(body);
+      CHECK(frame_after(dt, put_back[n]));
+      /* drawn: the body's arms, the socket where the hand is; the Trace line's sock= says how far that is from the game's
+       * own along the view (the rig's placement node turns the drawn arms a little against the view: within 6 %) */
+      sock[n] = stats().draw.sock_m;
+      CHECK(fabsf(sock[n] - push) <= .06f * push + .0005f);
+      if (push > most) most = push;
+      /* and when the game next looks: its own 63 records, to the bit, and so its own eye */
+      CHECK(game_own() && stats().owned == 0 && model_eye() == eye);
+    }
+    CHECK(most > .5f && stats().binds == 1 && !stats().refused && stats().draw.count == frames + 1);
+    /* the written values left (arms_live_keep.txt, the default until round 13): the same picture of the arms, bit for
+     * bit, and the model eye thrown about by them */
+    rest_start();
+    CHECK(!frame_after(dt, NULL));
+    CHECK(model_eye() == eye && stats().draw.mode == TFP_ARM_DRAW_KEPT);
+    float before = eye, step = 0, jerk = 0, far = 0;
+    for (unsigned n = 0; n < frames; n++) {
+      pushed(melee_at(n * dt - 30), body), body_is(body);
+      CHECK(!frame_after(dt, kept));
+      CHECK(!memcmp(kept, put_back[n], sizeof kept));
+      const float now = model_eye();
+      CHECK(stats().draw.sock_m == sock[n] && fabsf((eye - now) - sock[n]) < .0002f); /* sock= is how far the eye was thrown */
+      if (fabsf((now - before) - step) > jerk) jerk = fabsf((now - before) - step);
+      if (fabsf(now - eye) > far) far = fabsf(now - eye);
+      step = now - before, before = now;
+    }
+    CHECK(far > .5f);
+    if (dt > 33 && dt < 34) CHECK(jerk >= .06f); /* over the judge's limit in a frame at 30 a second */
+  }
+}
+/* The same through the two things of the mod's own that move the written socket with the body still: the aim fade
+ * (the copy's weight 1 to 0 to 1 in 120 ms each way, the body's socket 0.455 m from the rig's own) and an alignment
+ * taken at a rest and eased in over 150 ms. */
+static void test_fade_and_ease_under_put_back(void) {
+  static const double times[] = {8, 16.7, 33.3, 50};
+  static TfpGraftMatrix body[TFP_GRAFT_BODY_NODES];
+  for (unsigned at = 0; at < 4; at++) {
+    const double dt = times[at];
+    rest_start();
+    tfp_arm_drive_set(true, true, 1);
+    CHECK(frame_after(dt, NULL));
+    const float eye = model_eye();
+    pushed(.455f, body), body_is(body);
+    stance = TFP_ARM_REST_NONE; /* aiming: not a rest, nothing is measured */
+    CHECK(frame_after(dt, NULL));
+    const float full = stats().draw.sock_m;
+    CHECK(fabsf(full - .455f) < .03f && game_own() && model_eye() == eye);
+    float least = 1, most = 0;
+    for (double ms = 0; ms <= 360; ms += dt) {
+      const float weight = ms < 120 ? 1 - (float)(ms / 120) : ms < 240 ? 0 : ms < 360 ? (float)((ms - 240) / 120) : 1;
+      tfp_arm_drive_set(true, true, weight);
+      const bool after = frame_after(dt, NULL);
+      CHECK(after == (weight > 0)); /* at weight 0 the targets are the game's own: nothing was written */
+      CHECK(fabsf(stats().draw.sock_m - full * weight) < .002f);
+      if (stats().draw.sock_m < least) least = stats().draw.sock_m;
+      if (stats().draw.sock_m > most) most = stats().draw.sock_m;
+      CHECK(game_own() && model_eye() == eye);
+    }
+    CHECK(least < .001f && most > .3f);
+    /* at rest there, 0.455 m off: measured after 350 ms, shown at once (nothing is kept for the weapon) and eased */
+    tfp_arm_drive_set(true, true, 1);
+    stance = TFP_ARM_REST_STAND;
+    const uint64_t count = stats().align.count;
+    float last = 1;
+    bool eased = false;
+    for (double ms = 0; ms <= 700; ms += dt) {
+      CHECK(frame_after(dt, NULL) || fabsf(stats().draw.sock_m) < .0005f);
+      if (stats().align.count != count) eased = true;
+      last = stats().draw.sock_m;
+      CHECK(game_own() && model_eye() == eye);
+    }
+    CHECK(eased && stats().align.eased && stats().align.moved_m > .4f && fabsf(last) < .001f);
+  }
+}
+/* The hold's edge (the soak of 2026-11-24: in 53 of 149 holds the eye made one step of 0.06 to 0.54 m along the view
+ * 66 ms after "State: holding"; the socket going from written to the game's own). The drawn socket 0.2 m off along
+ * the view, a hold begins: with the values put back in every frame the hold changes nothing the game sees. */
+static void test_hold_begins_under_put_back(void) {
+  static const double times[] = {8, 16.7, 33.3, 50};
+  static TfpGraftMatrix body[TFP_GRAFT_BODY_NODES];
+  for (unsigned at = 0; at < 4; at++) {
+    const double dt = times[at];
+    for (int keep = 0; keep < 2; keep++) {
+      rest_start();
+      tfp_arm_drive_set(true, !keep, 1);
+      stance = TFP_ARM_REST_NONE; /* an action: no rest is measured, the entry's alignment stays */
+      CHECK(frame_after(dt, NULL) == !keep);
+      const float eye = model_eye();
+      pushed(.2f, body), body_is(body);
+      float worst = 0, before = 0;
+      for (unsigned n = 0; n < 12; n++) {
+        if (n == 6) tfp_arm_drive_set_hold_ready(true), tfp_arm_drive_set_hold(true); /* the tick before this draw sees the action */
+        CHECK(frame_after(dt, NULL) == (!keep || n >= 6));
+        CHECK(fabsf(stats().draw.sock_m - .2f) < .012f && stats().draw.mode == (n >= 6 ? TFP_ARM_DRAW_HOLD : keep ? TFP_ARM_DRAW_KEPT : TFP_ARM_DRAW_PUT_BACK));
+        const float now = model_eye();
+        if (n && fabsf(now - before) > worst) worst = fabsf(now - before);
+        before = now;
+        if (!keep) CHECK(game_own() && now == eye);
+      }
+      CHECK(stats().binds == 1 && !stats().refused);
+      if (keep) CHECK(fabsf(worst - stats().draw.sock_m) < .0002f && worst > .18f && fabsf(before - eye) < .0005f); /* the fault: the whole 0.2 m in the hold's first frame */
+      else CHECK(worst == 0);
+      tfp_arm_drive_set_hold(false), tfp_arm_drive_set_hold_ready(false);
+    }
+  }
+}
+
 int main(int argc, char **argv) {
   if (argc != 2 && argc != 3) { fprintf(stderr, "usage: arm_drive_test FIXTURE [EVERY-FRAME-FIXTURE]\n"); return 2; }
   load(argv[1]);
@@ -1696,6 +1870,9 @@ int main(int argc, char **argv) {
   test_rest_stances();
   test_rest_other_gun();
   test_rest_of();
+  test_game_sees_its_own_socket();
+  test_fade_and_ease_under_put_back();
+  test_hold_begins_under_put_back();
   if (argc == 3) test_rest_recorded(argv[2]);
   printf("arm drive: %u checks passed\n", checks);
   return 0;
