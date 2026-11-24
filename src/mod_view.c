@@ -25,6 +25,7 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "wire_feel.h"
 #include "wire_win_engine.h"
 #include "wire_win_effects.h"
+#include "wire_warp.h"
 #include "engine.h"
 #include "mod_menu.h"
 #include "mod_panel.h"
@@ -538,6 +539,15 @@ static void head_note(void) {
   tick.veil_largest_m = veil.largest_m, tick.veil_second = veil.second; /* round 19 */
   if (tfp_head_log_step(&seen, &tick, text, sizeof text)) say("%s", text);
 }
+/* ---- the "Warp:" line (round 22; src/wire_warp.h, docs/design/specs/2026-11-24-warp-pack-glow.md) ----------------- */
+static TfpWarp warp;
+static bool warp_hide; /* warp_hide.txt beside the DLL: the stops are on (off by default until a game run has proven them) */
+static void warp_say(const char *line) { say("%s", line); }
+static void warp_note(void) {
+  TfpHeadTick tick;
+  const bool owns = wire.controller.enabled && tfp_wire_engine_head_tick(&wire, &tick) && tick.active;
+  tfp_wire_warp_tick(&wire, &warp, owns, warp_hide, (double)GetTickCount64() / 1000.0, warp_say);
+}
 #endif
 
 #ifdef TFP_FEEL
@@ -815,6 +825,16 @@ static void start(void) {
         if (veil_file) fclose(veil_file);
         tfp_camera_set_veil_second(veil_file != NULL);
         if (veil_file) say("Test: veil_second.txt: the helmet veil opens at the tick that sees a leave of the native view, so only the frame that draws the body is moved");
+        /* Round 22: the Warp Pack's glow (src/warp_glow.h). Off by default: the "Warp:" line only says what plays. */
+        strcpy(slash + 1, "warp_hide.txt");
+        FILE *warp_file = fopen(parts_path, "r");
+        if (warp_file) fclose(warp_file);
+        warp_hide = warp_file != NULL;
+        say(warp_hide ? "Test: warp_hide.txt: while the view is TFP's and full ADS is off, the Warp Pack's playing effects of its three stop lists are "
+                        "stopped with the game's own stop (game+0x8abb20, no network message), as the game does in full ADS; leaving the view writes "
+                        "0xffffffff to the pack's cached mode word so the game plays them again. \"Warp:\" lines say each step"
+                      : "Warp: the Warp Pack's glow is left to the game (a file warp_hide.txt beside the DLL stops it while the view is TFP's); "
+                        "\"Warp:\" lines say what the game plays");
         /* The overrides of the three live features (src/wire_options.h): for testing only. */
         static const struct { const char *name; TfpFeature feature; bool on; } forced[] = {
           {"arms_live.txt", TFP_FEATURE_ARMS, true}, {"arms_off.txt", TFP_FEATURE_ARMS, false},
@@ -940,6 +960,7 @@ static volatile LONG release_state; /* 0 not answered, 1 released, 2 refused (re
 static const char *volatile release_why;
 static void release_on_game_thread(void) {
   const char *why = stage == RUNNING ? tfp_wire_feel_held(&wire) : NULL;
+  if (!why) tfp_wire_warp_release(&wire, &warp, warp_say); /* round 22: a restore still owed (the view is off by now, so normally none) */
   if (!why) { /* the arm drive: its joint values go back here, on the game thread, then its hook comes out */
     tfp_arm_drive_set(false, false, 1.0f);
     if (tfp_arm_drive_release()) tfp_render_slot_remove();
@@ -1159,6 +1180,7 @@ static void tick_body(void) {
   tfp_wire_frame(&wire, extra);
   entry_note();
   head_note();   /* before the trace: a "Head:" line then stands above the rows of the frames it is about */
+  warp_note();   /* round 22: the Warp Pack's glow */
   orphan_note(); /* before the trace: its edges open a trace window too */
   trace_note();
   tfp_wire_panel_frame(&wire);         /* what the user did in the mod's own panel since the last tick */
