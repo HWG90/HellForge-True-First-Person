@@ -19,7 +19,8 @@
  * the third-person field of view) and the game's sight distance (its near clip) and depth per level (the "out" line);
  * and whether the hooked field-of-view value lags the lens ("game/lens": one value while the lens moves, it is built
  * from this frame's lens; a spread that comes and goes with the gate, it lags a frame). "depth" is request+0x90
- * blended as the evaluator blends it (the socket's distance before the eye), plus what the held depth added. Kept
+ * blended as the evaluator blends it (the socket's distance before the eye), the game's own: not what the held depth
+ * added (zoom_steady.txt; review 28 N3), which the "rig depth" field counts. Kept
  * under 700 characters (src/mod_view.c say()). Game thread, once a tick; no engine reads. */
 #ifndef TFP_AIM_LOG_H
 #define TFP_AIM_LOG_H

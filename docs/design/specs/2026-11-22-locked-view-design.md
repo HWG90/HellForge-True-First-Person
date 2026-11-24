@@ -2532,3 +2532,28 @@ What decides the next round: if the gate never flips in full aim, the zoom-shake
 is looked for elsewhere (the `step` with the gate clear, the lock's glide). If it does, the corrections are fixed for
 review 27's two findings against the logged pattern. The sight distance's default is chosen from the per-level sight
 and depth.
+
+### Review 28 (2026-11-24): the near clip only on the player's ask, the pull let go at 0, the binder lines tested
+
+- **B1, a saved ADS placement changed the near clip with the default settings.** The near clip followed the pose
+  helper's `closer` (the ADS placement's forward, too) from the sight's least distance (the game's depth moved it), so
+  with Sight distance in aim 0 a placement 3 cm toward the eye put the near clip 3 to 15 cm nearer than feel.51's in
+  full aim, and with the gate flipping it alternated every frame. Decision (the user's): the near clip follows only the
+  game's value less the gun's move (`tfp_ads_near(native, closer)`, no least distance), and only while the player asks
+  for it: Sight distance in aim above 0, or the placement editor on its ADS action (`tfp_pose_set_ads_editing`, set each
+  tick from `tfp_editor_motion_editing_ads`). Otherwise the pose helper publishes nothing closer and the near clip is
+  feel.51's frame for frame (`wire-pose` `ads_default_frames`: the near clip, node 5 and the root bit for bit against
+  no source at all, ADS forward -3 cm, aim in, two zoom changes, the gate flipping every frame, modes 1 and 2, 16/9/7 ms,
+  the near setter before and after the gun). Starting to follow gives no lead (the gun did not move). With a wanted
+  distance the near clip now cuts at a zoom change what the game's own value cuts of the game's sight (feel.51's cut),
+  not nothing: the zoom tests count only what is cut beyond that.
+- **I1, Sight distance in aim set to 0 mid-aim left the gun pulled until the aim ended.** Only a larger wanted distance
+  counted as the player's change. Now a wanted distance going to 0, or no sight handed (`tfp_ads_sight_none`), glides the
+  pull down too (`tfp_ads_pull_frame` takes the sight); a sight nearer than the wanted distance is still the game's move
+  and held (`ads-seat`: 15 -> 0, 5 -> 0, the sight going to 0 and to the game's 0.05).
+- **I2, binder lines no test reached.** They are in `src/aim_bind.h` (`tfp_aim_bind_pose`: the lens note and the near
+  source; `tfp_aim_bind_switches`: zoom_steady.txt; `tfp_aim_bind_tick`), tested by `tests/run-aim-bind.sh` over the
+  real helpers; whether the editor opens in full aim is `tfp_editor_motion_full_aim` (`editor-ads`). The Windows
+  binders keep one call each.
+- **N2/N3:** AIM-TEST.md says the `out` line can file a range under the gate's wide value; the `Aim:` depth comment says
+  it is the game's own depth.

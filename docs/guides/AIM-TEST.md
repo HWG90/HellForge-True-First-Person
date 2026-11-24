@@ -6,7 +6,9 @@ is handed lags the lens. Everything is read from the `Aim:` lines in the mod's l
 decides: `docs/design/specs/2026-11-22-locked-view-design.md` "Round 20c".
 
 What this build changes by default: nothing you can see in full aim. Aim field of view is the game's zoom and Sight
-distance in aim is 0, so full aim looks as it did on feel.51. The placement editor now works while aiming.
+distance in aim is 0, so full aim looks as it did on feel.51, a saved ADS placement included: the near clip follows
+the gun only while Sight distance in aim is above 0 or the placement editor is open on its ADS action. The placement
+editor now works while aiming.
 
 ## Before you start
 
@@ -77,7 +79,10 @@ Before the `|`, what is on screen now; after it, the frames since the previous `
 
 The `out` line lists each range seen: `zoom levels (game fov: sight m, depth m, optic): 30.8: sight 0.220, depth
 0.270, optic 30.00 deg x3.00; ...`. That per-range sight and depth is what the Sight distance in aim needs. A wide
-entry with no optic, seen after standing at the wall, is the game's own unzoom, not a range.
+entry with no optic, seen after standing at the wall, is the game's own unzoom, not a range. The `out` line files each
+range under the game's field of view as sampled once a tick, so while the gate flips a range can land under the gate's
+wide value (x6 filed as 24.0 instead of 15.0); its sight and depth are still that range's. Which ranges there are,
+read from the `second` lines' `optic target`.
 
 In pass C, per range: `wanted 0.150`, `closer` = sight - 0.15 (at most 0.25), `near clip` about 0.15 (never under
 0.05). During a range change the `second` lines' `closer` should change smoothly, with `depth`, not in one jump.
