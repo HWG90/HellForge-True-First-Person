@@ -42,6 +42,7 @@
 
 #define TFP_STEADY_RATE 18.0        /* 1/s: nine tenths of the way in 216 ms, at rest in about 520; the game's own lens takes 170 to 260 ms over 30 degrees */
 #define TFP_STEADY_GAP_MS 250.0     /* longer without a frame: begin again at the game's own depth */
+#define TFP_STEADY_MOST 1.0f        /* m: a shift over this is not added (the zoom depth term's own limit); its ranges alone would allow 8 */
 #define TFP_STEADY_REST .0002f      /* m: this near the settled distance ... */
 #define TFP_STEADY_REST_SPEED .005f /* m/s: ... and this slow, the held distance is the settled one, to the bit */
 
@@ -115,7 +116,9 @@ static inline float tfp_steady_held(TfpSteady *s, uint64_t lease, double tick, f
 }
 /* One frame. Returns a TFP_STEADY_* reason; `*delta` is what to add to the rig's node 5 on its forward axis (and to
  * take from the root along the view's forward), 0 on every pass. `*depth` is the game's own D where it could be
- * worked out (0 else), `*held` the held distance where the shift was worked out. A pass leaves the state as it was. */
+ * worked out (0 else), `*held` the held distance where the shift was worked out. A pass leaves the state as it was.
+ * A shift of more than TFP_STEADY_MOST is a pass ("values out of range"): each value can be in its own range and the
+ * two distances still 8 m apart. */
 static inline uint32_t tfp_steady_frame(TfpSteady *s, const TfpSteadyInput *in, uint64_t lease, double tick, float *delta, float *depth, float *held) {
   float gain = 0;
   *delta = 0; *depth = 0; *held = 0;
@@ -125,8 +128,13 @@ static inline uint32_t tfp_steady_frame(TfpSteady *s, const TfpSteadyInput *in, 
       || (in->blend && (!tfp_steady_within(in->mix_before, 0, 1) || !tfp_steady_within(in->mix_after, 0, 1)))) return TFP_STEADY_RANGE;
   if (!tfp_steady_gain(in, &gain)) return TFP_STEADY_SCALED;
   const float share = in->share < 0 ? 0 : in->share > 1 ? 1 : in->share;
+  TfpSteady before; memcpy(&before, s, sizeof before);
   *held = tfp_steady_held(s, lease, tick, *depth, in->settled);
   *delta = share*gain*(*held-*depth);
+  if (!(fabsf(*delta) <= TFP_STEADY_MOST)) { /* more than the zoom depth term itself would ever add: not a distance of an optic */
+    memcpy(s, &before, sizeof before); *delta = 0; *held = 0;
+    return TFP_STEADY_RANGE;
+  }
   return TFP_STEADY_WORKED;
 }
 

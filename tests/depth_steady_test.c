@@ -240,6 +240,26 @@ int main(void) {
     in = game_frame(&g, false, 16); in.share = .5f; in.settled = .30f; state.held = .30f; state.speed = 0;
     CHECK(tfp_steady_frame(&state, &in, 1, 1096, &delta, &depth, &held) == TFP_STEADY_WORKED && near(delta, .5*(.30-(double)depth), 1e-7)); /* half the hip share: half the shift */
   }
+  /* ---- no shift over a metre (the zoom depth term's own limit): inside its own ranges the rule could ask for 8 m ---- */
+  {
+    TfpSteady state; memset(&state, 0, sizeof state); float delta = 1, depth = 1, held = 1;
+    TfpSteadyInput in; memset(&in, 0, sizeof in);
+    in.target = 60*RAD; in.lens = 60*RAD; in.prior = 80*RAD; in.current = 3.5f; in.previous = -3.5f; in.settled = 3.5f;
+    in.mix_before = in.mix_after = 1; in.share = 1; in.on = true;
+    CHECK(tfp_steady_frame(&state, &in, 1, 1000, &delta, &depth, &held) == TFP_STEADY_WORKED && delta == 0 && held == 3.5f);
+    const TfpSteady kept = state;
+    in.target = 90*RAD; in.lens = 62*RAD; /* the gate set: the game's depth is the distance before, 7 m away */
+    CHECK(tfp_steady_frame(&state, &in, 1, 1016, &delta, &depth, &held) == TFP_STEADY_RANGE && delta == 0 && held == 0 && depth == -3.5f);
+    CHECK(!memcmp(&kept, &state, sizeof state));                       /* a pass: the state as it was */
+    in.previous = 2.4f; CHECK(tfp_steady_frame(&state, &in, 1, 1016, &delta, &depth, &held) == TFP_STEADY_RANGE && delta == 0 && !memcmp(&kept, &state, sizeof state)); /* 1.1 m */
+    in.previous = 4; in.current = 2.9f; in.settled = 2.9f; state.held = 2.9f;
+    CHECK(tfp_steady_frame(&state, &in, 1, 1016, &delta, &depth, &held) == TFP_STEADY_RANGE && delta == 0); /* and the other way */
+    state = kept; in.current = in.settled = 3.5f; in.previous = 2.6f;
+    CHECK(tfp_steady_frame(&state, &in, 1, 1016, &delta, &depth, &held) == TFP_STEADY_WORKED && near(delta, .9, 1e-6) && held == 3.5f); /* 0.9 m goes out */
+    state = kept; in.previous = 2.4f; in.share = .5f;
+    CHECK(tfp_steady_frame(&state, &in, 1, 1016, &delta, &depth, &held) == TFP_STEADY_WORKED && near(delta, .55, 1e-6)); /* what counts is what would be added */
+    CHECK(TFP_STEADY_MOST == 1.0f);
+  }
   /* ---- the "Steady:" line ---- */
   {
     TfpSteadyLog log; memset(&log, 0, sizeof log); TfpSteadySecond s; char text[640];
