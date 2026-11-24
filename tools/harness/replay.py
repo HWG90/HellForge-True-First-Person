@@ -51,6 +51,8 @@ What this leaves out:
    or two at a leave of the native view. It is read into row["veil"] (None where it moved nothing or the line does
    not say), and nothing here uses it: eye_world is the filter's own eye, before the veil, and that is what is
    replayed and judged. tools/harness/matrix.py judges the eye shown, eye + veil.
+ - Of what a line carries after "tick=" only off_foot, damp and view are read (round 19: the head the helper gives the
+   filter, head_node); damped, sock, arms and eye_edge are not. tools/harness/trace.py reads them for the judge.
  - A row's time is its "tick=" where the line has one (0.6.0-feel.41 on). Before that it is "t=", to 0.1 ms and from
    the window's edge, and the edge is placed by the line's own stamp (to 1 ms, and written up to a frame late): the
    time between the last row of one window and the first of the next can be a millisecond or two off.
@@ -82,10 +84,10 @@ BEYOND_M = 0.05
 CARRY_M = 0.05   # a correction over this, carried on after a change of camera, is timed
 TRACE = re.compile(r"^(\d+):(\d+):(\d+)\.(\d+) Trace: t=(-?[\d.]+) kind=(\d+) eye_world=\(([-\d. ]+)\) step=[-\d.]+ wanted=\(([-\d. ]+)\) "
                    r"correction=([-\d.]+).*?source=(\S+) root=\(([-\d. ]+)\)(?: axes=\(([-\d. ]+)\))? looked=(\d) taken=(\S+)"
-                   r"(?: quiet=(\d))?(?: tick=([\d.]+))?")
+                   r"(?: quiet=(\d))?(?: tick=([\d.]+))?(?: off_foot=(\d) damped=\d damp=\(([-\d. ]+)\))?(?: view=\(([-\d. ]+)\))?")
 VEIL = re.compile(r" veil=\(([-\d. ]+)\)")
 SOURCES = {"head": 1, "native": 2, "repeat": 2}
-TAKEN = ((1, "jump"), (2, "edge"), (4, "root"), (8, "restart"))
+TAKEN = ((1, "jump"), (2, "edge"), (4, "root"), (8, "restart"), (16, "cut"))
 
 
 def read(lines):
@@ -104,7 +106,9 @@ def read(lines):
         row = {"stamp": stamp, "t": float(m[5]), "kind": int(m[6]), "eye": [float(x) for x in m[7].split()],
                "wanted": [float(x) for x in m[8].split()], "carried": float(m[9]), "source": m[10],
                "root": [float(x) for x in m[11].split()], "axes": [float(x) for x in m[12].split()] if m[12] else None,
-               "looked": int(m[13]), "taken": m[14], "quiet": int(m[15] or 0), "clock": float(m[16]) if m[16] else None, "at": line[:12]}
+               "looked": int(m[13]), "taken": m[14], "quiet": int(m[15] or 0), "clock": float(m[16]) if m[16] else None, "at": line[:12],
+               "off_foot": int(m[17]) if m[17] else None, "damp": [float(x) for x in m[18].split()] if m[18] else None,
+               "view": [float(x) for x in m[19].split()] if m[19] else None}
         veil = VEIL.search(line)
         row["veil"] = [float(x) for x in veil[1].split()] if veil else None
         if window and row["t"] < window[-1]["t"] - 1:  # an edge without a State line (the orphaned view): t starts again
@@ -273,11 +277,73 @@ def build(header_dir, name, work):
     return binary
 
 
+EYE_FORWARD_M = 0.18  # the head camera's eye from its node: along the level view (src/camera_policy.c), and up
+EYE_UP_M = 0.04
+
+
+def head_node(row, axes=None):
+    """The point the head camera's eye is built on (the head node as the head camera's own smoothing left it), in the
+    world, before the eye damping: the wanted eye less the damping and less the eye's place in front of and above it
+    (src/camera_helper.c: c.forward along the level view direction, c.up; the side the placement can give is taken as
+    0). The level view is the logged view's; at a vertical view the root's forward axis (`axes`, rows), as the helper
+    does. None where the line does not say the damping and the view (before 0.6.0-feel.48)."""
+    damp, view = row.get("damp"), row.get("view")
+    if damp is None or view is None:
+        return None
+    level = [view[0], view[1]]
+    length = math.hypot(*level)
+    if length < 1e-4 and axes:
+        level = [axes[3], axes[4]]
+        length = math.hypot(*level)
+    if length < 1e-4:
+        return None
+    return [row["wanted"][0] - damp[0] - level[0] / length * EYE_FORWARD_M, row["wanted"][1] - damp[1] - level[1] / length * EYE_FORWARD_M,
+            row["wanted"][2] - damp[2] - EYE_UP_M]
+
+
+def head_given(row):
+    """Whether the helper gives the filter the head in this row (THE CUT, src/camera_continuity.h; src/camera_helper.c
+    smooth_present): a head-camera frame (kind 4, the head source) of a body on foot, not in full aim, where the line
+    says enough to find the head (head_node: 0.6.0-feel.48 on). Not known from a line: the helper also leaves out a
+    body that is down (its head 3 m from the root) and the ADS gap. A line before feel.48 is replayed without the
+    head: the eye is no stand-in for it (a turn of the view swings the eye 0.18 m about the head, which is no cut)."""
+    return (row["kind"] == 4 and row["source"] == "head" and row.get("off_foot") != 1 and not row.get("quiet", 0)
+            and row.get("damp") is not None and row.get("view") is not None)
+
+
+def row_text(row, axes):
+    """One row for replay_filter.c: tick source detect quiet fresh, wanted, root, logged eye, axes, and (round 19) whether
+    the head is given and the head node in the world (head_node; zeros where it is not given)."""
+    node = head_node(row, row[axes]) if head_given(row) else None
+    given = node is not None
+    return "%.3f %d %d %d %d %s %s %s %s %d %s\n" % (row["tick"], SOURCES.get(row["source"], 0), row["looked"], row.get("quiet", 0),
+                                                 row.get("fresh", False), " ".join(map(str, row["wanted"])), " ".join(map(str, row["root"])),
+                                                 " ".join(map(str, row["eye"])), " ".join(map(str, row[axes])), given,
+                                                 " ".join(map(str, node or [0.0, 0.0, 0.0])))
+
+
+def emit_head(name, rows):
+    """The rows as a C array of HeadFrame (tests/reference/soak-30-cut.h): SoakFrame with the kind, off_foot, what
+    the damping added and the view, for scenes of THE CUT."""
+    first = rows[0]["tick"]
+
+    def group(values, digits):
+        return "{" + ", ".join(f"{v:.{digits}f}f" for v in values) + "}"
+    out = [f"/* {rows[0]['at']} to {rows[-1]['at']}: ms, kind, source, looked, off_foot, wanted eye, damp, view, root, root axes (logged), "
+           f"eye shown in the log */",
+           f"static const HeadFrame {name}[] = {{"]
+    for row in rows:
+        off = row.get("off_foot")
+        out.append(f"  {{{row['tick'] - first:.1f}f, {row['kind']}, {SOURCES.get(row['source'], 0)}, {row['looked']}, {1 if off == 1 else 0}, "
+                   f"{group(row['wanted'], 4)}, {group(row.get('damp') or [0, 0, 0], 4)}, {group(row.get('view') or [0, 0, 0], 5)},\n"
+                   f"    {group(row['root'], 4)}, {group(row['fit'], 6)}, "
+                   f"{group(row['eye'], 4)}}},")
+    out.append("};")
+    return "\n".join(out) + "\n"
+
+
 def run(binary, mode, rows, axes):
-    text = "".join("%.3f %d %d %d %d %s %s %s %s\n" % (row["tick"], SOURCES.get(row["source"], 0), row["looked"], row.get("quiet", 0),
-                                                       row.get("fresh", False), " ".join(map(str, row["wanted"])), " ".join(map(str, row["root"])),
-                                                       " ".join(map(str, row["eye"])), " ".join(map(str, row[axes])))
-                   for row in rows)
+    text = "".join(row_text(row, axes) for row in rows)
     out = subprocess.run([str(binary), mode], input=text, capture_output=True, text=True, check=True).stdout.splitlines()
     assert len(out) == len(rows)
     return [[float(x) for x in line.split()] for line in out]
@@ -332,6 +398,7 @@ def main(argv):
     parser.add_argument("--from", dest="start", default=None)
     parser.add_argument("--to", dest="end", default=None)
     parser.add_argument("--emit", default=None, help="write the rows of --from/--to as a C array of this name")
+    parser.add_argument("--emit-head", default=None, help="the same as HeadFrame rows, with the kind, off_foot, the damping and the view (round 19)")
     parser.add_argument("--worst", type=int, default=0, help="list this many rows where the logged filter, replayed, is farthest from the log")
     args = parser.parse_args(argv[1:])
     calls = read(Path(args.log).read_text(errors="replace").splitlines())
@@ -341,6 +408,9 @@ def main(argv):
 
     def chosen(row):
         return not (args.start and row["at"] < args.start) and not (args.end and row["at"] > args.end)
+    if args.emit_head:
+        print(emit_head(args.emit_head, [row for row in calls if chosen(row)]), end="")
+        return 0
     if args.emit:
         picked = [row for row in calls if chosen(row)]
         print(f"/* {picked[0]['at']} to {picked[-1]['at']}: ms, source, looked, wanted eye, root, root axes "

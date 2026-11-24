@@ -634,3 +634,158 @@ in 16 of 149 holds, by 0.20 m or more in 8. Twelve stills do not rule that out; 
   that does not hold, a row carries the neighbouring frame's figure.
 - The filter's replays are the same as on `main` for soaks 20 to 26 (run and compared); soaks 8 to 19 were not run
   again. None of the filter's files changed.
+
+## Round 19: a move straight out of an emote (THE CUT)
+
+Written 2026-11-24 (branch `round19-emote-move`), from the logs of feel.50 and feel.51 (`~/.cache/tfp-soak-27` to
+`-30.modlog`). Nothing here was run in the game.
+
+### What the rows say
+
+Sprint, dive or dive-back straight out of an emote, the head camera (kind 4) holding the view and the gun out of
+the hands (`Hold: ... why=the gun has left the hands`, phase=waiting). Soak 30 at 16:33:39.703 (emote 174, then
+sprint 178), as the Trace rows have it, with the head = wanted - damp taken against the root:
+
+| | before (5 frames) | the frame | after |
+|---|---|---|---|
+| root's step | 0.003 to 0.011 m, then 0.050 | **0.163 m**, yaw +3.6 degrees | 0.054, 0.024 |
+| head against the root | 0.002 to 0.010 m | **0.340 m** | 0.043, 0.036 |
+| damp (Stable, 0.25 m most) | 0.18 to 0.25 m, falling | 0.250 (the limit) | 0.19, 0.14 |
+| eye shown | 0.020 to 0.052 m | **0.355 m** | 0.064 |
+| looked, taken, correction | 0, -, 0 | 0, -, 0 | 0, -, 0 |
+
+The other cases are the same frame: the head 0.34 to 0.61 m against the root in one frame, from under 0.4 m/s, the
+root lunging 0.08 m or snapping 0.16 m, a dive-back's yaw flipping 157 to 180 degrees. Every one in soaks 27 to 30:
+27 at 12:52:57.770 (the cut takes two frames there, 0.39 and 0.32 m: 0.401 then 0.619 m of step change shown),
+13:04:44.367, 13:05:17.921; 28 at 16:03:34.909, 16:04:02.153; 29 at 16:16:30.771, 16:17:04.358; 30 at 16:33:39.703,
+16:37:34.709, 16:38:01.952. Soak 25 (feel.49) has none that nothing looked at: its head jumps of 0.27 to 0.36 m all
+fell in a looked-at window and were taken up.
+
+### Why the continuity took none of it
+
+Not looked for. `smooth_detect` looks for jumps for `SMOOTH_EVENT_MS` (600 ms) after a change of the control mask,
+the request's kind or weapon, the binder's weapon key, or a word from the binder. The gun left the hands 0.9 to 1 s
+before (the `Hold:` line), and moving out of an emote changes none of those: every row says looked=0. Within the
+head camera only a change of camera is taken up otherwise.
+
+Not the damping, and not the head camera's own path: the damping did what it is for. Stable took 0.25 m of the
+head's 0.34 to 0.54 m (its limit, reached in that frame), Bodycam 0.10 m; the rest went through. `off_foot` is 0 in
+all these rows (a dive is "on foot" to the layer it reads, round 14), so the head-camera exclusion for a thrown body
+did not apply either. `orphan_head` is not involved: these are kind 4 rows with source=head.
+
+### What changed
+
+The smallest place is the continuity: a frame that is no event and is not looked at, where the game re-seats the
+head as it re-seats a rig.
+
+- `src/camera_continuity.h`, THE CUT: `tfp_continuity_step_cut` takes the head the eye is built on, before the eye
+  damping, in the root's frame (NULL where it is not given; `tfp_continuity_step_in` is that call with NULL). A frame
+  in which nothing is looked for and the head moves `TFP_CONTINUITY_CUT_M` (0.25 m) or more against the root, or
+  `TFP_CONTINUITY_CUT_ACCEL` (150 m/s^2) times the frame's time squared where that is more, from under
+  `TFP_CONTINUITY_CUT_REST` (1 m/s) the frame before, is taken up as a change of camera: whole, on the curve, the
+  speed lent from before (none). The frame after one cut can be a cut too (soak 27), a third cannot. The root's
+  course is kept through a cut frame and nothing is tried from it: believed, a dive-back's yaw flip was the course of
+  the frame after, the root read as re-seated off it, and what was carried swung round by as much again (0.376 m of
+  step change at 16:16:30.838 of soak 29, found by the replay).
+- `src/camera_helper.c` `smooth_present` gives the head in a head-camera frame (kind 4, source head) of a body that
+  is on foot and not down, not in full aim or its gap. The trace row says `taken=cut`
+  (`TFP_CAMERA_TRACE_CUT`), and the `Smooth:` line counts the cuts apart from the changes of camera.
+- `tools/harness/replay.py` reads `off_foot=` and `damp=`, gives the filter the head where the helper would
+  (`head_given`: kind 4, source head, not off foot, not full aim; a line before feel.48 does not say off_foot and is
+  taken as on foot), and writes HeadFrame rows (`--emit-head`) for tests.
+
+What is not a cut stays as it was: the dive's own arc (the head moving 0.1 to 0.2 m a frame against the root after
+the first frame: never from rest), a body off foot (thrown, ragdoll: the head is not given; soak 28's throw is no cut
+even with it given, the head going 2.7 m/s the frame before), the held eye let go in an emote (0.15 to 0.18 m, round
+14's M), prone out of an emote (the head from rest at 120 m/s^2: 0.13 m in a frame at 33 ms, 0.30 m at 50 ms, under
+the bound at every frame time), every native frame, and every frame something is looked for.
+
+Two damping scenarios of `tests/camera_smooth_test.cpp` (17 and 20) dropped the head 0.5 m in one frame from rest to
+fill the damping's lag. That is a cut now; they drop it in two frames (0.24 and 0.26 m) and test the damping as before.
+
+### Tests
+
+- `tests/camera_continuity_test.c`: the real rows of soaks 27, 29 and 30 (`tests/reference/soak-30-cut.h`: sprint,
+  dive-back twice, dive, the two-frame cut): the cut's step change against the root's place under the measure
+  (0.001 to 0.013 m, the log 0.20 to 0.55 m), the frame after and the arc after it no more than the eye's own and the
+  curve (under 0.03 m), no frame of the arc taken up. Soak 28's throw and soak 30's held eye: no cut, nothing carried.
+  Made up at 8, 16.7, 33.3 and 50 ms: a 0.4 m cut, then the dive's arc at 30 m/s^2 against a root lunging at 5 m/s
+  (nothing shown in the cut's frame, 0.002 to 0.041 m beyond the arc's own after it, under 0.01 m carried after 288 to 301 ms); the head from
+  rest at 60 and 120 m/s^2 is no cut.
+- `tests/camera_smooth_test.cpp` scenario 25: the same through the helper, Bodycam and Stable, on foot and thrown.
+- `tests/test_harness_replay.py`: reading the fields, where the head is given, the rows for a test.
+
+### The logs through the filter
+
+`replay.py LOG --logged REV`, the present filter where the replay is exact, before (main, 383ddb1) and after:
+
+| Soak | Build | The filter's steps, before | after | Metre-frames, before | after |
+|---|---|---|---|---|---|
+| 8 to 26 | | the same to the digit | | the same | |
+| 27 | b70333e (feel.50) | 18 | 25 | 244.6 | 251.3 |
+| 28 | cc0a95f (feel.51) | 13 | 17 | 122.0 | 126.3 |
+| 29 | cc0a95f | 21 | 26 | 160.5 | 164.8 |
+| 30 | cc0a95f | 12 | 17 | 89.4 | 93.2 |
+
+The cut frames themselves, the log's step change against the present filter's (shown in the world, so the root's
+own lunge of 0.08 m stays in it):
+
+| Soak, frame | log | present | the root's own change |
+|---|---|---|---|
+| 27 12:52:57.770 / .804 | 0.402 / 0.619 | 0.084 / 0.071 | 0.083 / 0.082 |
+| 27 13:04:44.367, 13:05:17.921 | 0.291, 0.481 | 0.083, 0.077 | 0.083, 0.082 |
+| 28 16:03:34.909, 16:04:02.153 | 0.292, 0.486 | 0.083, 0.079 | 0.082, 0.082 |
+| 29 16:16:30.771, 16:17:04.358 | 0.306, 0.456 | 0.082, 0.080 | 0.081, 0.082 |
+| 30 16:33:39.703 (sprint) | 0.348 | 0.162 | 0.155 |
+| 30 16:37:34.709, 16:38:01.952 | 0.272, 0.324 | 0.083, 0.080 | 0.082, 0.082 |
+
+Every step added to the filter's count lies in these dives, 70 to 300 ms after the cut, on the dive's own arc: the
+shown change is the wanted eye's own within 0.003 to 0.014 m (for example 16:37:34.909 of soak 30: 0.087 for a
+wanted 0.085). The judge calls them the filter's only because the cut is still being let out there (0.03 m or more
+carried), where it called the same frames the game's own before. The game's own count falls by as many or more (soak
+30: 82 to 71). Nothing outside these actions changed.
+
+### What only the game can show
+
+1. That a dive or a sprint out of an emote now reads as one motion: the view stays and is eased onto the head over
+   about 300 ms, and is not left behind it long enough to see the body from outside or the inside of the helmet
+   (the eye is 0.3 to 0.4 m off the head at the cut). `taken=cut` in the row and the `Smooth:` line say it ran.
+2. The sprint out of an emote keeps the root's own snap (0.16 m in one frame in soak 30): the root is shown, as
+   everywhere. Whether a player sees it.
+3. Whether a cut ever fires where it should not: a head-camera frame of a body on foot that moves 0.25 m against
+   the root from rest for a reason of its own (an animation not seen in these soaks).
+4. That a throw out of an emote still sets `off_foot` in its first moving frame, as soak 28's did.
+
+### After the review of round 19
+
+The review held the cause and the fix for the emote cases and found:
+
+1. **A flick of the mouse was a cut.** The head handed to the filter was the head camera's eye less the damping,
+   0.18 m ahead of the head node along the level view. In kind 4 the root does not turn with the view, so a turn of
+   about 88 degrees or more in one frame after a calm frame moved that eye a chord of up to 0.36 m: flicks of 95 and
+   180 degrees at 8, 16.7 and 33.3 ms were cuts, the eye 0.265 / 0.360 m off (0.18 m behind the head node) for about
+   300 ms. Now the helper gives the head node itself (`smoothed`, the point `lock_damp_eye` damps), which does not
+   move on a view turn: no cut, the eye on the head camera's eye in every frame, as main. The node moves 0.255 to
+   0.553 m against the root in the eleven real cut frames (soak 27 12:52:57.770 is the least, against the 0.25 m bound).
+2. **The root moving alone was a cut.** The root alone 0.5 m, the head and the eye still in the world: cut, the eye
+   0.500 m off. A cut now also needs the head to jump as far in the world (the real cuts: 0.330 to 0.578 m); the
+   root alone is read as before (Bodycam 0.060 m, Stable 0.310 m off at most, as main).
+3. **The ease's end.** Soak 30 16:37:35.009, 300 ms after a cut, the step change went 0.009 -> 0.029 m where the
+   cubic ended (it brakes hardest in its last frame). A cut is now eased on the quartic (1-s)^3 (d (1+3s) + v T s),
+   at rest at its end with no acceleration, its length reckoned for its start (12 d / T^2 at ease_accel, up to
+   max_ms times the square root of 2). Over the ten cuts, the 15 frames after each against main: the most a frame's
+   step change is beyond main's 0.020 -> 0.008 m, summed 0.260 -> 0.141 m. (The quintic, at rest at both ends,
+   brakes in its middle as hard as the cubic at its end: 0.021 and 0.429 m.)
+4. **Exclusions not pinned.** Tests now pin each: a third cut in a row, a frame looked at, full aim, a change of
+   camera, the frame after a start and after a restart, a head without the world, kind 5, a body that is down, and
+   the first frame out of full aim. The ADS gap stays unpinned on purpose: it starts with a change of camera and
+   lasts under 250 ms, inside the 600 ms in which jumps are looked for after one, so it cannot be told apart.
+5. Scenario 17 drops the head 0.5 m in one frame again: with the smooth eye on that is a cut (the trace says so,
+   the damping still runs at its 0.10 m, the eye is not moved in that frame), and the native view after it starts
+   from where the eye is. Scenario 20 drops in one frame with the smooth eye off, in two with it on.
+
+The node is smoothed by the head camera's own 0.06 m lag, so a made-up 0.4 m cut moves it 0.34 m: under the bound at
+50 ms a frame (0.375 m, prone's 0.30 m in such a frame from rest stays shown), and shown as before there; at 50 ms a
+0.55 m cut is a cut. The replay rebuilds the node from `damp=` and `view=` (feel.48 on); older lines are replayed
+without the head. Soaks 8 to 30 replayed against main: soaks 8 to 26 the same to the digit; 27 to 30 eleven cut frames
+(the ten cuts), 21 frames better by more than 0.02 m of step change, none worse (before: one, 16:37:35.009).

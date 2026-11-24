@@ -265,9 +265,10 @@ void tfp_camera_veil_stats(TfpCameraVeilStats *out);
  * `hidden` = the update found meshes drawn again and left none drawn, then tfp_camera_set_veil. */
 struct TfpHeadTick;
 void tfp_camera_veil_from_head(const struct TfpHeadTick *tick);
-typedef struct TfpCameraContinuityStats { uint64_t jumps, edges, restarts; float largest_m; uint64_t reseats; } TfpCameraContinuityStats;
+typedef struct TfpCameraContinuityStats { uint64_t jumps, edges, restarts; float largest_m; uint64_t reseats, cuts; } TfpCameraContinuityStats;
 /* Counts since the start; the largest correction carried since the last call. reseats: frames in which the body
- * root alone was re-seated (a jump in the root's frame with the eye going on evenly in the world; nothing taken up). */
+ * root alone was re-seated (a jump in the root's frame with the eye going on evenly in the world; nothing taken up).
+ * cuts: head-camera pose cuts taken up as a change of camera (round 19, THE CUT; not counted in edges). */
 void tfp_camera_continuity_stats(TfpCameraContinuityStats *out);
 /* The eye going back and forth, watched only (src/camera_alternation.h; nothing is held). Counts since the start:
  * frames the rule counted under the lock, how many of them in a frame in which jumps were looked for, how many with
@@ -294,7 +295,8 @@ enum { TFP_CAMERA_TRACE_LOOKED = 1,  /* jumps within the camera were looked for 
        TFP_CAMERA_TRACE_QUIET = 64,  /* full aim: the continuity was told to take nothing up */
        TFP_CAMERA_TRACE_OFF_FOOT = 128, /* a head-camera frame of a body that was not on foot: its eye is not damped and jumps in it are not looked for. A native frame never says it: the question is not asked there */
        TFP_CAMERA_TRACE_DAMPED = 256, /* the eye damping ran in this frame (src/camera_damp.h); without it a `damp` that is not nothing is a lag being let go */
-       TFP_CAMERA_TRACE_SELF = 512   /* the presented eye changed its step by TFP_TRACE_SELF_M or more in this frame: the helper opened a window itself, or kept one open (src/trace_edges.h) */ };
+       TFP_CAMERA_TRACE_SELF = 512,  /* the presented eye changed its step by TFP_TRACE_SELF_M or more in this frame: the helper opened a window itself, or kept one open (src/trace_edges.h) */
+       TFP_CAMERA_TRACE_CUT = 1024   /* round 19: the head camera's pose cut was taken up as a change of camera (THE CUT, src/camera_continuity.h) */ };
 /* damp: what the eye damping added to the true eye of this frame, in the world (wanted - damp is the eye the head
  * camera would have had without it); zeros where it added nothing. view: which way the view pointed, a unit vector
  * in the world (the head camera's forward; in a native frame the forward axis of the rig eye the camera hangs on);
