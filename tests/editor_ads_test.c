@@ -32,7 +32,7 @@ static TfpEditor *ed;
 static TfpEdPlace live;                                   /* the controller's placement (the hip's) */
 static TfpEdPlace stored[3]; static bool has_stored[3];   /* the store, by action: idle, aim, ads */
 static char saved_action[16]; static unsigned saves;
-static struct { double x, y, wheel; bool click, enter; } input;
+static struct { double x, y, wheel; bool click, enter, right; } input;
 static double clock_now = 10;
 static double revision;
 
@@ -73,7 +73,7 @@ static bool ed_call(void *user, TfpEdCall which, const TfpEdArgs *a, TfpEdReply 
       r->sample.click = input.click; r->sample.x = input.x; r->sample.y = input.y; r->sample.wheel = input.wheel; r->sample.dt = 1.0 / 60;
       input.wheel = 0;
       return true;
-    case TFP_ED_I_DOWN: r->a.kind = (int)a->number == 13 && input.enter ? TFP_ED_TRUE : TFP_ED_FALSE; return true;
+    case TFP_ED_I_DOWN: r->a.kind = ((int)a->number == 13 && input.enter) || ((int)a->number == 2 && input.right) ? TFP_ED_TRUE : TFP_ED_FALSE; return true;
     default: return true;
   }
 }
@@ -202,8 +202,13 @@ int main(void) {
   /* the wheel: depth. Pulled toward the eye by 3 cm (three notches back; forward is away from the eye) */
   for (int i = 0; i < 3; i++) { input.wheel = -120; CHECK(frame() == 0); }
   CHECK(fabs(full_aim_forward() - (-.03)) < 1e-9);
-  /* the rotation preview is drawn as authored for full aim (the pose helper draws an unauthored one only at the hip) */
-  CHECK(drawn.authored_ads == true || drawn.axis[TFP_MOTION_QW] == 1);
+  /* the rotation preview (a right-drag: yaw) is drawn as authored for full aim (the pose helper draws an unauthored one
+   * only at the hip) */
+  input.x = 900; input.y = 700; input.right = true; CHECK(frame() == 0);
+  input.x = 1000; CHECK(frame() == 0);
+  CHECK(drawn.authored_ads && drawn.axis[TFP_MOTION_QW] < 1);
+  input.right = false; CHECK(frame() == 0);
+  CHECK(drawn.authored_ads);
   /* saved for this weapon's ADS action; closed, the motion runtime keeps sending the saved one */
   input.enter = true; CHECK(frame() == 0); input.enter = false;
   CHECK(saves == 1 && !strcmp(saved_action, "ads") && has_stored[2] && fabs(stored[2].v[1] - (-.03)) < 1e-9 && fabs(stored[2].v[0] - right) < 1e-9);

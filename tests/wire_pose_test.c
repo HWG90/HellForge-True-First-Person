@@ -1277,6 +1277,20 @@ static int real(void) {
     pose_world_aim(0);
     H->finish(H->user, handle, &has_stats, &stats, &why);
     pose_world_third_person();
+    /* a lease that is not a steady entry begins its hip weight at 0 and blends it up at the hip: 1 - weight is then
+     * near 1, but that is no aim, and nothing is pulled (the review's I1, mutation #5) */
+    TfpOpsHelperConfig blended = c;
+    blended.steady_entry = false;
+    tfp_pose_set_ads_seat(.173f, .10f);
+    CHECK(H->prepare(H->user, &blended, &native, &why) == TFP_OPS_TRUE && H->begin(H->user, &blended, native, &handle, &why) == TFP_OPS_TRUE);
+    pose_world_first_person();
+    for (int i = 0; i < 12; i++) {
+      game_frame(handle, &stats, 16);
+      CHECK(forwarded[1] == NATIVE[1] && tfp_pose_ads_probe(&ads) && ads.share == 0 && ads.closer == 0);
+    }
+    CHECK(near(forwarded[0] - NATIVE[0], .15, 1e-4));                 /* the hip placement did blend in */
+    H->finish(H->user, handle, &has_stats, &stats, &why);
+    pose_world_third_person();
   }
   if (ads_frames(H, &c)) return 1;
   if (ads_zoom_frames(H, &c)) return 1;
