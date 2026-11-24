@@ -19,5 +19,15 @@ class SoakVerdict(unittest.TestCase):
         self.assertEqual(soak.verdict(frames=18136, flagged=3), 1)
 
 
+class SoakWholeLog(unittest.TestCase):
+    """The log is cut per action, and three frames that lie across a cut were judged in neither stretch (the soaks of
+    2026-11-24: 08:31:09.150 at 0.072 m and 08:32:05.640 at 0.061 m were over the limit and not flagged)."""
+
+    def test_frames_over_the_limit_that_no_action_listed(self):
+        whole = [{"at": "08:31:09.150", "whose": "own"}, {"at": "08:31:12.000", "whose": "filter"}, {"at": "08:31:15.000", "whose": "body"}]
+        seen = {"08:31:12.000"}
+        self.assertEqual([p["at"] for p in soak.unlisted(whole, seen)], ["08:31:09.150"])   # the body's own is not a flag
+
+
 if __name__ == "__main__":
     unittest.main()

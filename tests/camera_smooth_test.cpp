@@ -915,6 +915,65 @@ int main() {
       CHECK(!std::memcmp(out[0][at600], out[1][at600], sizeof(float) * 4 * (at + after - at600))); // gone: the undamped camera
     }
   }
+  // ---- 21. The trace says what the eye damping did to the wanted eye, and whether the body was on foot. The
+  // wanted eye of a head-camera frame is written after the damping, so a log could not say whether the damping ran
+  // in a frame, how far behind the head the eye was, or where the head itself was (round 10, 2026-11-24: prone and a
+  // crouch out of an emote, the eye setting off at 0.02, 0.12, 0.25 m a frame; the arithmetic says the 0.25 m limit
+  // came into force, the lines could not). damp: what was added to the true eye, in the world; nothing: zeros. ----
+  {
+    const double dt = 33.3;
+    fresh(true, true, true, 300.0f);
+    Game g; g.pose(1, 2, 0, .2f); g.look(.3f, -.2f); g.hip(); g.begin();
+    TfpCameraTraceRow rows[64];
+    standing(g, 12, dt, false);
+    tfp_camera_trace_edge();
+    uint32_t count = tfp_camera_trace_read(rows, 64);
+    CHECK(count == 6);
+    for (uint32_t i = 0; i < count; ++i) // on foot, damped, the head still: nothing added
+      CHECK((rows[i].what & TFP_CAMERA_TRACE_DAMPED) && !(rows[i].what & TFP_CAMERA_TRACE_OFF_FOOT) && rows[i].damp[0] == 0 && rows[i].damp[1] == 0 && rows[i].damp[2] == 0);
+    g.pose(1, 2, 0, .2f, 1.0f); g.hip(); g.frame(dt); // the head 0.5 m down in a frame: the eye is held 0.10 m above it, the limit
+    count = tfp_camera_trace_read(rows, 64);
+    CHECK(count == 1 && (rows[0].what & TFP_CAMERA_TRACE_DAMPED) && !(rows[0].what & TFP_CAMERA_TRACE_OFF_FOOT));
+    CHECK(std::fabs(rows[0].damp[2] - .10f) < 1e-3f && std::fabs(rows[0].damp[0]) < 1e-3f && std::fabs(rows[0].damp[1]) < 1e-3f);
+    const float true_eye = rows[0].wanted[2] - rows[0].damp[2];
+    g.s.state = 50; g.hip(); g.frame(dt); // off foot: the row says so, the damping no longer runs, and what is let go is still told
+    count = tfp_camera_trace_read(rows, 64);
+    CHECK(count == 1 && (rows[0].what & TFP_CAMERA_TRACE_OFF_FOOT) && !(rows[0].what & TFP_CAMERA_TRACE_DAMPED));
+    CHECK(rows[0].damp[2] > .02f && rows[0].damp[2] < .09f && std::fabs(rows[0].wanted[2] - rows[0].damp[2] - true_eye) < 1e-3f);
+    standing(g, 10, dt, false);
+    count = tfp_camera_trace_read(rows, 64);
+    CHECK(count == 10 && (rows[9].what & TFP_CAMERA_TRACE_OFF_FOOT) && rows[9].damp[2] == 0); // let go and gone
+    g.s.state = 36; standing(g, 2, dt, true); tfp_camera_trace_edge(); // on foot again, the native view: never damped
+    count = tfp_camera_trace_read(rows, 64);
+    CHECK(count >= 1 && rows[count - 1].kind == 6 && !(rows[count - 1].what & (TFP_CAMERA_TRACE_DAMPED | TFP_CAMERA_TRACE_OFF_FOOT)) && rows[count - 1].damp[2] == 0);
+    g.end();
+    std::printf("trace: the damping's share of the wanted eye and the body off foot are in the rows\n");
+  }
+  // ---- 22. The trace says which way the view pointed. What is carried is kept against the body root, and goes
+  // round with the root's axes; that is right for a body that turns with its view and wrong for a root that turns
+  // under a still view (W; round 10: a backwards dive, the root's axes going round 156 degrees in nine frames, the rig
+  // eye and the view staying, and 0.6 m carried swept round on an arc, 0.8 m of path that was not the eye's). The
+  // filter cannot tell the two apart from what it is given, and the lines could not either. view: the head camera's
+  // forward; in a native frame the forward axis of the rig eye the camera hangs on. Nothing is done with it yet. ----
+  for (int native_view = 0; native_view < 2; ++native_view) {
+    const double dt = 33.3;
+    fresh(true, true, true);
+    Game g; g.pose(1, 2, 0, .2f); g.look(.3f, 0); g.hip(); g.begin();
+    TfpCameraTraceRow rows[64];
+    standing(g, 8, dt, native_view != 0);
+    g.look(.8f, 0); standing(g, 1, dt, native_view != 0);   // the view turns by 0.5 rad, the body does not
+    g.pose(1, 2, 0, .9f); standing(g, 1, dt, native_view != 0); // the body turns by 0.7 rad, the view does not
+    tfp_camera_trace_edge();
+    const uint32_t count = tfp_camera_trace_read(rows, 64);
+    CHECK(count == 6);
+    auto angle = [](const float *a, const float *b) { return std::acos(std::fmin(1.0f, a[0] * b[0] + a[1] * b[1] + a[2] * b[2])); };
+    const TfpCameraTraceRow &before = rows[3], &turned = rows[4], &body = rows[5];
+    CHECK(std::fabs(before.view[0] * before.view[0] + before.view[1] * before.view[1] + before.view[2] * before.view[2] - 1) < 1e-4f);
+    CHECK(std::fabs(before.view[0] + std::sin(.3f)) < 1e-3f && std::fabs(before.view[1] - std::cos(.3f)) < 1e-3f);
+    CHECK(std::fabs(angle(before.view, turned.view) - .5f) < 2e-3f && angle(before.axes + 3, turned.axes + 3) < 1e-3f);
+    CHECK(angle(turned.view, body.view) < 2e-3f && std::fabs(angle(turned.axes + 3, body.axes + 3) - .7f) < 2e-3f);
+    g.end();
+  }
   std::printf("camera smooth: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

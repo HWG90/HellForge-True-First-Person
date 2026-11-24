@@ -23,6 +23,10 @@ POP_M = 0.03
 SAME_FRAME_MS = 5.0   # a row this soon after a frame's first row can be that frame set again
 SAME_EYE_M = 0.002    # "the same eye": the rows of one frame differed by 0.0001 m in the game
 TRACE = re.compile(r"Trace: t=(-?[\d.]+) kind=(\d+) eye_world=\(([-\d. ]+)\) step=([-\d.]+)(?:.*?correction=([-\d.]+))?")
+# The same line with what 0.6.0-feel.23 and later builds add to it, each part only where the line has it.
+WHOLE = re.compile(r"^(\d+):(\d+):(\d+)\.(\d+) Trace: t=(-?[\d.]+) kind=(\d+) eye_world=\(([-\d. ]+)\) step=[-\d.]+(?: wanted=\(([-\d. ]+)\))?"
+                   r"(?:.*? correction=([-\d.]+))?(?:.*? root=\(([-\d. ]+)\))?(?:.*? looked=(\d))?(?:.*? taken=(\S+))?(?:.*? tick=([\d.]+))?")
+GAP_MS = 80.0   # two traced frames further apart than this are not consecutive (30 frames a second in the harness)
 
 
 def newest():
@@ -50,6 +54,55 @@ def windows(lines):
                 rows.append(row); first = row[0]
     if rows:
         yield edge, rows
+
+
+def frames(lines):
+    """Every traced frame of `lines` in order of time, as dicts, whatever falls between them: at (the line's stamp),
+    tick (ms), kind, eye, wanted, carried, root (None where the line has none), looked (None likewise), taken.
+    windows() ends a window at every State line, and frames on either side of one were never measured against each
+    other (the Stable soak of 2026-11-24: 0.120 m at a landing, 08:18:55.525, with "State: left the native view"
+    between its frames); nor were the frames a stretch of the log begins with before its first State line. Here a
+    State line only says that "t=" counts from a new edge. The time is "tick=" (the helper's clock, 0.6.0-feel.41 on);
+    without it the edge is placed by the line's own stamp, as tools/harness/replay.py does, to a millisecond or two.
+    Two rows of one frame are one, the later, as in windows()."""
+    groups, group = [], []
+    for line in lines:
+        if " State: " in line:
+            if group:
+                groups.append(group)
+            group = []
+            continue
+        m = WHOLE.match(line)
+        if not m:
+            continue
+        def numbers(text):
+            return [float(x) for x in text.split()] if text else None
+        row = {"at": line[:12], "stamp": ((int(m[1]) * 60 + int(m[2])) * 60 + int(m[3])) * 1000 + int(m[4]), "t": float(m[5]), "kind": int(m[6]),
+               "eye": numbers(m[7]), "wanted": numbers(m[8]), "carried": float(m[9] or 0), "root": numbers(m[10]),
+               "looked": int(m[11]) if m[11] else None, "taken": m[12] or "-", "clock": float(m[13]) if m[13] else None}
+        if group and row["t"] < group[-1]["t"] - 1:   # an edge without a State line: t starts again
+            groups.append(group)
+            group = []
+        group.append(row)
+    if group:
+        groups.append(group)
+    rows = []
+    for group in groups:
+        edge = min(row["stamp"] - row["t"] for row in group)   # a line is written at or after its frame
+        for row in group:
+            row["tick"] = row["clock"] if row["clock"] is not None else edge + row["t"]
+        rows.extend(group)
+    rows.sort(key=lambda row: row["tick"])
+    out, first = [], None
+    for row in rows:
+        again = bool(out) and 0 <= row["tick"] - first < SAME_FRAME_MS and (
+            row["kind"] != out[-1]["kind"] or sum((x - y) ** 2 for x, y in zip(row["eye"], out[-1]["eye"])) ** 0.5 < SAME_EYE_M)
+        if again:
+            out[-1] = row
+        else:
+            out.append(row)
+            first = row["tick"]
+    return out
 
 
 def main(argv):

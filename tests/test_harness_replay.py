@@ -17,6 +17,22 @@ def line(stamp_ms, t, kind, eye, wanted, carried, root=(0, 0, 0), axes=None, loo
                                                                                        taken, tail))
 
 
+class NewFields(unittest.TestCase):
+    """Builds after 0.6.0-feel.48: off_foot, damped, damp and view follow tick=. The readers take the line as before."""
+
+    def test_a_line_with_the_damping_fields_reads_the_same(self):
+        axes = (1, 0, 0, 0, 1, 0, 0, 0, 1)
+        plain = [line(33 * i, 33.0 * i, 4, (0.01 * i, 1, 2), (0.01 * i, 1, 2.1), 0.1, axes=axes, source="head", tail=" quiet=0 tick=%.3f" % (5000 + 33.0 * i))
+                 for i in range(4)]
+        more = [text + " off_foot=1 damped=0 damp=(0.00000 0.00000 0.10000) view=(-0.29552 0.95534 0.00000)" for text in plain]
+        self.assertEqual(replay.read(plain), replay.read(more))
+        self.assertEqual(len(replay.read(more)), 4)
+        self.assertEqual(replay.read(more)[2]["clock"], 5066.0)
+        import trace
+        self.assertEqual(trace.frames(plain), trace.frames(more))
+        self.assertEqual(trace.frames(more)[3]["tick"], 5099.0)
+
+
 class Frames(unittest.TestCase):
     def test_lines_with_and_without_the_axes(self):
         axes = (1, 0, 0, 0, 1, 0, 0, 0, 1)

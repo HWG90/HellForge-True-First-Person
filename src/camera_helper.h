@@ -239,8 +239,14 @@ enum { TFP_CAMERA_TRACE_LOOKED = 1,  /* jumps within the camera were looked for 
        TFP_CAMERA_TRACE_ROOT = 8,    /* the body root alone was re-seated: nothing taken up for it */
        TFP_CAMERA_TRACE_RESTART = 16, /* the continuity started again (a teleport, a pause) */
        TFP_CAMERA_TRACE_START = 32,  /* the continuity began from nothing in this frame (its first, or the first after the helper forgot it) */
-       TFP_CAMERA_TRACE_QUIET = 64   /* full aim: the continuity was told to take nothing up */ };
-typedef struct TfpCameraTraceRow { float ms; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; float root[3]; uint32_t what; float axes[9]; double tick; } TfpCameraTraceRow;
+       TFP_CAMERA_TRACE_QUIET = 64,  /* full aim: the continuity was told to take nothing up */
+       TFP_CAMERA_TRACE_OFF_FOOT = 128, /* a head-camera frame of a body that was not on foot: its eye is not damped and jumps in it are not looked for. A native frame never says it: the question is not asked there */
+       TFP_CAMERA_TRACE_DAMPED = 256 /* the eye damping ran in this frame (src/camera_damp.h); without it a `damp` that is not nothing is a lag being let go */ };
+/* damp: what the eye damping added to the true eye of this frame, in the world (wanted - damp is the eye the head
+ * camera would have had without it); zeros where it added nothing. view: which way the view pointed, a unit vector
+ * in the world (the head camera's forward; in a native frame the forward axis of the rig eye the camera hangs on);
+ * zeros where the frame did not have it. */
+typedef struct TfpCameraTraceRow { float ms; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; float root[3]; uint32_t what; float axes[9]; double tick; float damp[3], view[3]; } TfpCameraTraceRow;
 void tfp_camera_trace_edge(void);
 uint32_t tfp_camera_trace_read(TfpCameraTraceRow *rows, uint32_t capacity);
 #endif

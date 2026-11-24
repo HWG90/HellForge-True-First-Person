@@ -34,6 +34,7 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "arm_drive.h"
 #include "wire_options.h"
 #include "arm_weight.h"
+#include "trace_edges.h"
 #define TFP_VIEW_VERSION "0.6.0-feel.48"
 #else
 #include "wire_win.h"
@@ -379,14 +380,28 @@ static void entry_note(void) {
  *   lease        the controller's native request record (0: none) when the line is written, pose_armed likewise
  *   entry_ease   the eased entry's progress (1: not easing)
  *   source       head (the head camera), native (the game's first-person camera), repeat (its last argument repeated)
- *   root, axes, looked, taken, quiet, tick: what the continuity was given and what it did (below) */
+ *   root, axes, looked, taken, quiet, tick: what the continuity was given and what it did (below)
+ *   off_foot     1: a head-camera frame of a body that was not on foot (a native frame never says it)
+ *   damped       1: the eye damping ran in this frame (src/camera_damp.h)
+ *   damp         what the damping added to the true eye, in the world: wanted - damp is the head camera's own eye.
+ *                With damped=0 it is a lag being let go. (Round 10, 2026-11-24: the wanted eye is written after the
+ *                damping, so the lines could not say whether its 0.25 m limit came into force in a frame, nor give
+ *                the head's own path for a change to the damping to be tried on.)
+ *   view         which way the view pointed, a unit vector in the world (the head camera's forward; in a native frame
+ *                the forward axis of the rig eye the camera hangs on). With the root's axes it says whether the root
+ *                turned under a still view (a backwards dive) or with it (the mouse): what is carried goes round with
+ *                the root either way (W), and nothing the continuity is given tells the two apart.
+ * A window is also opened when the body's action changes (src/trace_edges.h); such a window has no State line before
+ * it, and "t=" starts again in it. */
 static void trace_note(void) {
-  static bool was_leased, was_holding;
-  const bool leased = wire.log.has_lease, holding = wire.controller.holding, edge = leased != was_leased || holding != was_holding;
-  was_leased = leased, was_holding = holding;
-  if (edge && lock_wanted) tfp_camera_continuity_event(); /* a lease or a hold begun or ended: the rig may be re-seated */
+  static TfpTraceEdges edges;
+  /* The body's action, where the motion runtime samples it: a change of it opens a window too (src/trace_edges.h). */
+  const TfpMotionRuntime *motion = tfp_wire_motion_runtime(&wire);
+  const int action = motion && motion->state.phase == TFP_MOTION_PHASE_ACTIVE && motion->state.action != TFP_ACT_NONE ? (int)motion->state.action : -1;
+  const unsigned edge = tfp_trace_edges_step(&edges, wire.log.has_lease, wire.controller.holding, action);
+  if ((edge & TFP_TRACE_EDGE_EVENT) && lock_wanted) tfp_camera_continuity_event(); /* a lease or a hold begun or ended: the rig may be re-seated */
   if (!lock_wanted || !trace_wanted) return;
-  if (edge) tfp_camera_trace_edge();
+  if (edge & TFP_TRACE_EDGE_WINDOW) tfp_camera_trace_edge();
   TfpCameraTraceRow rows[48];
   const uint32_t count = tfp_camera_trace_read(rows, 48);
   if (!count) return;
@@ -412,12 +427,15 @@ static void trace_note(void) {
              r->what & TFP_CAMERA_TRACE_ROOT ? "+root" : "", r->what & TFP_CAMERA_TRACE_RESTART ? "+restart" : "",
              r->what & TFP_CAMERA_TRACE_START ? "+start" : "");
     say("Trace: t=%.1f kind=%u eye_world=(%.5f %.5f %.5f) step=%.4f wanted=(%.5f %.5f %.5f) correction=%.4f lease=0x%llx pose_armed=%d entry_ease=%.2f source=%s"
-        " root=(%.5f %.5f %.5f) axes=(%.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f) looked=%d taken=%s quiet=%d tick=%.3f",
+        " root=(%.5f %.5f %.5f) axes=(%.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f) looked=%d taken=%s quiet=%d tick=%.3f"
+        " off_foot=%d damped=%d damp=(%.5f %.5f %.5f) view=(%.5f %.5f %.5f)",
         (double)r->ms, r->kind, (double)r->eye[0], (double)r->eye[1], (double)r->eye[2], (double)r->step, (double)r->wanted[0], (double)r->wanted[1],
         (double)r->wanted[2], (double)r->correction, lease, (int)(pose.armed != 0), (double)r->entry_ease, sources[r->source < 4 ? r->source : 0],
         (double)r->root[0], (double)r->root[1], (double)r->root[2], (double)r->axes[0], (double)r->axes[1], (double)r->axes[2], (double)r->axes[3],
         (double)r->axes[4], (double)r->axes[5], (double)r->axes[6], (double)r->axes[7], (double)r->axes[8],
-        (int)((r->what & TFP_CAMERA_TRACE_LOOKED) != 0), taken[0] ? taken + 1 : "-", (int)((r->what & TFP_CAMERA_TRACE_QUIET) != 0), r->tick);
+        (int)((r->what & TFP_CAMERA_TRACE_LOOKED) != 0), taken[0] ? taken + 1 : "-", (int)((r->what & TFP_CAMERA_TRACE_QUIET) != 0), r->tick,
+        (int)((r->what & TFP_CAMERA_TRACE_OFF_FOOT) != 0), (int)((r->what & TFP_CAMERA_TRACE_DAMPED) != 0), (double)r->damp[0], (double)r->damp[1],
+        (double)r->damp[2], (double)r->view[0], (double)r->view[1], (double)r->view[2]);
   }
 }
 #endif
