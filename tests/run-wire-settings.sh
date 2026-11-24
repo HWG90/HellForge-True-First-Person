@@ -27,6 +27,10 @@ TFP_MCM_FLAGS=()
 if [ -f "$TFP_MCM/schema.c" ]; then
   for tfp_unit in schema json num; do "$TFP_CC" -std=c11 -w -c -I "$TFP_MCM" "$TFP_MCM/$tfp_unit.c" -o "$TFP_WORK/mcm_$tfp_unit.o"; done
   TFP_MCM_FLAGS=(-DTFP_HAVE_MCM_SCHEMA -I "$TFP_MCM" "$TFP_WORK/mcm_schema.o" "$TFP_WORK/mcm_json.o" "$TFP_WORK/mcm_num.o")
+  # The menu sends every choice as "selector": MCM's window must still draw that name as its one-click < choice > row.
+  if [ -f "$TFP_MCM/ui.c" ] && ! grep -q 'Same(c->presentation,"selector")' "$TFP_MCM/ui.c"; then
+    echo "wire settings: FAILED DBF-MCM's ui.c no longer draws presentation \"selector\" as < choice >"; exit 1
+  fi
 else
   echo "wire settings: DBF-MCM's source is not at $TFP_MCM; the menu definition is not run through its schema parser"
 fi
