@@ -35,7 +35,7 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "wire_options.h"
 #include "arm_weight.h"
 #include "trace_edges.h"
-#define TFP_VIEW_VERSION "0.6.0-feel.50"
+#define TFP_VIEW_VERSION "0.6.0-feel.51"
 #else
 #include "wire_win.h"
 #include "wire_action.h"
@@ -77,14 +77,14 @@ static TfpWireOptions options;
  * State edge. A file trace_off.txt beside the DLL switches the lines off; neither does anything without the lock. */
 static bool smooth_wanted = true, trace_wanted = true;
 /* Test switch panel_on.txt: the settings menu is the mod's own panel even when DBF-MCM is loaded (src/wire_panel.h).
- * mcm_on.txt, the switch of builds up to 0.6.0-feel.50, is still read and changes nothing: MCM is the default now. */
+ * mcm_on.txt, the switch of builds up to 0.6.0-feel.51, is still read and changes nothing: MCM is the default now. */
 static bool panel_wanted;
 /* The arm drive (src/arm_drive.h). arms_live: it is on (the Animated arms option, or its files). While it is on, the
  * game's joint values are put back after every primary draw (round 13, 2026-11-24: the game seats the first-person
  * eye by the rig's weapon socket, and a written socket left in the rig moved the camera; src/arm_drive.c). Test
  * switches, files beside the DLL read once at the start: arms_live_keep.txt leaves the written values in the rig until
  * the next frame, as every build before round 13 did, for the comparison in the game; arms_live_restore.txt, the
- * switch that proved put-back in 0.6.0-feel.50, is still read and changes nothing; arm_bend.txt makes the drive bend one
+ * switch that proved put-back in 0.6.0-feel.51, is still read and changes nothing; arm_bend.txt makes the drive bend one
  * shoulder instead of following the body; rest_trace.txt makes the "Rest:" line (the resting weapon pose, once a
  * second) come every tick. */
 static bool arms_live, arms_keep, arms_restore, arms_bend, arms_rest_trace;
@@ -433,14 +433,14 @@ static void trace_note(void) {
   static const char *const sources[] = {"-", "head", "native", "repeat"};
   for (uint32_t i = 0; i < count; i++) {
     const TfpCameraTraceRow *r = &rows[i];
-    /* root: the body root the eye was measured against, axes: its three axis rows (the soak of 2026-11-22 on feel.50:
+    /* root: the body root the eye was measured against, axes: its three axis rows (the soak of 2026-11-22 on feel.51:
      * a root whose axes turned 0.26 rad in one frame carried the eye 0.18 m, and the lines could not say so); looked:
      * jumps within the camera were looked for; taken:
      * what the continuity did with the frame (jump, edge: taken up; root: the root alone re-seated, nothing taken
      * up; restart; start: it began from nothing in this frame). Without the root a jump of the root cannot be told
      * from a jump of the eye in these lines. quiet: full aim, nothing is taken up. tick: the frame's time on the
      * helper's clock (ms). With these the line holds all the continuity was given, and tools/harness/replay.py can
-     * run it again frame for frame (the soaks of 2026-11-22 on feel.50: without the time across edges, full aim and
+     * run it again frame for frame (the soaks of 2026-11-22 on feel.51: without the time across edges, full aim and
      * the starts, and with places to 0.1 mm, 29 of 3447 frames could not be replayed: two decisions that fell
      * within the rounding). */
     char taken[48] = "";
