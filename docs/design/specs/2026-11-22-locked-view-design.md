@@ -2068,3 +2068,84 @@ scenes at 8, 16.7, 33.3 and 50 ms a frame, 2, 4 and 6.5 m/s believed and a quart
 ahead); the other five `run-camera-*.sh` pass (3,403, 229, 75, 2,377 and 301 checks); the harness's python tests 33,
 both probe tests with their recorded bounds as they were; all 47 `tests/run-*.sh` pass; `build.sh --feel` builds.
 Nothing here has been run in the game.
+
+### The check of round 7: a frame taken up while the let-down runs
+
+An independent check passed the round and found one defect, reached by no log: in a frame TAKEN UP while a let-down
+is running, what the let-down went was added to the new correction, but its room had been measured against the
+wanted eye before the jump. Where the jump puts the wanted eye behind the presented one, the eye went one frame more
+away from it and the speed was dropped whole the frame after.
+
+**What is in.** In a frame taken up (a jump, a change of camera) the room is measured anew: against what is carried
+after the jump, and against the curve begun in that frame, its speed and its whole length. Where the wanted eye is
+then behind the presented one the let-down ends in that frame; where it is still ahead it goes on. A frame that is
+not taken up is computed as it was, to the bit. (Tried: the let-down ended in every frame taken up. A change of
+camera to the side then stops an eye that is still closing: 8 m/s believed, a quarter for one frame, the new eye
+0.4 m aside, the step change 0.013, 0.024, 0.032 and 0.091 m becomes 0.040, 0.066, 0.095 and 0.064 m; and nine rows
+of soak 20 at 09:06:29 change, the frame after the mended one 0.025 to 0.056 m.)
+
+**The three scenes of the check** (made up; step change / m past the wanted eye / ms to settle; "main" is b8a591b,
+"before" the round as it was checked):
+
+| Scene | ms a frame | main | before | now |
+|---|---|---|---|---|
+| 8 m/s believed, a quarter one frame, re-seated 1.2 m back, stands | 8 | 0.045 / 0.523 / 328 | 0.056 / 0.612 / 256 | 0.040 / 0.569 / 328 |
+| | 16.7 | 0.086 / 0.321 / 217 | 0.100 / 0.491 / 317 | 0.066 / 0.410 / 267 |
+| | 33.3 | 0.139 / 0.072 / 166 | 0.154 / 0.348 / 333 | 0.069 / 0.228 / 266 |
+| | 50 | 0.203 / 0.036 / 150 | 0.197 / 0.367 / 350 | 0.081 / 0.242 / 300 |
+| 5 m/s believed, half one frame, then back at 5 m/s | 8 | 0.020 / 0.731 / 472 | 0.020 / 0.731 / 472 | 0.020 / 0.731 / 472 |
+| | 16.7 | 0.033 / 0.557 / 501 | 0.021 / 0.605 / 501 | 0.021 / 0.603 / 501 |
+| | 33.3 | 0.080 / 0.677 / 533 | 0.082 / 0.717 / 533 | 0.082 / 0.717 / 533 |
+| | 50 | 0.165 / 0.746 / 550 | 0.170 / 0.780 / 550 | 0.170 / 0.780 / 550 |
+| 7 m/s believed, half one frame, then stands (a dive's landing) | 8 | 0.025 / 0 / 384 | 0.025 / 0 / 384 | 0.025 / 0 / 384 |
+| | 16.7 | 0.046 / 0 / 384 | 0.048 / 0 / 384 | 0.048 / 0 / 384 |
+| | 33.3 | 0.069 / 0 / 366 | 0.076 / 0 / 366 | 0.076 / 0 / 366 |
+| | 50 | 0.128 / 0 / 350 | 0.121 / 0 / 350 | 0.121 / 0 / 350 |
+
+The first scene at 33.3 ms, the presented steps: main 0.048, -0.091, 0.004, -0.023 m; before 0.048, 0.069, 0.120,
+-0.034 m; now 0.048, 0.069, 0.000, -0.032 m. The frame of the re-seat is as on main (the presented eye goes 0.000 m
+where main's goes 0.004 m), and the step change is under main's at every frame time.
+
+**What is not down to main, and cannot be inside the round.** In all three scenes what is left over main is the
+let-down itself where the wanted eye is still ahead, its first frame above all: the frame that slows down, which is
+the mend of 09:06:29.235 and 09:11:59.029.
+
+- *Re-seated 1.2 m back.* In the frame that slows down main throws the presented eye 0.091 m back; the let-down
+  takes it 0.069 m on, towards the wanted eye as it then stands: 0.160 m nearer. The re-seat a frame later puts the
+  wanted eye behind, and the presented eye is that 0.160 m further past it (0.046, 0.090, 0.160 and 0.210 m at the
+  four frame times: 0.046, 0.090, 0.156 and 0.206 m measured), and the curve takes 50 to 150 ms longer over the
+  longer way. To have it back in the frame of the re-seat is 0.16 m of step change where main's largest is 0.139 m;
+  not to go it is the round undone. The frame that slows down does not know of a re-seat to come.
+- *Then back at 5 m/s.* The same first frame, 0.043 m at 33.3 ms (0.046, 0.040, 0.034 m further past at 16.7, 33.3
+  and 50 ms). In the frames of the run the wanted eye is still ahead of the presented one, so the let-down, measured
+  anew, goes on: 0.022 m of the 0.046 m at 16.7 ms and 0.003 m at 33.3 ms (0.023 and 0.003 m before; ended in every
+  frame taken up it is 0.582 and 0.714 m past, over main's 0.557 and 0.677 m all the same). The 0.56 to 0.75 m itself
+  is the kept speed gone on through the run of jumps, on main as here. The step change is main's within 0.005 m, later in
+  the catch-up (0.080 to 0.082 m, 0.165 to 0.170 m; 0.033 to 0.021 m at 16.7 ms).
+- *A dive's landing.* No frame is taken up in it: the frame after the one that slows down is a stop, followed, and
+  the wanted eye's second drop (0.117 m a frame) shows in the presented step beside the let-down's 0.040 m: 0.076 m
+  at that frame where main's largest, 0.069 m, comes a frame later from its curve; 0.002 m more at 16.7 ms, 0.007 m
+  less at 50 ms. Tried: a speed dropped in a frame followed while the let-down runs, a stop too, joins it. The dive
+  goes to 0.011, 0.041 and 0.081 m, and no row of the eleven logs moves; but "8 m/s believed, a quarter one frame,
+  then stands" goes from 0.040 to 0.052 m at 33.3 ms and from 0.090 to 0.101 m at 50 ms (main: 0.139 and 0.161 m),
+  because there the curve's own gathering of speed already makes up for the second drop. One made-up scene against
+  another; not in.
+
+**The cases the round mended** are as they were, to the printed digit: 09:06:29.235 0.034 m and 09:11:59.029
+0.054 m, soak 15 05:06:55.307 0.099 m, soaks 8 and 9 00:25:52.009 0.081 m, and all 48 cells of the made-up table (2,
+4 and 6.5 m/s believed, a quarter or a half after, behind and ahead, at four frame times). Of the check's own probe
+scenes: "believed 5 / 8 m/s, slows to a quarter" and "0.3 m forwards the frame before, then stop" are the same to the
+last digit; of its 2,296 lines 26 move, all with a frame taken up during a let-down: 24 of its last probe (the re-seats, the
+changes of camera, the reversal), and a change of camera at 4 m/s whose first step is nothing (step change 0.0119 to
+0.0120 m and 0.0448 to 0.0449 m, 0.004 and 0.001 m more carried, at 16.7 and 33.3 ms; main 0.054 and 0.081 m): the
+room there is counted against the new curve's whole length, not the rest of the old one's. A change of camera 0.4 m
+aside after 5 m/s at 16.7 ms settles in 401 ms as on main (384 ms before), the step 0.0191 to 0.0193 m.
+
+**Replayed.** On the eleven logs no row's presented eye differs from the round's as it was checked (0.01 mm, every
+row, exact or not), and `replay.py`'s whole output is the same to the character: the table above stands, "round7"
+being both before and now.
+
+Tests on the branch: `tests/run-camera-continuity.sh` 3,066 checks (3,018 unchanged and 48 new, 21 of which fail on
+the round as it was checked); the other five `run-camera-*.sh` 3,403, 229, 75, 2,377 and 301; the harness's python
+tests 33, both probe tests with their recorded bounds as they were; all 47 `tests/run-*.sh` pass; `build.sh --feel`
+builds. Nothing here has been run in the game.
