@@ -505,6 +505,9 @@ int main(void) {
   CHECK(!calls[0] && live_refs == 0); /* nothing reached the engine */
   char second[200];
   CHECK(tfp_wire_engine_second(&wire, second, sizeof second) && !strcmp(second, "head=waiting sleeves=waiting grip=waiting corr=0 max=0.000m/0.0deg"));
+  TfpHeadTick head_tick;
+  memset(&head_tick, 0xff, sizeof head_tick);
+  CHECK(!tfp_wire_engine_head_tick(&wire, &head_tick) && !head_tick.bound && !head_tick.rows && !head_tick.on_again); /* not bound: nothing for a "Head:" line */
   const TfpEngineIface *head = tfp_wire_engine_head_iface(&wire);
   const TfpArmEngine *sleeves = tfp_wire_engine_arm_iface(&wire, TFP_WE_SLEEVES), *grip = tfp_wire_engine_arm_iface(&wire, TFP_WE_GRIP);
   TfpEngineIface head_before = *head;
@@ -851,6 +854,10 @@ int main(void) {
   tfp_wire_engine_frame(&wire);
   CHECK(tfp_wire_engine_second(&wire, second, sizeof second) && !strcmp(second, "head=idle:0 sleeves=idle:0 grip=idle corr=0 max=0.005m/90.0deg")); /* the grip write above */
   CHECK(tfp_wire_engine_second(&wire, second, sizeof second) && !strcmp(second, "head=idle:0 sleeves=idle:0 grip=idle corr=0 max=0.000m/0.0deg"));
+  /* Bound and idle (the controller is off): the tick for the "Head:" line says so, with nothing owned, counted or read for it. */
+  CHECK(h->head_update(h, &v, &v2) && v.kind == TFP_RT_TRUE);
+  CHECK(tfp_wire_engine_head_tick(&wire, &head_tick) && head_tick.bound && !head_tick.active && !strcmp(head_tick.phase, "idle") && head_tick.kind == 0);
+  CHECK(!head_tick.rows && !head_tick.head && !head_tick.camera_rows && !head_tick.on_again && !head_tick.left_on && !head_tick.put_back && !head_tick.view);
   CHECK(!strstr(second, "waiting") && !strstr(calls, "set_") && !strstr(calls, "link_unit") && ktop == 0);
 
   printf("Engine binder: %d checks: the bridge's marshalling over a stand-in Lua state (%zu functions compared with build 25480438's), the handle table across "

@@ -19,6 +19,7 @@
 #include "wire.h"
 #include "engine_iface.h"
 #include "arm_engine_iface.h"
+#include "head_log.h"
 #include <stdarg.h>
 
 typedef int TfpEngRef; /* src/engine.h's EngRef: 0 is none */
@@ -102,6 +103,11 @@ void tfp_wire_engine_set_held_body(uint32_t (*body)(void));
 void tfp_wire_engine_set_lock_view(bool (*lock)(void));
 /* Rows head visibility hides now (its phase is "active"); 0: it hides nothing; -1: the module is not bound. Reads only. */
 int tfp_wire_engine_head_hidden(const TfpWire *w);
+/* For the "Head:" line (src/head_log.h): what head visibility owns after this tick's update and what that update saw
+ * of the camera pass (TfpHeadWatch), with the camera kind of the snapshot the module took in it (0: it took none).
+ * `view` is left false: the caller knows whether the view is on. false, and all of it zero: the module is not bound.
+ * Reads the module's own numbers only; no engine call, no memory read. */
+bool tfp_wire_engine_head_tick(const TfpWire *w, TfpHeadTick *out);
 
 /* The 27 Vector3 / Quaternion / Matrix4x4 value functions, computed here on 32-bit floats with the
  * engine's conventions (Quaternion.multiply(second, first); Matrix4x4.multiply(a, b) is a, then b).
