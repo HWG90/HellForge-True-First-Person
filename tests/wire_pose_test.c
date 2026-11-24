@@ -935,6 +935,29 @@ static int real(void) {
       tfp_steady_line(&held, line, sizeof line);
       CHECK(strstr(line, "Steady: 68 frames of the rig, the game's depth worked out in 0: ") && strstr(line, "passed in 68 (the evaluator's code is not the pinned one 68)"));
     }
+    if (pinned) {
+      /* the root comes every other frame. No two frames alone are running, and without a count for the lease node 5
+       * would go on alone in half of all frames; the third of the lease stops it */
+      pose_world_gate(1, 0);
+      root_frame(16);
+      const double gated_added = (double)forwarded[1] - (double)NATIVE[1];
+      CHECK(gated_added > rest + .01 && near(root_forwarded[1], -gated_added, 2e-6));
+      unsigned alone = 0, followed = 0;
+      for (int i = 0; i < 120; i++) {
+        if (i % 2 == 0) depth_frame(16); else root_frame(16);
+        const double now_added = (double)forwarded[1] - (double)NATIVE[1];
+        if (now_added == 0) continue;                                                    /* stopped: node 5 is left where the game put it */
+        CHECK(near(now_added, gated_added, 2e-6));
+        if (i % 2 == 0) ++alone; else { ++followed; CHECK(near(root_forwarded[1], -gated_added, 2e-6)); }
+      }
+      CHECK(alone == TFP_STEADY_ALONE_LEASE && alone == 3 && followed == 2);             /* 60 of 120 without the count */
+      CHECK(root_forwarded[1] == 0);                                                     /* a root that comes after the stop takes nothing */
+      CHECK(tfp_pose_steady_take(&held) == 1 && held.frames == 121 && held.shifted == 6 && held.roots == 3 && held.stops == 1 && held.stop_lost == 3 && held.stop_running == 1);
+      CHECK(held.passed[TFP_STEADY_NO_ROOT] == 115 && tfp_steady_stop_line(&held, line, sizeof line));
+      CHECK(strstr(line, ": the rig was moved in 3 frames of this lease and its root did not follow (no two of them running), so the gun moved against the eye in them; "));
+      for (int i = 0; i < 6; i++) root_frame(16);
+      CHECK((double)forwarded[1] - (double)NATIVE[1] == 0 && tfp_pose_steady_take(&held) == 1 && held.stops == 0 && held.shifted == 0 && !tfp_steady_stop_line(&held, line, sizeof line));
+    }
     pose_world_gate(0, 0);
     CHECK(tfp_pose_set_depth_steady(0) == 1);
     CHECK(H->finish(H->user, handle, &has_stats, &stats, &why) == TFP_OPS_TRUE);
