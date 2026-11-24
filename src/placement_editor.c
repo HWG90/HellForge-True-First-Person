@@ -357,6 +357,22 @@ bool tfp_editor_preview_rotation(const TfpEditor *e, double out[3]) {
   for (int i = 0; i < 3; i++) out[i] = e->draft.v[3 + i];
   return true;
 }
+bool tfp_editor_select_action(TfpEditor *e, const char *id) {   /* not in retail (round 20) */
+  if (!e || !id || e->phase != QUEUED) return false;
+  for (int i = 0; i < e->nactions && i < TFP_ED_ACTIONS; i++)
+    if (!strcmp(e->action_id[i], id)) { e->action_index = i + 1; return true; }
+  return false;
+}
+bool tfp_editor_preview_place(const TfpEditor *e, double out[6]) {
+  if (!e || e->phase != ACTIVE || !e->has_draft) return false;
+  for (int i = 0; i < 6; i++) out[i] = e->draft.v[i];
+  return true;
+}
+bool tfp_editor_original_place(const TfpEditor *e, TfpEdPlace *out) {
+  if (!e || !e->has_original) return false;
+  *out = copy(&e->original);
+  return true;
+}
 bool tfp_editor_holds_draft(const TfpEditor *e) {
   if (!e->has_draft || !e->has_original || e->committed) return false;
   TfpEdPlace o = copy(&e->original);

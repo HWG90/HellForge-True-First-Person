@@ -266,6 +266,7 @@ int main(void) {
       bool open = false;
       TfpActionPlacement preview;
       CHECK(motion && motion->host->editor_is_active && motion->host->editor_preview_rotation);       /* feel.1-feel.50: both NULL */
+      CHECK(motion->host->editor_preview_ads);                                                         /* round 20: the ADS draft, live in full aim */
       CHECK(motion->host->editor_is_active(motion->host->user, &open, NULL) && open);                  /* queued counts as active, as retail */
       CHECK(motion->host->editor_preview_rotation(motion->host->user, &preview) == TFP_MOTION_GOT_NIL); /* no draft before it is active */
     }
