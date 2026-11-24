@@ -18,13 +18,13 @@ def line(stamp_ms, t, kind, eye, wanted, carried, root=(0, 0, 0), axes=None, loo
 
 
 class NewFields(unittest.TestCase):
-    """0.6.0-feel.49 on: off_foot, damped and damp follow tick=. The readers take the line as before."""
+    """0.6.0-feel.49 on: off_foot, damped, damp and view follow tick=. The readers take the line as before."""
 
     def test_a_line_with_the_damping_fields_reads_the_same(self):
         axes = (1, 0, 0, 0, 1, 0, 0, 0, 1)
         plain = [line(33 * i, 33.0 * i, 4, (0.01 * i, 1, 2), (0.01 * i, 1, 2.1), 0.1, axes=axes, source="head", tail=" quiet=0 tick=%.3f" % (5000 + 33.0 * i))
                  for i in range(4)]
-        more = [text + " off_foot=1 damped=0 damp=(0.00000 0.00000 0.10000)" for text in plain]
+        more = [text + " off_foot=1 damped=0 damp=(0.00000 0.00000 0.10000) view=(-0.29552 0.95534 0.00000)" for text in plain]
         self.assertEqual(replay.read(plain), replay.read(more))
         self.assertEqual(len(replay.read(more)), 4)
         self.assertEqual(replay.read(more)[2]["clock"], 5066.0)

@@ -239,12 +239,13 @@ static struct { bool known; uint32_t mask, kind, weapon, key; double until; } sm
 #define TRACE_RING 128u
 #define TRACE_BEFORE 6u   /* frames before the edge that are written with it */
 #define TRACE_MS 500.0
-typedef struct TraceFrame { double tick; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease, root[3]; uint32_t what; float axes[9], damp[3]; } TraceFrame;
+typedef struct TraceFrame { double tick; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease, root[3]; uint32_t what; float axes[9], damp[3], view[3]; } TraceFrame;
 /* What the eye damping did in the frame being presented, for its trace row (lock_damp_eye writes, smooth_present
  * reads and clears): what it added to the eye in the world, whether it ran, and whether the body was off foot. That
  * last is asked only in a head-camera frame (on_foot()): Policy.lock_off_foot in a native frame is the answer of the
- * last head-camera frame, and is not written to a native row. Policy lock. */
-static struct { float added[3]; bool ran, off_foot; } trace_damp;
+ * last head-camera frame, and is not written to a native row. And which way the view pointed (written by whoever
+ * calls smooth_present; see TfpCameraTraceRow). Policy lock. */
+static struct { float added[3], view[3]; bool ran, off_foot; } trace_damp;
 static struct { TraceFrame frames[TRACE_RING]; uint64_t head, sent; double edge, until; float last[3]; double last_tick; bool last_known, open; } trace;
 /* The native eye is not remembered for its weapon while it is being moved about (set in the native view). */
 static float eye_watch[3]; static bool eye_watch_known; static double eye_unsettled_until;
@@ -1045,7 +1046,7 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
     row->step = trace.last_known && tick >= trace.last_tick && tick-trace.last_tick <= p->c.max_gap_ms ? distance(shown, trace.last) : 0;
     row->correction = correction; memcpy(row->root, root, 12); memcpy(row->axes, root_basis, 36);
     row->what = what | (trace_damp.off_foot ? TFP_CAMERA_TRACE_OFF_FOOT : 0u) | (trace_damp.ran ? TFP_CAMERA_TRACE_DAMPED : 0u);
-    memcpy(row->damp, trace_damp.added, 12);
+    memcpy(row->damp, trace_damp.added, 12); memcpy(row->view, trace_damp.view, 12);
     row->entry_ease = p->entry.ease.active && p->entry.ease.duration > 0 ? (float)fmin(1.0, fmax(0.0, (tick-p->entry.ease.started)/p->entry.ease.duration)) : 1;
     if (trace.head-trace.sent > TRACE_RING) trace.sent = trace.head-TRACE_RING;
   }
@@ -1116,6 +1117,7 @@ static bool smooth_native(Policy *p, const NativeSample *sample, const float *gi
   for (unsigned axis = 0; axis < 3; ++axis) memcpy(root_basis + axis*3, root + axis*4, 12);
   for (unsigned component = 0; component < 3; ++component) { wanted[component] = position[component];
     for (unsigned axis = 0; axis < 3; ++axis) wanted[component] += local[axis]*parent_basis[axis*3+component]; }
+  if (finite3(parent_basis + 3)) memcpy(trace_damp.view, parent_basis + 3, 12); /* the rig eye's forward axis: for the trace only */
   if (!finite3(wanted) || !smooth_present(p, kind, source, root + 12, root_basis, wanted, tick, shown)) return false;
   float moved[3] = {0};
   for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
@@ -1149,6 +1151,7 @@ static bool orphan_head(Policy *p, const float *given, uint32_t kind, double tic
     behind += (wanted[i]-game)*horizontal[i]; /* how far behind the head camera's eye the game put its own */
   }
   if (!finite3(wanted) || !isfinite(behind)) return false;
+  memcpy(trace_damp.view, forward, 12);
   smooth_present(p, kind, SMOOTH_HEAD, root, root_basis, wanted, tick, shown);
   for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
     moved[axis] += (shown[component]-position[component])*parent_basis[axis*3+component];
@@ -1462,6 +1465,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
             else { memcpy(policy.last_relative, relative, 12); policy.last_relative_tick = tick; policy.relative_valid = true;
               if (policy.lock_now) { float shown[3] = {0}; const float smoothed[3] = {head[0]+lag[0], head[1]+lag[1], head[2]+lag[2]};
                 eye_damped = lock_damp_eye(&policy, kind, root, root_basis, smoothed, tick, adjusted);
+                if (finite3(forward)) memcpy(trace_damp.view, forward, 12);
                 if (smooth_present(&policy, kind, SMOOTH_HEAD, root, root_basis, adjusted, tick, shown)) memcpy(adjusted, shown, 12); }
               memcpy(policy.last_head_world, adjusted, 12);
               if (policy.fallback_safe) policy.last_view_tick = tick; else ++policy.guard_grace_frames;
@@ -1787,7 +1791,7 @@ uint32_t tfp_camera_trace_read(TfpCameraTraceRow *rows, uint32_t capacity) {
     memcpy(row->eye, frame->eye, 12); memcpy(row->wanted, frame->wanted, 12);
     row->step = frame->step; row->correction = frame->correction; row->entry_ease = frame->entry_ease;
     memcpy(row->root, frame->root, 12); memcpy(row->axes, frame->axes, 36); row->what = frame->what; row->tick = frame->tick;
-    memcpy(row->damp, frame->damp, 12);
+    memcpy(row->damp, frame->damp, 12); memcpy(row->view, frame->view, 12);
   }
   policy_release();
   return count;

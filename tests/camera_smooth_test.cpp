@@ -949,6 +949,31 @@ int main() {
     g.end();
     std::printf("trace: the damping's share of the wanted eye and the body off foot are in the rows\n");
   }
+  // ---- 22. The trace says which way the view pointed. What is carried is kept against the body root, and goes
+  // round with the root's axes; that is right for a body that turns with its view and wrong for a root that turns
+  // under a still view (W; round 10: a backwards dive, the root's axes going round 156 degrees in nine frames, the rig
+  // eye and the view staying, and 0.6 m carried swept round on an arc, 0.8 m of path that was not the eye's). The
+  // filter cannot tell the two apart from what it is given, and the lines could not either. view: the head camera's
+  // forward; in a native frame the forward axis of the rig eye the camera hangs on. Nothing is done with it yet. ----
+  for (int native_view = 0; native_view < 2; ++native_view) {
+    const double dt = 33.3;
+    fresh(true, true, true);
+    Game g; g.pose(1, 2, 0, .2f); g.look(.3f, 0); g.hip(); g.begin();
+    TfpCameraTraceRow rows[64];
+    standing(g, 8, dt, native_view != 0);
+    g.look(.8f, 0); standing(g, 1, dt, native_view != 0);   // the view turns by 0.5 rad, the body does not
+    g.pose(1, 2, 0, .9f); standing(g, 1, dt, native_view != 0); // the body turns by 0.7 rad, the view does not
+    tfp_camera_trace_edge();
+    const uint32_t count = tfp_camera_trace_read(rows, 64);
+    CHECK(count == 6);
+    auto angle = [](const float *a, const float *b) { return std::acos(std::fmin(1.0f, a[0] * b[0] + a[1] * b[1] + a[2] * b[2])); };
+    const TfpCameraTraceRow &before = rows[3], &turned = rows[4], &body = rows[5];
+    CHECK(std::fabs(before.view[0] * before.view[0] + before.view[1] * before.view[1] + before.view[2] * before.view[2] - 1) < 1e-4f);
+    CHECK(std::fabs(before.view[0] + std::sin(.3f)) < 1e-3f && std::fabs(before.view[1] - std::cos(.3f)) < 1e-3f);
+    CHECK(std::fabs(angle(before.view, turned.view) - .5f) < 2e-3f && angle(before.axes + 3, turned.axes + 3) < 1e-3f);
+    CHECK(angle(turned.view, body.view) < 2e-3f && std::fabs(angle(turned.axes + 3, body.axes + 3) - .7f) < 2e-3f);
+    g.end();
+  }
   std::printf("camera smooth: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

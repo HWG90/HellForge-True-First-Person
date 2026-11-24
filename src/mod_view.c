@@ -387,6 +387,10 @@ static void entry_note(void) {
  *                With damped=0 it is a lag being let go. (Round 10, 2026-11-24: the wanted eye is written after the
  *                damping, so the lines could not say whether its 0.25 m limit came into force in a frame, nor give
  *                the head's own path for a change to the damping to be tried on.)
+ *   view         which way the view pointed, a unit vector in the world (the head camera's forward; in a native frame
+ *                the forward axis of the rig eye the camera hangs on). With the root's axes it says whether the root
+ *                turned under a still view (a backwards dive) or with it (the mouse): what is carried goes round with
+ *                the root either way (W), and nothing the continuity is given tells the two apart.
  * A window is also opened when the body's action changes (src/trace_edges.h); such a window has no State line before
  * it, and "t=" starts again in it. */
 static void trace_note(void) {
@@ -424,14 +428,14 @@ static void trace_note(void) {
              r->what & TFP_CAMERA_TRACE_START ? "+start" : "");
     say("Trace: t=%.1f kind=%u eye_world=(%.5f %.5f %.5f) step=%.4f wanted=(%.5f %.5f %.5f) correction=%.4f lease=0x%llx pose_armed=%d entry_ease=%.2f source=%s"
         " root=(%.5f %.5f %.5f) axes=(%.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f) looked=%d taken=%s quiet=%d tick=%.3f"
-        " off_foot=%d damped=%d damp=(%.5f %.5f %.5f)",
+        " off_foot=%d damped=%d damp=(%.5f %.5f %.5f) view=(%.5f %.5f %.5f)",
         (double)r->ms, r->kind, (double)r->eye[0], (double)r->eye[1], (double)r->eye[2], (double)r->step, (double)r->wanted[0], (double)r->wanted[1],
         (double)r->wanted[2], (double)r->correction, lease, (int)(pose.armed != 0), (double)r->entry_ease, sources[r->source < 4 ? r->source : 0],
         (double)r->root[0], (double)r->root[1], (double)r->root[2], (double)r->axes[0], (double)r->axes[1], (double)r->axes[2], (double)r->axes[3],
         (double)r->axes[4], (double)r->axes[5], (double)r->axes[6], (double)r->axes[7], (double)r->axes[8],
         (int)((r->what & TFP_CAMERA_TRACE_LOOKED) != 0), taken[0] ? taken + 1 : "-", (int)((r->what & TFP_CAMERA_TRACE_QUIET) != 0), r->tick,
         (int)((r->what & TFP_CAMERA_TRACE_OFF_FOOT) != 0), (int)((r->what & TFP_CAMERA_TRACE_DAMPED) != 0), (double)r->damp[0], (double)r->damp[1],
-        (double)r->damp[2]);
+        (double)r->damp[2], (double)r->view[0], (double)r->view[1], (double)r->view[2]);
   }
 }
 #endif
