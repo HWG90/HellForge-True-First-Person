@@ -77,11 +77,15 @@ static TfpWireOptions options;
  * State edge. A file trace_off.txt beside the DLL switches the lines off; neither does anything without the lock. */
 static bool smooth_wanted = true, trace_wanted = true;
 static bool mcm_wanted; /* test switch mcm_on.txt: the settings menu in DBF-MCM instead of the mod's own panel */
-/* The arm drive (src/arm_drive.h). arms_live: it is on (the Animated arms option, or its files). Test switches, files
- * beside the DLL read once at the start: arms_live_restore.txt makes it put the game's joint values back after every
- * draw instead of leaving them; arm_bend.txt makes it bend one shoulder instead of following the body; rest_trace.txt
- * makes the "Rest:" line (the resting weapon pose, once a second) come every tick. */
-static bool arms_live, arms_restore, arms_bend, arms_rest_trace;
+/* The arm drive (src/arm_drive.h). arms_live: it is on (the Animated arms option, or its files). While it is on, the
+ * game's joint values are put back after every primary draw (round 13, 2026-11-24: the game seats the first-person
+ * eye by the rig's weapon socket, and a written socket left in the rig moved the camera; src/arm_drive.c). Test
+ * switches, files beside the DLL read once at the start: arms_live_keep.txt leaves the written values in the rig until
+ * the next frame, as every build before round 13 did, for the comparison in the game; arms_live_restore.txt, the
+ * switch that proved put-back in 0.6.0-feel.49, is still read and changes nothing; arm_bend.txt makes the drive bend one
+ * shoulder instead of following the body; rest_trace.txt makes the "Rest:" line (the resting weapon pose, once a
+ * second) come every tick. */
+static bool arms_live, arms_keep, arms_restore, arms_bend, arms_rest_trace;
 /* Test switch depth_off.txt, read once at the start: the pose helper's zoom-depth term adds nothing on any frame, so
  * neither the rig nor its root is shifted for the optic. It is there to find out in the game whether that shift is
  * part of the unzoom gate's flipping (docs/design/specs/2026-11-23-gate-flip.md). */
@@ -391,8 +395,16 @@ static void entry_note(void) {
  *                the forward axis of the rig eye the camera hangs on). With the root's axes it says whether the root
  *                turned under a still view (a backwards dive) or with it (the mouse): what is carried goes round with
  *                the root either way (W), and nothing the continuity is given tells the two apart.
+ *   sock         the weapon socket as the arm drive drew it in this frame less the game's own, along the view (m):
+ *                under put-back the gun's depth error on screen; with arms=2, how far the written socket threw the
+ *                eye the other way (the eye the game would have had is eye + sock * view). 0 with arms=0.
+ *   arms         what the arm drive did at this frame's draw: 0 not driven (off, another camera, refused) or not
+ *                known for the frame, 1 driven and the game's joint values put back after the draw, 2 driven and the
+ *                written values left (arms_live_keep.txt), 3 driven in a hold or with the gun away (put back)
+ *   eye_edge     1: the presented eye's step changed by 0.15 m or more in this frame; the camera helper opened this
+ *                window itself, or kept it open (src/trace_edges.h)
  * A window is also opened when the body's action changes (src/trace_edges.h); such a window has no State line before
- * it, and "t=" starts again in it. */
+ * it, and "t=" starts again in it. So does one the eye opens itself (eye_edge), unless a window was open. */
 static void trace_note(void) {
   static TfpTraceEdges edges;
   /* The body's action, where the motion runtime samples it: a change of it opens a window too (src/trace_edges.h). */
@@ -401,6 +413,13 @@ static void trace_note(void) {
   const unsigned edge = tfp_trace_edges_step(&edges, wire.log.has_lease, wire.controller.holding, action);
   if ((edge & TFP_TRACE_EDGE_EVENT) && lock_wanted) tfp_camera_continuity_event(); /* a lease or a hold begun or ended: the rig may be re-seated */
   if (!lock_wanted || !trace_wanted) return;
+  { /* What the arm drive drew in the frame just presented: its draw came after that frame's camera call and before this
+     * tick. Said before the rows are read, once for each draw the drive saw. */
+    static uint64_t draws;
+    TfpArmDriveStats arms;
+    tfp_arm_drive_stats(&arms);
+    if (arms.draw.count != draws) draws = arms.draw.count, tfp_camera_trace_draw(arms.draw.sock_m, arms.draw.mode);
+  }
   if (edge & TFP_TRACE_EDGE_WINDOW) tfp_camera_trace_edge();
   TfpCameraTraceRow rows[48];
   const uint32_t count = tfp_camera_trace_read(rows, 48);
@@ -428,14 +447,15 @@ static void trace_note(void) {
              r->what & TFP_CAMERA_TRACE_START ? "+start" : "");
     say("Trace: t=%.1f kind=%u eye_world=(%.5f %.5f %.5f) step=%.4f wanted=(%.5f %.5f %.5f) correction=%.4f lease=0x%llx pose_armed=%d entry_ease=%.2f source=%s"
         " root=(%.5f %.5f %.5f) axes=(%.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f) looked=%d taken=%s quiet=%d tick=%.3f"
-        " off_foot=%d damped=%d damp=(%.5f %.5f %.5f) view=(%.5f %.5f %.5f)",
+        " off_foot=%d damped=%d damp=(%.5f %.5f %.5f) view=(%.5f %.5f %.5f) sock=%.5f arms=%u eye_edge=%d",
         (double)r->ms, r->kind, (double)r->eye[0], (double)r->eye[1], (double)r->eye[2], (double)r->step, (double)r->wanted[0], (double)r->wanted[1],
         (double)r->wanted[2], (double)r->correction, lease, (int)(pose.armed != 0), (double)r->entry_ease, sources[r->source < 4 ? r->source : 0],
         (double)r->root[0], (double)r->root[1], (double)r->root[2], (double)r->axes[0], (double)r->axes[1], (double)r->axes[2], (double)r->axes[3],
         (double)r->axes[4], (double)r->axes[5], (double)r->axes[6], (double)r->axes[7], (double)r->axes[8],
         (int)((r->what & TFP_CAMERA_TRACE_LOOKED) != 0), taken[0] ? taken + 1 : "-", (int)((r->what & TFP_CAMERA_TRACE_QUIET) != 0), r->tick,
         (int)((r->what & TFP_CAMERA_TRACE_OFF_FOOT) != 0), (int)((r->what & TFP_CAMERA_TRACE_DAMPED) != 0), (double)r->damp[0], (double)r->damp[1],
-        (double)r->damp[2], (double)r->view[0], (double)r->view[1], (double)r->view[2]);
+        (double)r->damp[2], (double)r->view[0], (double)r->view[1], (double)r->view[2], (double)r->sock, (unsigned)r->arms,
+        (int)((r->what & TFP_CAMERA_TRACE_SELF) != 0));
   }
 }
 #endif
@@ -494,7 +514,8 @@ static void orphan_note(void) {
  * (armed), not only once the controller holds: HellForge runs this tick before the game's update, so the game's
  * first rig write of an action comes before the tick that sees the action. The arm drive is told both: "ready"
  * for the same reason (the action's first drawn frame must not cost its binding and entry alignment when the gun
- * has already left the rig), and the hold itself, during which the game's joint values go back after every draw. */
+ * has already left the rig), and the hold itself (the game's joint values go back after every draw there, as they do
+ * in every driven frame since round 13; with arms_live_keep.txt only in a hold and with the gun away). */
 static void hold_apply(TfpWire *w, bool armed, bool holding) {
   (void)w;
   tfp_pose_set_hold(armed || holding);
@@ -521,8 +542,8 @@ static void hold_start(void) { /* after tfp_wire_init and tfp_wire_options_start
       "first-person camera request as long as that request is still the lease's own (kind 6, same record, same player, not a ragdoll, "
       "not seated, not full aim, no other camera owner); at most 4000 ms, then the exit as without the hold");
   say("Hold: the pose helper keeps its placement through an action; \"Hold:\" lines say what the rig and the camera do; %s",
-      arms_live ? "the arm drive is on: while a lease runs it keeps its binding when the gun leaves the rig, and puts the game's joint "
-                  "values back after every draw during a hold and in any frame whose gun is away"
+      arms_live ? "the arm drive is on: while a lease runs it keeps its binding when the gun leaves the rig; the game's joint "
+                  "values go back after every draw, in a hold as outside one"
                 : "the arm drive is off, so the rig's arms are the game's own during a hold");
 }
 
@@ -565,9 +586,15 @@ static void arms_start(void) {
   else if (arms_live) say("Arms: on: the body's arm animation is written onto the first-person arm rig at the primary draw while the "
                           "native first-person view is shown (42 joints)");
   else say("Arms: off: the first-person rig's arms are the game's own");
-  if ((arms_live || arms_bend) && arms_restore) say("Test: arms_live_restore.txt: the rig's own joint values are put back after every primary draw");
-  else if (arms_live || arms_bend) say("Arms: written joint values stay until the next frame, where the game's own are recovered (a file "
-                                       "arms_live_restore.txt beside the DLL puts them back after every draw instead)");
+  /* Said whether or not Animated arms is on now: the option is live, and the files are read once. */
+  if (tfp_arm_drive_put_back(arms_keep, arms_restore))
+    say("Arms: the rig's own joint values are put back after every primary draw, so the game always finds its own weapon socket (it seats the "
+        "first-person eye by it); the written values are in the rig for the draw only. A file arms_live_keep.txt beside the DLL leaves them "
+        "written until the next frame instead, as the builds before round 13 (2026-11-24) did%s", arms_restore ? "; arms_live_restore.txt is here and changes nothing" : "");
+  else
+    say("Test: arms_live_keep.txt: written joint values stay in the rig until the next frame, where the game's own are recovered (the way of "
+        "builds before round 13, 2026-11-24: the written weapon socket moves the camera); in a hold and with the gun away they are put back as always%s",
+        arms_restore ? "; arms_live_restore.txt is here too and is overruled" : "");
   if (arms_live && arms_rest_trace) say("Test: rest_trace.txt: the \"Rest:\" line of the resting weapon pose comes every tick instead of once a second");
   const char *why = tfp_render_slot_contract();
   if (why) {
@@ -606,7 +633,7 @@ static void arms_tick(void) {
     if (wanted && !was_wanted) weight = aiming ? 0 : 1; /* the drive starts: nothing of it was shown, so there is nothing to fade from */
     was_wanted = wanted;
     weight = tfp_arm_weight_step(weight, aiming, weighed ? (float)(now - weighed) : 0); weighed = now;
-    tfp_arm_drive_set(wanted, arms_restore, weight);
+    tfp_arm_drive_set(wanted, tfp_arm_drive_put_back(arms_keep, arms_restore), weight);
   }
   { /* The resting weapon pose (src/arm_drive.h): the clock, whether this tick is a rest and in which stance, and the body's layer states.
      * The action alone is not a rest: a walk, hip fire, an ammo check and a melee are "idle" to it (src/action_select.c), and in the game
@@ -730,9 +757,9 @@ static void start(void) {
         mcm_wanted = mcm_file != NULL;
         if (mcm_wanted) say("Test: mcm_on.txt: the settings menu is registered with DBF-MCM (goose.mcm) instead of the mod's own panel");
 #ifdef TFP_FEEL
-        static const char *const arm_files[] = {"arms_live_restore.txt", "arm_bend.txt", "rest_trace.txt"};
-        bool *const arm_switches[] = {&arms_restore, &arms_bend, &arms_rest_trace};
-        for (int i = 0; i < 3; i++) {
+        static const char *const arm_files[] = {"arms_live_keep.txt", "arms_live_restore.txt", "arm_bend.txt", "rest_trace.txt"};
+        bool *const arm_switches[] = {&arms_keep, &arms_restore, &arms_bend, &arms_rest_trace};
+        for (int i = 0; i < 4; i++) {
           strcpy(slash + 1, arm_files[i]);
           FILE *arm_file = fopen(parts_path, "r");
           if (arm_file) fclose(arm_file);

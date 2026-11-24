@@ -27,6 +27,10 @@ TRACE = re.compile(r"Trace: t=(-?[\d.]+) kind=(\d+) eye_world=\(([-\d. ]+)\) ste
 WHOLE = re.compile(r"^(\d+):(\d+):(\d+)\.(\d+) Trace: t=(-?[\d.]+) kind=(\d+) eye_world=\(([-\d. ]+)\) step=[-\d.]+(?: wanted=\(([-\d. ]+)\))?"
                    r"(?:.*? correction=([-\d.]+))?(?:.*? root=\(([-\d. ]+)\))?(?:.*? looked=(\d))?(?:.*? taken=(\S+))?(?:.*? tick=([\d.]+))?")
 GAP_MS = 80.0   # two traced frames further apart than this are not consecutive (30 frames a second in the harness)
+# What later builds put after "tick=", read apart so that the line may grow: which way the view pointed (0.6.0-feel.49),
+# and what the arm drive drew in the frame and whether the eye opened the window itself (round 13: sock, arms, eye_edge).
+VIEW = re.compile(r" view=\(([-\d. ]+)\)")
+DRAWN = re.compile(r" sock=(-?[\d.]+) arms=(\d+)(?: eye_edge=(\d))?")
 
 
 def newest():
@@ -63,7 +67,11 @@ def _clock(ms):
 
 def frames(lines):
     """Every traced frame of `lines` in order of time, as dicts, whatever falls between them: at (the frame's own
-    time), written (the stamp of its line), tick (ms), kind, eye, wanted, carried, root (None where the line has none), looked (None likewise), taken.
+    time), written (the stamp of its line), tick (ms), kind, eye, wanted, carried, root (None where the line has none), looked (None likewise), taken,
+    view (the unit vector the view pointed along; None where the line has none), sock (m: the weapon socket as the arm
+    drive drew it less the game's own, along the view), arms (0 not driven or not known, 1 driven and the game's joint
+    values put back, 2 driven and the written values left, 3 driven in a hold) and eye_edge (1: the eye opened the
+    window itself); those three are None on a line from before round 13.
     windows() ends a window at every State line, and frames on either side of one were never measured against each
     other (the Stable soak of 2026-11-24: 0.120 m at a landing, 08:18:55.525, with "State: left the native view"
     between its frames); nor were the frames a stretch of the log begins with before its first State line. Here a
@@ -90,6 +98,10 @@ def frames(lines):
         row = {"written": line[:12], "stamp": ((int(m[1]) * 60 + int(m[2])) * 60 + int(m[3])) * 1000 + int(m[4]), "t": float(m[5]), "kind": int(m[6]),
                "eye": numbers(m[7]), "wanted": numbers(m[8]), "carried": float(m[9] or 0), "root": numbers(m[10]),
                "looked": int(m[11]) if m[11] else None, "taken": m[12] or "-", "clock": float(m[13]) if m[13] else None}
+        view, drawn = VIEW.search(line), DRAWN.search(line)
+        row["view"] = numbers(view[1]) if view else None
+        row["sock"], row["arms"] = (float(drawn[1]), int(drawn[2])) if drawn else (None, None)
+        row["eye_edge"] = int(drawn[3]) if drawn and drawn[3] else None
         if group and row["t"] < group[-1]["t"] - 1:   # an edge without a State line: t starts again
             groups.append(group)
             group = []

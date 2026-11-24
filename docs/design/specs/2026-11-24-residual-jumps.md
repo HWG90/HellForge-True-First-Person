@@ -419,3 +419,218 @@ windows only appear in a log a new build writes.
 4. Whether the 0.33 m at every entry goes with the mod's draw animation off.
 5. Whether, in a backwards dive, `view=` stays while the root's axes go round. That is the evidence W needs.
 6. Whether a longer leash for the Stable eye in a fall looks right. The picture, not the figure.
+
+## Round 13: the game always finds its own weapon socket
+
+Written 2026-11-24 (branch `round13-arms`), after round 12's read-only plan and its challenge
+(`~/.cache/tfp-round12/PLAN.md`, `CHALLENGE.md`) and one game session on feel.49 with a test switch. **This round
+changes what the player sees**: where the camera sits against the drawn arms and gun whenever the body's hands are
+not where the rig's own are. The filter is not touched.
+
+Nothing of this branch was run in the game. The proof run below was feel.49 with `arms_live_restore.txt`, which does
+what this branch now does by default.
+
+### The finding
+
+The game's kind-6 evaluator seats the first-person eye by the rig's weapon socket: node `0x4fdd3337`, rig node 8,
+joint 41 of the 42 the arm drive writes (`~/.cache/tfp-round9/eval.txt`, game+0x1287423 to 0x1287785). It puts the rig
+so that the socket is at depth D before the eye. The arm drive wrote that socket and left it in the rig until the
+next frame, so the evaluator read the mod's socket: every move of the drawn arms along the view moved the camera the
+other way. A melee 0.7 m in a frame, a backward dive, the aim fade, the alignment's 150 ms ease, the first frame of
+every hold (where the drive did put the game's values back, and the eye went the socket's whole offset at once).
+
+### The proof run
+
+Stable, soak seed 15, twice: the build as it is, and the same build with `arms_live_restore.txt` (the game's joint
+values put back after every primary draw). The first is the second half of `~/.cache/tfp-soak-25.modlog`, from the
+`Camera style: Stable` line at 10:19:44.878; its output is `~/.cache/tfp-feel49/soak-bodycam-15.out`, **named the
+wrong way round** (the panel was switched the other way than the file names say). The second is
+`~/.cache/tfp-soak-26.modlog`, output `~/.cache/tfp-feel49r/soak-seed15.out`. No crash in either.
+
+| | As it is (soak 25, Stable) | Put-back (soak 26) |
+|---|---|---|
+| Actions, flagged | 434, 74 | 337, 30 |
+| Frames over the limit | 270: 260 the eye's own (251 along the view), 10 the filter's | 42: 32 the eye's own (21 along the view), 10 the filter's |
+| Largest | 0.753 m (a melee) | 0.164 m (the filter's, a sprint into a native entry) |
+| Holds whose first 150 ms had a jump taken up | 39 of 60, up to 0.54 m | 0 of 56 |
+| Entries with a jump taken up 0.1 to 0.7 s after | 43 of 60 | 11 of 57 |
+| Kind-6 seconds with `eye_jump` of 0.15 / 0.30 / 0.60 m or more (every second, traced or not) | 49 / 14 / 11 of 887 | 2 / 0 / 0 of 664, after the second the view was switched on |
+| Frames not held in first person | 0 | 2 (quick-swaps, head camera, helper error 15) |
+
+The same seed gives the same action at the same place in the list, so the first 337 actions can be set side by side:
+
+- flagged 57 against 30; 16 in both, 41 only as it is, 14 only with put-back;
+- these left the list: pistol-aim (7 of 10 flagged before, none now; largest 0.144 against 0.009 m), aim+swap (5),
+  aim-fire (3), prone+stim (3), aim-walk (2), crouch (2), and ammo-check, stim, pistol-reload and melee (1 each).
+  Plain aim was not flagged in these 337 in either run (largest 0.059 against 0.026 m);
+- the melee: 12 of the 16 have no traced frame in either run. The four that have: largest 0.753 m against 0.025 m.
+  The untraced ones are covered by the `View:` line of each second: none over 0.30 m with put-back.
+
+The challenger's pass marks, all met: no jump taken up at a hold's edge; counted frames from 270 to 42 (it expected
+about 60 for both styles together); no melee second over 0.3 m.
+
+### What changed
+
+1. **Put-back is the rule** (`src/arm_drive.c`, `src/arm_drive.h`, `src/mod_view.c`). While the arm drive is on, the
+   game's joint values are put back after every primary draw. The rig holds the mod's values from the draw's write
+   to the end of that draw and no longer. No logic of the drive changed: the path was there for holds
+   (`restore_after`), and the binder now asks for it always (`tfp_arm_drive_put_back`).
+   - `arms_live_keep.txt` beside the DLL: the written values stay until the next frame, as before. For the
+     comparison in the game only. It is not in `docs/guides/TEST-BUILD.md` yet (that file was not to be changed in
+     this round).
+   - `arms_live_restore.txt` is still read and changes nothing; with both files, keep wins and the line says so.
+   - The start line says which runs: `Arms: the rig's own joint values are put back after every primary draw ...`
+     or `Test: arms_live_keep.txt: ...`.
+2. **The Trace row** ends with three more fields:
+   - `sock=%.5f`: the weapon socket as the arm drive drew it in this frame less the game's own, along the view, in
+     metres (positive: drawn further out). Under put-back it is the gun's depth error on screen. With `arms=2` it is
+     how far the eye was thrown, and `eye + sock * view` is the eye the game would have had: put-back can be tried on
+     any such log without the game.
+   - `arms=%u`: 0 not driven (off, another camera, refused) or not known for the frame, 1 driven and put back, 2
+     driven and left written, 3 driven in a hold or with the gun away.
+   - `eye_edge=%d`: 1 where the presented eye's step changed by 0.15 m or more in this frame. The camera helper
+     then opens a Trace window itself, with the six frames before, or keeps the open one open (`src/trace_edges.h`).
+     A melee has no State line and no change of action; this is what gets it traced.
+   - How `sock` gets there: the drive works it out at the draw from the two socket records it has (`base` and what
+     it writes), through the rig root's axes onto the rig eye's forward axis. The draw comes after the frame's
+     camera call, so the binder hands the figure to the helper at the next tick for the newest frame presented
+     (`tfp_camera_trace_draw`), before it reads the rows. Where the game sets the camera twice in a frame, the
+     earlier row says `arms=0`; the readers keep the later one.
+   - 0.15 m is at 30 frames a second. A faster game spreads a move over more frames and each changes the step by
+     less.
+3. **The harness** (`tools/harness/matrix.py`, `soak.py`, `trace.py`).
+   - The camera style is read from the log's `Camera style:` lines: printed at the top, where it changes, and in
+     the summary (`camera style: Stable throughout`, or `... NOT ONE STYLE, judge the stretches apart`). Each matrix
+     phase's result carries it. No argument and no file name says it.
+   - `soak.py --log LOG` judges a log that is there, one line for each style it ran in. That is where the figures
+     of the table above come from.
+   - Each frame at or over the limit is printed with what is judged split along `view=` and across it, and "the
+     eye's own" reads "the eye's own, along the view" where 0.06 m or more lies along it and less across. The
+     summary counts them. **Nothing is excused**: `POP_M`, the counts and whose of every frame in soaks 22 to 26
+     are what they were (checked frame for frame against `main`).
+   - `trace.py` reads `view=`, `sock=`, `arms=`, `eye_edge=`; `replay.py` takes the longer line as it is.
+
+### Who read the written joints, and what changes for each
+
+| Reader | What it read | Now |
+|---|---|---|
+| The game's evaluator (the eye) | the written socket | the game's own socket. This is the change |
+| The drive's own next frame (`tfp_graft_underlying`) | the written record, and recovered the game's value from what it had saved | the game's own record itself. The same values; one comparison instead of a recovery |
+| The rest alignment and the `Rest:` line | the game's own socket (`base`), recovered | the same value, read directly. What is measured and kept does not change. What the line calls "socket X m off the rig's own" is now seen on screen as the gun's depth, where before the camera hid it by moving |
+| The alignment's 150 ms ease, the aim fade (120 ms), a provisional alignment taken again | moved the written socket, and so the eye | move the drawn arms and gun only |
+| The hold's put-back | the game's values went back in a hold and with the gun away; the hold's first frame re-seated the eye by the whole offset | unchanged path, and no edge: the frame before a hold was put back too. `sock=` says 3 in a hold |
+| The gun's units (the weapon tree) | refreshed against the written socket and left there for the game's update | refreshed for the draw, and again against the game's socket after it. The game's update (flash, tracers, casings) has the gun where the rig's own arms hold it, `sock` away from where it is drawn |
+| Sleeve and glove units on the rig | refreshed after the write | refreshed after the write and after the put-back |
+| The head camera's held eye (`src/camera_helper.c`, the native eye remembered for a weapon when the view leaves) | the rig eye as the written socket seated it | the rig eye as the game's socket seats it: steadier, and elsewhere by `sock` where the view left mid-action. The watch that sets a moved eye aside for 200 ms (5 cm in a frame) fires less |
+| The `Hold:` line's rig eye, the entry trace | the same rig eye | likewise |
+| Hand grips and sleeves (`src/grip_hand.c`, `src/arm_pieces.c`) | the rig's world poses in the tick | **refused on this build** (held back since feel.18). Forced on with `arms_on.txt` they would now read the rig's own arms in the tick, not the drawn ones. Not tested |
+| The pose helper (node 5, the depth pair) | does not read the socket | unchanged, bit for bit (`tests/run-diff-pose.sh`) |
+
+One more write of up to 42 joints and one more refresh a frame. What that costs was not measured: the `Cost:` line
+times the write before the draw only (56 us mean in both runs), not the put-back after it (`src/render_slot.c`).
+
+### Tests
+
+- `tests/arm_drive_test.c`: `test_game_sees_its_own_socket` (a melee 0.8 m along the view in 100 ms, at 8, 16.7, 33.3
+  and 50 ms a frame: after every frame the rig's 63 records are the game's own bits and a model of the evaluator,
+  D less the socket the rig holds, does not move; with the values left the same scene throws it by `sock` and the
+  drawn joints are the same bits), `test_fade_and_ease_under_put_back`, and the challenger's
+  `test_hold_begins_under_put_back` (the socket 0.2 m off along the view, a hold begins: no change across the edge;
+  with the values left, the whole 0.2 m in the hold's first frame). 75 031 checks.
+- `tests/camera_smooth_test.cpp` scenarios 23 (the eye opens a window) and 24 (`sock`, `arms` in the rows);
+  `tests/trace_edges_test.c`.
+- `tests/test_harness_trace.py` `AlongTheView`, `CameraStyle`; `tests/test_harness_replay.py` (the longer row).
+  69 harness tests, 58 before.
+- The tests of the leave-written path stay and ask for it by name.
+- Watched failing first: all of the above. One caveat: the drive's put-back path existed, so the three drive tests
+  failed for want of the new figures (`stats.draw`), and were then checked by taking the put-back out of the test's
+  frame (they fail at the first frame).
+
+### What is left under put-back, and whose it is
+
+42 frames over the limit in 30 actions of soak 26; and 10 the body's own, not counted.
+
+| Class | Actions | Frames, size | Whose | In soak 25 at the same place |
+|---|---|---|---|---|
+| A. A dive's launch (and one sprint's stop): the root's step grows over two frames by under 0.06 m each, the rig eye makes it in one, a frame late. 65 to 68 ms after the action became dive | dive 4, 8, 64, 148, 265, 331; dive-back 38, 142, 286; w+dive+swap 179, 199, 293; sprint+swap 202 | 13; 0.069 to 0.107, twelve of them 0.069 to 0.085 | the body's (the game's own lag; the judge takes nothing off a root change under 0.06 m) | flagged there too where traced, at 0.12 to 0.51 m: the written socket on top of it |
+| B. Inside a dive, across the view: 300 ms in, and at a landing | dive 4, 148 | 2; 0.074, 0.088 | the eye's own | hidden under the larger frames |
+| C. A reload's step: the eye goes 0.06 to 0.15 m back along the view when the action becomes reload (two frames, the first 0.084 to 0.096), stands there for the whole reload, and returns when it ends (in the one traced to its end, to within a millimetre of where it stood). Body still, nothing looked for, nothing carried | reload 11, 12, 36; dive-back 38 (landing in a reload) | 8; 0.072 to 0.116, all along the view | the eye's own; most likely the game's | not traced there (all 12 reloads). The `View:` lines of the same two seconds read 0.080 and 0.079 m, with no change of the mod's placement: the step is not put-back's |
+| D. Back to idle: standing up from prone, a vault's end. The eye starts a glide of 0.04 m a frame along the view, 66 ms after the action became idle. Body root still | jump-vault 68, 149 (two), 240, 316; prone 229, 297 | 7; 0.061 to 0.070 | the eye's own | vault 68 was 0.105 m; three vaults and one prone were not traced; prone 229 was 0.052 m |
+| E. A native entry with 0.06 to 0.66 m carried, 67 to 270 ms in | sprint 178 (three frames, 0.164 the largest); back 141 (two); grenade+swap 248; w+dive+swap 179 | 7; 0.064 to 0.164 | the filter's | back 141: 0.149 m. The others had no flagged frame there or were not traced |
+| F. The head camera within 270 ms of a swap, something carried | w+dive+swap 128; back 141; sprint+swap 221 | 3; 0.061 to 0.072 | the filter's | 128 and 221 had the filter's frames too (0.079, 0.076) |
+| G. The head camera's own in the frame of a swap's State line, inside a dive | w+dive+swap 147, 293 | 2; 0.067, 0.075, mostly across the view | the eye's own | 147: 0.065 m, the filter's |
+| H. One frame not held in first person (head camera, helper error 15: the case of `tests/camera_smooth_test.cpp` scenario 19); the jump is under the limit | quick-swaps 99, 125 | none | the lock's | none missed in soak 25; soak 22 had two of the same |
+
+By whose: the body's 13 frames, the eye's own 19 (B, C, D, G), the filter's 10 (E, F). The judge prints class A as
+"the eye's own" like the other 19 (32 in its count): that it is the body's is this reading of the rows, not a rule. By action: dive 6, w+dive+swap
+5, jump-vault 4, reload 3, dive-back 3, prone 2, quick-swaps 2, sprint+swap 2, sprint 1, back 1, grenade+swap 1.
+
+**Did put-back make anything worse?** Not that the two logs show.
+
+- Where both runs have a figure for the same action (147 of the 337): 51 came under by more than 0.01 m from over the
+  limit. 3 went over the limit from under it: w+dive+swap 179 (0.038 to 0.074: classes A and E), prone 229 (0.052 to
+  0.070: D), grenade+swap 248 (0.051 to 0.069: E). All three are classes both runs have, at 0.06 to 0.07 m.
+- Of the 14 actions flagged only with put-back, 9 had no traced frame in soak 25 (reload 3, jump-vault 3, sprint,
+  dive, prone), so nothing was judged there; for the reloads the `View:` lines show the same step. 2 are the missed
+  frame (H). 3 are the ones above.
+- The two missed frames are the one thing new in kind. They are head-camera frames, where the drive does nothing,
+  and soak 22 had the same; that put-back has no part in them is likely and not shown.
+
+What the classes say for the next round:
+
+- A is honest motion at 0.07 m, flagged because the root's own change is spread over two frames at under 0.06 each.
+  It was hidden under M1's larger frames. No rule is added for it here.
+- C is the largest thing left that a player would see standing still. Not settled whether it is the game's own
+  (its rig's reload pose) or the mod's per-action placement on rig node 5, which sits above the socket and which the
+  evaluator therefore sees like any move of the socket. For the game's own: soak 25 has the step with no `Motion:`
+  line in those seconds, and the same placement change gives 0.060 m prone and 0.149 m standing. Against: one frame
+  of 0.09 m is not how an animation blends. `sock=` will not tell the two apart (both move the drawn and the game's
+  socket alike). A reload with the reload placement set equal to the idle one would.
+- E and F are the filter's old cases at entries and swaps. Its input is another eye now; they are to be judged again
+  on a soak of this build before anything is mended.
+
+### What the picture shows
+
+Twelve poses each, one frame a pose, taken by hand: `~/.cache/tfp-feel49r/sheet.jpg` (put-back) against
+`~/.cache/tfp-feel49b/sheet.jpg` (the build as it is; another mission and light, and two more frames).
+
+- With put-back the gun and hands are in view in 10 of the 12: hip, looking down, pistol, prone, prone looking down,
+  melee, reload, aim, sprint, crouch. The other two have none in either build: the frame in the middle of a swap
+  (the head camera, with the back of the helmet filling the middle of the picture) and the stim (no gun in the
+  hands).
+- The build as it is shows no gun in the prone frame and none in the melee frame; put-back shows the pistol in both
+  prone frames and the rifle in the melee frame.
+- No frame shows the gun behind the lens or cut off by the near plane, as far as a thumbnail 600 pixels wide shows.
+- Resting poses look the same in both, as they should: at rest the alignment makes `sock` zero.
+
+The challenge expected worse from the hold edges of soak 25: the eye going towards the drawn arms by 0.11 m or more
+in 16 of 149 holds, by 0.20 m or more in 8. Twelve stills do not rule that out; they are single frames.
+
+### What only the game can still show
+
+1. That this branch runs: the start line, `sock=`, `arms=1` and `eye_edge=` in the Trace rows, a window at every
+   melee, the style at the top of a soak's output.
+2. **The gun just after a swap, before its first rest.** A provisional alignment was hidden by the camera until now
+   (four holds of soak 25 at 0.47 to 0.50 m, a weapon with "no rest alignment kept for it yet"). It would show as a
+   gun out of place, or out of view, until the first rest. `sock=` in those rows says how far.
+3. **Prone with the view pitched**, and **standing, looking 25 degrees down**: whether the gun stays in view and
+   clear of the near plane (prone with one weapon read -0.16 to -0.20 m in nine holds: a steady offset).
+4. Hip fire: muzzle flash, tracers and casings come from where the game has the gun, `sock` away from where it is
+   drawn. Zero at rest; in a moving burst it is whatever the row says.
+5. A pass drawn after the primary one (the arms' shadow, a scope picture) with the rig's own arms.
+6. Whether the reload's step (C) is the game's: a reload with the reload placement equal to the idle one.
+7. Whether the two missed frames come again, and without the arm drive.
+8. A soak in each style on this build, the styles read from the log, and the same with `arms_live_keep.txt` for the
+   comparison.
+
+### Not proven
+
+- That every one of soak 25's 251 along-the-view frames was the socket. 21 of soak 26's 32 own frames still lie
+  along the view (classes A, C, D): dives go along the view, and so does whatever C is.
+- The cause of C and of D.
+- Anything about Bodycam under put-back: the proof run was Stable only.
+- `sock=`, the eye's own windows and the style reading have run in tests and on old logs, not in the game. The
+  binder's hand-over of `sock` to the right frame rests on the order tick, camera call, draw in every frame; where
+  that does not hold, a row carries the neighbouring frame's figure.
+- The filter's replays are the same as on `main` for soaks 20 to 26 (run and compared); soaks 8 to 19 were not run
+  again. None of the filter's files changed.

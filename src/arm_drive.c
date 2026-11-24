@@ -18,13 +18,25 @@
  *      array is this rig's, and the weapon's units, parents first;
  *   5. the caller forwards the render call.
  *
- * After the draw, the ACCEPTED behaviour (0.3.36 / 0.3.37, graft:662-817 with graft.drawing false):
- * nothing. The written values stay in the rig; on the next frame each joint's game value is recovered
- * by graft_underlying (the value saved before the write where the record still holds what was written,
- * the record itself where the game has written since), and when the drive stops the game's values are
- * written back once (graft_restore_graph, graft:147-179). The other behaviour, restore_after_draw,
- * writes them back right after every primary render (0.3.46, graft:186-209: there only for weapon draws
- * and holsters, and its acceptance in the game was still pending when the mod was retired).
+ * After the draw, the rule since round 13 (2026-11-24), restore_after_draw: the game's values are written
+ * back right after every primary render (the retired mod's 0.3.46 path, graft:186-209, there only for
+ * weapon draws and holsters). Why: the game's kind-6 evaluator seats the first-person eye by the rig's
+ * weapon socket (node 8, joint 41 here; game+0x1287423 to 0x1287785: the socket is put at depth D before
+ * the eye). A written socket left in the rig was what the evaluator read, so every move of the drawn arms
+ * along the view moved the camera the other way: a melee 0.7 m in a frame, a backward dive, the aim fade,
+ * the alignment's 150 ms ease, a reload. Proven in the game that day with the test switch
+ * arms_live_restore.txt (docs/design/specs/2026-11-24-residual-jumps.md "Round 13"). The rig now holds
+ * this mod's values only from the write to the end of the draw; whenever the game looks, it finds its own.
+ * What that costs: one more write of the joints and a refresh per frame, and the gun is drawn where the
+ * body's hand is while the game's update has it where the rig's own arms hold it (stats.draw.sock_m).
+ *
+ * The other behaviour, the retired mod's accepted one (0.3.36 / 0.3.37, graft:662-817 with graft.drawing
+ * false) and this mod's default until round 13: nothing after the draw. The written values stay in the
+ * rig; on the next frame each joint's game value is recovered by graft_underlying (the value saved before
+ * the write where the record still holds what was written, the record itself where the game has written
+ * since), and when the drive stops the game's values are written back once (graft_restore_graph,
+ * graft:147-179). It is still here, behind the binder's test file arms_live_keep.txt, for the comparison
+ * in the game. Under put-back graft_underlying finds the game's own record in every frame and returns it.
  *
  * What is not lifted: the per-action state machine (160 ms blends in and out, per-action profiles, the
  * resting-hip cache), the weapon draw and holster paths, and the evaluated-transform test of the two
@@ -635,10 +647,10 @@ static uint32_t drive(const Units *u) {
   if (!ptr(u->rig + L_UNIT_LOCALS, &locals) || locals != d.locals || !ptr(u->rig + L_UNIT_WORLDS, &rig_worlds) || !rd(locals, current, sizeof current) ||
       (!d.bend && !body_matrices(u->body, body)))
     return TFP_ARM_READ;
+  static TfpGraftMatrix rig_now[TFP_GRAFT_RIG_NODES]; /* the rig in the world as the game seated it for this frame */
   if (!d.bend) { /* the arms are seen in the view's frame (src/arm_graft.h tfp_graft_view) */
-    TfpGraftMatrix rig_view;
-    if (!rd(rig_worlds + d.view * sizeof rig_view, &rig_view, sizeof rig_view)) return TFP_ARM_READ;
-    if (!tfp_graft_view(body, &rig_view)) return TFP_ARM_POSE;
+    if (!rd(rig_worlds, rig_now, sizeof rig_now)) return TFP_ARM_READ;
+    if (!tfp_graft_view(body, &rig_now[d.view])) return TFP_ARM_POSE;
   }
   for (unsigned i = 0; i < d.joints; ++i)
     base[i] = tfp_graft_underlying((d.owned >> i) & 1, &d.original[i], &d.applied[i], current[d.map.fp[i]]);
@@ -649,6 +661,18 @@ static uint32_t drive(const Units *u) {
     if (!tfp_graft_pose(&d.map, body, poses)) return TFP_ARM_POSE;
     for (unsigned i = 0; i < d.joints; ++i)
       if (!tfp_graft_mix(&base[i], &poses[i], d.weight, &target[i])) return TFP_ARM_POSE;
+    /* For the log (stats.draw.sock_m): the socket as it is about to be drawn less the game's own, along the view.
+     * Both are locals of the socket's parent (the rig's root, which the drive does not write), so the difference
+     * goes through that node's axes into the world and onto the forward axis of the rig's eye. */
+    const unsigned socket = TFP_GRAFT_JOINTS - 1;
+    const float *parent = rig_now[d.map.parent[socket]].values, *forward = rig_now[TFP_GRAFT_RIG_EYE].values + 4;
+    float along = 0;
+    for (unsigned k = 0; k < 3; ++k) {
+      float world = 0;
+      for (unsigned j = 0; j < 3; ++j) world += (target[socket].position[j] - base[socket].position[j]) * parent[4 * j + k];
+      along += world * forward[k];
+    }
+    d.stats.draw.sock_m = isfinite(along) ? along : 0;
   }
   Tree tree = {0};
   bool changed = false;
@@ -715,6 +739,7 @@ bool tfp_arm_drive_render(uint64_t world, bool game_thread) {
   }
   uint32_t reason = TFP_ARM_NONE;
   bool native_view = false;
+  d.stats.draw.count++, d.stats.draw.mode = TFP_ARM_DRAW_NONE, d.stats.draw.sock_m = 0;
   if (d.on) {
     static TfpSnapshot s;
     Units u;
@@ -732,17 +757,20 @@ bool tfp_arm_drive_render(uint64_t world, bool game_thread) {
     if (native_view && reason == TFP_ARM_NONE) reason = drive(&u);
     if (native_view && reason == TFP_ARM_NONE) {
       d.stats.frames++;
-      /* In a hold the game's values go back after every draw, the retired mod's path for weapon draws and holsters
-       * (0.3.46, graft:186-209), not the accepted leave-written path. Why: the leave-written path recovers the
+      /* With restore_after (the rule since round 13: see the top of this file) the game's values go back after
+       * every draw, and what follows here is of the test switch that leaves them written.
+       * In a hold the game's values go back after every draw, the retired mod's path for weapon draws and holsters
+       * (0.3.46, graft:186-209), not the leave-written path. Why: the leave-written path recovers the
        * game's value of a joint on the next frame from the record it finds there, which is right only while the
        * game keeps animating the same rig with the same gun on it. During a stow, a draw, a throw or an injection
        * the game re-parents the gun and may stop writing some joints or replace the rig unit between two frames;
        * a value of this mod left in the rig would then be taken for the game's, and the gun's units would be
        * evaluated against it by the game's own update. Put back at once, the rig holds only the game's values
        * whenever the game looks at it. (That path's acceptance in the game was still pending when the mod it
-       * comes from was retired: this is a probe.)
+       * comes from was retired; the soaks of 2026-11-22 to -24 ran every hold on it, and round 13's on every frame.)
        * The same in a frame whose gun is away while only ready: that is an action's first drawn frame, before the
        * tick that makes the controller hold. */
+      d.stats.draw.mode = d.hold || u.gun_away ? TFP_ARM_DRAW_HOLD : d.restore_after ? TFP_ARM_DRAW_PUT_BACK : TFP_ARM_DRAW_KEPT;
       return (d.restore_after || d.hold || u.gun_away) && d.owned != 0;
     }
     if (native_view) refused(reason);

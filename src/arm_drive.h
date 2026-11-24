@@ -61,6 +61,22 @@ typedef struct TfpArmDriveAlign {
   uint32_t retake;              /* TFP_ARM_ALIGN_PROVISIONAL: taken once more, and why the first one was not good (TFP_ARM_RETAKE_*; 0: not a retake) */
 } TfpArmDriveAlign;
 
+/* What the last primary draw did (TfpArmDriveStats.draw). The game's kind-6 evaluator seats the first-person eye by the
+ * rig's weapon socket (node 8; game+0x1287423 to 0x1287785: the rig is put so that the socket is at depth D before the
+ * eye). sock_m says how far the socket this mod drew is from the game's own along the view: under put-back the gun's
+ * depth error on screen; with the written values left, how far the eye is thrown the other way. */
+enum {
+  TFP_ARM_DRAW_NONE = 0, /* not driven: switched off, another camera, refused */
+  TFP_ARM_DRAW_PUT_BACK, /* driven; the game's joint values were put back after the draw (the rule) */
+  TFP_ARM_DRAW_KEPT,     /* driven; the written values were left in the rig (the test switch arms_live_keep.txt) */
+  TFP_ARM_DRAW_HOLD      /* driven in a hold or with the gun away; the game's values were put back, as always there */
+};
+typedef struct TfpArmDriveDraw {
+  uint64_t count;  /* primary draws seen on the game thread while the drive was switched on or held something */
+  uint32_t mode;   /* TFP_ARM_DRAW_* of the last one */
+  float sock_m;    /* of the last one, when driven: the socket as written less the game's own, along the view (the
+                    * forward axis of the rig's eye, the Trace line's view=), in metres; positive: drawn further out */
+} TfpArmDriveDraw;
 typedef struct TfpArmDriveStats {
   uint64_t frames;   /* primary renders driven: the proofs held and the joints hold the wanted poses */
   uint64_t joints;   /* joint records written through the engine's setter (a record already as wanted is not written) */
@@ -72,6 +88,7 @@ typedef struct TfpArmDriveStats {
   uint32_t reason;   /* of the last refusal, TFP_ARM_* */
   uint32_t owned;    /* joints holding a value of this mod now */
   TfpArmDriveAlign align; /* the last time an alignment was taken or replaced (count: how many times so far) */
+  TfpArmDriveDraw draw;   /* the last primary draw */
 } TfpArmDriveStats;
 
 typedef struct TfpArmDriveHost {
@@ -89,10 +106,18 @@ typedef struct TfpArmDriveHost {
 /* Once, before anything else. The struct is copied. */
 void tfp_arm_drive_set_host(const TfpArmDriveHost *host);
 /* The switch. on: drive while the native first-person view is shown (the caller passes its own view
- * state in `on`). restore_after_draw: put the game's values back right after each primary render (the
- * retired 0.3.46 draw path) instead of leaving them written and recovering them on the next frame (the
- * accepted 0.3.36 / 0.3.37 action path). weight: 1 the body's pose, below 1 a blend from the game's own. */
+ * state in `on`). restore_after_draw: put the game's values back right after each primary render. That is
+ * the rule since round 13 (2026-11-24): the rig holds this mod's joint values only from the draw's write to
+ * the end of that draw, because the game seats the first-person eye by the rig's weapon socket (see
+ * TfpArmDriveDraw) and a written socket left in the rig moved the camera against every move of the drawn
+ * arms along the view. false: the written values are left and the game's own recovered on the next frame
+ * (the retired mod's accepted 0.3.36 / 0.3.37 action path, this mod's default until then): kept for the
+ * comparison in the game, behind a test file. weight: 1 the body's pose, below 1 a blend from the game's own. */
 void tfp_arm_drive_set(bool on, bool restore_after_draw, float weight);
+/* What the binder passes as restore_after_draw, from its two test files beside the DLL: arms_live_keep.txt asks for
+ * the written values to be left; arms_live_restore.txt, the switch of the proof run, asks for what is now the rule
+ * and changes nothing. */
+static inline bool tfp_arm_drive_put_back(bool keep_file, bool restore_file) { (void)restore_file; return !keep_file; }
 /* The test of the first game run: ignore the body and turn the rig's l_shoulder by 70 degrees about its
  * own Z, through the same writer and refresh. */
 void tfp_arm_drive_set_bend(bool on);
@@ -106,16 +131,16 @@ void tfp_arm_drive_set_bend(bool on);
  *   - the binding and its entry alignment are kept while only the gun differs;
  *   - the gun's units are collected and refreshed only while the gun is on the rig;
  *   - the game's joint values are put back after every primary render (tfp_arm_drive_render answers true),
- *     whatever restore_after_draw says. */
+ *     whatever restore_after_draw says (with restore_after_draw, the rule, a hold changes nothing here). */
 void tfp_arm_drive_set_hold(bool on);
 /* "Ready": a lease runs and the hold's switch is on, whether or not the controller holds yet. The binder sets it
  * every tick beside tfp_arm_drive_set_hold. Why it exists: the tick comes before the game's update, so the first
  * frame of an action is drawn before the tick that sees the action; with only the controller's state the drive
  * would still be strict in that frame, refuse a gun that already left the rig, drop the binding, and bind anew a
  * frame later with an entry alignment taken from a pose in the middle of the action. While ready, everything in
- * the list above applies except the last point: the game's values go back after a draw only in a frame whose gun
- * is away (and, as before, in every frame of a hold). With the gun on the rig a ready frame is the frame it
- * always was. Off at the start and for good unless this is called with true. */
+ * the list above applies except the last point: without restore_after_draw the game's values go back after a draw
+ * only in a frame whose gun is away (and, as before, in every frame of a hold). With the gun on the rig a ready
+ * frame is the frame it always was. Off at the start and for good unless this is called with true. */
 void tfp_arm_drive_set_hold_ready(bool on);
 /* The resting weapon pose. The tick says each frame what time it is, whether the player is at rest and in which
  * stance (TFP_ARM_REST_*; 0: not at rest), and the body's animation layer states (pose_key; 0: not known); both are

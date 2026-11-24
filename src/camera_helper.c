@@ -12,6 +12,7 @@
 #include "camera_damp.h"
 #include "camera_glide.h"
 #include "camera_math.h"
+#include "trace_edges.h"
 #include <stdatomic.h>
 
 /* ======================================================================
@@ -239,7 +240,7 @@ static struct { bool known; uint32_t mask, kind, weapon, key; double until; } sm
 #define TRACE_RING 128u
 #define TRACE_BEFORE 6u   /* frames before the edge that are written with it */
 #define TRACE_MS 500.0
-typedef struct TraceFrame { double tick; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease, root[3]; uint32_t what; float axes[9], damp[3], view[3]; } TraceFrame;
+typedef struct TraceFrame { double tick; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease, root[3]; uint32_t what; float axes[9], damp[3], view[3], sock; uint32_t arms; } TraceFrame;
 /* What the eye damping did in the frame being presented, for its trace row (lock_damp_eye writes, smooth_present
  * reads and clears): what it added to the eye in the world, whether it ran, and whether the body was off foot. That
  * last is asked only in a head-camera frame (on_foot()): Policy.lock_off_foot in a native frame is the answer of the
@@ -247,6 +248,7 @@ typedef struct TraceFrame { double tick; uint32_t kind, source; float eye[3], wa
  * calls smooth_present; see TfpCameraTraceRow). Policy lock. */
 static struct { float added[3], view[3]; bool ran, off_foot; } trace_damp;
 static struct { TraceFrame frames[TRACE_RING]; uint64_t head, sent; double edge, until; float last[3]; double last_tick; bool last_known, open; } trace;
+static TfpTraceSelf trace_self; /* the window the eye opens itself (src/trace_edges.h); policy lock */
 /* The native eye is not remembered for its weapon while it is being moved about (set in the native view). */
 static float eye_watch[3]; static bool eye_watch_known; static double eye_unsettled_until;
 static void policy_init(Policy *p) {
@@ -991,7 +993,7 @@ static void lock_body_shown(Policy *p, uint32_t kind, const float *head, double 
 }
 
 /* ---- beyond retail: continuity of the presented eye, and the trace (lock frames only) ---- */
-static void smooth_forget(void) { tfp_continuity_reset(&smooth); memset(&alternation, 0, sizeof alternation); trace.last_known = false; eye_watch_known = false; eye_unsettled_until = 0;
+static void smooth_forget(void) { tfp_continuity_reset(&smooth); memset(&alternation, 0, sizeof alternation); trace.last_known = false; trace_self.known = 0; eye_watch_known = false; eye_unsettled_until = 0;
   memset(&smooth_watch, 0, sizeof smooth_watch); }
 /* True: jumps are looked for in this native frame. Called once for every frame presented under the lock. */
 static bool smooth_detect(const Policy *p, uint32_t kind, uint32_t source, double tick) {
@@ -1048,7 +1050,16 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
     row->what = what | (trace_damp.off_foot ? TFP_CAMERA_TRACE_OFF_FOOT : 0u) | (trace_damp.ran ? TFP_CAMERA_TRACE_DAMPED : 0u);
     memcpy(row->damp, trace_damp.added, 12); memcpy(row->view, trace_damp.view, 12);
     row->entry_ease = p->entry.ease.active && p->entry.ease.duration > 0 ? (float)fmin(1.0, fmax(0.0, (tick-p->entry.ease.started)/p->entry.ease.duration)) : 1;
+    row->sock = 0; row->arms = 0; /* tfp_camera_trace_draw says them, after this frame's draw */
     if (trace.head-trace.sent > TRACE_RING) trace.sent = trace.head-TRACE_RING;
+    /* The log only: the eye opens a window itself where its step changes by TFP_TRACE_SELF_M or more
+     * (src/trace_edges.h: a melee has no State line and no change of action). In an open window the time goes on and
+     * the window lasts TRACE_MS from here. */
+    if (tfp_trace_self_step(&trace_self, shown, tick, p->c.max_gap_ms) >= TFP_TRACE_SELF_M) {
+      row->what |= TFP_CAMERA_TRACE_SELF;
+      if (!(trace.open && tick <= trace.until)) { trace.edge = tick; if (trace.head-trace.sent > TRACE_BEFORE+1u) trace.sent = trace.head-(TRACE_BEFORE+1u); }
+      trace.until = tick+TRACE_MS; trace.open = true;
+    }
   }
   memset(&trace_damp, 0, sizeof trace_damp); /* the next frame's is written before it is presented, or there is none */
   memcpy(trace.last, shown, 12); trace.last_tick = tick; trace.last_known = true;
@@ -1791,10 +1802,16 @@ uint32_t tfp_camera_trace_read(TfpCameraTraceRow *rows, uint32_t capacity) {
     memcpy(row->eye, frame->eye, 12); memcpy(row->wanted, frame->wanted, 12);
     row->step = frame->step; row->correction = frame->correction; row->entry_ease = frame->entry_ease;
     memcpy(row->root, frame->root, 12); memcpy(row->axes, frame->axes, 36); row->what = frame->what; row->tick = frame->tick;
-    memcpy(row->damp, frame->damp, 12); memcpy(row->view, frame->view, 12);
+    memcpy(row->damp, frame->damp, 12); memcpy(row->view, frame->view, 12); row->sock = frame->sock; row->arms = frame->arms;
   }
   policy_release();
   return count;
+}
+void tfp_camera_trace_draw(float sock_m, uint32_t arms) {
+  if (!atomic_load(&trace_on) || !host.lock_exclusive) return;
+  policy_acquire();
+  if (trace.head) { TraceFrame *frame = &trace.frames[(trace.head-1) % TRACE_RING]; frame->sock = sock_m == sock_m ? sock_m : 0; frame->arms = arms; }
+  policy_release();
 }
 void tfp_camera_lock_stats(TfpCameraLockStats *out) {
   if (!out) return;
@@ -1841,7 +1858,7 @@ void tfp_camera_reset_for_tests(void) {
   atomic_store(&lock_off_foot_body, 0); atomic_store(&lock_off_foot_at, 0); atomic_store(&lock_body_distance, 0); atomic_store(&lock_down_distance, 0);
   lock_carry = tfp_q_identity(); lock_was_held = false; lock_down_until = 0; lock_view_known = false; lock_first_known = false; lock_tick = 0; tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity();
   lock_damp_ms = 0; atomic_store(&lock_bodycam, 1); tfp_eye_damp_reset(&lock_eye_damp);
-  memset(&smooth, 0, sizeof smooth); memset(&trace, 0, sizeof trace); eye_watch_known = false; eye_unsettled_until = 0;
+  memset(&smooth, 0, sizeof smooth); memset(&trace, 0, sizeof trace); memset(&trace_self, 0, sizeof trace_self); eye_watch_known = false; eye_unsettled_until = 0;
   memset(&smooth_watch, 0, sizeof smooth_watch); atomic_store(&smooth_event, 0); memset(&trace_damp, 0, sizeof trace_damp);
   atomic_store(&original, 0);
   atomic_store(&installed, 0); atomic_store(&armed, 0); atomic_store(&reserved, 0); atomic_store(&last_error, 0);
