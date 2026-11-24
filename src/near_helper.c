@@ -297,10 +297,12 @@ void tfp_near_setter_from(uint64_t ret, void *camera, float native) {
         atomic_store_explicit(&ads_sight, sight_value ? float_bits(native) : 0, memory_order_relaxed);
         /* The pose helper's closer is read here, in this call, not handed over by the tick: the near clip has to be in
          * with the gun in the frame the gun comes in (the review's B1). */
-        float closer = 0, least = 0;
+        float closer = 0;
         const TfpNearAdsSource source = view == VIEW_ADS ? atomic_load_explicit(&ads_source, memory_order_acquire) : NULL;
-        if (source && (!source(&closer, &least) || !meters(closer) || closer > MAX_METERS)) closer = 0;
-        if (closer > 0) target = tfp_ads_near(least > 0 && meters(least) && least < native ? least : native, closer);
+        if (source && (!source(&closer) || !meters(closer) || closer > MAX_METERS)) closer = 0;
+        /* Round 20c (review 28, B1): the game's own value less the gun's move, no more: the same parts are cut as the
+         * game cuts them, however the game's seat moves. */
+        if (closer > 0) target = tfp_ads_near(native, closer);
         if (view == VIEW_ADS) atomic_fetch_add_explicit(&ads_forwarded, 1, memory_order_relaxed);
         else {
           const float wanted = bits_float(atomic_load_explicit(aim ? &aim_meters : &hip_meters, memory_order_relaxed));
@@ -461,6 +463,7 @@ uint32_t tfp_near_error(void) { return atomic_load_explicit(&last_error, memory_
 
 /* ---- not in retail ---- */
 void tfp_near_set_ads_source(TfpNearAdsSource source) { atomic_store_explicit(&ads_source, source, memory_order_release); }
+TfpNearAdsSource tfp_near_ads_source(void) { return atomic_load_explicit(&ads_source, memory_order_acquire); }
 bool tfp_near_ads_probe(float *sight, float *native, float *applied) {
   const bool on = atomic_load_explicit(&armed, memory_order_acquire) != 0;
   if (sight) *sight = on ? bits_float(atomic_load_explicit(&ads_sight, memory_order_relaxed)) : 0;

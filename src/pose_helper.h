@@ -257,10 +257,18 @@ typedef struct TfpPoseAdsProbe {
   float closer;       /* m the gun is drawn closer than the game seats it: pull * share less the ADS placement's forward */
   float ads_forward;  /* m: the ADS placement's forward (the editor's ADS action) */
   float depth;        /* m: the game's own depth in the last frame of full aim (request+0x90 blended); NAN: not worked out */
+  bool aim_steady;    /* round 20c: tfp_pose_set_aim_steady (zoom_steady.txt) */
+  bool editing;       /* round 20c: tfp_pose_set_ads_editing */
+  float sight, wanted; /* round 20c: what tfp_pose_set_ads_seat was handed last */
 } TfpPoseAdsProbe;
 bool tfp_pose_ads_probe(TfpPoseAdsProbe *out); /* reads only */
 /* For the near helper's own calls (tfp_near_set_ads_source): how far in the near clip goes in full aim this frame, `closer`
- * m (the gun's move toward the eye, leading it while it comes in: src/ads_seat.h tfp_ads_lead), and the least distance
- * the sight can be at, `sight_least` m (0: none known). false, both 0: no lease. Any thread; reads only. */
-bool tfp_pose_ads_near(float *closer, float *sight_least);
+ * m (the gun's move toward the eye, leading it while it comes in: src/ads_seat.h tfp_ads_lead). 0 unless the player asks
+ * for the near clip to follow (round 20c, review 28 B1): a wanted distance above 0 (tfp_pose_set_ads_seat), or the
+ * placement editor on its ADS action (tfp_pose_set_ads_editing). false, 0: no lease. Any thread; reads only. */
+bool tfp_pose_ads_near(float *closer);
+/* Round 20c: the placement editor is on its ADS action (its draft is full aim's ADS placement, drawn live), so the near
+ * clip follows the gun as with a wanted distance. false, the start-up value: a saved ADS placement is drawn as on
+ * feel.51, the near clip the game's. The binder sets it each tick (src/aim_bind.h). Any thread. */
+void tfp_pose_set_ads_editing(bool on);
 #endif

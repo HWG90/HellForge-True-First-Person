@@ -39,9 +39,9 @@ static bool host_write(void *, void *out, const void *data, size_t length) { std
 static bool host_pin(void *, uint64_t) { return true; }
 static void host_lock(void *, int) {}
 static void host_forward(void *, uint64_t, void *, float meters) { sent.seen = true; sent.meters = meters; }
-// The pose helper's side (tfp_pose_ads_near), scripted: how far the gun is drawn in, and the least distance of the sight.
-static struct { float closer, least; bool on; unsigned asked; } pose = {0, 0, true, 0};
-static bool pose_source(float *closer, float *least) { ++pose.asked; *closer = pose.closer; *least = pose.least; return pose.on; }
+// The pose helper's side (tfp_pose_ads_near), scripted: how far the gun is drawn in.
+static struct { float closer; bool on; unsigned asked; } pose = {0, true, 0};
+static bool pose_source(float *closer) { ++pose.asked; *closer = pose.closer; return pose.on; }
 static void set_closer(float m) { pose.closer = m; }
 
 // One call of the hook from the pinned site on the armed camera, 8 ms later. Returns what the game's setter was handed.
@@ -89,16 +89,14 @@ int main() {
   set_closer(.073f);
   last = frame(.173f);
   CHECK(near(last, .10, 1e-6));
-  // a sight the pose helper knows to be nearer than the game's value: the near clip goes in from there
-  pose.least = .15f;
+  // round 20c (review 28, B1): the game's value less the gun's move, whatever the game's seat: a new zoom level's value
+  // (0.22 m) less the same 7.3 cm, eased out to (a step away from the eye), and back in at once
+  last = frame(.22f);
+  CHECK(last > .10f && last < .147f);
+  for (int i = 0; i < 60; ++i) last = frame(.22f);
+  CHECK(near(last, .22 - .073, 1e-6));
   last = frame(.173f);
-  CHECK(near(last, .15 - .073, 1e-6));
-  pose.least = .30f;                                                        // farther than the game's value: the game's,
-  last = frame(.173f);                                                      // eased out to (a step away from the eye)
-  CHECK(last > .077f && last < .10f);
-  for (int i = 0; i < 60; ++i) last = frame(.173f);
   CHECK(near(last, .10, 1e-6));
-  pose.least = 0;
   // the gun going back out: the near clip eases out after it, never ahead of it
   set_closer(.02f);
   float before = last, worst = 0;

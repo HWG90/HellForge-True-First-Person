@@ -786,7 +786,8 @@ static float depth_delta(Policy *p, const DepthObservation *observation, uint64_
 static TfpSteady steady; static TfpSteadyLog steady_log; static TfpSteadyPair steady_pair;
 /* Not in retail (round 20, src/ads_seat.h): the binder's sight and wanted distance, and what the last frame did. */
 static _Atomic uint32_t ads_sight, ads_wanted, ads_pull_bits, ads_share_bits, ads_closer_bits, ads_forward_bits, ads_depth_bits = UINT32_C(0x7fc00000);
-static _Atomic uint32_t ads_full, ads_near_bits, ads_least_bits; /* what the near clip moves in by, the sight's least distance (tfp_pose_ads_near) */
+static _Atomic uint32_t ads_full, ads_near_bits; /* what the near clip moves in by (tfp_pose_ads_near) */
+static _Atomic uint32_t ads_editing; /* round 20c: the placement editor on its ADS action (tfp_pose_set_ads_editing) */
 static TfpAdsPull ads_pull;
 static TfpAdsLead ads_lead;
 static TfpAdsSeat ads_seat;
@@ -1484,8 +1485,12 @@ static void position_locked(uint32_t unit, uint32_t node, const float *pose, uin
     atomic_store_explicit(&ads_forward_bits, float_bits(forward), memory_order_relaxed);
     const float closer = tfp_ads_closer(pull, policy.ads_share, forward);
     atomic_store_explicit(&ads_closer_bits, float_bits(closer), memory_order_relaxed);
-    atomic_store_explicit(&ads_near_bits, float_bits(tfp_ads_lead(&ads_lead, closer, (double)now)), memory_order_relaxed);
-    atomic_store_explicit(&ads_least_bits, float_bits(least > 0 && isfinite(least) ? least : 0), memory_order_relaxed);
+    /* Round 20c (review 28, B1): the near clip follows the gun only while the player asks for it: a wanted distance, or
+     * the placement editor on its ADS action (its draft drawn live in full aim). Else nothing: the near clip in full aim
+     * is feel.51's, a saved ADS placement toward the eye included. The lead is left as it was while not following: by
+     * the time the editor opens it is stale (TFP_ADS_STALE_MS), so the near clip comes in with no lead. */
+    const bool follow = wanted > 0 || atomic_load_explicit(&ads_editing, memory_order_relaxed) != 0;
+    atomic_store_explicit(&ads_near_bits, float_bits(follow ? tfp_ads_lead(&ads_lead, closer, (double)now) : 0), memory_order_relaxed);
     atomic_store_explicit(&ads_full, policy.full_ads ? 1u : 0u, memory_order_relaxed);
   }
   float applied_depth = 0;
@@ -2185,7 +2190,7 @@ void tfp_pose_reset_for_tests(void) {
   memset(&steady, 0, sizeof steady); memset(&steady_log, 0, sizeof steady_log); memset(&steady_pair, 0, sizeof steady_pair); atomic_store(&steady_mode, 0); atomic_store(&aim_steady, 0);
   atomic_store(&ads_sight, 0); atomic_store(&ads_wanted, 0); atomic_store(&ads_pull_bits, 0); atomic_store(&ads_share_bits, 0);
   atomic_store(&ads_closer_bits, 0); atomic_store(&ads_forward_bits, 0); atomic_store(&ads_depth_bits, UINT32_C(0x7fc00000)); atomic_store(&ads_full, 0);
-  atomic_store(&ads_near_bits, 0); atomic_store(&ads_least_bits, 0);
+  atomic_store(&ads_near_bits, 0); atomic_store(&ads_editing, 0);
   tfp_ads_pull_reset(&ads_pull); tfp_ads_fall_reset(&ads_fall); memset(&ads_lead, 0, sizeof ads_lead); tfp_ads_seat_reset(&ads_seat); ads_frame_depth = ads_frame_rest = NAN;
 }
 /* Not in retail (pose_helper.h). */
@@ -2210,12 +2215,12 @@ void tfp_pose_set_ads_seat(float sight, float wanted) {
 }
 /* Read by the near helper in each call of the game's near setter (src/wire_win_pose.c binds it), not through the tick:
  * the near clip moves in with the gun in the same frame (the review's B1). */
-bool tfp_pose_ads_near(float *closer, float *sight_least) {
+bool tfp_pose_ads_near(float *closer) {
   const bool on = atomic_load_explicit(&armed, memory_order_acquire) != 0;
   if (closer) *closer = on ? bits_float(atomic_load_explicit(&ads_near_bits, memory_order_relaxed)) : 0;
-  if (sight_least) *sight_least = on ? bits_float(atomic_load_explicit(&ads_least_bits, memory_order_relaxed)) : 0;
   return on;
 }
+void tfp_pose_set_ads_editing(bool on) { atomic_store_explicit(&ads_editing, on ? 1u : 0u, memory_order_relaxed); }
 bool tfp_pose_ads_probe(TfpPoseAdsProbe *out) {
   if (!out) return false;
   out->armed = atomic_load_explicit(&armed, memory_order_acquire) != 0;
@@ -2225,6 +2230,10 @@ bool tfp_pose_ads_probe(TfpPoseAdsProbe *out) {
   out->closer = out->armed ? bits_float(atomic_load_explicit(&ads_closer_bits, memory_order_relaxed)) : 0;
   out->ads_forward = bits_float(atomic_load_explicit(&ads_forward_bits, memory_order_relaxed));
   out->depth = bits_float(atomic_load_explicit(&ads_depth_bits, memory_order_relaxed));
+  out->aim_steady = atomic_load_explicit(&aim_steady, memory_order_relaxed) != 0;
+  out->editing = atomic_load_explicit(&ads_editing, memory_order_relaxed) != 0;
+  out->sight = bits_float(atomic_load_explicit(&ads_sight, memory_order_relaxed));
+  out->wanted = bits_float(atomic_load_explicit(&ads_wanted, memory_order_relaxed));
   return true;
 }
 /* Not in retail (pose_helper.h). Reads only. */
