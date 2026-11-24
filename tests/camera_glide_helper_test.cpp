@@ -132,10 +132,15 @@ static float lapse_mid_glide(bool smooth, double dt, float way, double key_ms, f
   return at_lapse;
 }
 static float apart3(const float *a, const float *b) { float d = 0; for (int k = 0; k < 3; ++k) d += (a[k] - b[k]) * (a[k] - b[k]); return std::sqrt(d); }
+// A take-over (a weapon drawn while the eye is let go, scenes 3 to 5 below) goes on at the release's rates, not the swap
+// glide's 250 ms (src/camera_glide.h THE RELEASE): no frame's step changes by more than in the release of the same way at
+// the same frame time, within this share (the take-over begins with the speed the eye has; 1.11 at most seen).
+// On the swap glide's rates it is up to 2.4 times as hard, 1.5 to 1.9 at 33 and 50 ms a frame (review of round 19, M4).
+#define TAKE_OVER 1.15f
 static void hold_release() {
   const double frames[4] = {8, 16.7, 33.3, 50};
   for (int f = 0; f < 4; ++f) for (int smooth = 0; smooth < 2; ++smooth) {
-    const double dt = frames[f];
+    const double dt = frames[f]; float released = 0;
     // 1. The emote, the Scythe's 0.44 m: held for 900 ms, then let go from rest to rest over 300 to 450 ms, no frame's
     // step changing by more than the judge allows, at the head camera's own eye at the end and never further from it on
     // the way. (Before round 19: faded on 80 ms, the first frame 0.15 m at 33 ms a frame.)
@@ -146,6 +151,7 @@ static void hold_release() {
       CHECK(r.largest_change <= judge_limit(dt));
       CHECK(r.still_ms - r.first_move_ms >= 300 - dt && r.still_ms - r.first_move_ms <= 450 + dt);
       CHECK(r.toward && r.from_head_eye < 1e-3f);
+      released = r.largest_change;
     }
     // 2. A short way (0.10 m) is let go over 300 ms all the same: no faster than the long one.
     {
@@ -157,14 +163,14 @@ static void hold_release() {
     // full, and the eye's return glides it back to the rifle's eye, from where it rests.
     {
       float rifle[3]; const Release r = emote(true, smooth, dt, .44f, 1, 1050, false, nullptr, rifle);
-      CHECK(r.largest_change <= judge_limit(dt));
+      CHECK(r.largest_change <= judge_limit(dt) && r.largest_change <= TAKE_OVER * released);
       CHECK(apart3(r.from_end, rifle) < 1e-3f);
     }
     // 4. The sidearm, whose eye is remembered, comes up 150 ms into the letting go: the glide to its eye takes over from
     // where the eye is and the way it is going, without a step, and ends there.
     {
       float sidearm[3]; const Release r = emote(true, smooth, dt, .44f, 2, 1050, false, sidearm);
-      CHECK(r.largest_change <= judge_limit(dt));
+      CHECK(r.largest_change <= judge_limit(dt) && r.largest_change <= TAKE_OVER * released);
       CHECK(apart3(r.from_end, sidearm) < 1e-3f);
     }
     // 5. A long swap: the hold lapses on its 2500 ms while the hands are full and the eye is let go; 150 ms into that the
@@ -172,7 +178,7 @@ static void hold_release() {
     {
       float sidearm[3]; const Release r = emote(true, smooth, dt, .44f, 2, 2650, true, sidearm);
       CHECK(r.first_move_ms > 2500 - dt && r.first_move_ms <= 2500 + 2 * dt + .5);
-      CHECK(r.largest_change <= judge_limit(dt));
+      CHECK(r.largest_change <= judge_limit(dt) && r.largest_change <= TAKE_OVER * released);
       CHECK(apart3(r.from_end, sidearm) < 1e-3f);
     }
   }
