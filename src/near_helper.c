@@ -17,6 +17,7 @@
  * and expression is retail's. "cpp:a-b" above a function is its line range in
  * the retail file. What differs is in docs/translation/NEAR-HELPER-TRANSLATION.md. */
 #include "near_helper.h"
+#include "ads_seat.h"
 #include <math.h>
 #include <stdatomic.h>
 #include <string.h>
@@ -87,6 +88,7 @@ static _Atomic uint64_t seen, forwarded, replaced, ads_forwarded, aim_applied, o
  * (C has no always-lock-free guarantee to assert for _Atomic float); the
  * float read back is bit for bit the float stored. */
 static _Atomic uint32_t hip_meters, aim_meters, last_native, last_applied;
+static _Atomic uint32_t ads_closer, ads_sight; /* not in retail (round 20): src/ads_seat.h */
 _Static_assert(ATOMIC_INT_LOCK_FREE == 2 && sizeof(float) == 4, "Near clip requires lock-free floats");
 static uint32_t float_bits(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
 static float bits_float(uint32_t u) { float f; memcpy(&f, &u, 4); return f; }
@@ -289,6 +291,10 @@ void tfp_near_setter_from(uint64_t ret, void *camera, float native) {
         /* Full ADS targets the game's own distance, whatever the sight asks for; hip and normal
          * aim target theirs when it is further than the game's 0.05, and 0.05 otherwise. */
         const bool aim = view == VIEW_SHOULDER; float target = native;
+        /* Not in retail (round 20): the game's sight, for the pose helper's pull; and in full aim the near clip moved
+         * in with the gun (src/ads_seat.h), never under the game's own 0.05. Nothing closer: retail's value. */
+        atomic_store_explicit(&ads_sight, sight_value ? float_bits(native) : 0, memory_order_relaxed);
+        if (view == VIEW_ADS) target = tfp_ads_near(native, bits_float(atomic_load_explicit(&ads_closer, memory_order_relaxed)));
         if (view == VIEW_ADS) atomic_fetch_add_explicit(&ads_forwarded, 1, memory_order_relaxed);
         else {
           const float wanted = bits_float(atomic_load_explicit(aim ? &aim_meters : &hip_meters, memory_order_relaxed));
@@ -445,6 +451,16 @@ uint32_t tfp_near_read_stats(uint64_t generation, TfpNearStats *output) {
 uint32_t tfp_near_error(void) { return atomic_load_explicit(&last_error, memory_order_acquire); }
 
 /* ---- not in retail ---- */
+void tfp_near_set_ads_closer(float meters) {
+  atomic_store_explicit(&ads_closer, float_bits(isfinite(meters) && meters > 0 && meters <= MAX_METERS ? meters : 0), memory_order_relaxed);
+}
+bool tfp_near_ads_probe(float *sight, float *native, float *applied) {
+  const bool on = atomic_load_explicit(&armed, memory_order_acquire) != 0;
+  if (sight) *sight = on ? bits_float(atomic_load_explicit(&ads_sight, memory_order_relaxed)) : 0;
+  if (native) *native = bits_float(atomic_load_explicit(&last_native, memory_order_relaxed));
+  if (applied) *applied = bits_float(atomic_load_explicit(&last_applied, memory_order_relaxed));
+  return on;
+}
 void tfp_near_set_host(const TfpNearHost *h) { host = *h; }
 void tfp_near_reset_for_tests(void) {
   atomic_store(&original, 0);
@@ -452,6 +468,7 @@ void tfp_near_reset_for_tests(void) {
   atomic_store(&seen, 0); atomic_store(&forwarded, 0); atomic_store(&replaced, 0); atomic_store(&ads_forwarded, 0);
   atomic_store(&aim_applied, 0); atomic_store(&other_kind, 0); atomic_store(&text_low, 0); atomic_store(&text_high, 0);
   atomic_store(&hip_meters, 0); atomic_store(&aim_meters, 0); atomic_store(&last_native, 0); atomic_store(&last_applied, 0);
+  atomic_store(&ads_closer, 0); atomic_store(&ads_sight, 0);
   slot = 0; slot_image = 0; generation_counter = 0; owned_generation = 0; retired_generation = 0; possible = false;
   memset(&policy, 0, sizeof policy);
   for (unsigned i = 0; i < 16; ++i) {

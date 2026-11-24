@@ -54,6 +54,8 @@ void pose_world_weapon(int present) {
   sync();
 }
 void pose_world_seated(int seated) { scene.flags[14] = seated ? 4 : 0; sync(); }
+/* Full aim: the controller's aim byte (byte 4), as the game sets it in the sights. */
+void pose_world_aim(int on) { scene.controller[4] = on ? 1 : 0; sync(); }
 /* Another first-person request of the same avatar, weapon and body pushed above the owned one (1), or taken off again (0).
  * Nothing of the owned record changes: only the top of the ring is another record. */
 void pose_world_second_request(int pushed) {
@@ -527,6 +529,7 @@ void pose_world_first_person(void);
 void pose_world_action(unsigned flags);
 void pose_world_weapon(int present);
 void pose_world_seated(int seated);
+void pose_world_aim(int on);
 void pose_world_second_request(int pushed);
 void pose_world_request_field(unsigned at, uint32_t value);
 static PoseWorld world;
@@ -603,6 +606,10 @@ static void root_frame(uint64_t step_ms) {
 }
 static bool applied_is(double x, double y, double z) {
   return near(forwarded[0] - NATIVE[0], x, 2e-6) && near(forwarded[1] - NATIVE[1], y, 2e-6) && near(forwarded[2] - NATIVE[2], z, 2e-6);
+}
+/* Full aim, the hip placement eased out on the transition's own (exponential) step: x and z near 0, the forward as given. */
+static bool aimed_is(double y) {
+  return near(forwarded[0] - NATIVE[0], 0, 1e-4) && near(forwarded[1] - NATIVE[1], y, 1e-4) && near(forwarded[2] - NATIVE[2], 0, 1e-4);
 }
 static bool meter_is_applied(void) { /* the meter's commanded shift is what the helper really added to the game's pose */
   return applied_is(pose.meter.shift[0], pose.meter.shift[1], pose.meter.shift[2]);
@@ -1074,6 +1081,59 @@ static int real(void) {
   H->finish(H->user, handle, &has_stats, &stats, &why);
   pose_world_action(0);
   for (int i = 0; i < 5; i++) CHECK(slot_now(i) == world.native[i]);
+
+  /* ---- round 20: the sight brought closer in full aim (src/ads_seat.h; not retail's). Off until the binder hands a
+   * wanted distance; then, in full aim, the gun goes toward the eye along node 5's forward axis by the game's sight
+   * (its near clip) less the wanted distance, eased in and out with the hip placement's blend, and the ADS placement's
+   * forward (the editor's) on top. The root is never written for it: the eye stays where the game puts it. ---- */
+  {
+    TfpPoseAdsProbe ads;
+    pose_world_third_person();
+    CHECK(H->prepare(H->user, &c, &native, &why) == TFP_OPS_TRUE && H->begin(H->user, &c, native, &handle, &why) == TFP_OPS_TRUE);
+    pose_world_first_person();
+    game_frame(handle, &stats, 300);
+    CHECK(applied_is(.15, 0, -.12));
+    tfp_pose_set_ads_seat(.173f, .10f);                               /* the Scythe's sight, 10 cm wanted */
+    game_frame(handle, &stats, 16);
+    CHECK(applied_is(.15, 0, -.12) && tfp_pose_ads_probe(&ads) && !ads.full_ads && ads.share == 0 && ads.closer == 0); /* at the hip: nothing */
+    pose_world_aim(1);
+    const unsigned roots_before = root_calls;
+    float last = forwarded[1], worst = 0;
+    for (int i = 0; i < 40; i++) {
+      game_frame(handle, &stats, 16);
+      if (fabsf(forwarded[1] - last) > worst) worst = fabsf(forwarded[1] - last);
+      CHECK(forwarded[1] <= last + 1e-6f);                            /* toward the eye only, never back and forth */
+      last = forwarded[1];
+    }
+    CHECK(aimed_is(-.073) && worst < .02f && root_calls == roots_before);  /* full aim: the hip placement gone, the gun 7.3 cm closer */
+    CHECK(tfp_pose_ads_probe(&ads) && ads.full_ads && near(ads.share, 1, 1e-3) && near(ads.pull, .073, 1e-4) && near(ads.closer, .073, 1e-4));
+    /* the editor's ADS forward on top: 2 cm back from the eye; the near clip comes in by 5.3 cm then */
+    CHECK(H->set_ads_placement(H->user, handle, 0, .02, 0, &why) == TFP_OPS_TRUE);
+    game_frame(handle, &stats, 16);
+    CHECK(aimed_is(-.053) && tfp_pose_ads_probe(&ads) && near(ads.closer, .053, 1e-4) && near(ads.ads_forward, .02, 1e-6));
+    CHECK(H->set_ads_placement(H->user, handle, 0, 0, 0, &why) == TFP_OPS_TRUE);
+    game_frame(handle, &stats, 16);
+    CHECK(aimed_is(-.073));                                           /* the ADS placement is retail's: a step, as the editor drags it */
+    /* another zoom level: the game's sight at 0.35 m. Glided, the most (0.25 m) at the end */
+    tfp_pose_set_ads_seat(.35f, .10f);
+    last = forwarded[1]; worst = 0;
+    for (int i = 0; i < 60; i++) { game_frame(handle, &stats, 16); if (fabsf(forwarded[1] - last) > worst) worst = fabsf(forwarded[1] - last); last = forwarded[1]; }
+    CHECK(aimed_is(-.25) && worst < .04f);
+    /* out of aim: eased back to the hip placement, nothing pulled */
+    pose_world_aim(0);
+    last = forwarded[1]; worst = 0;
+    for (int i = 0; i < 40; i++) { game_frame(handle, &stats, 16); CHECK(forwarded[1] >= last - 1e-6f); if (fabsf(forwarded[1] - last) > worst) worst = fabsf(forwarded[1] - last); last = forwarded[1]; }
+    CHECK(near(forwarded[0] - NATIVE[0], .15, 1e-4) && near(forwarded[1] - NATIVE[1], 0, 1e-4) && near(forwarded[2] - NATIVE[2], -.12, 1e-4));
+    CHECK(tfp_pose_ads_probe(&ads) && ads.share < 1e-3f && ads.closer < 1e-4f);
+    /* 0 cm: the game's own seat, in full aim too */
+    tfp_pose_set_ads_seat(.35f, 0);
+    pose_world_aim(1);
+    for (int i = 0; i < 40; i++) game_frame(handle, &stats, 16);
+    CHECK(aimed_is(0) && tfp_pose_ads_probe(&ads) && ads.pull == 0 && ads.closer == 0);
+    pose_world_aim(0);
+    H->finish(H->user, handle, &has_stats, &stats, &why);
+    pose_world_third_person();
+  }
   CHECK(lock_faults == 0 && lock_depth[0] == 0 && lock_depth[1] == 0);
   return 0;
 }

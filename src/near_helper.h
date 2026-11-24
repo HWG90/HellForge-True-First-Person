@@ -103,4 +103,11 @@ uint32_t tfp_near_read_stats(uint64_t generation, TfpNearStats *stats);
 uint32_t tfp_near_error(void);
 /* Copies up to capacity rows; returns the number of distinct callers seen. */
 uint32_t tfp_near_read_sites(TfpNearSite *output, uint32_t capacity);
+/* Not in retail (round 20, src/ads_seat.h): in full aim the near clip moves in with the gun, by `closer` metres (what the
+ * pose helper drew the gun closer than the game seats it), never under the game's own 0.05. 0, the start-up value, is
+ * retail's: full aim forwards the game's own value. Any thread. tfp_near_ads_probe: the game's sight (its near clip of a
+ * sight in the first-person request, m; 0 when none is seen or no lease is armed), the game's last value and what was
+ * handed on. false: no lease. */
+void tfp_near_set_ads_closer(float meters);
+bool tfp_near_ads_probe(float *sight, float *native, float *applied);
 #endif

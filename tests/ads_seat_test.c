@@ -28,6 +28,9 @@ int main(void) {
   for (int i = 0; i < 60; i++) { const float now = tfp_ads_pull_step(&p, .25f, t += 8); if (now - last > worst) worst = now - last; CHECK(now >= last && now <= .25f); last = now; }
   CHECK(near(last, .25f, 1e-3) && worst < .02f);                                              /* another zoom level: glided, no step over 2 cm a frame */
   CHECK(tfp_ads_pull_step(&p, .25f, t) == last);                                              /* time standing still: the same */
+  for (int i = 0; i < 60; i++) last = tfp_ads_pull_step(&p, 0, t += 16);
+  CHECK(last == 0);                                                                           /* a glide to nothing ends at nothing */
+  tfp_ads_pull_step(&p, .25f, t += 16);
   CHECK(tfp_ads_pull_step(&p, 0, t += 400) == 0);                                             /* a pause over 250 ms: at once */
   CHECK(tfp_ads_pull_step(&p, NAN, t += 8) == 0 && isfinite(tfp_ads_pull_step(&p, .1f, t - 50)));
   /* ---- how much closer the gun is drawn: the pull by the ADS share, less the ADS placement's forward ---- */

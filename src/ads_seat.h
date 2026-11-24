@@ -23,6 +23,7 @@
 #define TFP_ADS_SIGHT_MOST 1.0f    /* m: the near helper's own limit */
 #define TFP_ADS_GLIDE_MS 80.0f
 #define TFP_ADS_STALE_MS 250.0
+#define TFP_ADS_SNAP .0002f       /* m: a glide this close to its target is there */
 
 /* The pull a sight at `sight` m (the game's near clip) asks for, to be `wanted` m from the eye. 0: nothing to pull
  * (no sight, already closer, or wanted 0: the game's own seat). */
@@ -40,6 +41,7 @@ static inline float tfp_ads_pull_step(TfpAdsPull *p, float target, double tick) 
   if (!isfinite(tick)) return p->has ? p->shown : 0;
   if (!p->has || tick < p->at || tick - p->at > TFP_ADS_STALE_MS) p->shown = target;
   else if (tick > p->at) p->shown += (target - p->shown)*(1 - expf(-(float)(tick - p->at)/TFP_ADS_GLIDE_MS));
+  if (fabsf(p->shown - target) < TFP_ADS_SNAP) p->shown = target; /* ends: a glide to nothing is nothing */
   p->at = tick; p->has = true;
   return p->shown;
 }
