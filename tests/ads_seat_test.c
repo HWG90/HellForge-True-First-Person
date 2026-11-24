@@ -59,11 +59,13 @@ int main(void) {
   CHECK(near(tfp_ads_sight_least(&seat, .22f, .27f, .27f, t += 8), .22f, 1e-6));              /* a tick later: the same */
   for (int i = 0; i < 8; i++) tfp_ads_sight_least(&seat, .22f, .27f, .27f, t += 8);
   CHECK(seat.has && seat.sight == .22f && seat.depth == .27f);                                /* paired anew */
-  /* the other way, the game reseating slowly: the sight with D, not at the new near clip */
+  /* the other way, the game reseating slowly: the sight with D, not at the new near clip; and the near clip still the
+   * old one (a tick late) against the new rest counts nothing twice: the gun does not jump back out */
+  CHECK(near(tfp_ads_sight_least(&seat, .22f, .27f, .40f, t += 8), .22f, 1e-6));
   CHECK(near(tfp_ads_sight_least(&seat, .35f, .30f, .40f, t += 8), .25f, 1e-6));
   CHECK(tfp_ads_sight_least(&seat, .05f, .30f, .40f, t += 8) == .05f && !seat.has);          /* no sight: nothing known */
-  /* the most the gun may be pulled: the sight no nearer than the wanted distance less 1 cm, nor than 0.05 */
-  CHECK(near(tfp_ads_pull_most(.22f, .10f), .13f, 1e-6) && tfp_ads_pull_most(.05f, .10f) == 0 && tfp_ads_pull_most(1, .10f) == TFP_ADS_PULL_MOST);
+  /* the most the gun may be pulled: the sight no nearer than the wanted distance, nor than 0.05 */
+  CHECK(near(tfp_ads_pull_most(.22f, .10f), .12f, 1e-6) && tfp_ads_pull_most(.05f, .10f) == 0 && tfp_ads_pull_most(1, .10f) == TFP_ADS_PULL_MOST);
   CHECK(near(tfp_ads_pull_most(.22f, .02f), .17f, 1e-6) && tfp_ads_pull_most(.22f, 0) == TFP_ADS_PULL_MOST && tfp_ads_pull_most(NAN, .1f) == TFP_ADS_PULL_MOST);
   TfpAdsPull held; tfp_ads_pull_reset(&held);
   tfp_ads_pull_step(&held, .25f, 100);
