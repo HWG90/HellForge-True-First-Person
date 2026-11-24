@@ -74,7 +74,7 @@ static inline bool tfp_eye_glide_retail(float *value, const float *target, float
 /* from, speed: where the glide began and with what speed (m/s); top: its speed when the gathering of way ends;
  * target: where it ends; at: the eye as the last frame left it; elapsed, rise, duration: ms since it began, the
  * time it gathers way for, its whole time. */
-typedef struct TfpEyeGlide { bool active, retail; float from[3], speed[3], top[3], target[3], at[3], elapsed, rise, duration; } TfpEyeGlide;
+typedef struct TfpEyeGlide { bool active, retail, release; float from[3], speed[3], top[3], target[3], at[3], elapsed, rise, duration; } TfpEyeGlide;
 static inline void tfp_eye_glide_reset(TfpEyeGlide *g) { memset(g, 0, sizeof *g); }
 /* The glide's place and speed `ms` after it began. */
 static inline void tfp_eye_glide_at(const TfpEyeGlide *g, float ms, float *value, float *speed) {
@@ -90,16 +90,20 @@ static inline void tfp_eye_glide_at(const TfpEyeGlide *g, float ms, float *value
     }
   }
 }
-static inline void tfp_eye_glide_begin(TfpEyeGlide *g, const float *from, const float *speed, const float *target) {
+/* A glide from `from` with `speed` to `target` that gathers way at `accel` where its time allows, in min_ms to max_ms. */
+static inline void tfp_eye_glide_plan(TfpEyeGlide *g, const float *from, const float *speed, const float *target, float accel, float min_ms, float max_ms) {
   float square = 0, fast = 0;
   for (unsigned i = 0; i < 3; ++i) { g->from[i] = g->at[i] = from[i]; g->speed[i] = speed[i]; g->target[i] = target[i];
     square += (target[i]-from[i])*(target[i]-from[i]); fast += speed[i]*speed[i]; }
   const float share = TFP_EYE_GLIDE_SHARE;
-  float ms = 1000*fmaxf(sqrtf(2*sqrtf(square)/(share*TFP_EYE_GLIDE_ACCEL)), sqrtf(fast)*(1-share*share)/(share*share*TFP_EYE_GLIDE_ACCEL));
-  ms = fminf(fmaxf(ms, TFP_EYE_GLIDE_MIN_MS), TFP_EYE_GLIDE_MAX_MS);
+  float ms = 1000*fmaxf(sqrtf(2*sqrtf(square)/(share*accel)), sqrtf(fast)*(1-share*share)/(share*share*accel));
+  ms = fminf(fmaxf(ms, min_ms), max_ms);
   g->duration = ms; g->rise = ms*share; g->elapsed = 0; g->active = true;
   /* the way is half the first speed over the rise and half the top speed over the whole time */
   for (unsigned i = 0; i < 3; ++i) g->top[i] = (2*(target[i]-from[i])-speed[i]*g->rise/1000)/(ms/1000);
+}
+static inline void tfp_eye_glide_begin(TfpEyeGlide *g, const float *from, const float *speed, const float *target) {
+  tfp_eye_glide_plan(g, from, speed, target, TFP_EYE_GLIDE_ACCEL, TFP_EYE_GLIDE_MIN_MS, TFP_EYE_GLIDE_MAX_MS);
 }
 /* One frame: `value` (the eye as the last frame left it) goes towards `target`; `dt` in seconds. True: it moved (by
  * more than 0.000001 m along an axis, as tfp_eye_glide_retail says it). A `dt` that is not above 0 moves nothing; a
@@ -157,10 +161,50 @@ static inline bool tfp_eye_glide_lock_step(TfpEyeGlide *g, float *value, const f
     tfp_eye_glide_reset(g);
     g->retail = sqrtf(square) > TFP_EYE_GLIDE_FAR_M;
   }
+  g->release = false;
   if (!g->retail) return tfp_eye_glide_step(g, value, target, dt);
   const bool moved = tfp_eye_glide_retail(value, target, dt);
   for (unsigned i = 0; i < 3; ++i) g->at[i] = value[i];
   if (!moved && dt > 0) g->retail = false;
   return moved;
 }
+
+/* THE RELEASE (beyond retail, round 19). The helper holds the native view's eye while the hands are empty (an emote, the
+ * stratagem menu, a grenade held, a stim, a swap) and lets it go when the hold lapses: TFP_ACTION_EYE_IDLE_MS (900) of
+ * empty hands, or 2500 ms of hold. Retail let it go on an 80 ms fade, whose first frame is its largest: 0.44 m (the
+ * LAS-5 Scythe's eye, behind the head) began with 0.15 m at 33 ms a frame, then 0.10, 0.067, 0.043, and the view
+ * stepped back to the head in every emote (soak 27: all three emotes at 901-902 ms; matrix of feel.51: grenade-held
+ * 0.156, stratagem-menu 0.157). In a frame the lock holds the release is a glide from rest to rest to `target` (the
+ * head camera's own eye: zero; or the eye of a hold that comes while letting go), on the swap glide's shape:
+ *  - Its time follows from the distance at TFP_EYE_RELEASE_ACCEL, 300 to 450 ms: 0.44 m is 404 ms, gathering way at
+ *    9 m/s^2 and losing it at 13.5. A frame's step changes by no more than 13.5 m/s^2 times its time squared: 0.015 m
+ *    at 33 ms, 0.034 m at 50, against the judge's 0.06 m at 30 frames a second. Short ways take 300 ms all the same:
+ *    nothing is gained by letting a held eye go faster.
+ *  - An eye under way (a swap's glide when the hold lapses, or a release whose target changes: a new hold) goes on from
+ *    the speed it has; an eye that is not where the last frame left it, a retail glide, or none: from rest.
+ *  - A glide that has begun as a release and is under way stays one when its target changes (a weapon drawn while
+ *    letting go): its rates, not the swap's 250 ms, so the take-over is no harder than the release itself.
+ * A `dt` that is not above 0 moves nothing; a value or a target that is not a number moves nothing and forgets it. */
+#define TFP_EYE_RELEASE_ACCEL 9.0f
+#define TFP_EYE_RELEASE_MIN_MS 300.0f
+#define TFP_EYE_RELEASE_MAX_MS 450.0f
+static inline bool tfp_eye_glide_release(TfpEyeGlide *g, float *value, const float *target, float dt) {
+  if (!tfp_finite3(value) || !tfp_finite3(target)) { tfp_eye_glide_reset(g); return false; }
+  const bool here = g->active && !g->retail && value[0] == g->at[0] && value[1] == g->at[1] && value[2] == g->at[2];
+  if (!here || !g->release || target[0] != g->target[0] || target[1] != g->target[1] || target[2] != g->target[2]) {
+    float place[3], speed[3] = {0, 0, 0};
+    if (here) tfp_eye_glide_at(g, g->elapsed, place, speed);
+    tfp_eye_glide_reset(g);
+    tfp_eye_glide_plan(g, value, speed, target, TFP_EYE_RELEASE_ACCEL, TFP_EYE_RELEASE_MIN_MS, TFP_EYE_RELEASE_MAX_MS);
+    g->release = true;
+  }
+  if (!(dt > 0) || !isfinite(dt)) return false;
+  g->elapsed += dt*1000;
+  float speed[3]; bool moved = false;
+  tfp_eye_glide_at(g, g->elapsed, g->at, speed);
+  for (unsigned i = 0; i < 3; ++i) { if (fabsf(g->at[i]-value[i]) > 1e-6f) moved = true; value[i] = g->at[i]; }
+  return moved;
+}
+/* Whether `g` is a release that has not ended. */
+static inline bool tfp_eye_glide_releasing(const TfpEyeGlide *g) { return g->active && g->release && g->elapsed < g->duration; }
 #endif
