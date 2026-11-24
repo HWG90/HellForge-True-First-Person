@@ -616,23 +616,55 @@ void tfp_fov_lock_stats(TfpFovLockStats *out) {
  * frames more of this), and then nothing here changes anything. Another camera than the armed one is never touched.
  * The glide's time is the host's performance counter, read here in every rendered frame (the clock the camera
  * helper's frames run on): the binder's time only moves once a game tick, in steps of about 16 ms, and a glide on it
- * stood still for a frame or two and then jumped. With the lock off and nothing gliding the clock is not read. */
-static float lock_field(void *camera, float native, float applied, bool aiming) {
+ * stood still for a frame or two and then jumped. With the lock off and nothing gliding the clock is not read.
+ *
+ * One value a frame (feel.50: the view pulsed in ADS). In the first-person view the game sets this camera's field of
+ * view twice a frame on one thread: the hooked call (the queue's dispatcher, return game+0x127a120) and then, in the
+ * post-camera rig update, game+0x127aa90 (return game+0x127aa92), a forwarded call. Both stepped the one glide, the
+ * hooked one toward the aim lens and the forwarded one toward the locked value, so in full aim the shown value sat
+ * between the two and moved with how each frame's time split between the calls. Now the hooked call decides the
+ * frame (`decides`): it steps the glide and keeps what it chose. The forwarded call that follows hands the setter
+ * that same value without stepping. A forwarded call with no hooked call before it in this frame (the hooked call
+ * not made, or a third call) steps toward the target the hooked call last chose, kept with its time (stale after
+ * TFP_FOV_LOCK_STALE_MS): steps toward one target compose, so the frame's time split cannot move the value. Gliding
+ * out with the lock off, the target is the forwarded call's own lens when there is one: it is the later write of
+ * the frame, what the screen keeps when the lock lets go. */
+static volatile double lock_frame_at, lock_tail_at;      /* host milliseconds of the last hooked / forwarded call */
+static volatile float lock_frame_value, lock_frame_applied, lock_tail_native;
+static volatile uint32_t lock_frame_open, lock_frame_aim; /* open: the hooked call's value not yet repeated */
+static bool lock_recent(double at, double tick) { return at > 0 && tick >= at && tick - at <= TFP_FOV_LOCK_STALE_MS; }
+static float lock_field(void *camera, float native, float applied, bool aiming, bool decides) {
   const float wanted = lock_radians;
   lock_seen_native = native;
-  if ((uint64_t)(uintptr_t)camera != atomic_load_explicit(&lock_camera, memory_order_relaxed)) { tfp_fov_lock_reset(&lock_state); lock_shown = 0; return applied; }
-  if (!(wanted > 0) && !tfp_fov_lock_active(&lock_state)) { lock_shown = 0; return applied; }
+  if ((uint64_t)(uintptr_t)camera != atomic_load_explicit(&lock_camera, memory_order_relaxed)) {
+    tfp_fov_lock_reset(&lock_state); lock_shown = 0; lock_frame_open = 0; lock_frame_at = lock_tail_at = 0; return applied;
+  }
+  if (!(wanted > 0) && !tfp_fov_lock_active(&lock_state)) { lock_shown = 0; lock_frame_open = 0; lock_tail_at = 0; return applied; }
   double tick = 0;
   if (host.seconds && seconds(&tick)) tick *= 1000; else tick = lock_clock;
-  const float shown = tfp_fov_lock_step(&lock_state, wanted, lock_zoom != 0, aiming, applied, tick);
-  lock_shown = tfp_fov_lock_active(&lock_state) ? shown : 0;
-  if (wanted > 0 && tfp_fov_lock_active(&lock_state)) atomic_fetch_add_explicit(&lock_applied, 1, memory_order_relaxed);
+  if (!decides) {
+    lock_tail_native = native; lock_tail_at = tick;
+    if (lock_frame_open) { /* the frame's second call: the hooked call's value, no second step */
+      lock_frame_open = 0;
+      if (lock_recent(lock_frame_at, tick) && tfp_fov_lock_active(&lock_state)) return lock_frame_value;
+    }
+  }
+  const bool kept = lock_recent(lock_frame_at, tick);
+  float goal = applied; bool aim = aiming;
+  if (!decides) { aim = kept && lock_frame_aim; if (kept) goal = lock_frame_applied; }
+  if (!(wanted > 0) && lock_recent(lock_tail_at, tick)) goal = lock_tail_native; /* gliding out: to what stays on screen */
+  float shown = tfp_fov_lock_step(&lock_state, wanted, lock_zoom != 0, aim, goal, tick);
+  const bool active = tfp_fov_lock_active(&lock_state);
+  if (!active) shown = applied; /* let go (or never taken): the caller's own value, untouched */
+  lock_shown = active ? shown : 0;
+  if (wanted > 0 && active) atomic_fetch_add_explicit(&lock_applied, 1, memory_order_relaxed);
+  if (decides) { lock_frame_aim = aiming ? 1u : 0u; lock_frame_applied = applied; lock_frame_at = tick; lock_frame_value = shown; lock_frame_open = active ? 1u : 0u; }
   return shown;
 }
 void tfp_fov_setter_from(uint64_t caller, void *camera, float native) {
   atomic_fetch_add_explicit(&seen, 1, memory_order_relaxed);
   if (!atomic_load_explicit(&armed, memory_order_acquire) || caller != atomic_load_explicit(&return_address, memory_order_relaxed)) {
-    atomic_fetch_add_explicit(&forwarded, 1, memory_order_relaxed); call_original(camera, lock_field(camera, native, native, false)); return;
+    atomic_fetch_add_explicit(&forwarded, 1, memory_order_relaxed); call_original(camera, lock_field(camera, native, native, false, false)); return;
   }
   policy_acquire();
   float applied = native; bool diagnostics_changed = false;
@@ -680,7 +712,7 @@ void tfp_fov_setter_from(uint64_t caller, void *camera, float native) {
       }
     }
   }
-  applied = lock_field(camera, native, applied, policy.full_ads);
+  applied = lock_field(camera, native, applied, policy.full_ads, true);
   atomic_fetch_add_explicit(&forwarded, 1, memory_order_relaxed); call_original(camera, applied);
   if (diagnostics_changed) publish_diagnostics(&policy);
   policy_release();
@@ -900,6 +932,7 @@ void tfp_fov_reset_for_tests(void) {
   slot = 0; slot_image = 0; generation_counter = 0; owned_generation = 0; retired_generation = 0; possible = false;
   policy_init(&policy);
   lock_radians = 0; lock_seen_native = 0; lock_shown = 0; lock_zoom = 0; lock_clock = 0; tfp_fov_lock_reset(&lock_state);
+  lock_frame_at = 0; lock_tail_at = 0; lock_frame_value = 0; lock_frame_applied = 0; lock_tail_native = 0; lock_frame_open = 0; lock_frame_aim = 0;
   atomic_store(&lock_camera, 0); atomic_store(&lock_applied, 0);
   display_cache.native = 0; display_cache.applied = 0; display_cache.degrees = 0;
   atomic_store(&display_sequence, 0); atomic_store(&display_native, 0); atomic_store(&display_applied, 0); atomic_store(&display_degrees, 0);
