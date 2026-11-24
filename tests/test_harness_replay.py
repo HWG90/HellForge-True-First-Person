@@ -26,7 +26,7 @@ class NewFields(unittest.TestCase):
                  for i in range(4)]
         more = [text + " off_foot=1 damped=0 damp=(0.00000 0.00000 0.10000) view=(-0.29552 0.95534 0.00000)" for text in plain]
         # round 19: replay.py reads off_foot, damp and view (THE CUT is asked of the head node); the rest is the same
-        bare = lambda rows: [{k: v for k, v in row.items() if k not in ("off_foot", "damp", "view")} for row in rows]
+        bare = lambda rows: [{k: v for k, v in row.items() if k not in ("off_foot", "damped", "damp", "view")} for row in rows]
         self.assertEqual(bare(replay.read(plain)), bare(replay.read(more)))
         self.assertEqual([(row["off_foot"], row["damp"]) for row in replay.read(plain)], [(None, None)] * 4)
         self.assertEqual([(row["off_foot"], row["damp"]) for row in replay.read(more)], [(1, [0.0, 0.0, 0.1])] * 4)
@@ -35,7 +35,7 @@ class NewFields(unittest.TestCase):
         self.assertEqual(len(replay.read(more)), 4)
         self.assertEqual(replay.read(more)[2]["clock"], 5066.0)
         import trace
-        self.assertEqual(trace.frames(plain), [{**row, "view": None} for row in trace.frames(more)])   # all but the view, which the judge now reads
+        self.assertEqual(trace.frames(plain), [{**row, "view": None, "damp": None} for row in trace.frames(more)])   # all but the view and (round 24) the damping, which the judge now reads
         self.assertEqual(trace.frames(more)[3]["tick"], 5099.0)
         self.assertEqual(trace.frames(more)[3]["view"], [-0.29552, 0.95534, 0.0])
 
@@ -160,26 +160,26 @@ class Cut(unittest.TestCase):
         row = self.row(damp=(0.1, -0.2, 0.05))
         row["fit"] = list(self.AXES)
         fields = replay.row_text(row, "fit").split()
-        self.assertEqual(len(fields), 14 + 9 + 4)
+        self.assertEqual(len(fields), 14 + 9 + 4 + 9)   # round 24: mask kind damped off_foot damp stable rearm_only
         self.assertEqual(fields[23], "1")
-        for got, want in zip([float(x) for x in fields[24:]], [0.9, 2.02, 2.91]):
+        for got, want in zip([float(x) for x in fields[24:27]], [0.9, 2.02, 2.91]):
             self.assertAlmostEqual(got, want, places=6)
         # a view pitched (0.6 up): only its level part counts, 0.18 m along it
         row = self.row(view=(0.0, -0.8, 0.6))
         row["fit"] = list(self.AXES)
-        for got, want in zip([float(x) for x in replay.row_text(row, "fit").split()[24:]], [1.0, 2.18, 2.96]):
+        for got, want in zip([float(x) for x in replay.row_text(row, "fit").split()[24:27]], [1.0, 2.18, 2.96]):
             self.assertAlmostEqual(got, want, places=6)
         # a view straight up: the root's forward axis (the axes' second row), as the helper does
         row = self.row(view=(0.0, 0.0, 1.0))
         row["fit"] = [0, 1, 0, -1, 0, 0, 0, 0, 1]
-        for got, want in zip([float(x) for x in replay.row_text(row, "fit").split()[24:]], [1.18, 2.0, 2.96]):
+        for got, want in zip([float(x) for x in replay.row_text(row, "fit").split()[24:27]], [1.18, 2.0, 2.96]):
             self.assertAlmostEqual(got, want, places=6)
         row = self.row(off_foot=1, damp=(0.1, -0.2, 0.05))
         row["fit"] = list(self.AXES)
-        self.assertEqual(replay.row_text(row, "fit").split()[23:], ["0", "0.0", "0.0", "0.0"])
+        self.assertEqual(replay.row_text(row, "fit").split()[23:27], ["0", "0.0", "0.0", "0.0"])
         row = self.row(off_foot=None)
         row["fit"] = list(self.AXES)
-        self.assertEqual(replay.row_text(row, "fit").split()[23:], ["0", "0.0", "0.0", "0.0"])   # no damp= or view= on the line: not given
+        self.assertEqual(replay.row_text(row, "fit").split()[23:27], ["0", "0.0", "0.0", "0.0"])   # no damp= or view= on the line: not given
 
     def test_the_rows_for_a_test(self):
         rows = [self.row(damp=(0.1, -0.2, 0.05)), self.row(off_foot=1)]

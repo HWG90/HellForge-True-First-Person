@@ -67,6 +67,7 @@ What this leaves out:
 """
 import argparse
 import math
+import os
 import re
 import subprocess
 import sys
@@ -74,6 +75,8 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import trace as trace_reader  # noqa: E402  (tools/harness/trace.py: the raw target and the float, round 24)
 SAME_FRAME_MS = 5.0
 SAME_EYE_M = 0.002
 STEP_M = 0.06
@@ -84,14 +87,82 @@ BEYOND_M = 0.05
 CARRY_M = 0.05   # a correction over this, carried on after a change of camera, is timed
 TRACE = re.compile(r"^(\d+):(\d+):(\d+)\.(\d+) Trace: t=(-?[\d.]+) kind=(\d+) eye_world=\(([-\d. ]+)\) step=[-\d.]+ wanted=\(([-\d. ]+)\) "
                    r"correction=([-\d.]+).*?source=(\S+) root=\(([-\d. ]+)\)(?: axes=\(([-\d. ]+)\))? looked=(\d) taken=(\S+)"
-                   r"(?: quiet=(\d))?(?: tick=([\d.]+))?(?: off_foot=(\d) damped=\d damp=\(([-\d. ]+)\))?(?: view=\(([-\d. ]+)\))?")
+                   r"(?: quiet=(\d))?(?: tick=([\d.]+))?(?: off_foot=(\d) damped=(\d) damp=\(([-\d. ]+)\))?(?: view=\(([-\d. ]+)\))?")
 VEIL = re.compile(r" veil=\(([-\d. ]+)\)")
 SOURCES = {"head": 1, "native": 2, "repeat": 2}
-TAKEN = ((1, "jump"), (2, "edge"), (4, "root"), (8, "restart"), (16, "cut"))
+TAKEN = ((1, "jump"), (2, "edge"), (4, "root"), (8, "restart"), (16, "cut"), (32, "settle"))
+
+
+MASK = re.compile(r"^(\d+):(\d+):(\d+)\.(\d+) (?:Hold|Return|Drop|Wait): .*?\bmask=([0-9a-fA-F]+)")
+STYLE = re.compile(r"^(\d+):(\d+):(\d+)\.(\d+) Camera style: (\w+)")
+WINDOW_MS = 600.0  # src/camera_helper.c SMOOTH_EVENT_MS
+TRAVERSAL = 0x20   # src/camera_traversal.h
+
+
+def _stamp(m):
+    return ((int(m[1]) * 60 + int(m[2])) * 60 + int(m[3])) * 1000 + int(m[4])
+
+
+def context(lines, rows):
+    """Round 24: what the helper knew around the filter that the Trace lines do not say, from the log's other lines,
+    into each row: "mask" (the control mask of the last Hold/Return/Drop/Wait line at or before the row's frame, within
+    1.5 s; -1 not known), "stable" (1 Stable, 0 Bodycam, -1 not known; the last "Camera style:" line) and "rearm_only"
+    (1: jumps were looked for in the row only because a change of mask into or out of a traversal mask opened the window
+    again, which camera_helper.c no longer does; found from the State lines, the changes of kind and the masks, so it is
+    the window as near as the log tells it). A row's frame is placed on the log's clock by the median of stamp less
+    tick over the rows written as they happened."""
+    masks, styles, states = [], [], []
+    for line in lines:
+        m = MASK.match(line)
+        if m:
+            masks.append((_stamp(m), int(m[5], 16)))
+            continue
+        m = STYLE.match(line)
+        if m:
+            styles.append((_stamp(m), 1 if m[5] == "Stable" else 0))
+            continue
+        if " State: " in line and line[:2].isdigit():
+            try:
+                states.append(_stamp(re.match(r"^(\d+):(\d+):(\d+)\.(\d+)", line)))
+            except TypeError:
+                pass
+    live = sorted(row["stamp"] - row["tick"] for row in rows if row.get("clock") is not None and row["t"] >= 0)
+    offset = live[len(live) // 2] if live else 0.0
+    events = [(t, "other") for t in states]
+    before = None
+    for stamp, mask in masks:
+        if before is not None and mask != before:
+            events.append((stamp, "trav" if (mask & TRAVERSAL or before & TRAVERSAL) else "other"))
+        before = mask
+    kind = None
+    for row in rows:
+        at = row["tick"] + offset if row.get("clock") is not None else row["tick"]
+        row["at_ms"] = at
+        if kind is not None and row["kind"] != kind:
+            events.append((at, "other"))
+        kind = row["kind"]
+    events.sort()
+    mi = si = ei = 0
+    mask = style = None
+    last = {"other": -1e18, "trav": -1e18}
+    for row in sorted(rows, key=lambda r: r["at_ms"]):
+        at = row["at_ms"]
+        while mi < len(masks) and masks[mi][0] <= at + 2:
+            mask = masks[mi]
+            mi += 1
+        while si < len(styles) and styles[si][0] <= at + 2:
+            style = styles[si][1]
+            si += 1
+        while ei < len(events) and events[ei][0] <= at + 2:
+            last[events[ei][1]] = events[ei][0]
+            ei += 1
+        row["mask"] = mask[1] if mask and at - mask[0] <= 1500 else -1
+        row["stable"] = -1 if style is None else style
+        row["rearm_only"] = int(bool(row["looked"]) and at >= last["other"] + WINDOW_MS and at < last["trav"] + WINDOW_MS)
 
 
 def read(lines):
-    """Every Trace row in order of time: one for each call of the filter."""
+    """Every Trace row in order of time: one for each call of the filter (round 24: with context())."""
     windows, window = [], []
     for line in lines:
         if " State: " in line:
@@ -107,8 +178,8 @@ def read(lines):
                "wanted": [float(x) for x in m[8].split()], "carried": float(m[9]), "source": m[10],
                "root": [float(x) for x in m[11].split()], "axes": [float(x) for x in m[12].split()] if m[12] else None,
                "looked": int(m[13]), "taken": m[14], "quiet": int(m[15] or 0), "clock": float(m[16]) if m[16] else None, "at": line[:12],
-               "off_foot": int(m[17]) if m[17] else None, "damp": [float(x) for x in m[18].split()] if m[18] else None,
-               "view": [float(x) for x in m[19].split()] if m[19] else None}
+               "off_foot": int(m[17]) if m[17] else None, "damped": int(m[18]) if m[18] else None,
+               "damp": [float(x) for x in m[19].split()] if m[19] else None, "view": [float(x) for x in m[20].split()] if m[20] else None}
         veil = VEIL.search(line)
         row["veil"] = [float(x) for x in veil[1].split()] if veil else None
         if window and row["t"] < window[-1]["t"] - 1:  # an edge without a State line (the orphaned view): t starts again
@@ -125,6 +196,7 @@ def read(lines):
             row["tick"] = row["clock"] if row["clock"] is not None else edge + row["t"]
         rows.extend(window)
     rows.sort(key=lambda row: row["tick"])
+    context(lines, rows)
     return rows
 
 
@@ -312,14 +384,17 @@ def head_given(row):
 
 
 def row_text(row, axes):
-    """One row for replay_filter.c: tick source detect quiet fresh, wanted, root, logged eye, axes, and (round 19) whether
-    the head is given and the head node in the world (head_node; zeros where it is not given)."""
+    """One row for replay_filter.c: tick source detect quiet fresh, wanted, root, logged eye, axes, (round 19) whether
+    the head is given and the head node in the world (head_node; zeros where it is not given), and (round 24) mask,
+    kind, damped, off_foot, damp, stable, rearm_only (context(); -1 where not known)."""
     node = head_node(row, row[axes]) if head_given(row) else None
     given = node is not None
-    return "%.3f %d %d %d %d %s %s %s %s %d %s\n" % (row["tick"], SOURCES.get(row["source"], 0), row["looked"], row.get("quiet", 0),
-                                                 row.get("fresh", False), " ".join(map(str, row["wanted"])), " ".join(map(str, row["root"])),
-                                                 " ".join(map(str, row["eye"])), " ".join(map(str, row[axes])), given,
-                                                 " ".join(map(str, node or [0.0, 0.0, 0.0])))
+    damped = row.get("damped")
+    return "%.3f %d %d %d %d %s %s %s %s %d %s %d %d %d %d %s %d %d\n" % (
+        row["tick"], SOURCES.get(row["source"], 0), row["looked"], row.get("quiet", 0), row.get("fresh", False), " ".join(map(str, row["wanted"])),
+        " ".join(map(str, row["root"])), " ".join(map(str, row["eye"])), " ".join(map(str, row[axes])), given, " ".join(map(str, node or [0.0, 0.0, 0.0])),
+        row.get("mask", -1), row["kind"], -1 if damped is None or row.get("damp") is None else damped, row.get("off_foot") or 0,
+        " ".join(map(str, row.get("damp") or [0.0, 0.0, 0.0])), row.get("stable", -1), row.get("rearm_only", 0))
 
 
 def emit_head(name, rows):
@@ -349,6 +424,43 @@ def run(binary, mode, rows, axes):
     return [[float(x) for x in line.split()] for line in out]
 
 
+STILL_M_S = 0.5    # the root counts as stopped under this speed (src/camera_traversal.h TFP_TRAVERSAL_ROOT_M_S) ...
+STILL_MS = 100.0   # ... for this long
+
+
+def window_figures(rows, eye, carried, taken_key):
+    """Round 24, for --from/--to: what a window's frames say of one filter (`eye`: its presented eye, `carried`, `taken_key`):
+      offset   the most the presented eye is from the raw target (trace.raw_target: the head camera's own eye, before the
+               damping; the rig eye in the native view)
+      stopped  the same, only in frames where the body root has gone under STILL_M_S for STILL_MS
+      held     the largest float: the least offset over trace.FLOAT_MS, at its largest (trace.held_offsets)
+      regrown  how far what is carried grew again after it had come down, with nothing taken up (a jump, a change of
+               camera, a cut, THE SETTLE) in between: the backpack pick-ups' drift"""
+    out = {"offset": 0.0, "stopped": 0.0, "held": 0.0, "regrown": 0.0}
+    still_since = None
+    low = None
+    for i, row in enumerate(rows):
+        target = trace_reader.raw_target(row)
+        off = math.dist(row[eye], target)
+        out["offset"] = max(out["offset"], off)
+        if i and row["tick"] > rows[i - 1]["tick"]:
+            speed = math.dist(row["root"], rows[i - 1]["root"]) * 1000 / (row["tick"] - rows[i - 1]["tick"])
+            if speed < STILL_M_S:
+                still_since = rows[i - 1]["tick"] if still_since is None else still_since
+            else:
+                still_since = None
+        if still_since is not None and row["tick"] - still_since >= STILL_MS:
+            out["stopped"] = max(out["stopped"], off)
+        if any(word in row[taken_key] for word in ("jump", "edge", "cut", "settle")):
+            low = None
+        else:
+            low = row[carried] if low is None else min(low, row[carried])
+            out["regrown"] = max(out["regrown"], row[carried] - low)
+    shown = [dict(row, eye=row[eye]) for row in rows]
+    out["held"] = trace_reader.largest_float(shown)[0]
+    return out
+
+
 def taken(bits):
     return "+".join(name for bit, name in TAKEN if int(bits) & bit) or "-"
 
@@ -359,9 +471,11 @@ def header(revision, work, name):
     if Path(revision).is_dir():  # a folder with the two headers in place of a revision
         return Path(revision).resolve()
     folder.mkdir()
-    for file in ("camera_continuity.h", "camera_math.h"):
-        (folder / file).write_text(subprocess.run(["git", "-C", str(ROOT), "show", f"{revision}:src/{file}"], capture_output=True, text=True,
-                                                  check=True).stdout)
+    for file in ("camera_continuity.h", "camera_math.h", "camera_damp.h", "camera_traversal.h"):
+        shown = subprocess.run(["git", "-C", str(ROOT), "show", f"{revision}:src/{file}"], capture_output=True, text=True,
+                               check=file in ("camera_continuity.h", "camera_math.h"))
+        if shown.returncode == 0:  # the damping and the round-24 rules only where the revision has both (replay_filter.c RULES)
+            (folder / file).write_text(shown.stdout)
     return folder
 
 
@@ -384,9 +498,11 @@ def replay(rows, logged=None, present=None):
             row["start"] = row["axes"] if given else identity
         for row, out in zip(rows, run(old, "run" if given else "fit", rows, "start")):
             row["old_eye"], row["old_carried"], row["old_taken"], row["fit"], row["misfit"] = out[0:3], out[3], taken(out[4]), out[5:14], out[14]
+            row["old_wanted"] = out[15:18]
             row["follows"] = row["known"] and row["misfit"] < EXACT_M if given else row["misfit"] < NEAR_M
         for row, out in zip(rows, run(new, "run", rows, "fit")):
             row["new_eye"], row["new_carried"], row["new_taken"] = out[0:3], out[3], taken(out[4])
+            row["new_wanted"] = out[15:18]
     return (merge(rows) if given else rows), given
 
 
@@ -425,6 +541,7 @@ def main(argv):
         return 0
     if args.start or args.end:
         before = None
+        picked = [row for row in calls if chosen(row)]
         for row in calls:
             if not chosen(row):
                 before = None
@@ -438,6 +555,12 @@ def main(argv):
                       f"{row['old_taken']:9} misfit {row['misfit']:.3f} axes turned {math.sqrt(sum(x * x for x in a) / 2):.3f} | present filter "
                       f"{math.dist(row['new_eye'], before['new_eye']):.3f} carried {row['new_carried']:.3f} {row['new_taken']}")
             before = row
+        if picked:
+            for title, eye, carried, key in (("log", "eye", "carried", "taken"), ("logged filter", "old_eye", "old_carried", "old_taken"),
+                                             ("present", "new_eye", "new_carried", "new_taken")):
+                f = window_figures(merge(picked), eye, carried, key)
+                print(f"{title:14}: shown eye from the raw target at most {f['offset']:.3f} m, {f['stopped']:.3f} m once the root stopped; "
+                      f"held over {trace_reader.FLOAT_MS:.0f} ms {f['held']:.3f} m; carried grew again by {f['regrown']:.3f} m")
         return 0
     if given:
         known = [row for row in calls if row["known"]]

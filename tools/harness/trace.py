@@ -33,6 +33,14 @@ VIEW = re.compile(r" view=\(([-\d. ]+)\)")
 DRAWN = re.compile(r" sock=(-?[\d.]+) arms=(\d+)(?: eye_edge=(\d))?")
 # Round 19: the helmet veil's move of the eye handed to the game, after eye_edge=: "veil=0" or "veil=(x y z)".
 VEIL = re.compile(r" veil=(?:\(([-\d. ]+)\)|0\b)")
+# What the head camera's eye damping added to the wanted eye (0.6.0-feel.48 on): the raw target is wanted less it.
+DAMP = re.compile(r" damp=\(([-\d. ]+)\)")
+# Round 24: a float. The presented eye's offset from the raw target (the wanted eye less the damping: the head camera's
+# own eye, or the rig eye), the least it is over FLOAT_MS: a step judge (POP_M between two frames) does not see an eye
+# that drifts 0.6 m off and back at 0.04 m a frame, which is how the clambers of the user's log of 2026-11-24 floated
+# (feel.51; the matrix's vault passed). FLOAT_M: Stable's damping holds the eye up to 0.25 m behind the head by design.
+FLOAT_MS = 300.0
+FLOAT_M = 0.26
 
 
 def newest():
@@ -108,6 +116,8 @@ def frames(lines):
         row["eye_edge"] = int(drawn[3]) if drawn and drawn[3] else None
         veil = VEIL.search(line)
         row["veil"] = numbers(veil[1]) if veil and veil[1] else None
+        damp = DAMP.search(line)
+        row["damp"] = numbers(damp[1]) if damp else None
         if group and row["t"] < group[-1]["t"] - 1:   # an edge without a State line: t starts again
             groups.append(group)
             group = []
@@ -133,6 +143,47 @@ def frames(lines):
             out.append(row)
             first = row["tick"]
     return out
+
+
+def raw_target(row, wanted="wanted"):
+    """The eye the frame's camera gives before the mod keeps it (the continuity) or damps it: the wanted eye less what the
+    damping added (round 24). None where the row has no wanted eye."""
+    if not row.get(wanted):
+        return None
+    damp = row.get("damp")
+    return [w - d for w, d in zip(row[wanted], damp)] if damp else list(row[wanted])
+
+
+def held_offsets(rows, eye="eye", ms=FLOAT_MS, gap_ms=GAP_MS):
+    """For every frame (rows: frames(), or replay.py's), the least offset of rows[i][eye] from raw_target() over the
+    `ms` that end at it, where the frames there are no more than `gap_ms` apart and span at least `ms`: [(row, held)].
+    A float is a frame whose held offset is over FLOAT_M."""
+    out, start = [], 0
+    offsets = []
+    for row in rows:
+        target = raw_target(row)
+        offsets.append(None if target is None or not row.get(eye) else sum((a - b) ** 2 for a, b in zip(row[eye], target)) ** 0.5)
+    for i, row in enumerate(rows):
+        if offsets[i] is None or (i and row["tick"] - rows[i - 1]["tick"] > gap_ms) or (i and offsets[i - 1] is None):
+            start = i
+        if offsets[i] is None or row["tick"] - rows[start]["tick"] < ms:
+            continue
+        first = i
+        while first > start and row["tick"] - rows[first - 1]["tick"] <= ms:
+            first -= 1
+        if first > start:  # the frame just before the span, so the span covers the whole time
+            first -= 1
+        out.append((row, min(offsets[first:i + 1])))
+    return out
+
+
+def largest_float(rows, eye="eye"):
+    """(the largest held offset, its row) or (0.0, None)."""
+    found = held_offsets(rows, eye)
+    if not found:
+        return 0.0, None
+    row, held = max(found, key=lambda f: f[1])
+    return held, row
 
 
 def main(argv):
