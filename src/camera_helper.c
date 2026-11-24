@@ -1178,6 +1178,12 @@ static bool orphan_head(Policy *p, const float *given, uint32_t kind, double tic
 }
 
 /* Beyond retail, round 14 (tfp_camera_set_veil). */
+/* A world begun or ended: the kind of the last frame and an open veil belong to the old one (a native frame there
+ * followed by the new world's first head-camera frame is no leave). The counts stay. */
+static void veil_forget(void) {
+  atomic_store_explicit(&veil_last_kind, 0, memory_order_relaxed); atomic_store_explicit(&veil_open, 0, memory_order_relaxed);
+  atomic_store_explicit(&veil_ticks, 0, memory_order_relaxed);
+}
 /* The eye of a head-camera frame while the veil is open: at least TFP_CAMERA_VEIL_CLEAR in front of the head along
  * `horizontal` (the level view direction, unit length, z 0). `move`: a body on foot; otherwise only looked at.
  * true: the eye is that far in front (moved there, or already). */
@@ -1645,7 +1651,7 @@ static uint32_t begin_locked(const TfpCameraConfig *input, uint64_t *output) {
   const bool stable = current == OK && top(&next, &kind) && (kind == 4 || kind == 6) && next.safe && graph(&next, false) && dispatch_owned(&next)
       && (kind != 4 || unparented(&next));
   if (stable) {
-    smooth_forget();
+    smooth_forget(); veil_forget();
     policy = next; atomic_store(&seen, 0); atomic_store(&forwarded, 0); atomic_store(&replaced, 0); atomic_store(&native6_forwarded, 0); atomic_store(&resets, 0);
     publish_diagnostics(&policy);
     atomic_store_explicit(&return_address, c.game + B_GAME_CALL + 4, memory_order_relaxed);
@@ -1662,7 +1668,7 @@ static uint32_t end_locked(uint64_t generation) {
   if (!generation) return reject(TOKEN_MISMATCH);
   if (!atomic_load(&reserved)) { if (generation != retired_generation) return reject(TOKEN_MISMATCH); error(OK); return 1; }
   if (generation != owned_generation) return reject(TOKEN_MISMATCH);
-  atomic_store_explicit(&armed, 0, memory_order_release); atomic_store_explicit(&callback_generation, 0, memory_order_release); policy_acquire(); reset(&policy, false); smooth_forget(); publish_diagnostics(&policy); policy_release();
+  atomic_store_explicit(&armed, 0, memory_order_release); atomic_store_explicit(&callback_generation, 0, memory_order_release); policy_acquire(); reset(&policy, false); smooth_forget(); veil_forget(); publish_diagnostics(&policy); policy_release();
   if (!restore_slot()) return reject(CLEANUP_PENDING);
   error(OK); return 1;
 }

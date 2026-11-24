@@ -195,6 +195,41 @@ int main() {
     CHECK(std::fabs(ahead_of_head(g) - held_ahead) < .002f && veil().frames == 1);
     g.end();
   }
+  // ---- 10. Off foot at the leave (a dive, a fall): the veil opens but does not move the eye (a thrown body's head is
+  // no place to judge "in front" from); the frame is counted as left behind the head. ----
+  {
+    Game g; leave(g, true, true, -.22f, &first);
+    tfp_camera_veil_tick(true);
+    g.end();
+    fresh(true, false);
+    Game h; h.pose(1, 2, 0, .2f); h.look(.2f, 0); h.hip(); h.begin();
+    h.eye[0] = 0; h.eye[1] = -.22f; h.eye[2] = .13f;
+    CHECK(tfp_camera_set_weapon_key(h.gen, 0x1111) == 1);
+    tfp_camera_set_veil(true);
+    standing(h, 30, 33.3, true);
+    standing(h, 4, 33.3, true, 2);
+    h.s.state = 50; h.hip(2); h.frame(33.3);
+    const TfpCameraVeilStats s = veil();
+    CHECK(s.leaves == 1 && s.frames == 1 && s.moved == 0 && s.behind == 1 && ahead_of_head(h) < 0);
+    tfp_camera_veil_tick(true);
+    h.end();
+  }
+  // ---- 11. A new world (the helper ended and begun again): the last kind of the old one does not open a veil. The
+  // old world's last frame was the native view; the new one's first is the head camera. ----
+  {
+    fresh(true, false);
+    Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+    g.eye[0] = 0; g.eye[1] = -.22f; g.eye[2] = .13f;
+    tfp_camera_set_veil(true);
+    standing(g, 10, 33.3, true);
+    g.end();
+    Game h; h.pose(4, 5, 0, .2f); h.look(.2f, 0); h.hip(); h.begin();
+    tfp_camera_set_veil(true);
+    h.hip(); h.frame(33.3); h.hip(); h.frame(33.3);
+    const TfpCameraVeilStats s = veil();
+    CHECK(s.leaves == 0 && s.frames == 0 && s.moved == 0);
+    h.end();
+  }
   std::printf("camera veil through the helper: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

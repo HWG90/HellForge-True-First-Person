@@ -234,6 +234,8 @@ void tfp_camera_orphan_stats(TfpCameraOrphanStats *out);
  * leave of a session it owns none, and that leave draws the head as every other does (soak 27, 12:41:45.163 and
  * 12:41:50.071). false: no veil opens, an open one closes.
  * veil_tick: each tick, after head visibility's update: `hidden` = it found meshes drawn again and left none drawn.
+ * The helper's begin and end forget the last frame's kind and close the veil: a native frame of the old world and the
+ * new one's first head-camera frame are no leave.
  * Off (the default) and without the lock: nothing is reached or read. */
 #define TFP_CAMERA_VEIL_CLEAR .10f
 void tfp_camera_set_veil(bool armed);

@@ -303,7 +303,9 @@ front for both frames of a leave in the order soak 27 has (the first frame befor
 after the closing tick; the other order (one frame); no re-show (closed after two ticks); an eye in front already;
 switched off while open; a native frame while open (counted among the frames, not behind); no lock, no veil; what the
 tick hands it (armed on a kind-6 tick that owns no head row, closed by the tick that found the body and left none of it
-drawn, not by one that left some drawn, not armed with the view off, the module not active or no tick).
+drawn, not by one that left some drawn, not armed with the view off, the module not active or no tick). Off foot at a leave the eye is not moved and the frame counts as left behind
+the head; a new world (the helper ended and begun again) does not open a veil from the old world's last native frame
+(the first build kept that kind across worlds and could open a spurious veil of up to two frames).
 
 ### The `Head:` line now ends with the veil's counts
 
