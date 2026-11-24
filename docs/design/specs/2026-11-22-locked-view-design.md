@@ -2149,3 +2149,66 @@ Tests on the branch: `tests/run-camera-continuity.sh` 3,066 checks (3,018 unchan
 the round as it was checked); the other five `run-camera-*.sh` 3,403, 229, 75, 2,377 and 301; the harness's python
 tests 33, both probe tests with their recorded bounds as they were; all 47 `tests/run-*.sh` pass; `build.sh --feel`
 builds. Nothing here has been run in the game.
+
+## After feel.50 (2026-11-24): the field of view pulsed in ADS (branch `round15-ads`; offline, not yet in a build)
+
+The report: "When in ADS, there is a 'pulsing' to the camera." The log of that session (13:27:39.053 aim in to
+13:27:55.296 aim out, about 116 frames a second; `locked_view.json` with field of view 80, the lock on, zoom when
+aiming on): the eye still (`eye_step` 0.0001 m), no kick, the arm drive writing nothing; but every `Fov:` line
+counts about 232 frames locked for 116 frames, and reads "the game asked for 61.5 degrees, shown 64.3 / 64.4 / 64.5"
+second to second. Outside aim it reads "shown 80.0".
+
+**Two calls a frame.** In the first-person view the game sets this camera's field of view twice a frame, on one
+thread (656, the tick's). The queue's dispatcher (`game+0x1279190`) sets the composed lens at `game+0x127a11a`
+(return `0x127a120`, the hooked call); then the post-camera rig update (`game+0x127a420`, after its rig update at
+`0x127a51f`) sets it again at `game+0x127aa90` (return `0x127aa92`), and the camera's position and rotation right
+after it (`0x127aaac`, `0x127aac8`; the camera helper's caller is `0x127aaae`). The log's `Hook: fov first fired ...
+called from game+0x127aa92` is that second call; the disassembly is in
+`docs/history/research-0.5.34/native-lifecycle-reentry-evidence.json`. Same camera: a call on any other camera
+resets the lock, and the count would not be two a frame. The second call is the later write of the frame; the
+setter stores the value on the camera and queues it, so the second call's value is what is drawn if the last write
+wins. Only the game can show that.
+
+**The cause.** Both calls stepped the one glide (`lock_state`, `src/fov_lock.h`): the hooked call toward the game's
+aim lens (`policy.full_ads`, zoom when aiming), the second call, forwarded with `aiming` false, toward the locked 80.
+The value sat between: with `a` the share of the 80 ms constant from the hooked call to the second (about 1.3 ms) and
+`b` the rest of the frame, it settles 18.5 degrees x (1-e^-a)/(1-e^-(a+b)) above 61.5, 3 degrees for 1.3 ms of 8.6,
+and moves with every frame's time and every frame's split between the two calls. Outside aim both calls aim at 80
+and agree, which is why it showed only in ADS. The same two calls also kept a glide out at the hip from ever ending
+(each call stops it only near its own value: the helper's hip lens and the game's 61.5).
+
+**The model** (`tests/fov_lock_helper_test.cpp` part 7, built with the user's numbers: `-DTFP_TEST_NATIVE=61.5f
+-DTFP_TEST_LOCKED=80.0f`; frame times +-15 %, 0.6 to 2.0 ms between the two calls; two seconds of full aim):
+
+| frames a second | feel.50: shown (the later call) | largest change between frames | now |
+|---|---|---|---|
+| 60 | 62.72 to 63.49 degrees | 0.185 degrees | 61.500, no change |
+| 116 | 63.85 to 64.95 degrees | 0.205 degrees | 61.500, no change |
+| 144 | 64.48 to 65.56 degrees | 0.198 degrees | 61.500, no change |
+
+At 116 frames: 64.65 / 64.95, 64.71 / 64.91, 64.55 / 64.84, ... (hooked / second call, frame by frame) where the log's
+once-a-second samples read 64.3 to 64.6. Both calls of a frame now hand the setter 61.500.
+
+**The fix** (`lock_field` in `src/fov_helper.c`): one value a frame. The hooked call decides the frame: it steps the
+glide and keeps what it chose (the value, its aim, its target, the time). The forwarded call that follows hands the
+setter the same value and does not step. A forwarded call without a hooked call before it in the frame (the hooked
+call not made, or a third) steps toward the target the hooked call last chose, kept for 250 ms
+(`TFP_FOV_LOCK_STALE_MS`); steps toward one target compose, so a frame's split cannot move it. Switched off, the
+glide out ends on the second call's own lens when there is one (the later write, what stays on screen when the
+lock lets go), and then each call hands over its own value again. The `Fov:` line counts frames, not calls: about
+116 a second.
+
+The aim zoom still glides on its 80 ms: aim in and out (every frame a little, none more than a frame's glide of the
+whole distance, settled within 0.7 s behind the helper's 180 ms hand-off lens), quick taps, the game's lens changing
+under the aim (a swap), zoom when aiming off while aiming, the lock off while aiming, the lock off at the hip (now
+ends within half a second). Parts 7 to 9 of the test: 31 checks (165 in all, 134 before), 17 of which fail on feel.50's code.
+
+**Nothing else pulses in that stretch.** `Lock:` largest kick 0.0 degrees after the first second; `Feel:` turn 0.00
+and no placements after the first second; the arm drive's writes stand at 41672; no `Gate:` line (full aim takes the
+depth hold to nothing, `2026-11-23-gate-flip.md`). The eye (`Hold:` lines, eye = rig eye) rises and falls 4 mm over
+about four seconds (z 4.921 to 4.925 m): the game's own rig, too slow and too small to be the report; not changed.
+
+Not yet known, only the game can show: which of the two writes is drawn (the fix gives both one value, so it does
+not depend on it, except at the end of a glide out at the hip and on the first frame of switching the lock on,
+where the helper's hip lens and the game's own still differ); that the zoom feels steady in ADS; whether the second
+call is made outside first person.
