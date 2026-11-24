@@ -25,7 +25,11 @@ class NewFields(unittest.TestCase):
         plain = [line(33 * i, 33.0 * i, 4, (0.01 * i, 1, 2), (0.01 * i, 1, 2.1), 0.1, axes=axes, source="head", tail=" quiet=0 tick=%.3f" % (5000 + 33.0 * i))
                  for i in range(4)]
         more = [text + " off_foot=1 damped=0 damp=(0.00000 0.00000 0.10000) view=(-0.29552 0.95534 0.00000)" for text in plain]
-        self.assertEqual(replay.read(plain), replay.read(more))
+        # round 19: replay.py reads off_foot and damp (THE CUT is asked of the head before the damping); the rest is the same
+        bare = lambda rows: [{k: v for k, v in row.items() if k not in ("off_foot", "damp")} for row in rows]
+        self.assertEqual(bare(replay.read(plain)), bare(replay.read(more)))
+        self.assertEqual([(row["off_foot"], row["damp"]) for row in replay.read(plain)], [(None, None)] * 4)
+        self.assertEqual([(row["off_foot"], row["damp"]) for row in replay.read(more)], [(1, [0.0, 0.0, 0.1])] * 4)
         self.assertEqual(len(replay.read(more)), 4)
         self.assertEqual(replay.read(more)[2]["clock"], 5066.0)
         import trace
@@ -113,6 +117,51 @@ class Rows(unittest.TestCase):
         self.assertEqual([row["known"] for row in rows], [False, False, True, True, True, True])
         # in the middle of a stretch the replay lets its own correction go; after a pause the filter starts again by itself
         self.assertEqual([row["fresh"] for row in rows], [0, 0, 2, 0, 0, 0])
+
+
+class Cut(unittest.TestCase):
+    """Round 19, THE CUT (src/camera_continuity.h): the replay gives the filter the head before the damping where the
+    helper does, a head-camera frame of a body on foot that is not in full aim, and nowhere else."""
+    AXES = (1, 0, 0, 0, 1, 0, 0, 0, 1)
+
+    def row(self, kind=4, source="head", off_foot=0, quiet=0, damp=(0.0, 0.0, 0.0)):
+        tail = " quiet=%d tick=5000.000" % quiet
+        if off_foot is not None:
+            tail += " off_foot=%d damped=1 damp=(%.5f %.5f %.5f) view=(0.00000 1.00000 0.00000)" % (off_foot, *damp)
+        return replay.read([line(33, 33.0, kind, (1, 2, 3), (1, 2, 3), 0, axes=self.AXES, source=source, tail=tail)])[0]
+
+    def test_where_the_head_is_given(self):
+        self.assertTrue(replay.head_given(self.row()))
+        self.assertTrue(replay.head_given(self.row(off_foot=None)))   # a line before 0.6.0-feel.48 does not say: on foot, as the helper mostly found
+        self.assertFalse(replay.head_given(self.row(off_foot=1)))     # thrown, dead: the helper does not ask
+        self.assertFalse(replay.head_given(self.row(quiet=1)))        # full aim
+        self.assertFalse(replay.head_given(self.row(kind=6, source="native")))
+        self.assertFalse(replay.head_given(self.row(kind=6)))         # the orphaned native view lends the head source: not the head camera
+
+    def test_the_filter_is_given_the_head_without_the_damping(self):
+        row = self.row(damp=(0.1, -0.2, 0.05))
+        row["fit"] = list(self.AXES)
+        fields = replay.row_text(row, "fit").split()
+        self.assertEqual(len(fields), 14 + 9 + 4)
+        self.assertEqual(fields[23], "1")
+        self.assertEqual([float(x) for x in fields[24:]], [0.1, -0.2, 0.05])
+        row = self.row(off_foot=1, damp=(0.1, -0.2, 0.05))
+        row["fit"] = list(self.AXES)
+        self.assertEqual(replay.row_text(row, "fit").split()[23:], ["0", "0.0", "0.0", "0.0"])
+        row = self.row(off_foot=None)
+        row["fit"] = list(self.AXES)
+        self.assertEqual(replay.row_text(row, "fit").split()[23:], ["1", "0.0", "0.0", "0.0"])   # no damp= on the line: nothing added
+
+    def test_the_rows_for_a_test(self):
+        rows = [self.row(damp=(0.1, -0.2, 0.05)), self.row(off_foot=1)]
+        for row in rows:
+            row["fit"] = list(self.AXES)
+        text = replay.emit_head("cut_rows", rows)
+        self.assertIn("static const HeadFrame cut_rows[] = {", text)
+        self.assertIn("{0.1000f, -0.2000f, 0.0500f}", text)
+        self.assertEqual(text.count("\n  {"), 2)
+        self.assertIn(", 4, 1, 1, 0, {", text)   # kind, source, looked, off_foot
+        self.assertIn(", 4, 1, 1, 1, {", text)
 
 
 class Judge(unittest.TestCase):

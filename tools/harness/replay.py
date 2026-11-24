@@ -78,9 +78,9 @@ BEYOND_M = 0.05
 CARRY_M = 0.05   # a correction over this, carried on after a change of camera, is timed
 TRACE = re.compile(r"^(\d+):(\d+):(\d+)\.(\d+) Trace: t=(-?[\d.]+) kind=(\d+) eye_world=\(([-\d. ]+)\) step=[-\d.]+ wanted=\(([-\d. ]+)\) "
                    r"correction=([-\d.]+).*?source=(\S+) root=\(([-\d. ]+)\)(?: axes=\(([-\d. ]+)\))? looked=(\d) taken=(\S+)"
-                   r"(?: quiet=(\d))?(?: tick=([\d.]+))?")
+                   r"(?: quiet=(\d))?(?: tick=([\d.]+))?(?: off_foot=(\d) damped=\d damp=\(([-\d. ]+)\))?")
 SOURCES = {"head": 1, "native": 2, "repeat": 2}
-TAKEN = ((1, "jump"), (2, "edge"), (4, "root"), (8, "restart"))
+TAKEN = ((1, "jump"), (2, "edge"), (4, "root"), (8, "restart"), (16, "cut"))
 
 
 def read(lines):
@@ -99,7 +99,8 @@ def read(lines):
         row = {"stamp": stamp, "t": float(m[5]), "kind": int(m[6]), "eye": [float(x) for x in m[7].split()],
                "wanted": [float(x) for x in m[8].split()], "carried": float(m[9]), "source": m[10],
                "root": [float(x) for x in m[11].split()], "axes": [float(x) for x in m[12].split()] if m[12] else None,
-               "looked": int(m[13]), "taken": m[14], "quiet": int(m[15] or 0), "clock": float(m[16]) if m[16] else None, "at": line[:12]}
+               "looked": int(m[13]), "taken": m[14], "quiet": int(m[15] or 0), "clock": float(m[16]) if m[16] else None, "at": line[:12],
+               "off_foot": int(m[17]) if m[17] else None, "damp": [float(x) for x in m[18].split()] if m[18] else None}
         if window and row["t"] < window[-1]["t"] - 1:  # an edge without a State line (the orphaned view): t starts again
             windows.append(window)
             window = []
@@ -266,11 +267,44 @@ def build(header_dir, name, work):
     return binary
 
 
+def head_given(row):
+    """Whether the helper gives the filter the head before the damping in this row (THE CUT, src/camera_continuity.h;
+    src/camera_helper.c smooth_present): a head-camera frame (kind 4, the head source) of a body on foot, not in full
+    aim. A line before 0.6.0-feel.48 does not say off_foot: taken as on foot. Not known from a line: the helper also
+    leaves out a body that is down (its head 3 m from the root) and the ADS gap."""
+    return row["kind"] == 4 and row["source"] == "head" and row.get("off_foot") != 1 and not row.get("quiet", 0)
+
+
+def row_text(row, axes):
+    """One row for replay_filter.c: tick source detect quiet fresh, wanted, root, logged eye, axes, and (round 19) whether
+    the head is given and what the damping added to the eye in the world (the head is the wanted eye less that)."""
+    given = head_given(row)
+    damp = (row.get("damp") or [0.0, 0.0, 0.0]) if given else [0.0, 0.0, 0.0]
+    return "%.3f %d %d %d %d %s %s %s %s %d %s\n" % (row["tick"], SOURCES.get(row["source"], 0), row["looked"], row.get("quiet", 0),
+                                                 row.get("fresh", False), " ".join(map(str, row["wanted"])), " ".join(map(str, row["root"])),
+                                                 " ".join(map(str, row["eye"])), " ".join(map(str, row[axes])), given, " ".join(map(str, damp)))
+
+
+def emit_head(name, rows):
+    """The rows as a C array of HeadFrame (tests/reference/soak-30-cut.h): SoakFrame with the kind, off_foot and what
+    the damping added, for scenes of THE CUT."""
+    first = rows[0]["tick"]
+
+    def group(values, digits):
+        return "{" + ", ".join(f"{v:.{digits}f}f" for v in values) + "}"
+    out = [f"/* {rows[0]['at']} to {rows[-1]['at']}: ms, kind, source, looked, off_foot, wanted eye, damp, root, root axes (logged), eye shown in the log */",
+           f"static const HeadFrame {name}[] = {{"]
+    for row in rows:
+        off = row.get("off_foot")
+        out.append(f"  {{{row['tick'] - first:.1f}f, {row['kind']}, {SOURCES.get(row['source'], 0)}, {row['looked']}, {1 if off == 1 else 0}, "
+                   f"{group(row['wanted'], 4)}, {group(row.get('damp') or [0, 0, 0], 4)},\n    {group(row['root'], 4)}, {group(row['fit'], 6)}, "
+                   f"{group(row['eye'], 4)}}},")
+    out.append("};")
+    return "\n".join(out) + "\n"
+
+
 def run(binary, mode, rows, axes):
-    text = "".join("%.3f %d %d %d %d %s %s %s %s\n" % (row["tick"], SOURCES.get(row["source"], 0), row["looked"], row.get("quiet", 0),
-                                                       row.get("fresh", False), " ".join(map(str, row["wanted"])), " ".join(map(str, row["root"])),
-                                                       " ".join(map(str, row["eye"])), " ".join(map(str, row[axes])))
-                   for row in rows)
+    text = "".join(row_text(row, axes) for row in rows)
     out = subprocess.run([str(binary), mode], input=text, capture_output=True, text=True, check=True).stdout.splitlines()
     assert len(out) == len(rows)
     return [[float(x) for x in line.split()] for line in out]
@@ -325,6 +359,7 @@ def main(argv):
     parser.add_argument("--from", dest="start", default=None)
     parser.add_argument("--to", dest="end", default=None)
     parser.add_argument("--emit", default=None, help="write the rows of --from/--to as a C array of this name")
+    parser.add_argument("--emit-head", default=None, help="the same as HeadFrame rows, with the kind, off_foot and the damping (round 19)")
     parser.add_argument("--worst", type=int, default=0, help="list this many rows where the logged filter, replayed, is farthest from the log")
     args = parser.parse_args(argv[1:])
     calls = read(Path(args.log).read_text(errors="replace").splitlines())
@@ -334,6 +369,9 @@ def main(argv):
 
     def chosen(row):
         return not (args.start and row["at"] < args.start) and not (args.end and row["at"] > args.end)
+    if args.emit_head:
+        print(emit_head(args.emit_head, [row for row in calls if chosen(row)]), end="")
+        return 0
     if args.emit:
         picked = [row for row in calls if chosen(row)]
         print(f"/* {picked[0]['at']} to {picked[-1]['at']}: ms, source, looked, wanted eye, root, root axes "
