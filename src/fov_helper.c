@@ -604,10 +604,14 @@ static bool hook_exit_request(const Policy *p) {
  * lock is released at the single exit below (retail's Unlock guard). */
 /* Beyond retail (tfp_fov_set_lock): one field of view for every frame of the view, whatever the weapon, action or
  * camera. 0 switches it off, and then nothing here runs. The value glides (80 ms) so switching it never pops. */
-static volatile float lock_radians, lock_seen_native, lock_shown; static volatile uint32_t lock_zoom; static _Atomic uint64_t lock_camera, lock_applied;
+static volatile float lock_radians, lock_seen_native, lock_shown, lock_aim = TFP_FOV_AIM_ZOOM; static _Atomic uint64_t lock_camera, lock_applied;
 static TfpFovLock lock_state;
 static volatile double lock_clock; /* milliseconds, as the binder last gave them: only for a host clock that cannot be read */
-void tfp_fov_set_lock(float radians, bool zoom_when_aiming, double now_ms) { lock_clock = now_ms; lock_zoom = zoom_when_aiming ? 1u : 0u; lock_radians = radians > .05f && radians < 3.0f ? radians : 0; }
+void tfp_fov_set_lock_aim(float radians, float aim, double now_ms) {
+  lock_clock = now_ms; lock_aim = aim > .05f && aim < 3.0f ? aim : aim == TFP_FOV_AIM_LOCKED ? TFP_FOV_AIM_LOCKED : TFP_FOV_AIM_ZOOM;
+  lock_radians = radians > .05f && radians < 3.0f ? radians : 0;
+}
+void tfp_fov_set_lock(float radians, bool zoom_when_aiming, double now_ms) { tfp_fov_set_lock_aim(radians, zoom_when_aiming ? TFP_FOV_AIM_ZOOM : TFP_FOV_AIM_LOCKED, now_ms); }
 void tfp_fov_lock_stats(TfpFovLockStats *out) {
   if (!out) return;
   out->applied = atomic_load(&lock_applied); out->game_radians = lock_seen_native; out->shown_radians = lock_shown;
@@ -639,7 +643,10 @@ static float lock_field(void *camera, float native, float applied, bool aiming, 
   if ((uint64_t)(uintptr_t)camera != atomic_load_explicit(&lock_camera, memory_order_relaxed)) {
     tfp_fov_lock_reset(&lock_state); lock_shown = 0; lock_frame_open = 0; lock_frame_at = lock_tail_at = 0; return applied;
   }
-  if (!(wanted > 0) && !tfp_fov_lock_active(&lock_state)) { lock_shown = 0; lock_frame_open = 0; lock_tail_at = 0; return applied; }
+  const float aim_field = lock_aim;
+  /* A chosen field of view in aim holds with the lock off too: this frame's aim, or the hooked call's, decides. */
+  const bool chosen_aim = aim_field > 0 && (decides ? aiming : lock_frame_aim != 0);
+  if (!(wanted > 0) && !chosen_aim && !tfp_fov_lock_active(&lock_state)) { lock_shown = 0; lock_frame_open = 0; lock_tail_at = 0; return applied; }
   double tick = 0;
   if (host.seconds && seconds(&tick)) tick *= 1000; else tick = lock_clock;
   if (!decides) {
@@ -653,11 +660,11 @@ static float lock_field(void *camera, float native, float applied, bool aiming, 
   float goal = applied; bool aim = aiming;
   if (!decides) { aim = kept && lock_frame_aim; if (kept) goal = lock_frame_applied; }
   if (!(wanted > 0) && lock_recent(lock_tail_at, tick)) goal = lock_tail_native; /* gliding out: to what stays on screen */
-  float shown = tfp_fov_lock_step(&lock_state, wanted, lock_zoom != 0, aim, goal, tick);
+  float shown = tfp_fov_lock_step_aim(&lock_state, wanted, aim_field, aim, goal, tick);
   const bool active = tfp_fov_lock_active(&lock_state);
   if (!active) shown = applied; /* let go (or never taken): the caller's own value, untouched */
   lock_shown = active ? shown : 0;
-  if (wanted > 0 && active) atomic_fetch_add_explicit(&lock_applied, 1, memory_order_relaxed);
+  if ((wanted > 0 || chosen_aim) && active) atomic_fetch_add_explicit(&lock_applied, 1, memory_order_relaxed);
   if (decides) { lock_frame_aim = aiming ? 1u : 0u; lock_frame_applied = applied; lock_frame_at = tick; lock_frame_value = shown; lock_frame_open = active ? 1u : 0u; }
   return shown;
 }
@@ -931,7 +938,7 @@ void tfp_fov_reset_for_tests(void) {
   atomic_store(&binds, 0); atomic_store(&ads_forwarded, 0); atomic_store(&return_address, 0);
   slot = 0; slot_image = 0; generation_counter = 0; owned_generation = 0; retired_generation = 0; possible = false;
   policy_init(&policy);
-  lock_radians = 0; lock_seen_native = 0; lock_shown = 0; lock_zoom = 0; lock_clock = 0; tfp_fov_lock_reset(&lock_state);
+  lock_radians = 0; lock_seen_native = 0; lock_shown = 0; lock_aim = TFP_FOV_AIM_ZOOM; lock_clock = 0; tfp_fov_lock_reset(&lock_state);
   lock_frame_at = 0; lock_tail_at = 0; lock_frame_value = 0; lock_frame_applied = 0; lock_tail_native = 0; lock_frame_open = 0; lock_frame_aim = 0;
   atomic_store(&lock_camera, 0); atomic_store(&lock_applied, 0);
   display_cache.native = 0; display_cache.applied = 0; display_cache.degrees = 0;

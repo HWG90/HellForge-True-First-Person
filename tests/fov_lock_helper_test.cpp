@@ -339,6 +339,43 @@ int main() {
     CHECK(stats().applied == counted && stats().shown_radians == 0);
     tfp_fov_end(gen);
   }
+  // ---- 10. Round 20, "Aim field of view": a chosen value in full aim, through the real helper and two calls a frame.
+  // With the lock on: the lock at the hip, the chosen value in full aim, the lock again after. With the lock off: the
+  // game's own values at the hip, untouched, the chosen value in full aim, and let go afterwards. The two old answers
+  // (the game's zoom, your locked view) are part 5's, through the new call. ----
+  {
+    const float CHOSEN = 40 * RAD;
+    for (int locked = 1; locked >= 0; --locked) {
+      fresh(); F.gap = 1.3; jitter_seed = 21;
+      const double period = 1000.0 / 116;
+      auto ms = [&] { return period * (0.85 + 0.3 * jitter()); };
+      auto gap = [&] { return 0.6 + 1.4 * jitter(); };
+      tfp_fov_set_lock_aim(locked ? LOCKED : 0, CHOSEN, 5000);
+      float a = 0, b = 0;
+      for (int i = 0; i < 116; ++i) b = frame2(ms(), gap(), &a);
+      if (locked) CHECK(std::fabs(b - LOCKED) < 1e-3f && a == b);
+      else CHECK(b == NATIVE && a == base && stats().shown_radians == 0 && stats().applied == 0);
+      aim(true);
+      bool same = true;
+      for (int i = 0; i < 116; ++i) { b = frame2(ms(), gap(), &a); if (a != b) same = false; }
+      CHECK(same && std::fabs(b - CHOSEN) < 1e-3f && stats().shown_radians == b); // one value a frame, the chosen one
+      aim(false);
+      for (int i = 0; i < 116; ++i) b = frame2(ms(), gap(), &a);
+      if (locked) CHECK(std::fabs(b - LOCKED) < 1e-3f);
+      else CHECK(b == NATIVE && a == base && stats().shown_radians == 0);          // let go again
+      tfp_fov_end(gen);
+    }
+    for (int zoom = 0; zoom < 2; ++zoom) {
+      fresh();
+      tfp_fov_set_lock_aim(LOCKED, zoom ? TFP_FOV_AIM_ZOOM : TFP_FOV_AIM_LOCKED, 5000);
+      float last = 0;
+      aim(true);
+      for (int i = 0; i < 120; ++i) last = frame(dt);
+      CHECK(std::fabs(last - (zoom ? NATIVE : LOCKED)) < 1e-3f);
+      aim(false);
+      tfp_fov_end(gen);
+    }
+  }
   std::printf("fov lock helper: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

@@ -419,6 +419,52 @@ static bool locked_as_feel24(void) {
   return !tfp_locked_view_animated_arms(&wire) && tfp_locked_view_camera_lock(&wire) && tfp_locked_view_fov_degrees(&wire) == 104 &&
          !tfp_locked_view_fov_zoom_when_aiming(&wire) && tfp_locked_view_kick_strength(&wire) == 55 && tfp_locked_view_put_away(&wire);
 }
+/* ---- round 20: "Aim field of view" and the sight distance in aim (locked_view.json) ---- */
+static int aim_part(void) {
+  static TfpSettings s;
+  char why[200], text[1 << 14];
+  /* defaults: the game's zoom in aim (as "Zoom when aiming" on), a chosen value of 50 degrees, the sight brought to 10 cm */
+  CHECK(tfp_settings_defaults(&s));
+  CHECK(tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim) == 1 && tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim_degrees) == 50);
+  CHECK(tfp_settings_locked_number(&s, TFP_LOCKED_ads_sight_cm) == 10 && tfp_settings_locked_flag(&s, TFP_LOCKED_fov_zoom_when_aiming));
+  /* a file of feel.51 and before: the toggle off is "your locked view", on is "the game's zoom" */
+  static const char off[] = "{\"format\":1,\"locked_view\":{\"fov_zoom_when_aiming\":false}}", on[] = "{\"format\":1,\"locked_view\":{\"fov_zoom_when_aiming\":true}}";
+  CHECK(tfp_settings_defaults(&s) && tfp_settings_load_locked(&s, off, strlen(off), why, sizeof why));
+  CHECK(tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim) == 2 && !s.locked_skipped[0]);
+  CHECK(tfp_settings_defaults(&s) && tfp_settings_load_locked(&s, on, strlen(on), why, sizeof why) && tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim) == 1);
+  /* a file of this build: its own fov_aim wins over the toggle beside it */
+  static const char both[] = "{\"format\":1,\"locked_view\":{\"fov_aim\":3,\"fov_aim_degrees\":42,\"fov_zoom_when_aiming\":false,\"ads_sight_cm\":7}}";
+  CHECK(tfp_settings_defaults(&s) && tfp_settings_load_locked(&s, both, strlen(both), why, sizeof why));
+  CHECK(tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim) == 3 && tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim_degrees) == 42);
+  CHECK(tfp_settings_locked_number(&s, TFP_LOCKED_ads_sight_cm) == 7);
+  /* setting the choice keeps the old toggle in step, so a build before this one reads the nearest answer from the file */
+  CHECK(tfp_settings_set_locked(&s, TFP_LOCKED_fov_aim, false, false, 1) && tfp_settings_locked_flag(&s, TFP_LOCKED_fov_zoom_when_aiming));
+  CHECK(tfp_settings_set_locked(&s, TFP_LOCKED_fov_aim, false, false, 2) && !tfp_settings_locked_flag(&s, TFP_LOCKED_fov_zoom_when_aiming));
+  CHECK(tfp_settings_set_locked(&s, TFP_LOCKED_fov_aim, false, false, 3));
+  CHECK(!tfp_settings_locked_flag(&s, TFP_LOCKED_fov_zoom_when_aiming));
+  CHECK(tfp_settings_set_locked(&s, TFP_LOCKED_fov_aim, false, false, 9) && tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim) == 3); /* kept in range */
+  /* and the other way: the toggle set by an old path moves the choice between its two answers, a chosen value stays */
+  CHECK(tfp_settings_set_locked(&s, TFP_LOCKED_fov_zoom_when_aiming, true, true, 0) && tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim) == 3);
+  CHECK(tfp_settings_set_locked(&s, TFP_LOCKED_fov_aim, false, false, 2) && tfp_settings_set_locked(&s, TFP_LOCKED_fov_zoom_when_aiming, true, true, 0));
+  CHECK(tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim) == 1);
+  /* written and read again: all three, and the toggle */
+  CHECK(tfp_settings_set_locked(&s, TFP_LOCKED_fov_aim, false, false, 3) && tfp_settings_set_locked(&s, TFP_LOCKED_ads_sight_cm, false, false, 14));
+  const size_t n = tfp_settings_write_locked(&s, text, sizeof text);
+  CHECK(n > 0 && strstr(text, "\"fov_aim\": 3") && strstr(text, "\"ads_sight_cm\": 14") && strstr(text, "\"fov_zoom_when_aiming\": false"));
+  static TfpSettings again;
+  CHECK(tfp_settings_defaults(&again) && tfp_settings_load_locked(&again, text, n, why, sizeof why));
+  CHECK(tfp_settings_locked_number(&again, TFP_LOCKED_fov_aim) == 3 && tfp_settings_locked_number(&again, TFP_LOCKED_ads_sight_cm) == 14);
+  /* what the field-of-view helper is handed (src/fov_lock.h): the game's zoom, the locked view, or the chosen radians */
+  new_wire();
+  CHECK(tfp_wire_settings_bind(&wire, "{\"format\":1,\"first_person\":{}}", 30, "settings.json"));
+  tfp_wire_settings_bind_locked(&wire, both, strlen(both), "locked_view.json");
+  CHECK(fabs(tfp_locked_view_aim_field(&wire) - 42 * 3.14159265358979 / 180) < 1e-6);
+  CHECK(tfp_wire_settings_locked_set(&wire, TFP_LOCKED_fov_aim, false, false, 1) && tfp_locked_view_aim_field(&wire) == TFP_FOV_AIM_ZOOM);
+  CHECK(tfp_wire_settings_locked_set(&wire, TFP_LOCKED_fov_aim, false, false, 2) && tfp_locked_view_aim_field(&wire) == TFP_FOV_AIM_LOCKED);
+  CHECK(!tfp_locked_view_fov_zoom_when_aiming(&wire));
+  CHECK(tfp_locked_view_ads_sight_cm(&wire) == 7);
+  return 0;
+}
 /* ---- the one list (src/wire_menu.c): every option of both files, each with a setter, once ---- */
 static bool has_fird(const char *text) {
   for (const char *t = text; t && *t; t++) if ((t[0] == 'F' || t[0] == 'f') && !strncmp(t + 1, "ird", 3)) return true;
@@ -452,6 +498,7 @@ static int list_part(void) {
       const TfpSettingsLockedInfo *info = tfp_settings_locked_info((TfpSettingsLockedId)c->locked);
       CHECK(info && c->page == 2);
       if (c->kind == TFP_MK_SLIDER) CHECK(!info->is_bool && c->min == info->min && c->max == info->max && c->step == info->step);
+      else if (c->kind == TFP_MK_CHOICE && !info->is_bool) CHECK(info->min == 1 && info->max == c->choice_count && info->step == 1); /* a choice over a number */
       else CHECK(info->is_bool && (c->kind == TFP_MK_TOGGLE || c->kind == TFP_MK_CHECK || (c->kind == TFP_MK_CHOICE && c->choice_count == 2)));
     }
   }
@@ -484,7 +531,7 @@ static int list_part(void) {
   for (int i = 0; i < skipped; i++) CHECK(out[i].why && strlen(out[i].why) > 20 && out[i].key);
   /* the options the locked view brought are all in: field of view and its lock and zoom, the camera style, the kicks,
    * damping, the three live features */
-  static const char *const wanted[] = {"camera_lock", "fov_lock", "fov_degrees", "fov_zoom_when_aiming", "camera_style", "kick_strength",
+  static const char *const wanted[] = {"camera_lock", "fov_lock", "fov_degrees", "fov_aim", "fov_aim_degrees", "ads_sight_cm", "camera_style", "kick_strength",
                                         "kick_max_degrees", "thrown_kick_strength", "camera_damping", "animated_arms", "one_handed_pistols",
                                         "put_away", "smooth_eye", "edit_placement", "editor_key", "toggle_key", "fird_person_arms"};
   for (size_t k = 0; k < COUNT(wanted); k++) {
@@ -1760,6 +1807,7 @@ int main(int argc, char **argv) {
     tfp_wire_settings_free(&wire);
   }
   if (list_part()) return 1;
+  if (aim_part()) return 1;
   if (compat_part()) return 1;
   printf("wire settings: %u checks passed (%zu refusals of the reader and loader; retail's answers on %zu + %zu + %zu operations, the defaults "
          "also with no file and with a broken one; placement refs; mod.set; the runtime's entry placement, near clip and weapon line)\n",

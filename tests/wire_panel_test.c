@@ -112,8 +112,10 @@ static int store_part(void) {
   TfpSettings s;
   memset(&s, 0, sizeof s);
   CHECK(tfp_settings_defaults(&s));
-  /* the thirteen options and their defaults */
-  CHECK(TFP_LOCKED_COUNT == 13);
+  /* the sixteen options and their defaults (round 20: Aim field of view, its chosen degrees, the sight distance in aim) */
+  CHECK(TFP_LOCKED_COUNT == 16);
+  CHECK(tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim) == 1 && tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim_degrees) == 50 &&
+        tfp_settings_locked_number(&s, TFP_LOCKED_ads_sight_cm) == 10);
   CHECK(tfp_settings_locked_flag(&s, TFP_LOCKED_camera_lock) && tfp_settings_locked_flag(&s, TFP_LOCKED_fov_lock) &&
         tfp_settings_locked_number(&s, TFP_LOCKED_fov_degrees) == 80 && tfp_settings_locked_flag(&s, TFP_LOCKED_fov_zoom_when_aiming) &&
         tfp_settings_locked_number(&s, TFP_LOCKED_kick_strength) == 35 && tfp_settings_locked_number(&s, TFP_LOCKED_kick_max_degrees) == 8 &&
@@ -159,7 +161,7 @@ static int store_part(void) {
   CHECK(n && n < sizeof text && tfp_settings_write_locked(&s, NULL, 0) == n && strstr(text, "{\n \"format\": 1,\n \"locked_view\": {") == text &&
         strstr(text, "\"camera_lock\": false") && strstr(text, "\"fov_degrees\": 120") &&
         strstr(text, "\"kick_max_degrees\": 0") && strstr(text, "\"put_away\": true") && strstr(text, "\"thrown_kick_strength\": 70") &&
-        strstr(text, " \"locked_view\": {\n  \"animated_arms\": true,\n  \"bodycam\": false,\n  \"camera_damping\": 60,\n  \"camera_lock\": false,") &&
+        strstr(text, " \"locked_view\": {\n  \"ads_sight_cm\": 10,\n  \"animated_arms\": true,\n  \"bodycam\": false,\n  \"camera_damping\": 60,\n  \"camera_lock\": false,") &&
         strstr(text, "\"animated_arms\": true") && strstr(text, "\"smooth_eye\": true") && !strstr(text, "holster_animation"));
   TfpSettings back;
   memset(&back, 0, sizeof back);
@@ -569,7 +571,7 @@ static int panel_part(void) {
   CHECK(drawn("tab:First person") && drawn("tab:Bob and sway") && drawn("tab:Locked view"));
   int count = 0, sliders = 0, checks_drawn = 0, keys = 0, described = 0, choices = 0;
   const TfpMenuControl *controls = tfp_wire_menu_controls(&count);
-  CHECK(count == 42);
+  CHECK(count == 44);
   for (int i = 0; i < count; i++) {
     const TfpMenuControl *c = &controls[i];
     char line[420];
@@ -601,14 +603,16 @@ static int panel_part(void) {
     }
     if (c->description) { snprintf(line, sizeof line, "tip:%s", c->description); CHECK(drawn_part(line)); described++; }
   }
-  CHECK(sliders == 14 && checks_drawn == 17 && keys == 2 && choices == 2 && described == 29);
+  CHECK(sliders == 16 && checks_drawn == 16 && keys == 2 && choices == 3 && described == 31);
   CHECK(drawn("text:First person through every action, one field of view, and how much your body's movement moves the view."));
   CHECK(drawn("primary:Enable True First Person") && drawn("cap:F11") && drawn("cap:PAGE UP"));
   CHECK(drawn("slider:Weapon movement strength=120[0..200]") && drawn("slider:Near clip distance (cm)=15[5..40]") && drawn("slider:Weapon bob speed=100[25..200]"));
   CHECK(drawn("text:Status: First person off") && drawn_part("text:Weapon: enable First Person with a firearm"));
   CHECK(drawn("slider:This weapon: hip clearance (cm)=15[5..40] (disabled)") && drawn("button:Save clipping for this weapon (disabled)"));
   CHECK(drawn("check:Camera lock=on") && drawn("check:Field of view lock=on") && drawn("slider:Field of view (degrees)=80[50..120]") &&
-        drawn("check:Zoom when aiming=on") && drawn("slider:View kick strength (%)=35[0..100] (disabled)") && drawn("slider:View kick limit (degrees)=8[0..20] (disabled)") &&
+        drawn("combo:Aim field of view=The game's zoom") && drawn("slider:Aim field of view (degrees)=50[20..90] (disabled)") &&
+        drawn("text:Used when Aim field of view is A chosen value.") && drawn("slider:Sight distance in aim (cm)=10[0..30]") &&
+        !drawn_part("Zoom when aiming") && drawn("slider:View kick strength (%)=35[0..100] (disabled)") && drawn("slider:View kick limit (degrees)=8[0..20] (disabled)") &&
         drawn("slider:View kick when thrown (%)=70[0..100]") && drawn("slider:Camera damping (%)=60[0..100] (disabled)") && drawn("check:Animated arms=on") && drawn("check:Weapon put-away=on") && drawn("check:Smooth eye=on"));
   /* The camera style. Bodycam is off (the Stable camera): its row is directly above the kick sliders, with what the
    * two styles are; the three sliders only Bodycam uses are greyed through the host, with one line that says so, and
@@ -617,7 +621,7 @@ static int panel_part(void) {
     const char *row = drawn("combo:Camera style=Stable"), *tip_line = drawn("tip:Stable: a steady, traditional first-person camera. Bodycam: the view moves with "
       "your head, like a body camera: it takes kicks from your body's movement and follows the head through actions.");
     const char *note = drawn("text:View kick strength, View kick limit and Camera damping apply to Bodycam.");
-    const char *first = drawn("slider:View kick strength (%)=35[0..100] (disabled)"), *above = drawn("check:Zoom when aiming=on");
+    const char *first = drawn("slider:View kick strength (%)=35[0..100] (disabled)"), *above = drawn("slider:Sight distance in aim (cm)=10[0..30]");
     CHECK(row && tip_line && note && first && above && above < row && row < tip_line && tip_line < note && note < first && first - note == (ptrdiff_t)sizeof ov.drawn[0]);
     CHECK(!drawn("slider:View kick strength (%)=35[0..100]") && !drawn("slider:View kick limit (degrees)=8[0..20]") && !drawn("slider:Camera damping (%)=60[0..100]") &&
           !drawn("slider:View kick when thrown (%)=70[0..100] (disabled)"));
@@ -634,17 +638,18 @@ static int panel_part(void) {
   CHECK(!ov.tab_bars && !ov.tab_items && !ov.disabled_depth && !ov.disabled && !ov.lock_depth && ov.locks && !ov.bad_colours);
   /* A greyed item answers "not hovered" in the host, so each greyed row's description is carried by an unseen item
    * laid over it, of its own rectangle and not greyed: the three Bodycam sliders, One-handed pistols, and the two
-   * rows of the First person tab that need a weapon. */
+   * rows of the First person tab that need a weapon; and (round 20) the chosen aim field of view's slider while the
+   * game's zoom is the answer. */
   CHECK(drawn("tip:The most the view is turned by a kick while on foot. Default 8.") &&
         drawn("tip:How much the view is steadied against your body's movement. 0 is the raw movement; higher is calmer and slower. Default 60."));
-  CHECK(ov.covers == 6 && !ov.bad_covers);
+  CHECK(ov.covers == 7 && !ov.bad_covers);
   {
     const char *slider_row = drawn("slider:View kick strength (%)=35[0..100] (disabled)"), *tip_row = drawn("tip:How much of your body's movement reaches the view while on foot. Default 35.");
     CHECK(slider_row && tip_row && tip_row - slider_row == (ptrdiff_t)sizeof ov.drawn[0]);   /* directly after its slider */
   }
   ov.hover = false;
   draw_frame();
-  CHECK(ov.covers == 12 && !ov.bad_covers && !drawn_part("tip:"));   /* laid over them in every frame; no tooltip without the mouse */
+  CHECK(ov.covers == 14 && !ov.bad_covers && !drawn_part("tip:"));   /* laid over them in every frame; no tooltip without the mouse */
   ov.tab = "Bob and sway";                                        /* one tab selected: only its controls */
   draw_frame();
   CHECK(drawn_part("slider:Weapon bob strength=") && !drawn_part("Camera lock") && !drawn_part("Near clip distance") && !drawn_part("tip:"));
@@ -734,13 +739,20 @@ static int panel_part(void) {
   draw_frame(); game_update();
   CHECK(tfp_locked_view_kick_strength(&wire) == 50 && saves == 9 && strstr(saved_text, "\"kick_strength\": 50"));
   static const struct { const char *label; bool (*get)(TfpWire *); } flags[] = {
-    {"Field of view lock", tfp_locked_view_fov_lock}, {"Zoom when aiming", tfp_locked_view_fov_zoom_when_aiming},
+    {"Field of view lock", tfp_locked_view_fov_lock},
     {"Animated arms", tfp_locked_view_animated_arms}, {"Weapon put-away", tfp_locked_view_put_away}, {"Smooth eye", tfp_locked_view_smooth_eye}};
   for (size_t i = 0; i < COUNT(flags); i++) {
     ov.flip = flags[i].label; draw_frame(); game_update();
     CHECK(!flags[i].get(&wire));
   }
   CHECK(strstr(saved_text, "\"animated_arms\": false") && strstr(saved_text, "\"put_away\": false") && strstr(saved_text, "\"smooth_eye\": false"));
+  /* round 20: Aim field of view, a choice of three; A chosen value enables its slider, the old toggle follows in the file */
+  ov.pick = "Aim field of view"; ov.pick_to = 2; draw_frame(); game_update();
+  CHECK(tfp_locked_view_fov_aim(&wire) == 3 && !tfp_locked_view_fov_zoom_when_aiming(&wire) && strstr(saved_text, "\"fov_aim\": 3") &&
+        strstr(saved_text, "\"fov_zoom_when_aiming\": false"));
+  draw_frame();
+  CHECK(drawn("combo:Aim field of view=A chosen value") && drawn("slider:Aim field of view (degrees)=50[20..90]") && !drawn("text:Used when Aim field of view is A chosen value."));
+  CHECK(fabs(tfp_locked_view_aim_field(&wire) - 50 * 3.14159265358979 / 180) < 1e-6);
   ov.flip = "One-handed pistols"; draw_frame(); game_update();     /* greyed: a click does nothing */
   CHECK(tfp_locked_view_one_handed_pistols(&wire) && ov.flip);
   ov.flip = NULL;

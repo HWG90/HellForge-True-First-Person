@@ -701,6 +701,11 @@ TFP_SETTINGS_LOCKED(LOCKED_GETTER)
 #undef LOCKED_GETTER
 #undef LOCKED_GETTER_0
 #undef LOCKED_GETTER_1
+float tfp_locked_view_aim_field(TfpWire *w) {
+  const double aim = tfp_locked_view_fov_aim(w);
+  if (aim == 3) return (float)(tfp_locked_view_fov_aim_degrees(w)*3.14159265358979/180);
+  return aim == 2 ? TFP_FOV_AIM_LOCKED : TFP_FOV_AIM_ZOOM;
+}
 void tfp_wire_settings_save_frame(TfpWire *w) {
   static const char *const what[2] = {"settings", "locked view options"};
   Settings *st = state(w);

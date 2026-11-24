@@ -57,12 +57,14 @@ typedef struct TfpMenuControl {
    * MCM has no such line: there an inert control's note, and a choice's, ends the description. */
   const char *note; int note_when;
   bool bodycam_only;        /* disabled while the camera style is Stable (src/camera_damp.h) */
+  bool aim_chosen_only;     /* disabled unless Aim field of view is A chosen value (round 20) */
   bool inert;               /* stored, and nothing on this build acts on it: always disabled, with its note */
 } TfpMenuControl;
 const TfpMenuControl *tfp_wire_menu_controls(int *count);
 extern const char *const tfp_wire_menu_pages[TFP_MENU_PAGES];     /* "First person", "Bob and sway", "Locked view" */
 extern const char *const tfp_wire_menu_page_ids[TFP_MENU_PAGES];  /* MCM's page ids */
 extern const char *const tfp_wire_menu_page_intro[TFP_MENU_PAGES]; /* a line at the top of the page, or NULL */
+extern const char *const tfp_wire_menu_aim_fields[3]; /* fov_aim's choices: the values 1, 2, 3 */
 extern const char *const tfp_wire_menu_presets[3];  /* motion_preset's choices: the values 1, 2, 3 */
 /* Every key of settings.json and locked_view.json that is no control, and why: placements the editor writes, values
  * retail's runtime keeps, and what no unit of this build reads. Together with the controls this names every key of
