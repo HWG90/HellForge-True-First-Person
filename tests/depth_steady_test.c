@@ -294,18 +294,18 @@ int main(void) {
     }
     tfp_steady_take(&log, &s);
     CHECK(s.frames == 30 && s.worked == 30 && s.shifted == 0 && !tfp_steady_worth(&s));
-    for (int i = 0; i < 30; ++i) { /* a flipping one, the root following in all frames but one */
+    for (int i = 0; i < 30; ++i) { /* a flipping one, the root following in every frame the rig was moved in */
       const TfpSteadyInput in = game_frame(&g, (i & 1) == 0, 33.3f); float delta = 0, depth = 0, held = 0;
       const uint32_t reason = tfp_steady_frame(&state, &in, 1, 2000.0+i*33.3, &delta, &depth, &held);
       tfp_steady_note(&log, reason, in.bit, depth, held, delta, .07f+depth);
-      if (delta != 0) { tfp_steady_moved(&log, delta); if (i != 4) tfp_steady_root(&log); }
+      if (delta != 0) { tfp_steady_moved(&log, delta); tfp_steady_root(&log); }
     }
     tfp_steady_take(&log, &s);
-    CHECK(s.frames == 30 && s.worked == 30 && s.gated.count == 15 && s.clear.count == 15 && s.shifted == 15 && s.roots == 14 && tfp_steady_worth(&s));
+    CHECK(s.frames == 30 && s.worked == 30 && s.gated.count == 15 && s.clear.count == 15 && s.shifted == 15 && s.roots == 15 && tfp_steady_worth(&s));
     tfp_steady_line(&s, text, sizeof text);
     printf("  %s\n", text);
     CHECK(strlen(text) < 600 && strstr(text, "Steady: 30 frames of the rig, the game's depth worked out in 30: ") && strstr(text, " m with the gate set (15 frames), ")
-          && strstr(text, " m clear (15); held at 0.2400 to 0.2400 m; the rig moved to it in 15 frames, its root with it in 14, by 0.2400 to 0.2400 m; the rig's depth argument 0.0700 to 0.0700 m gated, 0.3100 to 0.3100 m clear; passed in 0") && !strstr(text, "passed in 0 ("));
+          && strstr(text, " m clear (15); held at 0.2400 to 0.2400 m; the rig moved to it in 15 frames, its root with it in 15, by 0.2400 to 0.2400 m; the rig's depth argument 0.0700 to 0.0700 m gated, 0.3100 to 0.3100 m clear; passed in 0") && !strstr(text, "passed in 0 ("));
     CHECK(strstr(text, "; the rig's depth argument ") && !strstr(text, "depth_steady_off.txt"));
     /* "moved" is a frame in which node 5's float changed, as the helper says it; a shift worked out is not one yet (it
      * can be too small for the float, and the root's half is only asked for where the float changed) */
