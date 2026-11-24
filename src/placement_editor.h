@@ -133,6 +133,14 @@ TfpEdResult tfp_editor_cancel(TfpEditor *e, const char *reason);
 TfpEdResult tfp_editor_finish(TfpEditor *e, bool all_weapons);
 TfpEdResult tfp_editor_shutdown(TfpEditor *e);
 TfpEdResult tfp_editor_update(TfpEditor *e);
+/* Not in retail (round 20; tests/editor_ads_test.c). tfp_editor_select_action: the action to begin on, asked for
+ * between request_open and the first update (phase "queued"; false at any other time, or for an action the editor
+ * does not list). The binder asks for "ads" when the editor is opened in full aim (src/editor_motion.h).
+ * tfp_editor_preview_place: x, y, z, yaw, pitch, roll of the draft while active; false: none.
+ * tfp_editor_original_place: the placement the editor puts back on cancel (the controller's when it opened). */
+bool tfp_editor_select_action(TfpEditor *e, const char *id);
+bool tfp_editor_preview_place(const TfpEditor *e, double out[6]);
+bool tfp_editor_original_place(const TfpEditor *e, TfpEdPlace *out);
 /* Not in retail: whether a draft differs from what the editor opened with (the live-replace check). */
 bool tfp_editor_holds_draft(const TfpEditor *e);
 #endif

@@ -12,6 +12,7 @@
 #ifndef TFP_WIRE_SETTINGS_H
 #define TFP_WIRE_SETTINGS_H
 #include "wire.h"
+#include "fov_lock.h"
 #include "tfp_settings.h"
 
 /* json: the bytes of settings.json (need not end in a NUL; not kept); NULL or length 0: there is no
@@ -138,6 +139,14 @@ bool tfp_locked_view_camera_lock(TfpWire *w);
 bool tfp_locked_view_fov_lock(TfpWire *w);
 double tfp_locked_view_fov_degrees(TfpWire *w);
 bool tfp_locked_view_fov_zoom_when_aiming(TfpWire *w);
+/* Round 20: "Aim field of view" as src/fov_lock.h takes it: TFP_FOV_AIM_ZOOM, TFP_FOV_AIM_LOCKED or the chosen value in
+ * radians. And the stored numbers behind it: fov_aim 1 .. 3, fov_aim_degrees, ads_sight_cm (src/ads_seat.h). */
+float tfp_locked_view_aim_field(TfpWire *w);
+/* The catalogue's name of the weapon in your hands (the placement key the Weapon: line last named); NULL: not known. */
+const char *tfp_wire_settings_weapon_name(TfpWire *w);
+double tfp_locked_view_fov_aim(TfpWire *w);
+double tfp_locked_view_fov_aim_degrees(TfpWire *w);
+double tfp_locked_view_ads_sight_cm(TfpWire *w);
 bool tfp_locked_view_bodycam(TfpWire *w); /* the camera style: false Stable, true Bodycam (src/camera_damp.h) */
 double tfp_locked_view_kick_strength(TfpWire *w);
 double tfp_locked_view_kick_max_degrees(TfpWire *w);

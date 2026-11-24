@@ -10,6 +10,7 @@
 typedef TfpMenuControl Control;
 const char *const tfp_wire_menu_presets[3] = {"Custom (keep existing sliders)", "Comfort", "Natural"};
 static const char *const STYLES[2] = {"Stable", "Bodycam"};
+const char *const tfp_wire_menu_aim_fields[3] = {"The game's zoom", "Your locked view", "A chosen value"};
 /* Every entry names its store, so one without a store says -1 and never 0 (a real id). */
 #define ROW(id_, kind_, label_, page_, ...) {.id = id_, .kind = kind_, .label = label_, .page = page_, __VA_ARGS__}
 #define NONE .menu = -1, .locked = -1, .config = -1
@@ -75,8 +76,18 @@ static const Control CONTROLS[] = {
   ROW("camera_lock", TFP_MK_TOGGLE, "Camera lock", 2, L(camera_lock), TIP("Keep the view first person through every action and camera of your own character.")),
   ROW("fov_lock", TFP_MK_TOGGLE, "Field of view lock", 2, L(fov_lock), TIP("Hold one field of view whatever the weapon or the camera asks for.")),
   ROW("fov_degrees", TFP_MK_SLIDER, "Field of view (degrees)", 2, L(fov_degrees), RANGE(50, 120, 1), TIP("The field of view the lock holds. Default 80.")),
-  ROW("fov_zoom_when_aiming", TFP_MK_TOGGLE, "Zoom when aiming", 2, L(fov_zoom_when_aiming),
-      TIP("Let aiming zoom in from the locked field of view. Off keeps the locked value while aiming too.")),
+  /* round 20: "Aim field of view" took the place of the toggle "Zoom when aiming" (still stored: NOT_OFFERED) */
+  ROW("fov_aim", TFP_MK_CHOICE, "Aim field of view", 2, L(fov_aim), .choices = tfp_wire_menu_aim_fields, .choice_count = 3,
+      TIP("What you see through the sights in full aim. The game's zoom: each weapon's own zoom and zoom levels, as the game shows them. "
+          "Your locked view: the field of view above, so a scope looks as small as it does at the hip. A chosen value: the field of view "
+          "below, for every weapon and zoom level, with or without the lock.")),
+  ROW("fov_aim_degrees", TFP_MK_SLIDER, "Aim field of view (degrees)", 2, L(fov_aim_degrees), RANGE(20, 90, 1), .aim_chosen_only = true,
+      TIP("The field of view in full aim when Aim field of view is A chosen value. Smaller is more zoom. Default 50."),
+      .note = "Used when Aim field of view is A chosen value."),
+  ROW("ads_sight_cm", TFP_MK_SLIDER, "Sight distance in aim (cm)", 2, L(ads_sight_cm), RANGE(0, 30, 1),
+      TIP("How close full aim brings the sight to your eye. The weapon is moved toward you until its sight is this far away; a sight that "
+          "is already closer is left where it is. 0 keeps the game's own distance. Default 15. Fine-tune one weapon with the placement "
+          "editor's ADS action (aim, then Page Up).")),
   /* the camera style (src/camera_damp.h): Boolean `bodycam` in the file, a choice of two here */
   ROW("camera_style", TFP_MK_CHOICE, "Camera style", 2, L(bodycam), .choices = STYLES, .choice_count = 2,
       TIP("Stable: a steady, traditional first-person camera. Bodycam: the view moves with your head, like a body camera: it takes kicks from your "
@@ -128,6 +139,7 @@ static const TfpMenuNotOffered NOT_OFFERED[] = {
   {"settings.json first_person", "near_clip_profiles", "per-weapon near clip, written by Save clipping for this weapon / Use global clipping for this weapon"},
   {"settings.json first_person", "grab_offset", "kept from older files; no unit of retail or of this build reads it"},
   {"settings.json first_person", "grab_offsets", "kept from older files; no unit of retail or of this build reads it"},
+  {"locked_view.json", "fov_zoom_when_aiming", "the toggle Aim field of view replaced (round 20); kept in step with it so an older build reads the nearest answer"},
   {"settings.json menu", "ads_mode", "retail's control is commented out (Fird Person ADS behaviour); only its free-aim test tool, not in this build, reads it"},
 };
 const TfpMenuNotOffered *tfp_wire_menu_not_offered(int *count) { if (count) *count = (int)(sizeof NOT_OFFERED / sizeof *NOT_OFFERED); return NOT_OFFERED; }
@@ -141,7 +153,7 @@ typedef struct Menu {
   char clip_key[TFP_SETTINGS_ID]; char clip_identity[24]; bool has_clip_target; /* :204-229 clip_target */
   bool drawn_weapon; char drawn_key[TFP_SETTINGS_ID], drawn_identity[24]; bool drawn_profile; double drawn_hip, drawn_aim;
   char message[200];                    /* a button's answer */
-  int bodycam_shown;                    /* the camera style the Bodycam-only sliders were last enabled for; -1: not yet */
+  int bodycam_shown, aim_shown;                    /* the camera style the Bodycam-only sliders were last enabled for; -1: not yet */
   /* What the user did in MCM, kept for the next tick: MCM calls back from its own update, outside this
    * mod's tick (no engine frame, the runtime not in its update), so nothing that reaches the runtime runs there. */
   struct { char id[40]; TfpMenuValue value, previous; } queued[8];
@@ -279,11 +291,20 @@ static void into_store(TfpWire *w, const Control *c, const TfpMenuValue *v) {
   bool is_bool = c->kind == TFP_MK_TOGGLE || c->kind == TFP_MK_CHECK;
   if (v->kind != (is_bool ? TFP_MENU_VALUE_BOOL : TFP_MENU_VALUE_NUMBER)) return;
   if (c->menu >= 0) tfp_wire_settings_menu_set(w, (TfpSettingsMenuId)c->menu, is_bool, v->boolean, v->number);
-  else if (c->locked >= 0 && c->kind == TFP_MK_CHOICE) /* a choice of two over a Boolean option: 1 off, 2 on */
-    tfp_wire_settings_locked_set(w, (TfpSettingsLockedId)c->locked, true, v->number == 2, 0);
+  else if (c->locked >= 0 && c->kind == TFP_MK_CHOICE && tfp_settings_locked_info((TfpSettingsLockedId)c->locked)->is_bool)
+    tfp_wire_settings_locked_set(w, (TfpSettingsLockedId)c->locked, true, v->number == 2, 0); /* a choice of two over a Boolean option: 1 off, 2 on */
+  else if (c->locked >= 0 && c->kind == TFP_MK_CHOICE) /* a choice over a number: the choice's own number, 1 .. choice_count */
+    tfp_wire_settings_locked_set(w, (TfpSettingsLockedId)c->locked, false, false, v->number);
   else if (c->locked >= 0) tfp_wire_settings_locked_set(w, (TfpSettingsLockedId)c->locked, is_bool, v->boolean, v->number);
 }
 static bool stored(const Control *c) { return c->menu >= 0 || c->locked >= 0; }
+/* The chosen aim field of view's slider: enabled while Aim field of view is A chosen value; sent on a change only. */
+static void sync_aim(TfpWire *w, Menu *m) {
+  const int chosen = tfp_locked_view_fov_aim(w) == 3;
+  if (chosen == m->aim_shown) return;
+  m->aim_shown = chosen;
+  for (int i = 0; i < CONTROL_COUNT; i++) if (CONTROLS[i].aim_chosen_only) m->host.set_disabled(m->host.user, CONTROLS[i].id, !chosen);
+}
 /* The Bodycam-only sliders: enabled for the Bodycam camera, disabled for the Stable one; sent on a change only. */
 static void sync_bodycam(TfpWire *w, Menu *m) {
   const int bodycam = tfp_locked_view_bodycam(w);
@@ -320,8 +341,9 @@ bool tfp_wire_menu_bind(TfpWire *w, const TfpMenuHost *host, unsigned unavailabl
   }
   host->set_disabled(host->user, "weapon_composition_status", true), host->set_disabled(host->user, "runtime_status", true);
   for (int i = 0; i < CONTROL_COUNT; i++) if (CONTROLS[i].inert) host->set_disabled(host->user, CONTROLS[i].id, true);
-  m->bodycam_shown = -1;
+  m->bodycam_shown = m->aim_shown = -1;
   sync_bodycam(w, m);
+  sync_aim(w, m);
   if (unavailable & TFP_MENU_NO_ARMS) {
     host->set_disabled(host->user, "fird_person_arms", true);
     tfp_wire_say(w, "Menu: \"First Person Arms\" is shown disabled: sleeves and hand grips refused on this build (see their Refused lines)");
@@ -498,6 +520,7 @@ void tfp_wire_menu_frame(TfpWire *w) {
   if (!m || !s) return;
   if (m->queue_count) run_queue(w, m);
   sync_bodycam(w, m);
+  sync_aim(w, m);
   snprintf(text, sizeof text, "Status: %s", w->controller.label[0] ? w->controller.label : "First person off");
   if (strcmp(text, m->status)) { snprintf(m->status, sizeof m->status, "%s", text); m->host.set_label(m->host.user, "runtime_status", text); }
   bool weapon = current_weapon(w, key, identity, text, sizeof text);

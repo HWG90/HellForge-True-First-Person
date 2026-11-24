@@ -109,6 +109,11 @@ typedef struct TfpMotionRuntimeHost {
   bool (*editor_is_active)(void *user, bool *active, const char **problem);
   /* editor:preview_rotation(): yaw, pitch, roll of *out. NULL: the editor has none. NIL: nil or false. */
   TfpMotionRuntimeGot (*editor_preview_rotation)(void *user, TfpActionPlacement *out);
+  /* Not in retail (round 20; src/editor_motion.h): while the editor is active, hand the pose helper the editor's ADS
+   * draft as the ADS placement (backend:set_ads_placement) when its "ads" action is edited. *authored: it was, so the
+   * rotation preview is drawn as an authored ADS rotation (full aim draws only those). false: refused, *why or NULL.
+   * NULL: none (retail). */
+  bool (*editor_preview_ads)(void *user, const TfpMotionRuntimeLease *lease, bool *authored, const char **why);
 
   /* sampler:sample(lease), in the mod tfp_locomotion_sample. false with the text in *why or NULL. Protected. */
   bool (*sample)(void *user, const TfpMotionRuntimeLease *lease, TfpLocomotionSample *out, const char **why);

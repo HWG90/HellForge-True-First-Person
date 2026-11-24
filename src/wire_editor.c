@@ -1,6 +1,7 @@
 /* The placement editor's binder: see wire_editor.h. */
 #include "wire_editor.h"
 #include "wire_settings.h"
+#include "editor_motion.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -107,10 +108,14 @@ static bool host_call(void *user, TfpEdCall which, const TfpEdArgs *a, TfpEdRepl
       reply->a = from_rt(r[0]);
       if (r[0].kind == TFP_RT_REF) snprintf(reply->a.s, sizeof reply->a.s, "%s", tfp_wire_phase_text(w->controller.phase));
       return true;
-    case TFP_ED_C_SET_PLACEMENT:
-      ops_from_place(&a->place, &st->argument);
+    case TFP_ED_C_SET_PLACEMENT: {
+      /* round 20: while the ADS action is edited the hip placement keeps the one the editor opened with; the draft goes
+       * to the ADS placement through the motion runtime (src/editor_motion.h) */
+      const TfpEdPlace value = tfp_editor_motion_controller_value(st->editor, &a->place);
+      ops_from_place(&value, &st->argument);
       args.v[0] = reference(&st->argument);
       PAIR(TFP_RT_E_pc_set_placement, &args);
+    }
     case TFP_ED_C_GET_PLACEMENT:
       if (!entry(st, TFP_RT_E_pc_get_placement, NULL, r, 8, reply)) return false;
       place_of(st, r[0], reply); reply->b = from_rt(r[1]);
@@ -251,7 +256,18 @@ static bool rt_update(TfpRtHost *h) { return answer(h, tfp_editor_update(state(W
 static bool rt_is_active(TfpRtHost *h, V *o1) { *o1 = boolean(tfp_editor_is_active(state(W(h))->editor)); return true; }
 static bool rt_cancel(TfpRtHost *h, const char *reason, V *o1, V *o2) { return answer(h, tfp_editor_cancel(state(W(h))->editor, reason), o1, o2); }
 static bool rt_shutdown(TfpRtHost *h, V *o1, V *o2) { return answer(h, tfp_editor_shutdown(state(W(h))->editor), o1, o2); }
-static bool rt_request_open(TfpRtHost *h, V *o1, V *o2) { return answer(h, tfp_editor_request_open(state(W(h))->editor, NULL), o1, o2); }
+/* Round 20: opened in full aim, the editor begins on its ADS action (src/editor_motion.h), and says so. */
+static TfpEdResult open_editor(Ed *st, const char *kind) {
+  TfpOpsSnapshot s;
+  TfpOpsText why;
+  const bool aiming = tfp_ops_player_snapshot(&st->w->ops, &s, &why) == TFP_OPS_TRUE && s.controller_active;
+  bool on_ads = false;
+  const TfpEdResult r = tfp_editor_motion_open(st->editor, kind, aiming, &on_ads);
+  if (on_ads)
+    tfp_wire_say(st->w, "Placement editor: opened in full aim: editing the ADS placement (what full aim draws), live; the wheel moves the sight toward you or away");
+  return r;
+}
+static bool rt_request_open(TfpRtHost *h, V *o1, V *o2) { return answer(h, open_editor(state(W(h)), NULL), o1, o2); }
 static bool rt_status(TfpRtHost *h, V *o1) { *o1 = text_n(tfp_wire_keep(W(h), tfp_editor_status(state(W(h))->editor))); return true; }
 
 bool tfp_wire_editor_bind(TfpWire *w, const TfpEditorPlatform *platform) {
@@ -282,7 +298,7 @@ const char *tfp_wire_editor_toggle(TfpWire *w) {
   Ed *st = state(w);
   if (!st || !st->editor) return "Placement editor is unavailable until first person has been set up";
   TfpEdResult r = tfp_editor_is_active(st->editor) ? tfp_editor_cancel(st->editor, "Placement editing cancelled; first person stays on")
-                                                   : tfp_editor_request_open(st->editor, "weapon");
+                                                   : open_editor(st, "weapon");
   if (!r.raised && r.r1.kind == TFP_ED_TRUE) return NULL;
   const TfpEdValue *why = r.raised ? &r.r1 : &r.r2;
   snprintf(st->why, sizeof st->why, "%s", why->kind == TFP_ED_TEXT ? why->s : "Placement editor refused");

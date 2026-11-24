@@ -119,6 +119,10 @@ uint32_t tfp_fov_error(void);
 /* Called every tick. The glide runs on the host's `seconds` clock, read in every rendered frame; `now_ms` (any
  * millisecond clock that keeps going) is only what it falls back on while that clock cannot be read. */
 void tfp_fov_set_lock(float radians, bool zoom_when_aiming, double now_ms);
+/* Round 20, "Aim field of view": `aim` is what full aim shows (src/fov_lock.h): TFP_FOV_AIM_ZOOM the game's lens,
+ * TFP_FOV_AIM_LOCKED the locked value, or a chosen value in radians, which holds with the lock off (`radians` 0) too.
+ * tfp_fov_set_lock(r, zoom, t) is tfp_fov_set_lock_aim(r, zoom ? TFP_FOV_AIM_ZOOM : TFP_FOV_AIM_LOCKED, t). */
+void tfp_fov_set_lock_aim(float radians, float aim, double now_ms);
 typedef struct TfpFovLockStats { uint64_t applied; float game_radians, shown_radians; } TfpFovLockStats;
 void tfp_fov_lock_stats(TfpFovLockStats *out);
 #endif

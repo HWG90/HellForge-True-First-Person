@@ -234,4 +234,22 @@ typedef struct TfpPoseHoldProbe {
   uint64_t node5_calls;          /* position-setter calls for node 5 of the watched rig, counted from the first tfp_pose_set_hold on */
 } TfpPoseHoldProbe;
 uint32_t tfp_pose_hold_probe(TfpPoseHoldProbe *out); /* 1; reads only */
+/* Not in retail (round 20; src/ads_seat.h): the sight brought closer in full aim. `sight`: the game's near clip of a
+ * sight (m; what src/near_helper.c saw), `wanted`: how far from the eye the sight is to be (m; 0 leaves the game's own
+ * seat, the start-up value, so the helper is retail's until the binder calls this). Any thread; read in each frame.
+ * tfp_pose_ads_probe: what the last frame of node 5 did with it, for the "Aim:" line and the near clip (closer). */
+void tfp_pose_set_ads_seat(float sight, float wanted);
+typedef struct TfpPoseAdsProbe {
+  bool armed, full_ads;
+  float share;        /* the ADS share: 0 at the hip, 1 in full aim */
+  float pull;         /* m toward the eye the sight asks for, glided */
+  float closer;       /* m the gun is drawn closer than the game seats it: pull * share less the ADS placement's forward */
+  float ads_forward;  /* m: the ADS placement's forward (the editor's ADS action) */
+  float depth;        /* m: the game's own depth in the last frame of full aim (request+0x90 blended); NAN: not worked out */
+} TfpPoseAdsProbe;
+bool tfp_pose_ads_probe(TfpPoseAdsProbe *out); /* reads only */
+/* For the near helper's own calls (tfp_near_set_ads_source): how far in the near clip goes in full aim this frame, `closer`
+ * m (the gun's move toward the eye, leading it while it comes in: src/ads_seat.h tfp_ads_lead), and the least distance
+ * the sight can be at, `sight_least` m (0: none known). false, both 0: no lease. Any thread; reads only. */
+bool tfp_pose_ads_near(float *closer, float *sight_least);
 #endif
