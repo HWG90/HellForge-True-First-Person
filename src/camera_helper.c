@@ -11,6 +11,7 @@
 #include "camera_continuity.h"
 #include "camera_alternation.h"
 #include "camera_damp.h"
+#include "camera_traversal.h"
 #include "camera_glide.h"
 #include "camera_math.h"
 #include "trace_edges.h"
@@ -245,6 +246,8 @@ static _Atomic uint64_t veil_leaves, veil_frames, veil_moved, veil_behind;
 static _Atomic uint32_t veil_second, veil_pending;
 static _Atomic uint64_t orphan_frames, orphan_refused;
 static struct { bool known; uint32_t mask, kind, weapon, key; double until; } smooth_watch;
+/* Round 24 (src/camera_traversal.h): the body root's motion, for the head-camera frames of a clamber. Policy lock. */
+static TfpRootMotion smooth_root; static TfpTraversalWatch damp_climb;
 #define TRACE_RING 128u
 #define TRACE_BEFORE 6u   /* frames before the edge that are written with it */
 #define TRACE_MS 500.0
@@ -1002,21 +1005,26 @@ static void lock_body_shown(Policy *p, uint32_t kind, const float *head, double 
 
 /* ---- beyond retail: continuity of the presented eye, and the trace (lock frames only) ---- */
 static void smooth_forget(void) { tfp_continuity_reset(&smooth); memset(&alternation, 0, sizeof alternation); trace.last_known = false; trace_self.known = 0; eye_watch_known = false; eye_unsettled_until = 0;
-  memset(&smooth_watch, 0, sizeof smooth_watch); }
+  memset(&smooth_watch, 0, sizeof smooth_watch); memset(&smooth_root, 0, sizeof smooth_root); memset(&damp_climb, 0, sizeof damp_climb); }
 /* True: jumps are looked for in this native frame. Called once for every frame presented under the lock. */
-static bool smooth_detect(const Policy *p, uint32_t kind, uint32_t source, double tick) {
+static bool smooth_detect(const Policy *p, uint32_t kind, uint32_t source, const float *root, double tick) {
   const bool said = atomic_exchange_explicit(&smooth_event, 0, memory_order_relaxed) != 0;
-  if (said || (smooth_watch.known && (p->control_mask != smooth_watch.mask || kind != smooth_watch.kind || p->current_weapon != smooth_watch.weapon
-      || p->weapon_key != smooth_watch.key))) smooth_watch.until = tick+SMOOTH_EVENT_MS;
+  /* Round 24: a change of mask into, out of or within a clamber's or a vault's (bit 0x20) opens nothing by itself
+   * (src/camera_traversal.h: a clamber's 0 -> 0x22 -> 0x20 kept the window open through the whole climb). */
+  if (said || (smooth_watch.known && (tfp_traversal_mask_rearms(smooth_watch.mask, p->control_mask) || kind != smooth_watch.kind
+      || p->current_weapon != smooth_watch.weapon || p->weapon_key != smooth_watch.key))) smooth_watch.until = tick+SMOOTH_EVENT_MS;
   smooth_watch.known = true; smooth_watch.mask = p->control_mask; smooth_watch.kind = kind; smooth_watch.weapon = p->current_weapon; smooth_watch.key = p->weapon_key;
   /* The head camera too (seen in the game 2026-11-22: 0.15 m in one frame inside a swap, when the held eye lets go
    * or starts for the incoming weapon's remembered eye). */
-  (void)source;
+  /* ... but not a clamber's or a vault's while the body root moves (round 24, src/camera_traversal.h): the head's
+   * crouch against a rising root was taken up as four jumps and the eye floated 0.6 m above the head. */
+  const bool moving = tfp_root_motion_step(&smooth_root, root, tick, p->c.max_gap_ms);
+  (void)tfp_traversal_recent(&damp_climb, p->control_mask, tick, p->c.max_gap_ms); /* kept in every frame; lock_damp_eye asks it */
   /* A re-seat can take several frames, and begin on the last frame of the time (seen in the game 2026-11-22: 0.08 m
    * a frame for three frames, 270 ms after the entry, with the view pitched down). A run of jumps that began inside
    * the time is looked at to its end; the run itself is bounded (TFP_CONTINUITY_RUN_MS), so this holds nothing open. */
   const bool in_run = smooth.run && tick >= smooth.run_started && tick-smooth.run_started <= TFP_CONTINUITY_RUN_MS;
-  return tick < smooth_watch.until || in_run;
+  return tfp_traversal_detect(tick < smooth_watch.until || in_run, source == SMOOTH_HEAD, p->control_mask, moving);
 }
 /* The eye about to be presented, in the world; `root`/`root_basis` are the body root's position and axis rows.
  * `node`: in the head camera's own frame, the point its eye is built on (the head node as the head camera's
@@ -1035,7 +1043,7 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
      * never sets the ragdoll flag, the head still within 3 m; a throw's first frames): taken for a re-seated rig, it
      * left the eye behind the head for up to half a second. On foot the head-frame jump of a swap is still taken up,
      * and native frames are as before. smooth_detect is called first: it keeps the watch on every frame. */
-    const bool detect = smooth_detect(p, kind, source, tick) && !p->lock_down && !(source == SMOOTH_HEAD && p->lock_off_foot);
+    const bool detect = smooth_detect(p, kind, source, root, tick) && !p->lock_down && !(source == SMOOTH_HEAD && p->lock_off_foot);
     const uint64_t jumps = smooth.jumps, edges = smooth.edges, reseats = smooth.reseats, restarts = smooth.restarts, cuts = smooth.cuts; const bool began = !smooth.known;
     looked = detect;
     /* THE CUT (round 19, camera_continuity.h): in a head-camera frame of a body on foot the filter is also given the
@@ -1050,6 +1058,7 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
     if (head_given) for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
       head[axis] += (node[component]-root[component])*root_basis[axis*3+component];
     /* The eye in the world goes with it: the root re-seated by itself is not the eye jumping (camera_continuity.h). */
+    smooth.traversal = tfp_traversal(p->control_mask); /* round 24: a run ending in a clamber hands no speed on */
     correction = tfp_continuity_step_cut(&smooth, wanted_relative, wanted, root_basis, head_given ? head : NULL, source == SMOOTH_REPEAT ? SMOOTH_NATIVE : source,
                                          detect, p->full_ads, tick, p->c.max_gap_ms, &smooth_tuning, relative);
     if (correction > 1e-6f && tfp_finite3(relative)) for (unsigned component = 0; component < 3; ++component) { shown[component] = root[component];
@@ -1108,7 +1117,11 @@ static bool lock_damp_eye(Policy *p, uint32_t kind, const float *root, const flo
   const float damp_ms = style.eye_damp_ms;
   /* on_foot: a frame the damping is for. Without it the lag is let go on 40 ms; with it and no time constant
    * (Bodycam with the camera damping option at 0, come to while a lag was carried) more slowly, src/camera_damp.h. */
-  const bool on_foot = kind == 4 && !p->lock_down && !p->lock_off_foot && !p->full_ads && !p->ads_gap_active;
+  /* Round 24: nor in a clamber or a vault, nor in the stand-up after it (src/camera_traversal.h): Stable's 0.25 m lag
+   * held the eye above a head that crouched against a rising root, and below it as the body stood up. What is carried
+   * is let go on 40 ms, as at full aim. */
+  const bool climbing = tfp_traversal_recent(&damp_climb, p->control_mask, tick, p->c.max_gap_ms);
+  const bool on_foot = tfp_traversal_damps(kind == 4 && !p->lock_down && !p->lock_off_foot && !p->full_ads && !p->ads_gap_active, climbing);
   const bool damp = on_foot && damp_ms > 0;
   trace_damp.off_foot = p->lock_off_foot;
   float relative[3] = {0}, damped[3] = {0}, behind[3] = {0}, lag = 0;
@@ -1966,7 +1979,7 @@ void tfp_camera_reset_for_tests(void) {
   lock_carry = tfp_q_identity(); lock_was_held = false; lock_down_until = 0; lock_view_known = false; lock_first_known = false; lock_tick = 0; tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity();
   lock_damp_ms = 0; atomic_store(&lock_bodycam, 1); tfp_eye_damp_reset(&lock_eye_damp);
   memset(&smooth, 0, sizeof smooth); memset(&trace, 0, sizeof trace); memset(&trace_self, 0, sizeof trace_self); eye_watch_known = false; eye_unsettled_until = 0;
-  memset(&smooth_watch, 0, sizeof smooth_watch); atomic_store(&smooth_event, 0); memset(&trace_damp, 0, sizeof trace_damp);
+  memset(&smooth_watch, 0, sizeof smooth_watch); atomic_store(&smooth_event, 0); memset(&trace_damp, 0, sizeof trace_damp); memset(&smooth_root, 0, sizeof smooth_root); memset(&damp_climb, 0, sizeof damp_climb);
   atomic_store(&original, 0);
   atomic_store(&installed, 0); atomic_store(&armed, 0); atomic_store(&reserved, 0); atomic_store(&last_error, 0);
   atomic_store(&callback_generation, 0);

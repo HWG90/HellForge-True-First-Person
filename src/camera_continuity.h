@@ -266,6 +266,7 @@ typedef struct TfpContinuity {
   bool rest_end;                         /* the curve is a cut's: it ends with no acceleration either (tfp_continuity_curve) */
   uint64_t cuts;                         /* frames taken up as a cut */
   float largest;                         /* the largest correction carried since the reader last cleared it */
+  bool traversal;                        /* round 24, set by the caller before each frame: a clamber's or a vault's (THE CLIMB) */
 } TfpContinuity;
 
 static inline void tfp_continuity_reset(TfpContinuity *c) {
@@ -636,7 +637,11 @@ static inline float tfp_continuity_step_cut(TfpContinuity *c, const float *wante
       const float fast = tfp_continuity_length(fresh);
       if (fast > 8) for (unsigned i = 0; i < 3; ++i) fresh[i] *= 8/fast;
       if (placed) for (unsigned k = 0; k < 3; ++k) for (unsigned a = 0; a < 3; ++a) c->loose_speed[k] += (fresh[a]-c->speed[a])*basis[a*3+k];
-      for (unsigned i = 0; i < 3; ++i) { from_speed[i] += c->left*c->speed[i]-fresh[i]; c->speed[i] = fresh[i]; }
+      /* THE CLIMB: not in a clamber's or a vault's frame. There the run is the body's own lunge read against the root
+       * (a head that crouches onto a ledge while the root rises), and its speed handed on kept the presented eye
+       * rising after the head had stopped: 0.646 m carried, the eye 0.6 m above the head. The presented eye takes the
+       * wanted eye's speed in this frame instead. */
+      for (unsigned i = 0; i < 3; ++i) { if (!c->traversal) from_speed[i] += c->left*c->speed[i]-fresh[i]; c->speed[i] = fresh[i]; }
       c->lent = false; /* the new camera's speed is known */
       rate = tfp_continuity_length(from_speed);
     }

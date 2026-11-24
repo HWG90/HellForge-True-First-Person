@@ -1174,6 +1174,54 @@ int main() {
     CHECK(tfp_camera_error() == 0);
     g.end();
   }
+  // ---- 28. A high clamber in the head camera (round 24; the user's log of 2026-11-24 on feel.51, 20:27:42, Stable).
+  // The native view, then the head camera as the gun is stowed (the binder's event, mask 0x22), and the body root
+  // climbs 1.8 m in 0.3 s at 6 m/s. The head goes up with it for 80 ms and then crouches onto the ledge: it rises at
+  // 1.2 m/s while the root goes on (a step change of 0.08 to 0.24 m a frame against the root, at 16.7 to 50 ms a frame);
+  // the mask is 0x20 from 0.15 s on. The root stops; 0.15 s later the body stands up (the head 1.06 m up against the
+  // root at 2.5 m/s, inside the window the event opened), the mask 2 from 0.55 s (the gun being drawn, as at
+  // 20:28:14.0, where Stable's damping held the eye 0.25 m below the rising head); then the native view on mask 0.
+  // In the log the crouch was taken up as four jumps, the run's speed handed to the ease-out, and the shown eye rose
+  // 0.5 to 0.6 m past the head and sank back over 0.3 s, with Stable's damping 0.25 m behind on top. Now: the shown
+  // eye stays within 0.25 m of the head camera's eye throughout (the change of camera at the hand-off is eased, 0.08 m
+  // here), and within 0.1 m of it from 100 ms after the root stops. ----
+  {
+    static const float times[] = {8, 16.7f, 33.3f, 50};
+    for (unsigned d = 0; d < 4; ++d) for (int bodycam = 0; bodycam < 2; ++bodycam) {
+      const double dt = times[d];
+      fresh(true, true, false, bodycam ? 180.0f : 0.0f, bodycam != 0);
+      tfp_camera_set_action_tuning(0x22, 900, true); // the binder's: the head camera takes the clamber's mask
+      Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.native(); g.begin();
+      standing(g, static_cast<int>(500 / dt), dt, true);
+      tfp_camera_continuity_event(); // "hold ended: the gun has left the hands"
+      float climbing = 0, after = 0, risen = 0; double t = 0;
+      const float c = std::cos(.2f), n = std::sin(.2f);
+      for (; t < 1.3; t += dt / 1000) {
+        const float tc = static_cast<float>(std::fmin(t, .3));
+        const float root_z = 6 * tc, forward = 3.3f * tc;
+        const float head_z = 1.5f + 6 * std::fmin(tc, .08f) + 1.2f * std::fmax(0.0f, tc - .08f); // in the world
+        float height = head_z - root_z;
+        if (t > .45) height = std::fmin(1.5f, height + 2.5f * static_cast<float>(t - .45));
+        g.pose(1 - n * forward, 2 + c * forward, root_z, .2f, height);
+        const uint32_t mask = t < .15 ? 0x22u : t < .55 ? 0x20u : 2u; // the gun drawn in the stand-up, as at 20:28:14
+        if (t < .9) g.hip(mask); else g.native(0);
+        g.frame(dt);
+        if (t < .9) {
+          climbing = std::fmax(climbing, g.from_head_eye());
+          if (t >= .4) after = std::fmax(after, g.from_head_eye());
+        }
+        if (t >= .45 && t < .9) risen = std::fmax(risen, g.from_head_eye());
+      }
+      std::printf("a high clamber in the head camera, %s, %g ms a frame: the shown eye at most %.3f m from the head camera's eye, "
+                  "%.3f m once the root stopped (%.3f m in the stand-up), the change of its step %.3f m at most\n",
+                  bodycam ? "Bodycam" : "Stable", dt, climbing, after, risen, g.world_change);
+      CHECK(climbing <= .25f);
+      CHECK(after <= .10f);
+      CHECK(tfp_camera_error() == 0);
+      g.end();
+      tfp_camera_set_action_tuning(0, 300, false); // the defaults again for what runs after
+    }
+  }
   std::printf("camera smooth: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

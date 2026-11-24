@@ -70,5 +70,28 @@ class Context(unittest.TestCase):
         self.assertEqual((rows[0]["mask"], rows[0]["stable"], rows[0]["rearm_only"]), (-1, -1, 0))
 
 
+@unittest.skipUnless(USER_LOG.exists(), "the user's log of 2026-11-24 is not in ~/.cache")
+class UserLog(unittest.TestCase):
+    """The replay windows of the round-24 report: the logged filter (feel.51, cc0a95f) and this tree's."""
+    calls = None
+
+    @classmethod
+    def setUpClass(cls):
+        calls = replay.read(USER_LOG.read_text(errors="replace").splitlines())
+        cls.rows = replay.merge(replay.replay(calls, "cc0a95f")[0])
+
+    def window(self, start, end, eye, carried, taken):
+        return replay.window_figures([r for r in self.rows if start <= r["at"] <= end], eye, carried, taken)
+
+    def test_the_high_clambers(self):
+        for start, end in (("20:27:42.7", "20:27:43.4"), ("20:27:50.4", "20:27:51.1"), ("20:28:13.1", "20:28:14.8")):
+            logged = self.window(start, end, "old_eye", "old_carried", "old_taken")
+            present = self.window(start, end, "new_eye", "new_carried", "new_taken")
+            self.assertGreater(logged["offset"], 0.7, start)    # the float as it was: 0.72 to 0.89 m
+            self.assertLessEqual(present["offset"], 0.25 + 1e-3, start)
+            self.assertLessEqual(present["stopped"], 0.10, start)
+            self.assertLessEqual(present["held"], trace.FLOAT_M, start)
+
+
 if __name__ == "__main__":
     unittest.main()
