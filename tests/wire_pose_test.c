@@ -684,6 +684,81 @@ static int ads_frames(const TfpOpsPoseHelper *H, const TfpOpsHelperConfig *c) {
   return 0;
 }
 
+/* ---- round 20, the review's B2 (2026-11-24): a zoom level changes in full aim ----
+ * The game's sight (its near clip) jumps to the new zoom level's at once; the pull's target with it, a tick later; the
+ * game moves its own seat, the depth D (request+0x90 blended over the lens, src/depth_steady.h), at a pace of its own
+ * (here 0 to 250 ms). The sight is where the game's seat has it: S_from + (D - D_from), less what the gun is drawn in.
+ * In no frame may the sight come nearer than the wanted distance less 1 cm, nor the near clip stand beyond the
+ * sight's rear. Zoom levels: 0.35 m with D 0.40 m (lens 0.40 rad) and 0.22 m with D 0.27 m (lens 0.20 rad). */
+static void put_f32(unsigned at, float v) { uint32_t u; memcpy(&u, &v, 4); pose_world_request_field(at, u); }
+static void ads_seat_world(float rest, float before, float prior, float target, float lens) {
+  put_f32(0x90, rest); put_f32(0x9C, before); put_f32(0xA0, prior);
+  pose_world_lens(target, lens);
+}
+static int ads_zoom_frames(const TfpOpsPoseHelper *H, const TfpOpsHelperConfig *c) {
+  static const uint64_t steps[3] = {16, 9, 7};
+  static const double seats[4] = {0, 80, 150, 250};
+  static const float S[2] = {.35f, .22f}, D[2] = {.40f, .27f}, LENS[2] = {.40f, .20f};
+  TfpOpsText why;
+  TfpOpsHandle *handle = NULL;
+  TfpOpsHelperStats stats;
+  void *native = NULL;
+  bool has_stats = false;
+  tfp_near_set_ads_source(tfp_pose_ads_near);
+  CHECK(tfp_pose_set_depth_steady(2) == 1 || tfp_pose_set_depth_steady(2) == 0); /* the game's depth worked out, nothing added (as depth_steady_off.txt) */
+  for (int from = 0; from < 2; from++) for (int z = 0; z < 4; z++) for (int f = 0; f < 3; f++) for (int order = 0; order < 2; order++) {
+    const int to = 1 - from;
+    pose_world_third_person();
+    CHECK(H->prepare(H->user, c, &native, &why) == TFP_OPS_TRUE && H->begin(H->user, c, native, &handle, &why) == TFP_OPS_TRUE);
+    pose_world_first_person();
+    pose_world_optic();
+    ads_seat_world(D[from], 0, LENS[from], LENS[from], LENS[from]);
+    game_frame(handle, &stats, 300);
+    CHECK(near_world_begin(.05f, now_ms * 1000));
+    tfp_pose_set_ads_seat(S[from], .10f);
+    pose_world_aim(1);
+    float near_clip = 0;
+    for (int i = 0; i < (int)(800 / steps[f]); i++) {
+      if (order == 0) near_clip = near_world_frame(S[from], 1, (now_ms + steps[f]) * 1000);
+      depth_frame(steps[f]);
+      if (order == 1) near_clip = near_world_frame(S[from], 1, now_ms * 1000);
+    }
+    const float settled = NATIVE[1] - forwarded[1];
+    CHECK(near(settled, S[from] - .10f, 1e-4) && near(near_clip, .10, 2e-3));    /* settled: 10 cm from the eye */
+    /* the zoom level changes: the game's sight at once, the tick's a frame later, the lens over seats[z] ms */
+    float nearest = 1, cut = 0;
+    const uint64_t begun = now_ms;
+    for (int i = 0; i < (int)(800 / steps[f]); i++) {
+      const double t = (double)(now_ms + steps[f] - begun);
+      const double u = seats[z] > 0 ? (t / seats[z] > 1 ? 1 : t / seats[z]) : 1, eased = u * u * (3 - 2 * u);
+      const float lens = (float)(LENS[from] + (LENS[to] - LENS[from]) * eased);
+      ads_seat_world(D[to], D[from], LENS[from], LENS[to], lens);
+      if (i == 1) tfp_pose_set_ads_seat(S[to], .10f);
+      if (order == 0) near_clip = near_world_frame(S[to], 1, (now_ms + steps[f]) * 1000);
+      depth_frame(steps[f]);
+      if (order == 1) near_clip = near_world_frame(S[to], 1, now_ms * 1000);
+      /* the game's own depth this frame, as it works it out (src/depth_steady.h) */
+      const float span = fabsf(LENS[to] - LENS[from]), tt = fabsf(LENS[to] - lens) / span, depth = (1 - (1 - tt)) * D[from] + (1 - tt) * D[to];
+      const float sight = S[from] + (depth - D[from]) - (NATIVE[1] - forwarded[1]);
+      if (sight < nearest) nearest = sight;
+      if (near_clip - sight > cut) cut = near_clip - sight;
+    }
+    const float wanted = S[to] - .10f > .25f ? .25f : S[to] - .10f;
+    CHECK(near(NATIVE[1] - forwarded[1], wanted, 1e-4) && near(near_clip, .10, 2e-3));    /* settled at the new zoom level: 10 cm again */
+    if (nearest < .09f - 1e-4f || cut > 1e-4f)
+      printf("wire pose: %.2f -> %.2f m, the game's seat over %.0f ms, %llu ms frames, near setter %s the gun: the sight came to %.1f cm, the near clip cut %.2f mm into it\n",
+             S[from], S[to], seats[z], (unsigned long long)steps[f], order ? "after" : "before", nearest * 100, cut * 1000);
+    near_world_end();
+    pose_world_aim(0);
+    H->finish(H->user, handle, &has_stats, &stats, &why);
+    if (!getenv("TFP_ADS_ALL")) CHECK(nearest >= .09f - 1e-4f && cut <= 1e-4f);
+  }
+  tfp_pose_set_depth_steady(0);
+  tfp_near_set_ads_source(NULL);
+  pose_world_third_person();
+  return 0;
+}
+
 static int real(void) {
   const TfpOpsPoseHelper *H;
   TfpOpsText why;
@@ -1204,6 +1279,7 @@ static int real(void) {
     pose_world_third_person();
   }
   if (ads_frames(H, &c)) return 1;
+  if (ads_zoom_frames(H, &c)) return 1;
   CHECK(lock_faults == 0 && lock_depth[0] == 0 && lock_depth[1] == 0);
   return 0;
 }

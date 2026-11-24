@@ -41,11 +41,39 @@ int main(void) {
   CHECK(near(tfp_ads_near(.173f, .073f), .10f, 1e-6) && tfp_ads_near(.173f, 0) == .173f);
   CHECK(tfp_ads_near(.066f, .03f) == .05f && tfp_ads_near(.05f, .2f) == .05f && tfp_ads_near(.35f, .25f) > .0999f);
   CHECK(isnan(tfp_ads_near(NAN, .1f)) && tfp_ads_near(.2f, NAN) == .2f);
+  /* ---- a wanted distance inside the game's own 0.05: the sight goes no nearer than 0.05 (a near clip never does) ---- */
+  CHECK(near(tfp_ads_pull_for(.173f, .01f), .123f, 1e-6) && near(tfp_ads_pull_for(.173f, .05f), .123f, 1e-6));
+  /* ---- where the sight can be (the review's B2): the near clip less what the game's depth lacks of its rest, and the
+   * last settled pair moved by the depth ---- */
+  TfpAdsSeat seat; tfp_ads_seat_reset(&seat);
+  t = 2000;
+  CHECK(tfp_ads_sight_least(&seat, .35f, NAN, NAN, t) == .35f);                              /* no depth: the near clip */
+  CHECK(near(tfp_ads_sight_least(&seat, .35f, .30f, .40f, t += 8), .25f, 1e-6));             /* D 10 cm short of its rest: 10 cm nearer */
+  CHECK(tfp_ads_sight_least(&seat, .35f, .45f, .40f, t += 8) == .35f);                        /* D beyond its rest: the near clip */
+  for (int i = 0; i < 6; i++) tfp_ads_sight_least(&seat, .35f, .40f, .40f, t += 8);
+  CHECK(!seat.has);                                                                           /* 40 ms at rest: not yet a pair */
+  for (int i = 0; i < 2; i++) tfp_ads_sight_least(&seat, .35f, .40f, .40f, t += 8);
+  CHECK(seat.has && seat.sight == .35f && seat.depth == .40f);                                /* 56 ms: the pair */
+  /* the zoom level changes and the game reseats at once; the near clip the pose helper has is still the old one */
+  CHECK(near(tfp_ads_sight_least(&seat, .35f, .27f, .27f, t += 8), .22f, 1e-6));
+  CHECK(near(tfp_ads_sight_least(&seat, .22f, .27f, .27f, t += 8), .22f, 1e-6));              /* a tick later: the same */
+  for (int i = 0; i < 8; i++) tfp_ads_sight_least(&seat, .22f, .27f, .27f, t += 8);
+  CHECK(seat.has && seat.sight == .22f && seat.depth == .27f);                                /* paired anew */
+  /* the other way, the game reseating slowly: the sight with D, not at the new near clip */
+  CHECK(near(tfp_ads_sight_least(&seat, .35f, .30f, .40f, t += 8), .25f, 1e-6));
+  CHECK(tfp_ads_sight_least(&seat, .05f, .30f, .40f, t += 8) == .05f && !seat.has);          /* no sight: nothing known */
+  /* the most the gun may be pulled: the sight no nearer than the wanted distance less 1 cm, nor than 0.05 */
+  CHECK(near(tfp_ads_pull_most(.22f, .10f), .13f, 1e-6) && tfp_ads_pull_most(.05f, .10f) == 0 && tfp_ads_pull_most(1, .10f) == TFP_ADS_PULL_MOST);
+  CHECK(near(tfp_ads_pull_most(.22f, .02f), .17f, 1e-6) && tfp_ads_pull_most(.22f, 0) == TFP_ADS_PULL_MOST && tfp_ads_pull_most(NAN, .1f) == TFP_ADS_PULL_MOST);
+  TfpAdsPull held; tfp_ads_pull_reset(&held);
+  tfp_ads_pull_step(&held, .25f, 100);
+  CHECK(tfp_ads_pull_limit(&held, .13f) == .13f && tfp_ads_pull_limit(&held, .2f) == .13f && tfp_ads_pull_limit(&held, -1) == 0);
+  CHECK(tfp_ads_pull_step(&held, .25f, 108) > 0 && tfp_ads_pull_step(&held, .25f, 116) < .25f);   /* from where it was held, glided */
   /* ---- the near clip's lead (the review's B1): coming in, three times the last step ahead; going out, the gun itself ---- */
   TfpAdsLead lead; memset(&lead, 0, sizeof lead);
   CHECK(tfp_ads_lead(&lead, 0, 100) == 0);
-  CHECK(near(tfp_ads_lead(&lead, .01f, 116), .04f, 1e-7));                                   /* 1 cm in: led by 3 cm more */
-  CHECK(near(tfp_ads_lead(&lead, .02f, 132), .05f, 1e-7));
+  CHECK(near(tfp_ads_lead(&lead, .01f, 116), .04f + TFP_ADS_SNAP, 1e-7));                   /* 1 cm in: led by 3 cm more (and a snap) */
+  CHECK(near(tfp_ads_lead(&lead, .02f, 132), .05f + TFP_ADS_SNAP, 1e-7));
   CHECK(near(tfp_ads_lead(&lead, .02f, 148), .02f, 1e-7));                                   /* standing: the gun itself */
   CHECK(near(tfp_ads_lead(&lead, .015f, 164), .015f, 1e-7));                                 /* going out: the gun itself */
   CHECK(near(tfp_ads_lead(&lead, .05f, 600), .05f, 1e-7));                                   /* after a pause: no step is known */

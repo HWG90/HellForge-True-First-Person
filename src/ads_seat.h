@@ -29,7 +29,7 @@
  * (no sight, already closer, or wanted 0: the game's own seat). */
 static inline float tfp_ads_pull_for(float sight, float wanted) {
   if (!(wanted > 0) || !isfinite(wanted) || !isfinite(sight) || !(sight > TFP_ADS_SIGHT_LEAST) || sight > TFP_ADS_SIGHT_MOST) return 0;
-  const float pull = sight - wanted;
+  const float pull = sight - (wanted < TFP_ADS_SIGHT_LEAST ? TFP_ADS_SIGHT_LEAST : wanted); /* not inside the game's own 0.05 */
   return pull <= 0 ? 0 : pull > TFP_ADS_PULL_MOST ? TFP_ADS_PULL_MOST : pull;
 }
 typedef struct TfpAdsPull { float shown; double at; bool has; } TfpAdsPull;
@@ -51,20 +51,58 @@ static inline float tfp_ads_closer(float pull, float share, float ads_forward) {
   const float closer = pull*share - (isfinite(ads_forward) ? ads_forward : 0);
   return closer > 0 && isfinite(closer) ? closer : 0;
 }
+/* Where the sight can be this frame (round 20 review, B2). The game's near clip (`sight`) jumps to a new zoom level's
+ * distance in one frame, and reaches the pose helper a tick later; the game moves its own seat there at a pace of its
+ * own: the depth D (`depth`, request+0x90 blended over the lens, src/depth_steady.h tfp_steady_depth), on its way to
+ * the selected optic's own distance (`rest`, request+0x90). The sight goes with D. Two ways to say where it is now,
+ * and the nearer is taken, so the pull is never more than both allow:
+ *   - the near clip, less what D still lacks of its rest (a D short of its rest is the gun still nearer the eye);
+ *   - the sight and D of the last time both stood still at rest for TFP_ADS_SETTLED_MS (`a`), moved by as much as D
+ *     moved since: right in the frame the zoom level changes, while the near clip the pose helper has is a tick old.
+ * With no depth worked out this frame (NAN), the near clip alone. Nothing known stays nothing: `sight` back. */
+#define TFP_ADS_MARGIN .01f        /* m: the sight never nearer than the wanted distance less this */
+#define TFP_ADS_SETTLED_MS 50.0    /* ms the sight and D stand still at rest before they are a pair */
+#define TFP_ADS_AT_REST .001f      /* m: D this near its rest is at rest */
+typedef struct TfpAdsSeat { float sight, depth, seen_sight, seen_rest; double since; bool has, seen; } TfpAdsSeat;
+static inline void tfp_ads_seat_reset(TfpAdsSeat *a) { a->sight = a->depth = a->seen_sight = a->seen_rest = 0; a->since = 0; a->has = a->seen = false; }
+static inline float tfp_ads_sight_least(TfpAdsSeat *a, float sight, float depth, float rest, double tick) {
+  if (!(sight > TFP_ADS_SIGHT_LEAST) || !(sight <= TFP_ADS_SIGHT_MOST)) { tfp_ads_seat_reset(a); return sight; }
+  if (!isfinite(depth) || !isfinite(rest) || !isfinite(tick)) return sight;
+  const bool at_rest = fabsf(depth - rest) <= TFP_ADS_AT_REST;
+  if (!at_rest || !a->seen || sight != a->seen_sight || rest != a->seen_rest || tick < a->since) {
+    a->seen = true; a->seen_sight = sight; a->seen_rest = rest; a->since = tick;
+  } else if (tick - a->since >= TFP_ADS_SETTLED_MS) { a->sight = sight; a->depth = depth; a->has = true; }
+  float least = sight + (depth < rest ? depth - rest : 0);
+  if (a->has) { const float moved = a->sight + (depth - a->depth); if (moved < least) least = moved; }
+  return least;
+}
+/* The most the gun may be pulled in a frame whose sight is at least `least` m away: the sight no nearer than the
+ * wanted distance less TFP_ADS_MARGIN, nor than the game's own 0.05 (a near clip never goes under it). */
+static inline float tfp_ads_pull_most(float least, float wanted) {
+  if (!(wanted > 0) || !isfinite(least)) return TFP_ADS_PULL_MOST;
+  const float floor = wanted - TFP_ADS_MARGIN > TFP_ADS_SIGHT_LEAST ? wanted - TFP_ADS_MARGIN : TFP_ADS_SIGHT_LEAST, most = least - floor;
+  return most > 0 ? (most < TFP_ADS_PULL_MOST ? most : TFP_ADS_PULL_MOST) : 0;
+}
+/* The glide held to `most`: it goes on from there, so the pull follows the game's seat while it is limited. */
+static inline float tfp_ads_pull_limit(TfpAdsPull *p, float most) {
+  if (isfinite(most) && p->shown > most) p->shown = most > 0 ? most : 0;
+  return p->shown;
+}
 /* What the near clip is moved in by (round 20 review, B1). The game may call its near setter before the gun's node in
  * a frame, and then the near clip would stand where last frame's gun was: behind the sight's rear while the gun comes
  * in, cutting into the sight. So while the gun comes closer the near clip leads it by three times the last frame's
  * step: the next step of the aim's smoothstep is at most three times the one before (after its first frame, the next is
  * a little under three times; later ones less), and the pull's glide has shrinking steps. Twice left 0.12 mm cut at
  * 60 fps (tests/wire_pose_test.c ads_frames). Going out it follows the gun itself (a near clip short of the sight cuts
- * nothing; only one beyond it does). `last` is the closer published the frame before, within TFP_ADS_STALE_MS. */
+ * nothing; only one beyond it does). The pull's glide ends in a snap of up to TFP_ADS_SNAP: that too is led by.
+ * `last` is the closer published the frame before, within TFP_ADS_STALE_MS. */
 typedef struct TfpAdsLead { float last; double at; bool has; } TfpAdsLead;
 static inline float tfp_ads_lead(TfpAdsLead *l, float closer, double tick) {
   if (!isfinite(closer) || closer < 0) closer = 0;
   const bool fresh = l->has && isfinite(tick) && tick >= l->at && tick - l->at <= TFP_ADS_STALE_MS;
   const float grow = fresh ? closer - l->last : 0;
   l->last = closer; l->at = isfinite(tick) ? tick : 0; l->has = true;
-  return grow > 0 ? closer + 3*grow : closer;
+  return grow > 0 ? closer + 3*grow + TFP_ADS_SNAP : closer; /* and the glide's last step, its snap */
 }
 /* The near clip in full aim: the game's `native`, moved in with the gun, never under the game's 0.05. */
 static inline float tfp_ads_near(float native, float closer) {
