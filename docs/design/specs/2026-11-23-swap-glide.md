@@ -242,7 +242,16 @@ as hard for the rest), to the head camera's own eye:
 - its time follows from the distance at 9 m/s^2, 300 to 450 ms: 0.44 m takes 404 ms, slowing down at 13.5 m/s^2. A
   frame's step changes by no more than that times its time squared: 0.0009 m at 8 ms, 0.004 at 16.7, 0.015 at 33.3,
   0.034 at 50 (the judge's limit: 0.06 m at 33.3 ms, scaled by the frame time squared, or linearly where that is less);
-- an eye under way when the hold lapses (a swap's glide) goes on from the speed it has; otherwise it starts from rest;
+- a swap's glide under way when the hold lapses runs to its end first (the gentle one to its own end, retail's to
+  within 1 mm of its target), and the release starts from rest after it (`tfp_eye_glide_lapse`, THE LAPSE); it always
+  starts from rest. (The review of round 19 found both ways of taking the swap's glide over in the lapse frame wrong:
+  from rest it stopped retail's glide dead, 0.08 m of step change at 33 ms a frame; with retail's speed, 4 to 13 m/s,
+  the eye shot up to 0.29 m behind the incoming eye and 0.45 m outside the span of the eye, the swap's target and the
+  head camera's eye; with a gentle glide's speed it overshot a head camera's eye at or near the swap's target by 0.05
+  to 0.085 m.) Through the helper, swapping in every frame from 10 before the lapse to 2 after, both ways, 0.44 and
+  0.70 m, continuity off and on, 8 to 50 ms a frame (`hold_release`, scene 7): never outside that span (beyond what the
+  continuity does with the swap alone, 1.9 and 3.2 mm for 0.70 m at 16.7 ms), and no frame from the lapse on over the
+  judge's limit, retail's own slowing or that frame of the swap alone;
 - a new hold while letting go takes over from where the eye is and the way it is going, without a step: the same
   weapon back in the hands (the hold resumes, the eye comes to rest, or glides back to that weapon's eye: below), or a
   weapon whose eye is remembered (the eye's return, `TFP_ACTION_EYE_RETURN`, now also while the eye is being let go,
