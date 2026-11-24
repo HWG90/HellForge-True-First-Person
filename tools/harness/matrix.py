@@ -68,12 +68,104 @@ def log_path():
     return sessions[-1] / "mod-goose.true-first-person.log"
 
 
-GAP_MS = 80   # the trace counts milliseconds from its edge; two traced frames further apart than this are not consecutive (30 frames a second in the harness)
+GAP_MS = 80   # two traced frames further apart than this are not consecutive (30 frames a second in the harness)
+OWN_M = 0.03  # under this carried in both frames, and the wanted eye making 0.8 of the change itself: the eye's own
 
 
-def _pop(rows):
-    steps = [sum((x - y) ** 2 for x, y in zip(a[2], b[2])) ** 0.5 for a, b in zip(rows, rows[1:])]
-    return max([0.0] + [abs(q - s) for s, q in zip(steps, steps[1:])])
+def _sub(a, b):
+    return [x - y for x, y in zip(a, b)]
+
+
+def _length(v):
+    return sum(x * x for x in v) ** 0.5
+
+
+def measure(rows):
+    """One dict for every three consecutive frames of `rows` (trace.frames), named for the third:
+      shown    how much the presented eye's step changed, as a vector: |(c-b) - (b-a)|
+      lengths  the same by the lengths of the two steps, ||c-b| - |b-a||: the measure until round 10 (2026-11-24).
+               It does not see a change of direction: 0.04 m forwards and then 0.04 m back is 0.08 m and counted 0;
+               the arc of 08:12:09.5 in the Stable soak of that day, eight frames of 0.07 to 0.10 m, read as one 0.100.
+      wanted   the same vector change of the wanted eye; root: of the body root
+      body     what was taken off for the body's own change of step (0: nothing)
+      beyond   shown less that: what is judged against POP_M
+      whose    "body" (shown is POP_M or more and beyond is not), "own" (the wanted eye makes 0.8 of it and under
+               OWN_M is carried: the eye's own start or stop, the filter did nothing), "filter" (anything else), or
+               None under POP_M
+    The body's own: a climb lifts the root 1.2 m in eight frames, its step 0.03, 0.13, 0.29, 0.38, 0.30, 0.15, 0.02 m
+    (the vaults of that soak, 5 of 5 flagged at 0.09 to 0.17 m), and the rig eye is the root a frame late. The eye
+    moves with the body and no more; a camera fixed to a body shows it whatever the mod does. So where the root's own
+    step changes by POP_M or more in this frame or the one before, and the wanted eye makes that change too within a
+    frame either side (to 0.03 m or half of it), that vector is taken off the shown one. Not where the root's change
+    is under POP_M: a marginal step is not argued down by a few centimetres of the root. And not where the wanted
+    eye does not make it (the head camera of a body checked in a dive: the root stops, the head goes on, and an eye
+    slowed with the root is the filter's doing). Rows without "root=" (before 0.6.0-feel.38) have nothing taken off.
+    What this lets through: a step the filter makes that happens to equal the body's own lunge of that frame or the
+    one before (within POP_M); and the frame after the root's change was set aside (R2), when the eye is given it:
+    that reads as the body's, a frame late. What the body did stays in view as "body" in every line."""
+    changes = {}
+    for i in range(2, len(rows)):
+        a, b, c = rows[i - 2:i + 1]
+        if not (0 < b["tick"] - a["tick"] <= GAP_MS and 0 < c["tick"] - b["tick"] <= GAP_MS):
+            continue
+        one, two = _sub(b["eye"], a["eye"]), _sub(c["eye"], b["eye"])
+        change = {"eye": _sub(two, one), "lengths": abs(_length(two) - _length(one)), "wanted": None, "root": None}
+        for key in ("wanted", "root"):
+            if a[key] and b[key] and c[key]:
+                change[key] = _sub(_sub(c[key], b[key]), _sub(b[key], a[key]))
+        changes[i] = change
+    found = []
+    for i, change in changes.items():
+        c, b = rows[i], rows[i - 1]
+        shown = _length(change["eye"])
+        beyond, body = shown, 0.0
+        for j in (i, i - 1):
+            root = changes.get(j, {}).get("root")
+            if not root or _length(root) < POP_M:
+                continue
+            near = min((_length(_sub(changes[k]["wanted"], root)) for k in (i - 1, i, i + 1) if k in changes and changes[k]["wanted"]), default=None)
+            if near is None or near > max(0.03, 0.5 * _length(root)):
+                continue
+            left = _length(_sub(change["eye"], root))
+            if left < beyond:
+                beyond, body = left, _length(root)
+        wanted = _length(change["wanted"]) if change["wanted"] else None
+        whose = None
+        if shown >= POP_M:
+            if beyond < POP_M:
+                whose = "body"
+            elif wanted is not None and wanted >= 0.8 * shown and b["carried"] < OWN_M and c["carried"] < OWN_M:
+                whose = "own"
+            else:
+                whose = "filter"
+        found.append({"at": c["at"], "kind": c["kind"], "looked": c["looked"], "taken": c["taken"], "carried": c["carried"], "shown": shown,
+                      "lengths": change["lengths"], "wanted": wanted, "root": _length(change["root"]) if change["root"] else None,
+                      "body": body, "beyond": beyond, "whose": whose})
+    return found
+
+
+def describe(result):
+    """What a soak or matrix line says of the jump: the figure judged, the body's own beside it, the old figure."""
+    if not result.get("from_trace"):
+        return "not traced" if not result.get("judged") else f"jump {result['largest_jump_m']:.3f} m"
+    if not result["judged"]:
+        return "no frames traced"
+    text = f"jump {result['largest_jump_m']:.3f} m"
+    if result["body_m"] >= POP_M:
+        text += f" (body {result['body_m']:.3f})"
+    return text + f" [by lengths {result['by_lengths_m']:.3f}]"
+
+
+def pop_lines(result, indent="       "):
+    """One line for every frame at or over POP_M: when, what the eye did, whose it is."""
+    out = []
+    for p in result.get("pops", []):
+        who = {"body": "the body's own, not counted", "own": "the eye's own (nothing carried)", "filter": "the filter's"}[p["whose"]]
+        wanted = "-" if p["wanted"] is None else f"{p['wanted']:.3f}"
+        root = "-" if p["root"] is None else f"{p['root']:.3f}"
+        out.append(f"{indent}{p['at']} kind {p['kind']} looked {'-' if p['looked'] is None else p['looked']} taken {p['taken']}: shown {p['shown']:.3f} m "
+                   f"(by lengths {p['lengths']:.3f}), wanted {wanted}, root {root}, carried {p['carried']:.3f}, beyond the body {p['beyond']:.3f}: {who}")
+    return out
 
 
 def judge(lines, toggles=False):
@@ -93,25 +185,20 @@ def judge(lines, toggles=False):
             notes.append(line.split(" ", 1)[-1].strip()[:140])
     refused = any("Refused" in n for n in notes)
     # With the Trace lines (0.6.0-feel.23 on) the judge is the presented eye itself, frame by frame: the Cut line
-    # measures before the eye continuity and calls an eased 0.7 m a jump.
+    # measures before the eye continuity and calls an eased 0.7 m a jump. The trace stops half a second after an edge
+    # and starts again at the next: frames on either side of such a pause are not neighbours (a dive begun inside one
+    # window and over before the next read as 0.12 m), and measure() takes none of them together.
     import trace as trace_reader
-    pop, traced = 0.0, False
-    for _, rows in trace_reader.windows(lines):
-        traced = True
-        # The trace stops half a second after an edge and starts again at the next: frames on either side of such a
-        # pause are not neighbours (a dive begun inside one window and over before the next read as 0.12 m).
-        run = [rows[0]] if rows else []
-        for a, b in zip(rows, rows[1:]):
-            if b[0] - a[0] > GAP_MS or b[0] < a[0]:
-                pop = max(pop, _pop(run)); run = [b]
-            else:
-                run.append(b)
-        pop = max(pop, _pop(run))
+    rows = trace_reader.frames(lines)
+    traced = bool(rows)
+    found = measure(rows)
     if traced:
-        jump = pop
+        jump = max([0.0] + [f["beyond"] for f in found])
     ok = held > 0 and missed == 0 and (jump < (POP_M if traced else LIMIT_M) or toggles) and not refused   # F11 itself is a cut by design
     return {"pass": ok, "frames": held, "other_camera_frames": other, "missed": missed, "kinds": sorted(kinds),
-            "largest_jump_m": jump, "from_trace": traced, "largest_kick_deg": kick, "notes": sorted(set(notes))[:6]}
+            "largest_jump_m": jump, "from_trace": traced, "judged": len(found),
+            "by_lengths_m": max([0.0] + [f["lengths"] for f in found]), "body_m": max([0.0] + [f["body"] for f in found]),
+            "pops": [f for f in found if f["whose"]], "largest_kick_deg": kick, "notes": sorted(set(notes))[:6]}
 
 
 def main(argv):
@@ -141,8 +228,8 @@ def main(argv):
             results[name] = judge(lines, name.startswith('toggle'))
             r = results[name]
             print(f"{'pass' if r['pass'] else 'FAIL':4} {name:16} frames {r['frames']:4} other-camera {r['other_camera_frames']:4} missed {r['missed']:3} "
-                  f"jump {r['largest_jump_m']:.3f} m kick {r['largest_kick_deg']:.1f} deg kinds {r['kinds']}")
-            for note in r["notes"]:
+                  f"{describe(r)} kick {r['largest_kick_deg']:.1f} deg kinds {r['kinds']}")
+            for note in r["notes"] + pop_lines(r, ""):
                 print(f"       {note}")
     (out / "matrix.json").write_text(json.dumps(results, indent=1))
     failed = [n for n, r in results.items() if not r["pass"]]

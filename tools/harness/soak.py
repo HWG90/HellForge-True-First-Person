@@ -6,7 +6,9 @@
 Needs a harness session in a mission with player control; takes the keyboard and mouse. One action at a time is what
 matrix.py checks; this looks for what one action leaves behind for the next: a frame out of first person, a camera
 step over POP_M between two traced frames, a refusal, the arm drive refusing, an action after which the view does
-not come back. Every action and what the judge said of its stretch of the log go to stdout; the seed repeats a run.
+not come back. Every action and what the judge said of its stretch of the log go to stdout, with one line for every
+frame at or over the limit (its time, kind, whether jumps were looked for, what was carried, whose it is); at the end
+the whole log is judged once more in one piece, for the frames that lie across two actions. The seed repeats a run.
 The view is switched on at the start if it is not, and is not toggled (toggling is a cut by design). No death: that ends the body.
 """
 import random
@@ -34,6 +36,11 @@ def verdict(frames, flagged):
     return 1 if flagged else 0
 
 
+def unlisted(whole, seen):
+    """The frames over the limit in the whole log that no action's own stretch listed (`seen`: their times)."""
+    return [p for p in whole if p["whose"] != "body" and p["at"] not in seen]
+
+
 def main(argv):
     minutes = float(argv[1]) if len(argv) > 1 else 10.0
     rng = random.Random(int(argv[2]) if len(argv) > 2 else 1)
@@ -46,7 +53,7 @@ def main(argv):
         d.run("key f11; wait 2.5")   # the view on, as matrix.py does
     whole = log.stat().st_size
     end = time.time() + minutes * 60
-    worst, bad, count = 0.0, [], 0
+    worst, bad, count, seen = 0.0, [], 0, set()
     while time.time() < end:
         if rng.random() < 0.3:
             name, script, settle = "overlap", rng.choice(OVERLAPS), 3.0
@@ -69,7 +76,10 @@ def main(argv):
         flag = j["missed"] or j["largest_jump_m"] >= matrix.POP_M or any("Refused" in n for n in j["notes"])
         if flag:
             bad.append((count, name, script, j["missed"], round(j["largest_jump_m"], 3)))
-        print(f"{count:3d} {'BAD ' if flag else 'ok  '}{name:16s} missed {j['missed']} pop {j['largest_jump_m']:.3f} kinds {j['kinds']}  {script[:60]}", flush=True)
+        print(f"{count:3d} {'BAD ' if flag else 'ok  '}{name:16s} missed {j['missed']} {matrix.describe(j)} kinds {j['kinds']}  {script[:60]}", flush=True)
+        for text in matrix.pop_lines(j):
+            print(text, flush=True)
+        seen.update(p["at"] for p in j["pops"])
     d.run("up w; up s; up shift; up right; wait 2.0")
     with open(log, errors="replace") as handle:
         handle.seek(whole)
@@ -80,6 +90,11 @@ def main(argv):
     print(f"\n{count} actions, {j['frames']} frames held, {j['missed']} missed, largest step {worst:.3f} m; {len(bad)} flagged")
     for row in bad:
         print("  flagged:", row)
+    across = unlisted(j["pops"], seen)
+    if across:
+        print(f"  {len(across)} frames over the limit lie across two actions' stretches of the log (judged from the whole log):")
+        for text in matrix.pop_lines({"pops": across}, "    "):
+            print(text)
     for text in refused:
         print("  line:", text)
     for text in arms:
@@ -88,7 +103,7 @@ def main(argv):
     print("  ends:", [l[13:110] for l in last])
     if j["frames"] <= 0:
         print("  NOT A PASS: no frame was held in first person: the view was not on")
-    return verdict(j["frames"], len(bad))
+    return verdict(j["frames"], len(bad) + len(across))
 
 
 if __name__ == "__main__":
