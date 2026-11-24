@@ -260,6 +260,29 @@ int main(void) {
     CHECK(tfp_steady_frame(&state, &in, 1, 1016, &delta, &depth, &held) == TFP_STEADY_WORKED && near(delta, .55, 1e-6)); /* what counts is what would be added */
     CHECK(TFP_STEADY_MOST == 1.0f);
   }
+  /* ---- node 5 never keeps moving without its root: two frames running, and the held depth stops for the lease ---- */
+  {
+    TfpSteadyPair pair; memset(&pair, 0, sizeof pair); bool now = true;
+    CHECK(TFP_STEADY_ALONE == 2);
+    CHECK(!tfp_steady_pair_frame(&pair, 1, &now) && !now);
+    tfp_steady_pair_moved(&pair); tfp_steady_pair_root(&pair);            /* a frame as it should be */
+    CHECK(!tfp_steady_pair_frame(&pair, 1, &now) && !now && pair.alone == 0);
+    tfp_steady_pair_moved(&pair);                                         /* the root did not come */
+    CHECK(!tfp_steady_pair_frame(&pair, 1, &now) && !now && pair.alone == 1); /* once: not yet */
+    tfp_steady_pair_moved(&pair); tfp_steady_pair_root(&pair);
+    CHECK(!tfp_steady_pair_frame(&pair, 1, &now) && pair.alone == 0);     /* it followed again: the count begins again */
+    tfp_steady_pair_moved(&pair);
+    CHECK(!tfp_steady_pair_frame(&pair, 1, &now) && pair.alone == 1);
+    CHECK(!tfp_steady_pair_frame(&pair, 1, &now) && pair.alone == 1);     /* a frame in which nothing was moved owes nothing */
+    tfp_steady_pair_moved(&pair);
+    CHECK(tfp_steady_pair_frame(&pair, 1, &now) && now);                  /* twice running: stopped, and this is the frame that says so */
+    CHECK(tfp_steady_pair_frame(&pair, 1, &now) && !now);                 /* and stays stopped; said once */
+    tfp_steady_pair_root(&pair);
+    CHECK(tfp_steady_pair_frame(&pair, 1, &now) && !now);                 /* a root that comes later does not start it again */
+    CHECK(!tfp_steady_pair_frame(&pair, 2, &now) && !now && pair.alone == 0); /* a new lease does */
+    tfp_steady_pair_moved(&pair);
+    CHECK(!tfp_steady_pair_frame(&pair, 3, &now) && !now && pair.alone == 0); /* what the old lease owed is not the new one's */
+  }
   /* ---- the "Steady:" line ---- */
   {
     TfpSteadyLog log; memset(&log, 0, sizeof log); TfpSteadySecond s; char text[640];
@@ -275,7 +298,7 @@ int main(void) {
       const TfpSteadyInput in = game_frame(&g, (i & 1) == 0, 33.3f); float delta = 0, depth = 0, held = 0;
       const uint32_t reason = tfp_steady_frame(&state, &in, 1, 2000.0+i*33.3, &delta, &depth, &held);
       tfp_steady_note(&log, reason, in.bit, depth, held, delta, .07f+depth);
-      if (delta != 0 && i != 4) tfp_steady_root(&log);
+      if (delta != 0) { tfp_steady_moved(&log, delta); if (i != 4) tfp_steady_root(&log); }
     }
     tfp_steady_take(&log, &s);
     CHECK(s.frames == 30 && s.worked == 30 && s.gated.count == 15 && s.clear.count == 15 && s.shifted == 15 && s.roots == 14 && tfp_steady_worth(&s));
@@ -284,6 +307,37 @@ int main(void) {
     CHECK(strlen(text) < 600 && strstr(text, "Steady: 30 frames of the rig, the game's depth worked out in 30: ") && strstr(text, " m with the gate set (15 frames), ")
           && strstr(text, " m clear (15); held at 0.2400 to 0.2400 m; the rig moved to it in 15 frames, its root with it in 14, by 0.2400 to 0.2400 m; the rig's depth argument 0.0700 to 0.0700 m gated, 0.3100 to 0.3100 m clear; passed in 0") && !strstr(text, "passed in 0 ("));
     CHECK(strstr(text, "; the rig's depth argument ") && !strstr(text, "depth_steady_off.txt"));
+    /* "moved" is a frame in which node 5's float changed, as the helper says it; a shift worked out is not one yet (it
+     * can be too small for the float, and the root's half is only asked for where the float changed) */
+    tfp_steady_note(&log, TFP_STEADY_WORKED, 0, .24f, .24f, 1e-9f, .3f);
+    tfp_steady_take(&log, &s);
+    CHECK(s.frames == 1 && s.worked == 1 && s.held.count == 1 && s.shifted == 0 && s.delta.count == 0 && s.roots == 0 && !tfp_steady_worth(&s));
+    tfp_steady_note(&log, TFP_STEADY_WORKED, 0, .2f, .24f, .04f, .3f); tfp_steady_moved(&log, .04f); tfp_steady_root(&log);
+    tfp_steady_take(&log, &s);
+    CHECK(s.shifted == 1 && s.roots == 1 && s.delta.count == 1 && s.delta.most == .04f && tfp_steady_worth(&s));
+    /* the two passes of the helper's own: the code not pinned (nothing of the frame is believed), the root not following
+     * (the game's depth is still worked out and counted, as with the switch) */
+    for (int i = 0; i < 3; ++i) tfp_steady_note(&log, TFP_STEADY_NO_CODE, 0, 0, 0, 0, .3f);
+    tfp_steady_take(&log, &s);
+    CHECK(s.frames == 3 && s.worked == 0 && s.passed[TFP_STEADY_NO_CODE] == 3 && tfp_steady_passed(&s) == 3 && tfp_steady_worth(&s) && !tfp_steady_stop_line(&s, text, sizeof text));
+    tfp_steady_line(&s, text, sizeof text);
+    CHECK(strstr(text, "; passed in 3 (the evaluator's code is not the pinned one 3)"));
+    for (int i = 0; i < 4; ++i) tfp_steady_note(&log, TFP_STEADY_NO_ROOT, i & 1, (i & 1) ? .1f : .24f, 0, 0, .3f);
+    tfp_steady_stopped(&log, 7);
+    tfp_steady_take(&log, &s);
+    CHECK(s.frames == 4 && s.worked == 4 && s.gated.count == 2 && s.clear.count == 2 && s.held.count == 0 && s.passed[TFP_STEADY_NO_ROOT] == 4 && s.stops == 1 && s.stop_lease == 7 && tfp_steady_worth(&s));
+    tfp_steady_line(&s, text, sizeof text);
+    CHECK(strstr(text, "nothing held; the rig moved to it in 0 frames, its root with it in 0; ") && strstr(text, "; passed in 4 (the root did not follow 4)"));
+    CHECK(tfp_steady_stop_line(&s, text, sizeof text));
+    printf("  %s\n", text);
+    CHECK(!strcmp(text, "Steady: stopped for lease 7: the rig was moved in 2 frames running and its root did not follow, so the gun moved against the eye; "
+                        "nothing more is held in this lease, and it begins again at the next"));
+    for (int i = 0; i < 4; ++i) tfp_steady_note(&log, TFP_STEADY_NO_ROOT, i & 1, (i & 1) ? .1f : .24f, 0, 0, .3f);
+    tfp_steady_take(&log, &s);
+    CHECK(s.stops == 0 && tfp_steady_worth(&s) && !tfp_steady_stop_line(&s, text, sizeof text)); /* later seconds of that lease: a line where the game's depth moved, as with the switch; the stop is said once */
+    for (int i = 0; i < 40; ++i) tfp_steady_note(&log, TFP_STEADY_NO_ROOT, 0, .24f, 0, 0, .3f);
+    tfp_steady_take(&log, &s);
+    CHECK(!tfp_steady_worth(&s));
     /* passes are named; the switch is said; a second of passes only is worth a line when a value was out of range or the game scaled the vector */
     tfp_steady_note(&log, TFP_STEADY_NO_LENS, 0, 0, 0, 0, .3f); tfp_steady_note(&log, TFP_STEADY_NO_LENS, 0, 0, 0, 0, .3f);
     tfp_steady_take(&log, &s);

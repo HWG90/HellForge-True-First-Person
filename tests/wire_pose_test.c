@@ -88,6 +88,19 @@ void pose_world_gate(int avatar_bit, int ability) {
   std::memcpy(scene.request + 0x84, gated ? &on_the_way : &optic_target, 4);
   sync();
 }
+/* The evaluator's lens target and lens for the next frame, as they stand (after pose_world_gate). */
+void pose_world_lens(float target, float lens) {
+  std::memcpy(scene.frame + 0x18, &target, 4); std::memcpy(scene.frame + 0x1C, &lens, 4); std::memcpy(scene.request + 0x84, &lens, 4);
+  sync();
+}
+/* The first of the nine code pins of the zoom depth (the evaluator's frame and the getters it reads): as this build
+ * has it (1), or one byte of it another (0). */
+void pose_world_depth_pin(int intact) {
+  static uint8_t kept; static bool have;
+  uint8_t *at = reinterpret_cast<uint8_t *>(W.a[A_GAME] + HERE.depth_pin[0]);
+  if (!have) { kept = *at; have = true; }
+  *at = intact ? kept : static_cast<uint8_t>(kept ^ 0xff);
+}
 /* The avatar's main row (avatar owner + 0x53d8b0 + index * 0x1238): byte +5, byte +0x3d, the float at +0x11ac. */
 void pose_world_main_row(unsigned index, int five, int three_d, float scalar) {
   const uint64_t row = W.a[A_OWNER] + 0x53d8b0 + static_cast<uint64_t>(index) * 0x1238;
@@ -508,6 +521,8 @@ void pose_world_third_person(void);
 void pose_world_optic(void);
 void pose_world_gate(int avatar_bit, int ability);
 void pose_world_main_row(unsigned index, int five, int three_d, float scalar);
+void pose_world_lens(float target, float lens);
+void pose_world_depth_pin(int intact);
 void pose_world_first_person(void);
 void pose_world_action(unsigned flags);
 void pose_world_weapon(int present);
@@ -781,6 +796,25 @@ static int real(void) {
     game_frame(handle, &stats, 16);
     CHECK(applied_is(.11, .02, -.12));
     CHECK(tfp_pose_steady_take(&held) == 1 && held.frames == 3 && held.passed[TFP_STEADY_NO_LENS] == 1);
+    /* a shift too small for node 5's float (the lens one step short of its target): nothing is moved, nothing is
+     * asked of the root, and neither is counted; it is not a root that failed to follow */
+    CHECK(tfp_pose_set_depth_off(1) == 1); /* the hold then rests on the optic's own distance, where the game's depth is */
+    pose_world_gate(0, 0);
+    for (int i = 0; i < 60; i++) root_frame(16);
+    CHECK(applied_is(.11, .02, -.12) && root_forwarded[1] == 0 && tfp_pose_steady_take(&held) == 1);
+    pose_world_gate(1, 0);
+    pose_world_lens(1.5707964f, nextafterf(1.5707964f, 0));
+    for (int i = 0; i < 3; i++) { root_frame(16); CHECK(applied_is(.11, .02, -.12) && root_forwarded[1] == 0); }
+    CHECK(tfp_pose_steady_take(&held) == 1 && held.frames == 3 && held.worked == 3 && tfp_steady_passed(&held) == 0 && held.gated.count == 3 && held.gated.most < current);
+    CHECK(held.shifted == 0 && held.roots == 0 && held.delta.count == 0 && !tfp_steady_worth(&held));
+    pose_world_gate(1, 0);                 /* and a real one after them is held as ever */
+    root_frame(16);
+    CHECK(near(forwarded[1] - NATIVE[1], .02 + (double)current - (double)gated_depth, 2e-6) && near(root_forwarded[1], (double)gated_depth - (double)current, 2e-6));
+    CHECK(tfp_pose_steady_take(&held) == 1 && held.frames == 1 && held.shifted == 1 && held.roots == 1 && near(held.delta.most, current - gated_depth, 2e-6));
+    CHECK(tfp_pose_set_depth_off(0) == 1);
+    pose_world_gate(0, 0);
+    for (int i = 0; i < 60; i++) root_frame(16);
+    CHECK(applied_is(.11, .02 + (double)depth, -.12) && tfp_pose_steady_take(&held) == 1 && tfp_pose_gate_take(&g) == 1);
     /* depth_steady_off.txt: counted, nothing held; the zoom depth term goes on and off with the gate as before */
     CHECK(tfp_pose_set_depth_steady(2) == 1);
     const unsigned roots_before = root_calls;

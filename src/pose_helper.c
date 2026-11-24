@@ -1294,7 +1294,7 @@ static void carrier_position_locked(uint64_t caller, uint32_t unit, uint32_t nod
   if (!finite_pose(shifted)) { forward_position(unit, node, pose); return; }
   memcpy(policy.carrier_baseline, source + 4, 16); memcpy(policy.carrier_written, shifted, 12);
   policy.carrier_poses = poses; policy.carrier_shifted = memcmp(shifted, source + 4, 12) != 0;
-  if (policy.carrier_shifted && pending.steady) tfp_steady_root(&steady_log);
+  if (pending.steady) tfp_steady_root(&steady_log); /* the root's half is done, to the float (a shift node 5's float took can be under the root's) */
   if (policy.carrier_shifted) forward_position(unit, node, shifted); else forward_position(unit, node, pose);
 }
 /* cpp:957-1011 */
@@ -1432,6 +1432,8 @@ static void position_locked(uint32_t unit, uint32_t node, const float *pose, uin
   }
   memcpy(policy.baseline, native, 16);
   if (applied_depth != 0) { policy.carrier.observation = observation; policy.carrier.delta = applied_depth; policy.carrier.steady = steadied; policy.carrier.ready = true; }
+  /* Counted where node 5's float took something of the held depth: the same frames the root's half is asked for. */
+  if (applied_depth != 0 && steadied) tfp_steady_moved(&steady_log, applied_depth);
   policy.rig_shifted = memcmp(shifted, native, 16) != 0;
   if (!policy.entry_position_seen && !policy.full_ads && policy.weight == 1) {
     policy.entry_position_seen = true; entry_position_remember(policy.c.viewmodel, policy.c.weapon, shifted);
