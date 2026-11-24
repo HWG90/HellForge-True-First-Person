@@ -34,7 +34,7 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "arm_drive.h"
 #include "wire_options.h"
 #include "arm_weight.h"
-#define TFP_VIEW_VERSION "0.6.0-feel.45"
+#define TFP_VIEW_VERSION "0.6.0-feel.46"
 #else
 #include "wire_win.h"
 #include "wire_action.h"
@@ -389,14 +389,14 @@ static void trace_note(void) {
   static const char *const sources[] = {"-", "head", "native", "repeat"};
   for (uint32_t i = 0; i < count; i++) {
     const TfpCameraTraceRow *r = &rows[i];
-    /* root: the body root the eye was measured against, axes: its three axis rows (the soak of 2026-11-22 on feel.45:
+    /* root: the body root the eye was measured against, axes: its three axis rows (the soak of 2026-11-22 on feel.46:
      * a root whose axes turned 0.26 rad in one frame carried the eye 0.18 m, and the lines could not say so); looked:
      * jumps within the camera were looked for; taken:
      * what the continuity did with the frame (jump, edge: taken up; root: the root alone re-seated, nothing taken
      * up; restart; start: it began from nothing in this frame). Without the root a jump of the root cannot be told
      * from a jump of the eye in these lines. quiet: full aim, nothing is taken up. tick: the frame's time on the
      * helper's clock (ms). With these the line holds all the continuity was given, and tools/harness/replay.py can
-     * run it again frame for frame (the soaks of 2026-11-22 on feel.45: without the time across edges, full aim and
+     * run it again frame for frame (the soaks of 2026-11-22 on feel.46: without the time across edges, full aim and
      * the starts, and with places to 0.1 mm, 29 of 3447 frames could not be replayed: two decisions that fell
      * within the rounding). */
     char taken[48] = "";
