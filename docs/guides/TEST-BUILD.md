@@ -321,5 +321,6 @@ Empty files beside the DLL, read when the game starts:
 | `hold_off.txt` / `hold_lease.txt` | weapon put-away off / on, whatever the panel says |
 | `smooth_off.txt` | smooth eye off |
 | `trace_off.txt` | no per-frame `Trace:` lines in the log |
+| `depth_off.txt` | the mod's zoom depth is forced to nothing on every frame: neither the rig nor its root is shifted for the optic (to find out whether that shift is part of the unzoom gate's flipping, `docs/design/specs/2026-11-23-gate-flip.md`) |
 | `mcm_on.txt` | the settings go to DBF-MCM instead of the mod's own panel |
 | `head_parts.txt` | one digit: which armour parts are hidden from the camera (1 head, 2 torso, 4 shoulders, added) |
