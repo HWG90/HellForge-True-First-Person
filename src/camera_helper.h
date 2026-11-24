@@ -240,13 +240,22 @@ void tfp_camera_orphan_stats(TfpCameraOrphanStats *out);
 #define TFP_CAMERA_VEIL_CLEAR .10f
 void tfp_camera_set_veil(bool armed);
 void tfp_camera_veil_tick(bool hidden);
+/* Round 19, a test switch (the binder's file veil_second.txt; off by default, and tfp_camera_reset_for_tests sets it
+ * off): the veil opens at the tick that sees the leave, not at the first head-camera frame, so in the order soak 27
+ * traced (that frame drawn before the tick, the frame with the body after it) only the frame that draws the body is
+ * moved. The hook notes the leave (the same first frame of the lock that is not the native view after one that was,
+ * while armed); the next veil_tick opens the veil if it is still armed and did not find the body drawn again and
+ * switched off already, and the tick after that closes it whatever it found. A leave is taken by one tick, opened or
+ * not. In the other order (the tick before the first head-camera frame, not seen in soak 27) that frame, the one
+ * with the body, is not moved. The stats say which way it opens (second). */
+void tfp_camera_set_veil_second(bool on);
 /* Counts since the start: leaves the veil opened at; frames drawn while it was open; of them, frames whose eye it moved;
  * behind: of them, frames other than the native view whose eye was not proven TFP_CAMERA_VEIL_CLEAR in front of the
  * head (a body off foot, a frame the helper did not present, an eye it would not move): the body may have been in
  * the view. Native frames drawn while it is open (a leave that goes straight back within a tick) are counted in
  * `frames` only: they are the game's own camera, which the veil never moves. On foot `behind` stays 0. largest_m: the
- * largest move since the start. */
-typedef struct TfpCameraVeilStats { uint64_t leaves, frames, moved, behind; float largest_m; } TfpCameraVeilStats;
+ * largest move since the start. second: tfp_camera_set_veil_second is on. */
+typedef struct TfpCameraVeilStats { uint64_t leaves, frames, moved, behind; float largest_m; bool second; } TfpCameraVeilStats;
 void tfp_camera_veil_stats(TfpCameraVeilStats *out);
 /* The tick's whole part in the veil (src/mod_view.c head_note calls it after head visibility's update, `tick` filled as
  * the "Head:" line has it, view included). NULL, no tick read: switched off. Otherwise tfp_camera_veil_tick with
@@ -290,7 +299,11 @@ enum { TFP_CAMERA_TRACE_LOOKED = 1,  /* jumps within the camera were looked for 
 /* sock, arms: what the arm drive drew in this frame, as the binder told it (tfp_camera_trace_draw): the weapon socket
  * as drawn less the game's own, along the view, in metres, and TFP_ARM_DRAW_* (src/arm_drive.h; 0: not driven, or not
  * told for this frame). */
-typedef struct TfpCameraTraceRow { float ms; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; float root[3]; uint32_t what; float axes[9]; double tick; float damp[3], view[3]; float sock; uint32_t arms; } TfpCameraTraceRow;
+/* veil (round 19): how far the veil (tfp_camera_set_veil) moved the eye handed to the game in this frame, in the world;
+ * zeros where it moved nothing. `eye` is the eye before it (what the continuity, the damping and `step` work on), so
+ * the eye shown is eye + veil. Round 18 found the veil moving the shown eye up to 0.32 m forward for a frame or two at
+ * most leaves of the native view, and no row said so. */
+typedef struct TfpCameraTraceRow { float ms; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; float root[3]; uint32_t what; float axes[9]; double tick; float damp[3], view[3]; float sock; uint32_t arms; float veil[3]; } TfpCameraTraceRow;
 void tfp_camera_trace_edge(void);
 /* The arm drive's figures of the last primary draw, for the newest frame presented. The draw comes after the frame's
  * camera call and before the next tick, so the binder calls this once a tick, when the drive has seen a draw since the

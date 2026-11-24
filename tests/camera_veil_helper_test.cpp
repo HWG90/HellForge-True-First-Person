@@ -23,16 +23,21 @@ static TfpCameraVeilStats veil() { TfpCameraVeilStats s; std::memset(&s, 0, size
 // handed to tfp_camera_veil_from_head instead. Then the swap's first head-camera frame: its drawn eye, how far in
 // front of the head, is returned in `first`.
 static float held_ahead, held_up; // the native view's drawn eye in the swap's last native frame: what the hold keeps
+// Round 19: the trace kept (Trace rows read with tfp_camera_trace_read), and the veil opened by the tick that sees the
+// leave (veil_second.txt), for the next leave() only.
+static bool leave_trace, leave_second; static double leave_dt = 33.3; // and the time of a frame
 static void leave(Game &g, bool lock, bool armed, float rig_ahead, float *first, const TfpHeadTick *head = nullptr) {
-  fresh(lock, false);
+  fresh(lock, false, leave_trace);
+  tfp_camera_set_veil_second(leave_second); leave_trace = leave_second = false;
   g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
   g.eye[0] = 0; g.eye[1] = rig_ahead; g.eye[2] = .13f;
   CHECK(tfp_camera_set_weapon_key(g.gen, 0x1111) == 1);
   if (head) tfp_camera_veil_from_head(head); else tfp_camera_set_veil(armed);
-  standing(g, 30, 33.3, true);
-  standing(g, 4, 33.3, true, 2);           // the swap begins: the hold keeps the native view
+  const double dt = leave_dt; leave_dt = 33.3;
+  standing(g, 30, dt, true);
+  standing(g, 4, dt, true, 2);             // the swap begins: the hold keeps the native view
   held_ahead = ahead_of_head(g); held_up = up_of_head(g);
-  g.hip(2); g.frame(33.3);                 // the view leaves the native view: the head camera's first frame
+  g.hip(2); g.frame(dt);                   // the view leaves the native view: the head camera's first frame
   *first = ahead_of_head(g);
 }
 
@@ -229,6 +234,97 @@ int main() {
     const TfpCameraVeilStats s = veil();
     CHECK(s.leaves == 0 && s.frames == 0 && s.moved == 0);
     h.end();
+  }
+  // ---- 12. Round 19: what is shown is logged. The Trace row of a frame the veil moved carries the move as a vector
+  // (veil): the row's eye is the eye before it, as before, and eye + veil is the eye handed to the game. A frame it
+  // did not move says nothing (zeros), the native frames before the leave and the held eye after it alike. At every
+  // frame time. ----
+  for (double dt : {8.0, 16.7, 33.3, 50.0}) {
+    Game g; leave_trace = true; leave_dt = dt; leave(g, true, true, -.22f, &first);
+    float drawn[3][3]; std::memcpy(drawn[0], g.shown, 12);
+    tfp_camera_veil_tick(false); g.hip(2); g.frame(dt); std::memcpy(drawn[1], g.shown, 12);
+    tfp_camera_veil_tick(true); g.hip(2); g.frame(dt); std::memcpy(drawn[2], g.shown, 12);
+    tfp_camera_trace_edge();
+    TfpCameraTraceRow rows[16]; std::memset(rows, 0, sizeof rows);
+    const uint32_t n = tfp_camera_trace_read(rows, 16);
+    CHECK(n >= 4);
+    if (n >= 4) {
+      const float a = std::sqrt(g.ahead[0] * g.ahead[0] + g.ahead[1] * g.ahead[1]), way[2] = {g.ahead[0] / a, g.ahead[1] / a};
+      for (int k = 0; k < 3; ++k) {
+        const TfpCameraTraceRow &r = rows[n - 3 + k];
+        float shown[3]; for (int i = 0; i < 3; ++i) shown[i] = r.eye[i] + r.veil[i];
+        CHECK(r.kind == 4 && std::fabs(shown[0] - drawn[k][0]) < .002f && std::fabs(shown[1] - drawn[k][1]) < .002f && std::fabs(shown[2] - drawn[k][2]) < .002f);
+        const float along = ((r.eye[0] - g.s.head[0]) * way[0] + (r.eye[1] - g.s.head[1]) * way[1]);
+        CHECK(std::fabs(along - held_ahead) < .002f); // the row's eye: the held eye, before the veil
+        const float moved = std::sqrt(r.veil[0] * r.veil[0] + r.veil[1] * r.veil[1] + r.veil[2] * r.veil[2]);
+        if (k < 2) CHECK(std::fabs(moved - (TFP_CAMERA_VEIL_CLEAR - held_ahead)) < .002f && std::fabs(r.veil[0] * way[0] + r.veil[1] * way[1] - moved) < .002f && r.veil[2] == 0);
+        else CHECK(moved == 0);
+      }
+      CHECK(rows[n - 4].kind == 6 && rows[n - 4].veil[0] == 0 && rows[n - 4].veil[1] == 0 && rows[n - 4].veil[2] == 0);
+    }
+    CHECK(!veil().second);
+    g.end();
+  }
+  // ---- 13. Round 19, a test switch (veil_second.txt; off by default): the veil opens at the tick that sees the leave,
+  // not at the first head-camera frame, so in the order soak 27 traced (the first head-camera frame before that tick,
+  // the frame with the body after it) only the frame that draws the body is moved. The stats say which way it opens. ----
+  for (double dt : {8.0, 16.7, 33.3, 50.0}) {
+    Game g; leave_trace = true; leave_second = true; leave_dt = dt; leave(g, true, true, -.22f, &first);
+    CHECK(std::fabs(first - held_ahead) < .002f); // the first head-camera frame: the held eye
+    TfpCameraVeilStats s = veil();
+    CHECK(s.second && s.leaves == 0 && s.frames == 0 && s.moved == 0);
+    tfp_camera_veil_tick(false);           // the tick that sees the leave: it opens
+    g.hip(2); g.frame(dt);                 // the frame with the body: moved
+    CHECK(std::fabs(ahead_of_head(g) - TFP_CAMERA_VEIL_CLEAR) < .002f);
+    tfp_camera_veil_tick(true);            // the body switched off: closed
+    g.hip(2); g.frame(dt);
+    CHECK(std::fabs(ahead_of_head(g) - held_ahead) < .002f);
+    s = veil();
+    CHECK(s.second && s.leaves == 1 && s.frames == 1 && s.moved == 1 && s.behind == 0 && std::fabs(s.largest_m - (TFP_CAMERA_VEIL_CLEAR - held_ahead)) < .002f);
+    tfp_camera_trace_edge();
+    TfpCameraTraceRow rows[16]; std::memset(rows, 0, sizeof rows);
+    const uint32_t n = tfp_camera_trace_read(rows, 16);
+    CHECK(n >= 3);
+    if (n >= 3) {
+      CHECK(rows[n - 3].veil[0] == 0 && rows[n - 3].veil[1] == 0);   // the first head-camera frame: not moved
+      CHECK(std::fabs(rows[n - 2].veil[0]) + std::fabs(rows[n - 2].veil[1]) > .2f);
+      CHECK(rows[n - 1].veil[0] == 0 && rows[n - 1].veil[1] == 0);
+    }
+    g.end();
+  }
+  {
+    // Nothing drawn again: closed by the tick after the one that opened it, so one frame.
+    Game g; leave_second = true; leave(g, true, true, -.22f, &first);
+    tfp_camera_veil_tick(false); g.hip(2); g.frame(33.3);
+    CHECK(std::fabs(ahead_of_head(g) - TFP_CAMERA_VEIL_CLEAR) < .002f);
+    tfp_camera_veil_tick(false); g.hip(2); g.frame(33.3);
+    CHECK(std::fabs(ahead_of_head(g) - held_ahead) < .002f && veil().frames == 1 && veil().moved == 1);
+    g.end();
+  }
+  {
+    // The tick that sees the leave already finds the body drawn again and switches it off: nothing opens.
+    Game g; leave_second = true; leave(g, true, true, -.22f, &first);
+    tfp_camera_veil_tick(true); g.hip(2); g.frame(33.3);
+    CHECK(std::fabs(ahead_of_head(g) - held_ahead) < .002f && veil().leaves == 0 && veil().frames == 0);
+    tfp_camera_veil_tick(false); g.hip(2); g.frame(33.3);
+    CHECK(std::fabs(ahead_of_head(g) - held_ahead) < .002f && veil().leaves == 0);
+    g.end();
+  }
+  {
+    // Not armed: the tick opens nothing (the switch alone is no veil).
+    Game g; leave_second = true; leave(g, true, false, -.22f, &first);
+    tfp_camera_veil_tick(false); g.hip(2); g.frame(33.3);
+    CHECK(std::fabs(ahead_of_head(g) - held_ahead) < .002f && veil().leaves == 0);
+    g.end();
+  }
+  {
+    // The leave is seen once: the tick that found the body switched off took it, and later ticks open nothing.
+    Game g; leave_second = true; leave(g, true, true, -.22f, &first);
+    tfp_camera_veil_tick(true); g.hip(2); g.frame(33.3);
+    tfp_camera_veil_tick(false); g.hip(2); g.frame(33.3);
+    tfp_camera_veil_tick(false); g.hip(2); g.frame(33.3);
+    CHECK(std::fabs(ahead_of_head(g) - held_ahead) < .002f && veil().leaves == 0);
+    g.end();
   }
   std::printf("camera veil through the helper: %d checks, %d failed\n", checks, failed);
   return failed != 0;
