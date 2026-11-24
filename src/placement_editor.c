@@ -6,6 +6,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* TFP_ED_RETAIL_PAGE_KEYS: a test-only switch, set by tests/run-vectors-placement-editor.sh alone (never by
+ * build.sh). It restores retail's two depth keys, Page Up (33) and Page Down (34), and the help line's
+ * "   PgUp/PgDn: depth", so tests/placement_editor_test.c compares every recorded retail call as retail made
+ * it. The shipped editor has neither (round 17); tests/editor_keys_test.c checks that build. */
+#ifdef TFP_ED_RETAIL_PAGE_KEYS
+#define TFP_ED_RETAIL_PAGE_BINDINGS , {33, 1, 1}, {34, 1, -1}
+#define TFP_ED_RETAIL_HELP_TAIL "   PgUp/PgDn: depth"
+#else
+#define TFP_ED_RETAIL_PAGE_BINDINGS
+#define TFP_ED_RETAIL_HELP_TAIL ""
+#endif
+
 typedef enum Phase { IDLE, QUEUED, HANDOFF, ACTIVE, CLOSING } Phase;
 static const char *const PHASE[] = {"idle", "queued", "handoff", "active", "closing"};
 enum { B_PREVIOUS, B_NEXT, B_SAVE, B_SAVE_ALL, B_CANCEL, B_RESET, B_RESET_ALL, B_COUNT };
@@ -283,7 +295,7 @@ static bool draw(TfpEditor *e, double w, double h, TfpEdValue *why) {
     plain(e, TFP_ED_S_ACTION_SUPPORTED, &a, &r);
     supported = is_true(&r.a);
   }
-  TEXT(supported ? "Wheel: depth   Arrows: move   PgUp/PgDn: depth" : "Preset only: automatic action mapping needs a live trace", x,
+  TEXT(supported ? "Wheel: depth   Arrows: move" TFP_ED_RETAIL_HELP_TAIL : "Preset only: automatic action mapping needs a live trace", x,
        top - 142 * scale, 14, TFP_ED_COLOR_TEXT);
   snprintf(line, sizeof line, "%.72s", e->ready ? e->label : "Release the activation click/key to begin");
   TEXT(line, x, top - 174 * scale, 13, TFP_ED_COLOR_TEXT_DIM);
@@ -596,7 +608,11 @@ TfpEdResult tfp_editor_update(TfpEditor *e) {   /* :227-394 */
     if (finite_number(sample.sample.wheel)) next.v[1] = next.v[1] + sample.sample.wheel / 120 * .01 * fine;
     double dt = finite_number(sample.sample.dt) ? fmax(0, fmin(.1, sample.sample.dt)) : 0;
     double step = .15 * dt * fine;
-    static const struct { double key; int axis; double sign; } BINDINGS[] = {{37, 0, -1}, {39, 0, 1}, {38, 2, 1}, {40, 2, -1}, {33, 1, 1}, {34, 1, -1}};
+    /* Retail (:384) also bound Page Up (33) and Page Down (34) to depth. Not here (round 17): Page Up is the
+     * editor's own open/close key and Page Down opens the overlay host's panel list; depth is the wheel's.
+     * TFP_ED_RETAIL_PAGE_KEYS puts them back for the retail comparison only (see the switch at the top). */
+    static const struct { double key; int axis; double sign; } BINDINGS[] = {{37, 0, -1}, {39, 0, 1}, {38, 2, 1}, {40, 2, -1}
+                                                                             TFP_ED_RETAIL_PAGE_BINDINGS};
     for (size_t i = 0; i < sizeof BINDINGS / sizeof BINDINGS[0]; i++)
       if (down(e, BINDINGS[i].key)) next.v[BINDINGS[i].axis] = next.v[BINDINGS[i].axis] + step * BINDINGS[i].sign;
     for (int i = 0; i < 3; i++) next.v[i] = clamp(next.v[i]);

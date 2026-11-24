@@ -1,6 +1,13 @@
 /* src/placement_editor.c replayed against the retail placement_editor.lua's own answers
  * (tests/vectors/placement_editor_vectors.h, cut by tools/retail_ref/gen_placement_editor.py). The fakes
- * here answer from the same scripted world as tools/retail_ref/run_placement_editor.lua's. */
+ * here answer from the same scripted world as tools/retail_ref/run_placement_editor.lua's.
+ *
+ * Built with -DTFP_ED_RETAIL_PAGE_KEYS (tests/run-vectors-placement-editor.sh): retail's Page Up / Page Down
+ * depth keys and help line, which the shipped editor dropped in round 17, are compiled back in so every
+ * recorded call compares exactly as retail made it. tests/editor_keys_test.c checks the shipped editor. */
+#ifndef TFP_ED_RETAIL_PAGE_KEYS
+#error "build with -DTFP_ED_RETAIL_PAGE_KEYS (tests/run-vectors-placement-editor.sh): the vectors are retail's, Page Up / Page Down included"
+#endif
 #include "effects_fx.h"
 #include "placement_editor.h"
 #include "vectors/placement_editor_vectors.h"
