@@ -164,7 +164,7 @@ static inline bool tfp_eye_glide_lock_step(TfpEyeGlide *g, float *value, const f
   g->release = false;
   if (!g->retail) return tfp_eye_glide_step(g, value, target, dt);
   const bool moved = tfp_eye_glide_retail(value, target, dt);
-  for (unsigned i = 0; i < 3; ++i) g->at[i] = value[i];
+  for (unsigned i = 0; i < 3; ++i) { g->at[i] = value[i]; g->target[i] = target[i]; } /* (a lapse lets it run on to it) */
   if (!moved && dt > 0) g->retail = false;
   return moved;
 }
@@ -180,8 +180,9 @@ static inline bool tfp_eye_glide_lock_step(TfpEyeGlide *g, float *value, const f
  *    9 m/s^2 and losing it at 13.5. A frame's step changes by no more than 13.5 m/s^2 times its time squared: 0.015 m
  *    at 33 ms, 0.034 m at 50, against the judge's 0.06 m at 30 frames a second. Short ways take 300 ms all the same:
  *    nothing is gained by letting a held eye go faster.
- *  - An eye under way (a swap's glide when the hold lapses, or a release whose target changes: a new hold) goes on from
- *    the speed it has; an eye that is not where the last frame left it, a retail glide, or none: from rest.
+ *  - A release under way whose target changes (a new hold: a weapon drawn while letting go) goes on from the speed the
+ *    eye has. Anything else begins from rest: an eye that is not where the last frame left it, a swap's glide (the
+ *    helper lets one that is under way when the hold lapses run to its end first: tfp_eye_glide_lapse), or none.
  *  - A glide that has begun as a release and is under way stays one when its target changes (a weapon drawn while
  *    letting go): its rates, not the swap's 250 ms, so the take-over is no harder than the release itself.
  * A `dt` that is not above 0 moves nothing; a value or a target that is not a number moves nothing and forgets it. */
@@ -190,8 +191,8 @@ static inline bool tfp_eye_glide_lock_step(TfpEyeGlide *g, float *value, const f
 #define TFP_EYE_RELEASE_MAX_MS 450.0f
 static inline bool tfp_eye_glide_release(TfpEyeGlide *g, float *value, const float *target, float dt) {
   if (!tfp_finite3(value) || !tfp_finite3(target)) { tfp_eye_glide_reset(g); return false; }
-  const bool here = g->active && !g->retail && value[0] == g->at[0] && value[1] == g->at[1] && value[2] == g->at[2];
-  if (!here || !g->release || target[0] != g->target[0] || target[1] != g->target[1] || target[2] != g->target[2]) {
+  const bool here = g->active && g->release && value[0] == g->at[0] && value[1] == g->at[1] && value[2] == g->at[2];
+  if (!here || target[0] != g->target[0] || target[1] != g->target[1] || target[2] != g->target[2]) {
     float place[3], speed[3] = {0, 0, 0};
     if (here) tfp_eye_glide_at(g, g->elapsed, place, speed);
     tfp_eye_glide_reset(g);
@@ -207,4 +208,43 @@ static inline bool tfp_eye_glide_release(TfpEyeGlide *g, float *value, const flo
 }
 /* Whether `g` is a release that has not ended. */
 static inline bool tfp_eye_glide_releasing(const TfpEyeGlide *g) { return g->active && g->release && g->elapsed < g->duration; }
+/* THE LAPSE (round 19 review: BLOCKING 1, IMPORTANT 2, MINOR 4). One frame, the lock holding, of a hold that has
+ * lapsed: a swap's glide that is under way (retail's, GATE, or the gentle one, or an eye coming to rest) runs on to its
+ * end first, and the release to `target` (the head camera's own eye) begins from rest after it. The release does not
+ * take the swap's glide over in the frame of the lapse:
+ *  - from rest, it stopped retail's glide dead in one frame (0.08 m of step change at 33 ms a frame for 0.81 m);
+ *  - with retail's speed, (target - eye) / 70 ms, 4 to 13 m/s, which a release of at most 450 ms cannot stop, the eye
+ *    shot past every target and came back (up to 0.29 m behind the incoming eye, 0.45 m outside the span of the eye,
+ *    the swap's target and the head camera's eye);
+ *  - with a gentle glide's speed, toward a head camera's eye at the swap's target or near it, it went 0.05 to 0.085 m
+ *    past it.
+ * The swap's glide is short: the gentle one ends at rest within its 250 ms, retail's is taken as over within
+ * TFP_EYE_GLIDE_SETTLED_M of its target (70 ms * ln(way / 1 mm): 470 ms for 0.81 m, though it is 98 % there after
+ * 280), where stopping it changes a frame's step by less than half of that. The eye stays on the swap's way and then on
+ * the release's, which are straight lines: inside the span of the eye, the swap's target and `target`, whatever the
+ * frames. True while the eye is still on its way (the swap's glide or the release); false when the release is over (the
+ * eye is at `target`) or when a value or a target is not a number (nothing moves, the glide is forgotten). */
+#define TFP_EYE_GLIDE_SETTLED_M .001f
+static inline bool tfp_eye_glide_lapse(TfpEyeGlide *g, float *value, const float *target, float dt) {
+  if (!tfp_finite3(value) || !tfp_finite3(target)) { tfp_eye_glide_reset(g); return false; }
+  const bool here = value[0] == g->at[0] && value[1] == g->at[1] && value[2] == g->at[2];
+  if (here && !g->release && g->retail) {
+    float left = 0;
+    for (unsigned i = 0; i < 3; ++i) left += (g->target[i]-value[i])*(g->target[i]-value[i]);
+    if (sqrtf(left) > TFP_EYE_GLIDE_SETTLED_M) {
+      tfp_eye_glide_retail(value, g->target, dt);
+      for (unsigned i = 0; i < 3; ++i) g->at[i] = value[i];
+      return true;
+    }
+  }
+  else if (here && !g->release && g->active && g->elapsed < g->duration) {
+    float to[3]; memcpy(to, g->target, sizeof to);
+    if (g->rise > 0) tfp_eye_glide_step(g, value, to, dt); /* the swap's glide, to its own target */
+    else tfp_eye_glide_rest(g, value, dt);                /* an eye coming to rest */
+    return true;
+  }
+  if (!g->release) tfp_eye_glide_reset(g); /* a swap's glide that is over, or none: the release from rest */
+  tfp_eye_glide_release(g, value, target, dt);
+  return tfp_eye_glide_releasing(g);
+}
 #endif
