@@ -1475,7 +1475,7 @@ static void position_locked(uint32_t unit, uint32_t node, const float *pose, uin
     if (policy.ads_share == 0) tfp_ads_seat_reset(&ads_seat); /* at the hip: each aim pairs the sight and the depth anew */
     const float least = tfp_ads_sight_least(&ads_seat, sight, ads_frame_depth, ads_frame_rest, (double)now);
     /* never down faster than the game's depth comes in (round 20c; review 27, B1) */
-    const float pull = tfp_ads_pull_frame(&ads_pull, &ads_fall, tfp_ads_pull_for(sight, wanted), tfp_ads_pull_most(least, wanted),
+    const float pull = tfp_ads_pull_frame(&ads_pull, &ads_fall, sight, tfp_ads_pull_for(sight, wanted), tfp_ads_pull_most(least, wanted),
                                           ads_frame_depth, wanted, policy.ads_share > 0, (double)now);
     if (policy.ads_share > 0 && pull > 0) shifted[1] -= pull*policy.ads_share;
     const float forward = policy.full_ads ? policy.ads_placement[1] : 0;

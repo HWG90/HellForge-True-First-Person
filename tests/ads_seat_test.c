@@ -75,35 +75,60 @@ int main(void) {
   {
     TfpAdsPull p; TfpAdsFall f; tfp_ads_pull_reset(&p); tfp_ads_fall_reset(&f);
     double at = 5000;
-    CHECK(near(tfp_ads_pull_frame(&p, &f, .20f, .25f, .40f, .15f, true, at), .20f, 1e-6));                 /* the first frame: the target */
-    CHECK(near(tfp_ads_pull_frame(&p, &f, .07f, .07f, .40f, .15f, true, at += 16), .20f, 1e-6));          /* new level's limit, depth still: held */
-    CHECK(near(tfp_ads_pull_frame(&p, &f, .07f, .07f, .39f, .15f, true, at += 16), .19f, 1e-6));          /* depth 1 cm in: 1 cm down */
-    CHECK(near(tfp_ads_pull_frame(&p, &f, .07f, .07f, .30f, .15f, true, at += 16), .10f, 1e-6));          /* 9 cm in: 9 cm down */
-    CHECK(near(tfp_ads_pull_frame(&p, &f, .07f, .07f, .31f, .15f, true, at += 16), .10f, 1e-6));          /* depth back out: nothing down */
-    CHECK(near(tfp_ads_pull_frame(&p, &f, .07f, .07f, .20f, .15f, true, at += 16), .07f, 1e-6));          /* in by more than is left: at the limit */
+    CHECK(near(tfp_ads_pull_frame(&p, &f, .35f, .20f, .25f, .40f, .15f, true, at), .20f, 1e-6));                 /* the first frame: the target */
+    CHECK(near(tfp_ads_pull_frame(&p, &f, .35f, .07f, .07f, .40f, .15f, true, at += 16), .20f, 1e-6));          /* new level's limit, depth still: held */
+    CHECK(near(tfp_ads_pull_frame(&p, &f, .35f, .07f, .07f, .39f, .15f, true, at += 16), .19f, 1e-6));          /* depth 1 cm in: 1 cm down */
+    CHECK(near(tfp_ads_pull_frame(&p, &f, .35f, .07f, .07f, .30f, .15f, true, at += 16), .10f, 1e-6));          /* 9 cm in: 9 cm down */
+    CHECK(near(tfp_ads_pull_frame(&p, &f, .35f, .07f, .07f, .31f, .15f, true, at += 16), .10f, 1e-6));          /* depth back out: nothing down */
+    CHECK(near(tfp_ads_pull_frame(&p, &f, .35f, .07f, .07f, .20f, .15f, true, at += 16), .07f, 1e-6));          /* in by more than is left: at the limit */
     /* no depth: at the glide's own pace, never at once */
     tfp_ads_pull_reset(&p); tfp_ads_fall_reset(&f); at = 7000;
-    tfp_ads_pull_frame(&p, &f, .20f, .25f, NAN, .15f, true, at);
-    const float glided = tfp_ads_pull_frame(&p, &f, .07f, .07f, NAN, .15f, true, at += 16);
+    tfp_ads_pull_frame(&p, &f, .35f, .20f, .25f, NAN, .15f, true, at);
+    const float glided = tfp_ads_pull_frame(&p, &f, .35f, .07f, .07f, NAN, .15f, true, at += 16);
     CHECK(glided < .20f && glided > .07f && near(glided, .20f - .13f*(1 - expf(-16.f/80)), 1e-5));
     /* at the hip (share 0): the limit at once, nothing is shown of it */
     tfp_ads_pull_reset(&p); tfp_ads_fall_reset(&f); at = 9000;
-    tfp_ads_pull_frame(&p, &f, .20f, .25f, .40f, .15f, false, at);
-    CHECK(near(tfp_ads_pull_frame(&p, &f, .07f, .07f, .40f, .15f, false, at += 16), .07f, 1e-6));
+    tfp_ads_pull_frame(&p, &f, .35f, .20f, .25f, .40f, .15f, false, at);
+    CHECK(near(tfp_ads_pull_frame(&p, &f, .35f, .07f, .07f, .40f, .15f, false, at += 16), .07f, 1e-6));
     /* the player asks for a farther sight mid-aim (the menu): glided down though the depth stands still */
     {
       TfpAdsPull q; TfpAdsFall g; tfp_ads_pull_reset(&q); tfp_ads_fall_reset(&g); double when = 11000;
-      tfp_ads_pull_frame(&q, &g, .20f, .25f, .40f, .15f, true, when);
-      const float down = tfp_ads_pull_frame(&q, &g, .10f, .25f, .40f, .25f, true, when += 16);
+      tfp_ads_pull_frame(&q, &g, .35f, .20f, .25f, .40f, .15f, true, when);
+      const float down = tfp_ads_pull_frame(&q, &g, .35f, .10f, .25f, .40f, .25f, true, when += 16);
       CHECK(near(down, .20f - .10f*(1 - expf(-16.f/80)), 1e-5));
-      for (int i = 0; i < 60; i++) tfp_ads_pull_frame(&q, &g, .10f, .25f, .40f, .25f, true, when += 16);
+      for (int i = 0; i < 60; i++) tfp_ads_pull_frame(&q, &g, .35f, .10f, .25f, .40f, .25f, true, when += 16);
       CHECK(q.shown == .10f && !g.asked);
       /* and then a nearer zoom level's limit with the depth still: held again */
-      CHECK(tfp_ads_pull_frame(&q, &g, .02f, .02f, .40f, .25f, true, when += 16) == .10f);
+      CHECK(tfp_ads_pull_frame(&q, &g, .35f, .02f, .02f, .40f, .25f, true, when += 16) == .10f);
+    }
+    /* review 28, I1: nothing left to pull for mid-aim, the depth standing still: glided down to nothing, never held
+     * until the aim ends. The wanted distance 15 -> 0 and 5 -> 0 cm (the menu), and the sight no longer handed. */
+    {
+      static const struct { float sight, wanted, pull, sight_after, wanted_after; } CASES[4] = {
+        {.35f, .15f, .20f, .35f, 0}, {.35f, .05f, .25f, .35f, 0}, {.35f, .15f, .20f, 0, .15f}, {.35f, .15f, .20f, .05f, .15f}};
+      for (int k = 0; k < 4; k++) {
+        TfpAdsPull q; TfpAdsFall g; tfp_ads_pull_reset(&q); tfp_ads_fall_reset(&g); double when = 13000;
+        const float s0 = CASES[k].sight, w0 = CASES[k].wanted, s1 = CASES[k].sight_after, w1 = CASES[k].wanted_after;
+        for (int i = 0; i < 20; i++) tfp_ads_pull_frame(&q, &g, s0, tfp_ads_pull_for(s0, w0), tfp_ads_pull_most(s0, w0), .40f, w0, true, when += 16);
+        CHECK(near(q.shown, CASES[k].pull, 1e-6));
+        const float most = tfp_ads_pull_most(s1, w1); /* the pose helper's least: the sight itself, or nothing */
+        const float first = tfp_ads_pull_frame(&q, &g, s1, tfp_ads_pull_for(s1, w1), most, .40f, w1, true, when += 16);
+        CHECK(near(first, CASES[k].pull*expf(-16.f/80), 1e-5)); /* the glide's first step, not at once */
+        float before = first, step_most = CASES[k].pull - first;
+        for (int i = 0; i < 62; i++) {
+          const float now = tfp_ads_pull_frame(&q, &g, s1, tfp_ads_pull_for(s1, w1), most, .40f, w1, true, when += 16);
+          CHECK(now <= before); if (before - now > step_most) step_most = before - now; before = now;
+        }
+        CHECK(q.shown == 0 && step_most < .05f); /* gone within a second, by at most 5 cm a frame */
+      }
+      /* a nearer zoom level (the sight nearer than the wanted distance) is still the game's move: held */
+      TfpAdsPull q; TfpAdsFall g; tfp_ads_pull_reset(&q); tfp_ads_fall_reset(&g); double when = 15000;
+      for (int i = 0; i < 20; i++) tfp_ads_pull_frame(&q, &g, .35f, .20f, .20f, .40f, .15f, true, when += 16);
+      CHECK(tfp_ads_pull_frame(&q, &g, .12f, 0, 0, .40f, .15f, true, when += 16) == .20f);
     }
     /* going up: the glide, held by the limit, as before */
-    CHECK(near(tfp_ads_pull_frame(&p, &f, .20f, .08f, .40f, .15f, true, at += 16), .08f, 1e-6));
-    CHECK(near(tfp_ads_pull_frame(&p, &f, .20f, .25f, .40f, .15f, true, at += 16), .08f + .12f*(1 - expf(-16.f/80)), 1e-5));
+    CHECK(near(tfp_ads_pull_frame(&p, &f, .35f, .20f, .08f, .40f, .15f, true, at += 16), .08f, 1e-6));
+    CHECK(near(tfp_ads_pull_frame(&p, &f, .35f, .20f, .25f, .40f, .15f, true, at += 16), .08f + .12f*(1 - expf(-16.f/80)), 1e-5));
   }
   /* ---- the near clip's lead (the review's B1): coming in, three times the last step ahead; going out, the gun itself ---- */
   TfpAdsLead lead; memset(&lead, 0, sizeof lead);

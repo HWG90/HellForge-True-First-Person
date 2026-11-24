@@ -105,18 +105,26 @@ static inline float tfp_ads_pull_limit(TfpAdsPull *p, float most) {
  * frame (the gun the game brings toward the eye, the pull gives back as much: the sight stays where it was). With no
  * depth worked out this frame or the last, it glides down (TFP_ADS_GLIDE_MS) to where the target and the limit have
  * it, never at once. The player asking for a farther sight (`wanted` grown: the menu) is no move of the game's: that
- * glides too, until the pull is where it was going. Going up, and at the hip, as the glide and the limit have it.
+ * glides too, until the pull is where it was going. So does a pull with nothing left to ask for it (review 28, I1): the
+ * wanted distance set to 0 (off) mid-aim, or no sight handed (`sight` not one: tfp_ads_pull_for's 0); held, the pull
+ * would stay until the aim ended, as the depth does not move. A sight nearer than the wanted distance (a nearer zoom
+ * level) is the game's move and is held. Going up, and at the hip, as the glide and the limit have it.
  * `depth` is the depth the gun is drawn at (the game's, plus what the held depth added: review 27's I1). The first
  * frame, or one after a pause, is the glide's (it takes the target; the share eases it in). */
 typedef struct TfpAdsFall { float depth, wanted; double at; bool has, asked; } TfpAdsFall;
 static inline void tfp_ads_fall_reset(TfpAdsFall *f) { f->depth = f->wanted = 0; f->at = 0; f->has = f->asked = false; }
-static inline float tfp_ads_pull_frame(TfpAdsPull *p, TfpAdsFall *f, float target, float most, float depth, float wanted, bool aiming, double tick) {
+/* No sight to pull toward: none handed, the game's own 0.05 (iron sights), or beyond the near helper's limit. */
+static inline bool tfp_ads_sight_none(float sight) { return !isfinite(sight) || !(sight > TFP_ADS_SIGHT_LEAST) || sight > TFP_ADS_SIGHT_MOST; }
+static inline float tfp_ads_pull_frame(TfpAdsPull *p, TfpAdsFall *f, float sight, float target, float most, float depth, float wanted, bool aiming,
+                                       double tick) {
   const bool fresh = p->has && isfinite(tick) && tick >= p->at && tick - p->at <= TFP_ADS_STALE_MS;
   const float before = p->shown;
   const double since = fresh ? tick - p->at : 0;
   const bool depths = isfinite(depth) && f->has && isfinite(tick) && tick >= f->at && tick - f->at <= TFP_ADS_STALE_MS;
   const float fell = depths && f->depth > depth ? f->depth - depth : 0;
-  if (isfinite(wanted) && wanted > f->wanted && f->at > 0) f->asked = true; /* the player's own change: glided, not held */
+  const bool off = !(isfinite(wanted) && wanted > 0);
+  if (f->at > 0 && ((!off && wanted > f->wanted) || (off && f->wanted > 0) || tfp_ads_sight_none(sight)))
+    f->asked = true; /* the player's own change, or no sight left: glided, not held */
   f->wanted = isfinite(wanted) ? wanted : 0;
   tfp_ads_pull_step(p, target, tick);
   tfp_ads_pull_limit(p, most);
