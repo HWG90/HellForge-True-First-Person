@@ -792,7 +792,12 @@ static bool steady_frame(Policy *p, const DepthObservation *observation, uint64_
    * depth is still worked out and counted, as with the switch. */
   const bool stopped = tfp_steady_pair_frame(&steady_pair, generation, &stopped_now);
   if (stopped_now) tfp_steady_stopped(&steady_log, generation);
-  if (observation->ready && observation->native_stack == native_stack && observation->request == p->c.request && observation->generation == generation
+  /* The lens locals are the evaluator's stack, read by offset: they are a lens only in the code the zoom depth term
+   * pins (depth_code, nine places), and this mirrors that code. The term asks before it reads; so does this. */
+  DepthState *s = &p->depth;
+  if (!s->checked) { s->checked = true; s->code_ok = depth_code(&p->c); }
+  if (!s->code_ok) reason = TFP_STEADY_NO_CODE;
+  else if (observation->ready && observation->native_stack == native_stack && observation->request == p->c.request && observation->generation == generation
       && observation->thread == host.thread(host.user) && read(p->c.request + L_REQUEST_STATE, request, sizeof request)
       && !memcmp(request, observation->request_state, 8) && !memcmp(request + 0xC, observation->request_state + 0xC, sizeof request - 0xC)
       && field_u32(request, 4) == field_u32(observation->frame, 0x1C)) {
@@ -805,7 +810,6 @@ static bool steady_frame(Policy *p, const DepthObservation *observation, uint64_
     /* Where to rest: the selected optic's own distance, or the mod's reference for it where the zoom depth term has
      * one for exactly these distances (then the two agree at rest, and the term's blend over the lens is left out). */
     in.settled = in.current;
-    const DepthState *s = &p->depth;
     const uint32_t signature[4] = {field_u32(request, 0x10), field_u32(request, 0x1C), field_u32(request, 0x20), 0};
     if (!p->zoom_policy_active && !atomic_load_explicit(&depth_off, memory_order_relaxed) && s->valid && s->signature_set
         && !memcmp(signature, s->signature, sizeof signature)) in.settled = s->current_reference;

@@ -907,7 +907,7 @@ static int real(void) {
 
   /* ---- the held depth in later leases: a new lease begins it again after the stop above; and with one of the zoom
    * depth's code pins not this build's, the evaluator's locals are not read as a lens at all ---- */
-  for (int pinned = 1; pinned >= 1; pinned--) {
+  for (int pinned = 1; pinned >= 0; pinned--) {
     TfpSteadySecond held;
     char line[640];
     pose_world_depth_pin(pinned);
