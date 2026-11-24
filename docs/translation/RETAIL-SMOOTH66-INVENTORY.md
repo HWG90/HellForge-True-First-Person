@@ -9,6 +9,7 @@ Conventions used in this file:
 - "kind 6" = the game's native first-person rig camera request; "kind 4" = the game's ordinary third-person camera. `s` = `backend:player_snapshot()` / `backend:snapshot()`.
 - How liveness was decided: from what `fp/runtime.lua` requires in `on_enable` (lines 649-730) and calls in `update_frame` (561-640), what `start_pose` / `toggle_pose` start (`controller:start(0,'pose_offset')`, 844), and which objects stay `nil` (`fird`, `fird_entry`, `fird_warm`, `fird_render`, `ready_pose`, `held_fire` are only created inside `start_fird`, 935-1040, whose menu entry is commented out at 1056). File names were not used as evidence.
 - The detailed tables were collected per module group; a few cells are long. Where a statement is my reading rather than something the code or its comments say, it is marked as such.
+- Retail's Page Up / Page Down depth keys (VK 33/34; section 4: editor VK codes, key speed; section 5: "Editor: PgUp 33 / PgDn 34"; section 7: behaviour 144) are not in the C port: removed in round 17 (2026-11-24) at the user's request, depth is the wheel's alone; only the retail comparison compiles them back in (`TFP_ED_RETAIL_PAGE_KEYS`, tests/run-vectors-placement-editor.sh).
 
 ## 0. Result in short
 
