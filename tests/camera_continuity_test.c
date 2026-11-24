@@ -693,6 +693,29 @@ static float plain_frame(TfpContinuity *c, const float *root, float yaw, const f
   for (int a = 0; a < 3; ++a) for (int k = 0; k < 3; ++k) { relative[a] += (eye[k]-root[k])*basis[a*3+k]; head[a] += (node[k]-root[k])*basis[a*3+k]; }
   return CUT_STEP_Q(c, relative, eye, basis, give ? head : NULL, source, detect, quiet, tick, out);
 }
+/* How a cut's ease ends: a made-up cut of `far` m from rest, the head still after it (no arc), `dt_ms` a frame. The
+ * presented eye's step change (| (c-b) - (b-a) |, in the root's frame) at most in the last frame of the ease and the
+ * two after it, and at most anywhere after the cut's own frame. */
+typedef struct CutEnd { float end, most; unsigned cuts; } CutEnd;
+static CutEnd cut_end(float far, float dt_ms) {
+  TfpContinuity c; memset(&c, 0, sizeof c); CutEnd e = {0, 0, 0};
+  const float basis[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1}; const int rest = (int)(300/dt_ms), total = rest+(int)(800/dt_ms);
+  float shown[3] = {0}; double ends = 1e9;
+  for (int i = 0; i < total; ++i) {
+    const float head = i >= rest ? far : 0; const float relative[3] = {.1f, head, 1.5f}; float out[3];
+    const double tick = 1000.0+i*(double)dt_ms;
+    CUT_STEP(&c, relative, relative, basis, relative, HEAD, false, tick, out);
+    if (i == rest) ends = c.started+c.duration;
+    for (int n = 0; n < 2; ++n) shown[n] = shown[n+1];
+    shown[2] = out[1];
+    if (i < 2 || i <= rest) continue;
+    const float change = fabsf(shown[2]-2*shown[1]+shown[0]);
+    if (change > e.most) e.most = change;
+    if (tick >= ends-dt_ms && tick < ends+2*dt_ms && change > e.end) e.end = change;
+  }
+  e.cuts = (unsigned)CUTS(&c);
+  return e;
+}
 int main(void) {
   Run r;
   /* A still eye and an eye moving evenly: nothing is added, at 30 and at 144 frames a second. */
@@ -1884,7 +1907,7 @@ int main(void) {
       CHECK(m.cuts == 1);
       CHECK(m.cut < .04f);
       CHECK(m.after < fmaxf(.03f, 24*times[d]*times[d]/1e6f+.005f)); /* the curve's own acceleration at most */
-      CHECK(m.settled < 400);
+      CHECK(m.settled <= 450); /* within the cut's curve: 447 ms for 0.4 m (the quartic's start at ease_accel) */
       CHECK(lunge.cuts == 0 && lunge.carried == 0);
       CHECK(fall.cuts == 0 && fall.carried == 0);
     }
@@ -1942,6 +1965,18 @@ int main(void) {
     }
     CHECK(c.cuts == 0);
 #undef PLAIN_START
+  }
+  /* The ease of a cut ends at rest: its acceleration comes down to nothing with it, so the eye does not stop short where
+   * the ease ends (round 19 review: soak 30 16:37:35.009, 300 ms after a cut, the step change went 0.009 -> 0.029 m
+   * there). A cut of 0.4 m from rest with the head still after it, at 8, 16.7, 33.3 and 50 ms a frame. */
+  {
+    static const float times[] = {8, 16.7f, 33.3f, 50};
+    for (unsigned d = 0; d < 4; ++d) {
+      const CutEnd e = cut_end(.4f, times[d]);
+      printf("  a 0.4 m cut eased, %g ms a frame: step change %.4f m at most where the ease ends, %.4f m at most anywhere\n", (double)times[d], (double)e.end, (double)e.most);
+      CHECK(e.cuts == 1);
+      CHECK(e.end < .5f*e.most+1e-4f); /* where it ends, under half the most it changes (the cubic's end: 0.95 to 1 of it) */
+    }
   }
 #endif
   printf("camera continuity: %d checks, %d failed\n", checks, failed);

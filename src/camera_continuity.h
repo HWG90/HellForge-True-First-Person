@@ -209,7 +209,8 @@
  *    frame: a head-camera frame of a body on foot; not the eye, which swings round the node with the view), a frame in
  *    which nothing is looked for and the head moves TFP_CONTINUITY_CUT_M or more against the root and as far in the
  *    world, from under TFP_CONTINUITY_CUT_REST the frame before, is a cut, and is taken up as a change of camera: whole,
- *    the eye's speed lent from before (none: it was at rest), on the curve. The frame after one cut can be a cut too
+ *    the eye's speed lent from before (none: it was at rest), on a curve that ends at rest (a quartic, its length
+ *    reckoned for its start; tfp_continuity_curve). The frame after one cut can be a cut too
  *    (seen on feel.50: 0.39 and then 0.32 m), not a third. The bound grows with the frame's time as an acceleration
  *    (TFP_CONTINUITY_CUT_ACCEL times its square), so honest fast motion from rest is no cut at any frame rate: prone out
  *    of an emote (the head at 240 m/s^2 from rest, 0.30 m in a frame of 50 ms) is shown as before. What is no cut is as
@@ -262,6 +263,7 @@ typedef struct TfpContinuity {
   bool head_known, head_cut;             /* THE CUT: last frame's head is known; last frame was a cut */
   float head[3], head_speed;             /* last frame: the head in the root's frame, and its speed the frame before a cut (m/s; unknown: huge) */
   bool head_placed; float head_world[3]; /* last frame: the same head in the world, where the world was given */
+  bool rest_end;                         /* the curve is a cut's: it ends with no acceleration either (tfp_continuity_curve) */
   uint64_t cuts;                         /* frames taken up as a cut */
   float largest;                         /* the largest correction carried since the reader last cleared it */
 } TfpContinuity;
@@ -328,7 +330,18 @@ static inline void tfp_continuity_curve(const TfpContinuity *c, double tick, flo
   const double s = (tick-c->started)/c->duration;
   if (!(s >= 0) || s >= 1) return;
   const double seconds = c->duration/1000.0;
-  const double h00 = 2*s*s*s-3*s*s+1, h10 = s*s*s-2*s*s+s, d00 = (6*s*s-6*s)/seconds, d10 = 3*s*s-4*s+1;
+  /* A cut's curve (rest_end) is the quartic that ends with no acceleration either, (1-s)^3 (d (1+3s) + v T s): the
+   * cubic brakes hardest in its last frame and then stops (round 19 review: soak 30 16:37:35.009, 300 ms after a cut,
+   * the step change went 0.009 -> 0.029 m where the cubic ended). The quartic starts hardest instead (12 d / T^2), in
+   * the frames right after the cut, where the move out of the emote starts too, brakes at 4 d / T^2 at most two thirds
+   * in, and comes to rest; its length is reckoned for its start (tfp_continuity_step_cut). Over the ten cuts of soaks
+   * 27 to 30, replayed against main: the most a frame's step change is beyond main's in the 15 frames after a cut, 0.020
+   * m with the cubic, 0.008 m with this; summed, 0.260 and 0.141 m. (Tried: the quintic, at rest at both ends, on the
+   * cubic's length, 0.021 and 0.429 m: it brakes in the middle as hard as the cubic at its end; this quartic on the
+   * cubic's length, 0.017 and 0.275 m.) */
+  const double u = 1-s;
+  const double h00 = c->rest_end ? u*u*u*(1+3*s) : 2*s*s*s-3*s*s+1, h10 = c->rest_end ? s*u*u*u : s*s*s-2*s*s+s;
+  const double d00 = (c->rest_end ? -12*s*u*u : 6*s*s-6*s)/seconds, d10 = c->rest_end ? u*u*(1-4*s) : 3*s*s-4*s+1;
   for (unsigned i = 0; i < 3; ++i) {
     value[i] = (float)(c->from[i]*h00+c->from_speed[i]*seconds*h10);
     speed[i] = (float)(c->from[i]*d00+c->from_speed[i]*d10);
@@ -631,10 +644,14 @@ static inline float tfp_continuity_step_cut(TfpContinuity *c, const float *wante
     const float a = fmaxf(t->ease_accel, 1e-3f);
     float duration = 1000*(4*rate+sqrtf(16*rate*rate+24*a*length))/(2*a);
     duration = fminf(fmaxf(duration, t->min_ms), t->max_ms);
+    /* A cut's curve, the quartic (tfp_continuity_curve), starts at 12 d / T^2 + 6 v / T: as long again by the square
+     * root of 2 for the same largest acceleration, and up to max_ms as long again by as much. */
+    if (cut) duration = fminf(fmaxf(1000*(6*rate+sqrtf(36*rate*rate+48*a*length))/(2*a), t->min_ms), t->max_ms*1.41421356f);
     /* THE LET-DOWN AT A SLOWING, in a frame taken up: measured anew, against the wanted eye where the jump put it. */
     tfp_continuity_glide(c, next, from_speed, true, duration, quiet, dt, t, glide);
     for (unsigned i = 0; i < 3; ++i) next[i] += glide[i];
     tfp_continuity_begin(c, next, from_speed, tick, duration);
+    c->rest_end = cut; /* kept when the curve is begun again from where it is (the glide, full aim) */
     for (unsigned i = 0; i < 3; ++i) value[i] = next[i];
     if (cut) { ++c->cuts; c->run = 0; } else if (edge) { ++c->edges; c->run = 0; } else if (believe) c->run = 0; else { ++c->jumps; if (!c->run++) c->run_started = tick; }
     c->neared = c->run && (c->neared || !over); c->paused = c->trial = c->calm = false;
