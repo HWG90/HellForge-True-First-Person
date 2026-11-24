@@ -535,6 +535,7 @@ static void head_note(void) {
   char text[700];
   if (!tfp_wire_engine_head_tick(&wire, &tick)) { tfp_camera_veil_from_head(NULL); return; }
   tick.view = wire.controller.enabled;
+  tick.now_ms = (double)GetTickCount64(); /* round 24: how long hiding was let go */
   /* Round 14, the veil (src/camera_helper.h tfp_camera_veil_from_head): this tick's update closes the one a leave
    * opened once it found the body drawn again and left none of it drawn; it stays armed while the module is active. */
   tfp_camera_veil_from_head(&tick);

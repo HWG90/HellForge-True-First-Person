@@ -92,6 +92,20 @@ int main(void) {
   CHECK(tfp_head_log_step(&g, &t, text, sizeof text) && strstr(text, "left behind the head on 2, largest move 0.321 m, opens at the first head-camera frame"));
   t.veil_second = true; t.veil_behind = 3;
   CHECK(tfp_head_log_step(&g, &t, text, sizeof text) && strstr(text, "left behind the head on 3, largest move 0.321 m, opens at the tick that sees the leave (veil_second.txt)"));
+  /* Round 24: with a clock, the line that says hiding is back says how long it was let go (a backpack's attach,
+   * 20:32:09.585 to 09.783 in the user's log of 2026-11-24); without one (every tick above) nothing is added. */
+  {
+    TfpHeadLog h; memset(&h, 0, sizeof h);
+    TfpHeadTick a = tick(4, true, 5, 11, 12); a.now_ms = 1000;
+    CHECK(tfp_head_log_step(&h, &a, text, sizeof text) && !strstr(text, "let go for"));
+    TfpHeadTick off = tick(6, false, 0, 0, 0); off.now_ms = 1585; off.phase = "unavailable";
+    CHECK(tfp_head_log_step(&h, &off, text, sizeof text) && !strstr(text, "let go for"));
+    off.now_ms = 1700; (void)tfp_head_log_step(&h, &off, text, sizeof text);
+    a.now_ms = 1783; a.on_new = 37;
+    CHECK(tfp_head_log_step(&h, &a, text, sizeof text) && strstr(text, "; hiding was let go for 198 ms with the view on"));
+    a.now_ms = 1800; a.on_new = 0; a.on_again = 1;
+    CHECK(tfp_head_log_step(&h, &a, text, sizeof text) && !strstr(text, "let go for"));
+  }
   /* A line never runs past its buffer, and stays under the 700 characters say() writes (src/mod_view.c). */
   t = tick(4, true, 4000000000u, 4000000000u, 4000000000u); t.on_again = t.on_again_head = t.on_new = t.on_still = t.turned_off = t.left_on = t.put_back = 4000000000u;
   g.again_ticks = g.again_meshes = g.off_ticks = 18446744073709551615ull;
