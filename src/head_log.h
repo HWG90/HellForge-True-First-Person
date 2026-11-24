@@ -38,6 +38,8 @@ typedef struct TfpHeadTick {
   unsigned camera_rows, on_new, on_again, on_again_head, on_still, turned_off, left_on, put_back;
   /* The veil's counts since the start (TfpCameraVeilStats): leaves, frames, moved, behind. */
   uint64_t veil_leaves, veil_frames, veil_moved, veil_behind;
+  float veil_largest_m; /* the largest move since the start (m) */
+  bool veil_second;     /* the veil opens at the tick that sees the leave (veil_second.txt), not at the first head-camera frame */
 } TfpHeadTick;
 typedef struct TfpHeadLog {
   bool known, was_view, was_active;
@@ -61,11 +63,12 @@ static inline bool tfp_head_log_step(TfpHeadLog *g, const TfpHeadTick *t, char *
   if (!worth || !size) return false;
   snprintf(text, size, "Head: kind=%u %s: owns head %u, torso %u, shoulders %u (%u rows; was head %u, torso %u, shoulders %u); found drawn %u new, %u again (%u of "
            "the head), %u still; switched off %u, left drawn %u, gave back %u; so far drawn again on %llu ticks (%llu meshes), view on without hiding on %llu ticks; veil: %llu leaves, %llu frames, eye moved clear on %llu, "
-           "left behind the head on %llu",
+           "left behind the head on %llu, largest move %.3f m, opens at %s",
            t->kind, t->phase ? t->phase : "-", t->head, t->torso, t->shoulders, t->rows, was_head, was_torso, was_shoulders, t->on_new, t->on_again, t->on_again_head,
            t->on_still, t->turned_off, t->left_on, t->put_back, (unsigned long long)g->again_ticks, (unsigned long long)g->again_meshes,
            (unsigned long long)g->off_ticks, (unsigned long long)t->veil_leaves, (unsigned long long)t->veil_frames, (unsigned long long)t->veil_moved,
-           (unsigned long long)t->veil_behind);
+           (unsigned long long)t->veil_behind, (double)t->veil_largest_m,
+           t->veil_second ? "the tick that sees the leave (veil_second.txt)" : "the first head-camera frame");
   return true;
 }
 #endif

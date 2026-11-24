@@ -26,7 +26,7 @@ int main(void) {
   CHECK(tfp_head_log_step(&g, &t, text, sizeof text));
   CHECK(same(text, "Head: kind=6 active: owns head 0, torso 0, shoulders 2 (5 rows; was head 0, torso 0, shoulders 0); found drawn 2 new, 0 again (0 of the "
                    "head), 0 still; switched off 2, left drawn 0, gave back 0; so far drawn again on 0 ticks (0 meshes), view on without hiding on 0 ticks"
-                   "; veil: 0 leaves, 0 frames, eye moved clear on 0, left behind the head on 0"));
+                   "; veil: 0 leaves, 0 frames, eye moved clear on 0, left behind the head on 0, largest move 0.000 m, opens at the first head-camera frame"));
   /* The same again, on the full path and on the steady path (which reads no row): nothing to say. */
   t = tick(6, true, 0, 0, 2);
   CHECK(!tfp_head_log_step(&g, &t, text, sizeof text));
@@ -37,7 +37,7 @@ int main(void) {
   CHECK(tfp_head_log_step(&g, &t, text, sizeof text));
   CHECK(same(text, "Head: kind=4 active: owns head 9, torso 14, shoulders 8 (34 rows; was head 0, torso 0, shoulders 2); found drawn 0 new, 29 again (9 of the "
                    "head), 0 still; switched off 29, left drawn 0, gave back 0; so far drawn again on 1 ticks (29 meshes), view on without hiding on 0 ticks"
-                   "; veil: 0 leaves, 0 frames, eye moved clear on 0, left behind the head on 0"));
+                   "; veil: 0 leaves, 0 frames, eye moved clear on 0, left behind the head on 0, largest move 0.000 m, opens at the first head-camera frame"));
   CHECK(g.again_ticks == 1 && g.again_meshes == 29);
   /* Drawn again with nothing else changed is still a line: that is the tick this log is for. */
   t = tick(4, true, 9, 14, 8); t.on_again = 31; t.on_again_head = 9; t.turned_off = 31;
@@ -56,7 +56,7 @@ int main(void) {
   CHECK(tfp_head_log_step(&g, &t, text, sizeof text));
   CHECK(same(text, "Head: kind=4 idle: owns head 0, torso 0, shoulders 0 (0 rows; was head 9, torso 14, shoulders 8); found drawn 0 new, 0 again (0 of the "
                    "head), 0 still; switched off 0, left drawn 0, gave back 34; so far drawn again on 3 ticks (69 meshes), view on without hiding on 1 ticks"
-                   "; veil: 0 leaves, 0 frames, eye moved clear on 0, left behind the head on 0"));
+                   "; veil: 0 leaves, 0 frames, eye moved clear on 0, left behind the head on 0, largest move 0.000 m, opens at the first head-camera frame"));
   t = tick(4, false, 0, 0, 0);
   CHECK(!tfp_head_log_step(&g, &t, text, sizeof text) && !tfp_head_log_step(&g, &t, text, sizeof text) && g.off_ticks == 3);
   t = tick(4, true, 9, 14, 8); t.on_again = 31; t.on_again_head = 9; t.turned_off = 31;
@@ -83,10 +83,19 @@ int main(void) {
   t.veil_frames = 6; t.veil_behind = 1;
   CHECK(tfp_head_log_step(&g, &t, text, sizeof text) && strstr(text, "6 frames, eye moved clear on 2, left behind the head on 1"));
   CHECK(!tfp_head_log_step(&g, &t, text, sizeof text));
+  /* Round 19: the largest move the veil made (round 18: up to 0.32 m forward, and no line said it), and which way it
+   * opens: at the first head-camera frame (the default) or at the tick that sees the leave (veil_second.txt). Neither
+   * makes a line by itself. */
+  t.veil_largest_m = .3214f;
+  CHECK(!tfp_head_log_step(&g, &t, text, sizeof text));
+  t.veil_behind = 2;
+  CHECK(tfp_head_log_step(&g, &t, text, sizeof text) && strstr(text, "left behind the head on 2, largest move 0.321 m, opens at the first head-camera frame"));
+  t.veil_second = true; t.veil_behind = 3;
+  CHECK(tfp_head_log_step(&g, &t, text, sizeof text) && strstr(text, "left behind the head on 3, largest move 0.321 m, opens at the tick that sees the leave (veil_second.txt)"));
   /* A line never runs past its buffer, and stays under the 700 characters say() writes (src/mod_view.c). */
   t = tick(4, true, 4000000000u, 4000000000u, 4000000000u); t.on_again = t.on_again_head = t.on_new = t.on_still = t.turned_off = t.left_on = t.put_back = 4000000000u;
   g.again_ticks = g.again_meshes = g.off_ticks = 18446744073709551615ull;
-  t.veil_leaves = t.veil_frames = t.veil_moved = t.veil_behind = 18446744073709551615ull;
+  t.veil_leaves = t.veil_frames = t.veil_moved = t.veil_behind = 18446744073709551615ull; t.veil_largest_m = 1e30f; t.veil_second = true;
   char small[40];
   CHECK(tfp_head_log_step(&g, &t, small, sizeof small) && strlen(small) == sizeof small - 1);
   CHECK(tfp_head_log_step(&g, &t, text, sizeof text) && strlen(text) < 700);
