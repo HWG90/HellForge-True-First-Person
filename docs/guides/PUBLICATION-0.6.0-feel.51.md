@@ -45,3 +45,7 @@
   unchanged) is left. The release text, the playtest issue and `TEST-BUILD.md` no longer mention a second ZIP. The
   `README-TEST.md` inside the complete ZIP still names the `-test.zip` once (the ZIP was left byte for byte as
   published). From now on a release has one ZIP.
+- Also on 2026-11-24, at the user's request: a player had put the complete ZIP itself into `mods`, and the launcher
+  refused it ("no hellforge-mod.json ... in its one top-level folder"). HellForge takes each archive in `mods` as one
+  mod and has no form for several mods in one archive. The release text, the playtest issue and `TEST-BUILD.md` now say
+  to extract the ZIP and not put the ZIP itself in `mods`.

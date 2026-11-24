@@ -6,7 +6,8 @@ hear what breaks.
 ## Install
 
 1. Close the game and the HellForge launcher.
-2. Unpack the ZIP into HellForge's `mods` folder. It adds three folders:
+2. Extract the ZIP into HellForge's `mods` folder. Don't put the ZIP itself in `mods`: it holds three mods, and
+   HellForge takes a ZIP there as one mod (it says "no hellforge-mod.json ... in its one top-level folder"). It adds three folders:
    - `true-first-person`: the mod.
    - `mcm`: DBF-MCM 0.1.74-hellforge.3, the settings menu. With it, every option is on the mod's
      "True First Person" page.
