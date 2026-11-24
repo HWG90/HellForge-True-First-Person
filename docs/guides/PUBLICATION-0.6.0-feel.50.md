@@ -30,5 +30,7 @@
   forum, tags Mod, Work in Progress and Available, linking the pre-release and the playtest issue:
   https://discord.com/channels/1555635878775361606/1555642510473429093/threads/1574781605258469456
   The user added an in-game screenshot. Edited the same day to say it is not a third-person camera moved into the
-  head but a true first-person rig (the game's own first-person view, kept on). Nothing posted elsewhere (no Nexus
+  head but a true first-person rig (the game's own first-person view, kept on); edited again to say not every
+  weapon's position is set yet, with the placement editor's controls (Page Up; left drag, wheel, right and middle
+  drag, Shift, < >, Save weapon / Save all / Reset, Enter, Esc). Nothing posted elsewhere (no Nexus
   or HellForge listing).
