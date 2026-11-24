@@ -32,11 +32,12 @@ enum { TFP_GATE_WORKED = 0,      /* the term was worked out (it can still be not
        TFP_GATE_ZOOM_POLICY = 10,
        TFP_GATE_SWITCHED_OFF = 11, /* depth_off.txt */
        TFP_GATE_NO_FRAME = 12,     /* the root was written without the evaluator's frame: the term is not reached */
-       TFP_GATE_REASONS = 13 };
+       TFP_GATE_STEADY = 13,       /* the term had a number, and the held depth went out in its place (src/depth_steady.h, the "Steady:" line) */
+       TFP_GATE_REASONS = 14 };
 static const char *const TFP_GATE_REASON_TEXT[TFP_GATE_REASONS] = {
     "worked out", "full aim", "the evaluator's code is not this build's", "no lens read for the frame", "unzoom gate or request state",
     "values out of range", "weapon data not read", "previous distance not known", "over 1 m", "weapon data changed", "zoom policy",
-    "depth_off.txt", "no evaluator frame"};
+    "depth_off.txt", "no evaluator frame", "the depth held steady instead"};
 
 typedef struct TfpGateFrame {
   bool lens_read;                    /* the evaluator's lens locals and the request's zoom state were read in this frame */

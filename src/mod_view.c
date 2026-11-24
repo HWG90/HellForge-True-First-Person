@@ -85,6 +85,10 @@ static bool arms_live, arms_restore, arms_bend, arms_rest_trace;
  * neither the rig nor its root is shifted for the optic. It is there to find out in the game whether that shift is
  * part of the unzoom gate's flipping (docs/design/specs/2026-11-23-gate-flip.md). */
 static bool depth_off;
+/* Test switch depth_steady_off.txt, read once at the start: the rig's depth is not held steady against the game's
+ * unzoom gate (src/depth_steady.h); it is still worked out and counted, so the "Steady:" line says what would have
+ * been held. For comparing a game run with and without. */
+static bool depth_steady_off;
 /* The action hold (docs/design/ACTION-CAMERA.md "Action hold") is on: the Weapon put-away option, or its files.
  * While it is off none of the hold's code is reached. */
 static bool hold_lease;
@@ -720,6 +724,10 @@ static void start(void) {
         FILE *depth_file = fopen(parts_path, "r");
         if (depth_file) fclose(depth_file);
         depth_off = depth_file != NULL;
+        strcpy(slash + 1, "depth_steady_off.txt");
+        FILE *steady_file = fopen(parts_path, "r");
+        if (steady_file) fclose(steady_file);
+        depth_steady_off = steady_file != NULL;
         /* The overrides of the three live features (src/wire_options.h): for testing only. */
         static const struct { const char *name; TfpFeature feature; bool on; } forced[] = {
           {"arms_live.txt", TFP_FEATURE_ARMS, true}, {"arms_off.txt", TFP_FEATURE_ARMS, false},
@@ -796,6 +804,12 @@ static void start(void) {
     say("Ready: unzoom gate watched: a \"Gate:\" line in a second in which a gate byte changes or the zoom depth is added in some frames and "
         "passed in others, and once at each native entry; the avatar's main row is read for it (two guarded reads a frame); nothing is changed by it");
     if (depth_off) say("Test: depth_off.txt: the mod's zoom depth is forced to nothing on every frame (neither the rig nor its root is shifted for the optic)");
+    /* The rig's depth held steady against that gate (src/depth_steady.h), or only counted. */
+    tfp_pose_set_depth_steady(depth_steady_off ? 2 : 1);
+    if (depth_steady_off) say("Test: depth_steady_off.txt: the rig's depth is not held steady; it follows the game's lens target as before, and a \"Steady:\" line "
+                              "says what would have been held");
+    else say("Ready: rig depth held steady: in the hip view the first-person rig and its root rest at the selected optic's distance instead of following "
+             "the lens target the unzoom gate switches; a \"Steady:\" line in a second in which something was moved (depth_steady_off.txt switches it off)");
     if (!lock_wanted) say("Smooth: eye continuity stays off whatever the option says: the camera lock is off (lock_off.txt)");
     else say(smooth_wanted ? "Smooth: on: while the lock holds the view, a change of camera (head camera, native view) and a one-frame move of the "
                              "first-person rig are carried as a correction of at most 1 m and eased out over 100 to 400 ms; farther than 1.5 m is "
@@ -962,6 +976,19 @@ static void gate_note(void) { /* once a second: what the pose helper counted of 
   tfp_gate_line(&g, entry, line, sizeof line);
   say("%s", line);
 }
+static void steady_note(void) { /* once a second: the rig's depth held steady (src/depth_steady.h), where something was moved or passed for its values */
+  static uint64_t next;
+  const uint64_t now = GetTickCount64();
+  if (now < next) return;
+  next = now + 1000;
+  TfpSteadySecond held;
+  char line[640];
+  if (!tfp_pose_steady_take(&held)) return;
+  if (tfp_steady_stop_line(&held, line, sizeof line)) say("%s", line); /* the root did not follow: said once, in the second it stopped */
+  if (!tfp_steady_worth(&held)) return;
+  tfp_steady_line(&held, line, sizeof line);
+  say("%s", line);
+}
 #endif
 static void fov_note(void) { /* once a second, on its own: the field-of-view lock also runs with the camera lock off, when lock_note has nothing to say */
   static uint64_t next, told_fov;
@@ -975,7 +1002,7 @@ static void fov_note(void) { /* once a second, on its own: the field-of-view loc
 }
 static void tick_body(void) {
 #ifdef TFP_FEEL
-  if (stage == RUNNING) gate_note();
+  if (stage == RUNNING) { gate_note(); steady_note(); }
 #endif
   if (stage == RUNNING) { quit_guard(); fov_lock_tick(); lock_note(); fov_note(); }   /* not earlier: the game module and the guarded reader are set up in WAIT_MODULES */
   if (stage == REFUSED) return;
