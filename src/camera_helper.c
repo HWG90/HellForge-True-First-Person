@@ -239,7 +239,12 @@ static struct { bool known; uint32_t mask, kind, weapon, key; double until; } sm
 #define TRACE_RING 128u
 #define TRACE_BEFORE 6u   /* frames before the edge that are written with it */
 #define TRACE_MS 500.0
-typedef struct TraceFrame { double tick; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease, root[3]; uint32_t what; float axes[9]; } TraceFrame;
+typedef struct TraceFrame { double tick; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease, root[3]; uint32_t what; float axes[9], damp[3]; } TraceFrame;
+/* What the eye damping did in the frame being presented, for its trace row (lock_damp_eye writes, smooth_present
+ * reads and clears): what it added to the eye in the world, whether it ran, and whether the body was off foot. That
+ * last is asked only in a head-camera frame (on_foot()): Policy.lock_off_foot in a native frame is the answer of the
+ * last head-camera frame, and is not written to a native row. Policy lock. */
+static struct { float added[3]; bool ran, off_foot; } trace_damp;
 static struct { TraceFrame frames[TRACE_RING]; uint64_t head, sent; double edge, until; float last[3]; double last_tick; bool last_known, open; } trace;
 /* The native eye is not remembered for its weapon while it is being moved about (set in the native view). */
 static float eye_watch[3]; static bool eye_watch_known; static double eye_unsettled_until;
@@ -1038,10 +1043,13 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
     TraceFrame *row = &trace.frames[trace.head++ % TRACE_RING];
     row->tick = tick; row->kind = kind; row->source = source; memcpy(row->eye, shown, 12); memcpy(row->wanted, wanted, 12);
     row->step = trace.last_known && tick >= trace.last_tick && tick-trace.last_tick <= p->c.max_gap_ms ? distance(shown, trace.last) : 0;
-    row->correction = correction; memcpy(row->root, root, 12); memcpy(row->axes, root_basis, 36); row->what = what;
+    row->correction = correction; memcpy(row->root, root, 12); memcpy(row->axes, root_basis, 36);
+    row->what = what | (trace_damp.off_foot ? TFP_CAMERA_TRACE_OFF_FOOT : 0u) | (trace_damp.ran ? TFP_CAMERA_TRACE_DAMPED : 0u);
+    memcpy(row->damp, trace_damp.added, 12);
     row->entry_ease = p->entry.ease.active && p->entry.ease.duration > 0 ? (float)fmin(1.0, fmax(0.0, (tick-p->entry.ease.started)/p->entry.ease.duration)) : 1;
     if (trace.head-trace.sent > TRACE_RING) trace.sent = trace.head-TRACE_RING;
   }
+  memset(&trace_damp, 0, sizeof trace_damp); /* the next frame's is written before it is presented, or there is none */
   memcpy(trace.last, shown, 12); trace.last_tick = tick; trace.last_known = true;
   return correction > 0;
 }
@@ -1067,6 +1075,7 @@ static bool lock_damp_eye(Policy *p, uint32_t kind, const float *root, const flo
    * (Bodycam with the camera damping option at 0, come to while a lag was carried) more slowly, src/camera_damp.h. */
   const bool on_foot = kind == 4 && !p->lock_down && !p->lock_off_foot && !p->full_ads && !p->ads_gap_active;
   const bool damp = on_foot && damp_ms > 0;
+  trace_damp.off_foot = p->lock_off_foot;
   float relative[3] = {0}, damped[3] = {0}, behind[3] = {0}, lag = 0;
   for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
     relative[axis] += (head[component]-root[component])*root_basis[axis*3+component];
@@ -1074,11 +1083,13 @@ static bool lock_damp_eye(Policy *p, uint32_t kind, const float *root, const flo
     if (!tfp_finite3(relative)) return false;
     lag = tfp_eye_damp_follow(&lock_eye_damp, relative, tick, p->c.max_gap_ms, damp_ms, style.eye_lag_m, damped);
     for (unsigned axis = 0; axis < 3; ++axis) behind[axis] = damped[axis]-relative[axis];
+    trace_damp.ran = true;
   } else if (!((lag = on_foot ? tfp_eye_damp_release_slowly(&lock_eye_damp, tick, p->c.max_gap_ms, behind)
                               : tfp_eye_damp_release(&lock_eye_damp, tick, p->c.max_gap_ms, behind)) > 0)) return false;
   if (lag > 0 && tfp_finite3(behind)) {
-    for (unsigned component = 0; component < 3; ++component) for (unsigned axis = 0; axis < 3; ++axis)
-      eye[component] += behind[axis]*root_basis[axis*3+component];
+    for (unsigned component = 0; component < 3; ++component) { float added = 0;
+      for (unsigned axis = 0; axis < 3; ++axis) added += behind[axis]*root_basis[axis*3+component];
+      eye[component] += added; trace_damp.added[component] = added; }
     /* where the eye is shown: what the way into the native view starts from */
     for (unsigned axis = 0; axis < 3; ++axis) p->last_relative[axis] += behind[axis];
   }
@@ -1776,6 +1787,7 @@ uint32_t tfp_camera_trace_read(TfpCameraTraceRow *rows, uint32_t capacity) {
     memcpy(row->eye, frame->eye, 12); memcpy(row->wanted, frame->wanted, 12);
     row->step = frame->step; row->correction = frame->correction; row->entry_ease = frame->entry_ease;
     memcpy(row->root, frame->root, 12); memcpy(row->axes, frame->axes, 36); row->what = frame->what; row->tick = frame->tick;
+    memcpy(row->damp, frame->damp, 12);
   }
   policy_release();
   return count;
@@ -1826,7 +1838,7 @@ void tfp_camera_reset_for_tests(void) {
   lock_carry = tfp_q_identity(); lock_was_held = false; lock_down_until = 0; lock_view_known = false; lock_first_known = false; lock_tick = 0; tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity();
   lock_damp_ms = 0; atomic_store(&lock_bodycam, 1); tfp_eye_damp_reset(&lock_eye_damp);
   memset(&smooth, 0, sizeof smooth); memset(&trace, 0, sizeof trace); eye_watch_known = false; eye_unsettled_until = 0;
-  memset(&smooth_watch, 0, sizeof smooth_watch); atomic_store(&smooth_event, 0);
+  memset(&smooth_watch, 0, sizeof smooth_watch); atomic_store(&smooth_event, 0); memset(&trace_damp, 0, sizeof trace_damp);
   atomic_store(&original, 0);
   atomic_store(&installed, 0); atomic_store(&armed, 0); atomic_store(&reserved, 0); atomic_store(&last_error, 0);
   atomic_store(&callback_generation, 0);

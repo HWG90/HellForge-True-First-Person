@@ -915,6 +915,40 @@ int main() {
       CHECK(!std::memcmp(out[0][at600], out[1][at600], sizeof(float) * 4 * (at + after - at600))); // gone: the undamped camera
     }
   }
+  // ---- 21. The trace says what the eye damping did to the wanted eye, and whether the body was on foot. The
+  // wanted eye of a head-camera frame is written after the damping, so a log could not say whether the damping ran
+  // in a frame, how far behind the head the eye was, or where the head itself was (round 10, 2026-11-24: prone and a
+  // crouch out of an emote, the eye setting off at 0.02, 0.12, 0.25 m a frame; the arithmetic says the 0.25 m limit
+  // came into force, the lines could not). damp: what was added to the true eye, in the world; nothing: zeros. ----
+  {
+    const double dt = 33.3;
+    fresh(true, true, true, 300.0f);
+    Game g; g.pose(1, 2, 0, .2f); g.look(.3f, -.2f); g.hip(); g.begin();
+    TfpCameraTraceRow rows[64];
+    standing(g, 12, dt, false);
+    tfp_camera_trace_edge();
+    uint32_t count = tfp_camera_trace_read(rows, 64);
+    CHECK(count == 6);
+    for (uint32_t i = 0; i < count; ++i) // on foot, damped, the head still: nothing added
+      CHECK((rows[i].what & TFP_CAMERA_TRACE_DAMPED) && !(rows[i].what & TFP_CAMERA_TRACE_OFF_FOOT) && rows[i].damp[0] == 0 && rows[i].damp[1] == 0 && rows[i].damp[2] == 0);
+    g.pose(1, 2, 0, .2f, 1.0f); g.hip(); g.frame(dt); // the head 0.5 m down in a frame: the eye is held 0.10 m above it, the limit
+    count = tfp_camera_trace_read(rows, 64);
+    CHECK(count == 1 && (rows[0].what & TFP_CAMERA_TRACE_DAMPED) && !(rows[0].what & TFP_CAMERA_TRACE_OFF_FOOT));
+    CHECK(std::fabs(rows[0].damp[2] - .10f) < 1e-3f && std::fabs(rows[0].damp[0]) < 1e-3f && std::fabs(rows[0].damp[1]) < 1e-3f);
+    const float true_eye = rows[0].wanted[2] - rows[0].damp[2];
+    g.s.state = 50; g.hip(); g.frame(dt); // off foot: the row says so, the damping no longer runs, and what is let go is still told
+    count = tfp_camera_trace_read(rows, 64);
+    CHECK(count == 1 && (rows[0].what & TFP_CAMERA_TRACE_OFF_FOOT) && !(rows[0].what & TFP_CAMERA_TRACE_DAMPED));
+    CHECK(rows[0].damp[2] > .02f && rows[0].damp[2] < .09f && std::fabs(rows[0].wanted[2] - rows[0].damp[2] - true_eye) < 1e-3f);
+    standing(g, 10, dt, false);
+    count = tfp_camera_trace_read(rows, 64);
+    CHECK(count == 10 && (rows[9].what & TFP_CAMERA_TRACE_OFF_FOOT) && rows[9].damp[2] == 0); // let go and gone
+    g.s.state = 36; standing(g, 2, dt, true); tfp_camera_trace_edge(); // on foot again, the native view: never damped
+    count = tfp_camera_trace_read(rows, 64);
+    CHECK(count >= 1 && rows[count - 1].kind == 6 && !(rows[count - 1].what & (TFP_CAMERA_TRACE_DAMPED | TFP_CAMERA_TRACE_OFF_FOOT)) && rows[count - 1].damp[2] == 0);
+    g.end();
+    std::printf("trace: the damping's share of the wanted eye and the body off foot are in the rows\n");
+  }
   std::printf("camera smooth: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }
