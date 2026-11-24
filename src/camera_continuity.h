@@ -205,15 +205,18 @@
  *    yaw flips 160 degrees) and the head is 0.34 to 0.61 m further on against it in that frame, from rest. Nothing is
  *    looked for there (no event in SMOOTH_EVENT_MS: the gun left the hands a second before), so the whole cut was shown,
  *    0.27 to 0.62 m of step change (soaks 25 to 30 on 0.6.0-feel.49 to .51; tests/reference/soak-30-cut.h). So where
- *    the caller gives the head (the head-camera eye before the eye damping, in the root's frame: a head-camera frame of
- *    a body on foot), a frame in which nothing is looked for and the head moves TFP_CONTINUITY_CUT_M or more against the
- *    root, from under TFP_CONTINUITY_CUT_REST the frame before, is a cut, and is taken up as a change of camera: whole,
+ *    the caller gives the head (the head node the head camera's eye is built on, before the eye damping, in the root's
+ *    frame: a head-camera frame of a body on foot; not the eye, which swings round the node with the view), a frame in
+ *    which nothing is looked for and the head moves TFP_CONTINUITY_CUT_M or more against the root and as far in the
+ *    world, from under TFP_CONTINUITY_CUT_REST the frame before, is a cut, and is taken up as a change of camera: whole,
  *    the eye's speed lent from before (none: it was at rest), on the curve. The frame after one cut can be a cut too
  *    (seen on feel.50: 0.39 and then 0.32 m), not a third. The bound grows with the frame's time as an acceleration
  *    (TFP_CONTINUITY_CUT_ACCEL times its square), so honest fast motion from rest is no cut at any frame rate: prone out
  *    of an emote (the head at 240 m/s^2 from rest, 0.30 m in a frame of 50 ms) is shown as before. What is no cut is as
  *    it was: the head moving the frame before (a dive's own arc, 0.2 m a frame), a body off foot (thrown, ragdoll: the
- *    caller does not give the head), the held eye let go (0.15 to 0.18 m), and every native frame. */
+ *    caller does not give the head), the held eye let go (0.15 to 0.18 m), a flick of the mouse (the node does not
+ *    move), the root moving by itself with the head still in the world (the re-seat's to read), and every native
+ *    frame. (Round 19 review: with the eye given, flicks of 95 and 180 degrees and the root alone 0.5 m were cuts.) */
 #ifndef TFP_CAMERA_CONTINUITY_H
 #define TFP_CAMERA_CONTINUITY_H
 #include "camera_math.h"
@@ -258,6 +261,7 @@ typedef struct TfpContinuity {
   uint64_t reseats;                      /* frames in which the root alone was re-seated (nothing taken up) */
   bool head_known, head_cut;             /* THE CUT: last frame's head is known; last frame was a cut */
   float head[3], head_speed;             /* last frame: the head in the root's frame, and its speed the frame before a cut (m/s; unknown: huge) */
+  bool head_placed; float head_world[3]; /* last frame: the same head in the world, where the world was given */
   uint64_t cuts;                         /* frames taken up as a cut */
   float largest;                         /* the largest correction carried since the reader last cleared it */
 } TfpContinuity;
@@ -381,11 +385,19 @@ static inline void tfp_continuity_glide(TfpContinuity *c, const float *value, co
   const float go = fminf(fast*dt-down, most);
   for (unsigned i = 0; i < 3; ++i) { glide[i] = go > 0 ? c->coast[i]/fast*go : 0; c->coast[i] = go > 0 ? glide[i]/dt : 0; }
 }
+/* THE CUT: the head in the world, from the head in the root's frame and the eye in both (wanted = basis times
+ * (world - root)); false where the world is not given. */
+static inline bool tfp_continuity_head_world(const float *head, const float *wanted, const float *world, const float *basis, float *out) {
+  if (!head || !world || !basis) return false;
+  for (unsigned k = 0; k < 3; ++k) { out[k] = world[k]; for (unsigned a = 0; a < 3; ++a) out[k] += (head[a]-wanted[a])*basis[a*3+k]; }
+  return tfp_finite3(out);
+}
 /* THE CUT: the head kept for the next frame. `speed`: its speed against the root that a cut is asked against (m/s). */
-static inline void tfp_continuity_head(TfpContinuity *c, const float *head, float speed, bool cut) {
+static inline void tfp_continuity_head(TfpContinuity *c, const float *head, const float *wanted, const float *world, const float *basis, float speed, bool cut) {
   c->head_known = head && tfp_finite3(head); c->head_cut = cut;
   c->head_speed = c->head_known ? speed : 1e9f;
   for (unsigned i = 0; i < 3; ++i) c->head[i] = c->head_known ? head[i] : 0;
+  c->head_placed = c->head_known && tfp_continuity_head_world(head, wanted, world, basis, c->head_world);
 }
 /* One presented frame. `wanted`: the eye the helper would present, in the body's frame. `world`, `basis`: the same
  * eye in the world and the body root's axis rows (wanted = basis times (world - root)), or both NULL where the
@@ -393,8 +405,11 @@ static inline void tfp_continuity_head(TfpContinuity *c, const float *head, floa
  * gave it. `detect`: jumps within a source are looked for (the native view); false: only a change of source is
  * taken up (the head camera, whose eye turns about the head with the view). Returns the correction's length;
  * `out` is the eye to present. */
-/* tfp_continuity_step_in with THE CUT: `head`, the head camera's eye before the eye damping in the root's frame (as
- * `wanted`), given only in a head-camera frame of a body on foot; NULL anywhere else (nothing is a cut there). */
+/* tfp_continuity_step_in with THE CUT: `head`, the head node the head camera's eye is built on (as the head camera's
+ * own smoothing leaves it, before the eye damping), in the root's frame (as `wanted`), given only in a head-camera
+ * frame of a body on foot; NULL anywhere else (nothing is a cut there). Not the eye: it sits 0.18 m ahead of the head
+ * along the level view and swings round it with every turn of the view (a flick of 95 degrees in one frame moved it
+ * 0.27 m against a root that does not turn with the view, and was taken for a cut: round 19 review). */
 static inline float tfp_continuity_step_cut(TfpContinuity *c, const float *wanted, const float *world, const float *basis, const float *head,
                                             uint32_t source, bool detect, bool quiet, double tick, uint32_t max_gap_ms, const TfpContinuityTuning *t,
                                             float *out) {
@@ -407,7 +422,7 @@ static inline float tfp_continuity_step_cut(TfpContinuity *c, const float *wante
     c->known = true; c->tick = tick; c->source = source;
     for (unsigned i = 0; i < 3; ++i) c->wanted[i] = c->shown[i] = wanted[i];
     tfp_continuity_place(c, wanted, world, basis);
-    tfp_continuity_head(c, head, 1e9f, false); /* its speed not known: no cut in the next frame */
+    tfp_continuity_head(c, head, wanted, world, basis, 1e9f, false); /* its speed not known: no cut in the next frame */
     return 0;
   }
   float value[3], speed[3];
@@ -422,9 +437,17 @@ static inline float tfp_continuity_step_cut(TfpContinuity *c, const float *wante
   bool cut = false; float head_speed = 1e9f;
   if (head && tfp_finite3(head) && c->head_known && source == c->source) {
     float moved[3]; for (unsigned i = 0; i < 3; ++i) moved[i] = head[i]-c->head[i];
-    const float far = tfp_continuity_length(moved);
+    const float far = tfp_continuity_length(moved), bound = fmaxf(TFP_CONTINUITY_CUT_M, TFP_CONTINUITY_CUT_ACCEL*dt*dt);
     head_speed = far/dt;
-    cut = !detect && !quiet && c->head_speed < TFP_CONTINUITY_CUT_REST && far >= fmaxf(TFP_CONTINUITY_CUT_M, TFP_CONTINUITY_CUT_ACCEL*dt*dt);
+    /* The head jumped in the world too, as far: a root moving by itself (the game re-seating it, the head and the eye
+     * still) moves the head against the root alone, and that is the re-seat's to read, not a cut (round 19 review: the
+     * root alone 0.5 m was a cut, the eye 0.500 m off). The ten cuts seen move the head 0.33 to 0.58 m in the world. */
+    float there[3], went[3]; bool jumped = false;
+    if (c->head_placed && tfp_continuity_head_world(head, wanted, world, basis, there)) {
+      for (unsigned i = 0; i < 3; ++i) went[i] = there[i]-c->head_world[i];
+      jumped = tfp_continuity_length(went) >= bound;
+    }
+    cut = !detect && !quiet && c->head_speed < TFP_CONTINUITY_CUT_REST && far >= bound && jumped;
   }
   /* a cut keeps the speed from before it for the frame after (a cut in two frames), only once */
   const float head_kept = cut && !c->head_cut ? c->head_speed : head_speed;
@@ -533,7 +556,7 @@ static inline float tfp_continuity_step_cut(TfpContinuity *c, const float *wante
     c->known = true; c->tick = tick; c->source = source;
     for (unsigned i = 0; i < 3; ++i) c->wanted[i] = c->shown[i] = wanted[i];
     tfp_continuity_place(c, wanted, world, basis);
-    tfp_continuity_head(c, head, 1e9f, false);
+    tfp_continuity_head(c, head, wanted, world, basis, 1e9f, false);
     return 0;
   }
   /* THE TRIAL: the frame before went on after a stop and its speed was believed. A frame that does not go on within
@@ -679,7 +702,7 @@ static inline float tfp_continuity_step_cut(TfpContinuity *c, const float *wante
   for (unsigned i = 0; i < 3; ++i) { out[i] = wanted[i]+value[i]; c->ago[i] = c->wanted[i]; c->wanted[i] = wanted[i]; c->shown[i] = out[i]; }
   c->ago_known = !edge; /* across a change of camera the eye before is another camera's */
   c->tick = tick; c->source = source;
-  tfp_continuity_head(c, head, head_kept, cut);
+  tfp_continuity_head(c, head, wanted, world, basis, head_kept, cut);
   return carried;
 }
 /* Without THE CUT: every caller but the helper's head-camera frames. */

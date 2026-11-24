@@ -766,20 +766,39 @@ int main() {
     }
     // The damped eye is handed on as it was shown: the way into the native view starts from it. The head has
     // dropped 0.5 m (the eye is 0.10 m behind) when the native view begins; with the lag handed on the first native
-    // frame is the eye where it was, without it the eye would be shown 0.10 m off for that frame. (Round 19: in two
-    // frames, 0.24 m and 0.26 m; 0.5 m in one frame from rest is a pose cut, THE CUT, which the smooth eye takes up.)
-    for (int smooth = 0; smooth < 2; ++smooth) {
-      fresh(true, smooth != 0, false, 300);
+    // frame is the eye where it was, without it the eye would be shown 0.10 m off for that frame. The drop in two
+    // frames (0.24 m and 0.26 m), and in one. In one frame from rest it is a pose cut for the smooth eye (round 19, THE
+    // CUT): the trace says so, the damping still runs under it (0.10 m, its limit), the eye is not moved in that frame
+    // (the cut is taken up whole) and comes down on the curve, and the native view after it starts from where it is.
+    for (int frames = 2; frames >= 1; --frames) for (int smooth = 0; smooth < 2; ++smooth) {
+      fresh(true, smooth != 0, true, 300);
       Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+      TfpCameraTraceRow rows[128];
       standing(g, 12, dt, false); standing(g, 40, dt, true); standing(g, 300, dt, false);
-      g.pose(1, 2, 0, .2f, 1.26f); g.hip(); g.frame(dt);
+      if (frames == 2) { g.pose(1, 2, 0, .2f, 1.26f); g.hip(); g.frame(dt); }
+      tfp_camera_trace_edge(); tfp_camera_trace_read(rows, 128);
+      g.measure_from_here();
       g.pose(1, 2, 0, .2f, 1.0f); g.hip(); g.frame(dt);
-      CHECK(std::fabs(g.from_head_eye() - .16f) < .005f); // 0.10 m of damping and the 0.06 m of the head camera's own smoothing
+      tfp_camera_trace_edge();
+      const uint32_t count = tfp_camera_trace_read(rows, 128);
+      const bool said = count >= 1 && (rows[count - 1].what & TFP_CAMERA_TRACE_CUT) != 0;
+      const float damp = count >= 1 ? std::sqrt(rows[count - 1].damp[0] * rows[count - 1].damp[0] + rows[count - 1].damp[1] * rows[count - 1].damp[1]
+                                                + rows[count - 1].damp[2] * rows[count - 1].damp[2]) : 0;
+      const float in_drop = g.step, off = g.from_head_eye();
+      if (frames == 1 && smooth) {
+        CHECK(said && std::fabs(damp - .10f) < 1e-3f);
+        CHECK(in_drop < .01f && off > .4f);  // the cut not shown: the eye where it was, 0.5 m above the damped one
+      } else {
+        CHECK(!said);
+        CHECK(std::fabs(off - .16f) < .005f); // 0.10 m of damping and the 0.06 m of the head camera's own smoothing
+      }
       g.pose(1, 2, 0, .2f, 1.0f); g.hip(); g.frame(dt);
       g.measure_from_here();
       g.native(); g.frame(dt);
       CHECK(g.step < .02f);
-      std::printf("damping handed on to the native view, smooth eye %s: %.4f m in the first native frame\n", smooth ? "on" : "off", g.step);
+      std::printf("damping handed on to the native view, the head down 0.5 m in %d frame%s, smooth eye %s: %.4f m in the frame of the drop%s, "
+                  "%.3f m off the head camera's eye; %.4f m in the first native frame\n", frames, frames > 1 ? "s" : "", smooth ? "on" : "off", in_drop,
+                  said ? " (cut)" : "", off, g.step);
       g.end();
     }
     // A frame that was not damped forgets the damping: after three native frames (21 ms, inside the pause the
@@ -874,8 +893,9 @@ int main() {
   // frames a second; at 30 it moves what the camera left in Stable moves in its own first frame from 0.25 m
   // (0.0227 m), and no more. It is within Bodycam's 0.10 m 300 ms after the change. With Bodycam's camera damping
   // at 0 no damping is left: the lag is let go by 0.55 m a second at most (0.02 m in no frame), and is gone in 600 ms.
-  // Runs: [0] no damping, [1] the change, [2] Stable kept. (Round 19: the drop is two frames, 0.24 m and 0.26 m; 0.5 m
-  // in one frame from rest is a pose cut, THE CUT, which the smooth eye takes up whatever the damping did.) ----
+  // Runs: [0] no damping, [1] the change, [2] Stable kept. (Round 19: with the smooth eye on the drop is two frames,
+  // 0.24 m and 0.26 m; 0.5 m in one frame from rest is a pose cut for it, THE CUT, taken up whatever the damping did,
+  // and scenario 17 says what is then shown. With it off, the drop is one frame, as before.) ----
   for (int rate = 0; rate < 3; ++rate) for (int smooth = 0; smooth < 2; ++smooth) for (int to = 0; to < 2; ++to) {
     static const double rates[] = {30, 60, 144};
     const double dt = 1000.0 / rates[rate];
@@ -887,7 +907,7 @@ int main() {
       Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
       auto keep = [&]() { std::memcpy(out[run][frames[run]++], sent.position, 16); };
       for (int i = 0; i < still; ++i) { g.hip(); g.frame(dt); keep(); }
-      g.pose(1, 2, 0, .2f, 1.26f); g.hip(); g.frame(dt); keep();
+      if (smooth) { g.pose(1, 2, 0, .2f, 1.26f); g.hip(); g.frame(dt); keep(); }
       g.pose(1, 2, 0, .2f, 1.0f);
       g.hip(); g.frame(dt); keep();
       if (run == 1) tfp_camera_set_lock(true, 0, 0, 300, 0, 0, to ? 0.0f : 180.0f, true); // what lock_note does when the option changes
@@ -895,7 +915,7 @@ int main() {
       CHECK(tfp_camera_error() == 0);
       g.end();
     }
-    const int at = still + 2; // the first frame of the new style
+    const int at = still + (smooth ? 2 : 1); // the first frame of the new style
     auto lag = [&](int i) { float d = 0; for (int k = 0; k < 3; ++k) d += (out[1][i][k] - out[0][i][k]) * (out[1][i][k] - out[0][i][k]); return std::sqrt(d); };
     auto moved = [&](int run, int i) { // how far the eye moved against the undamped one in frame i
       float d = 0;
@@ -1035,10 +1055,16 @@ int main() {
   // is looked for. The diver dives out of it: in one frame the game cuts the pose, the head 0.4 m lower against a root
   // that lunges 0.08 m and turns its yaw by 2.8 rad (a dive-back), then the root goes on at 5 m/s. On foot the cut is
   // taken up as a change of camera and eased (the trace says cut); off foot (thrown) the head is shown as it is, as
-  // in scenario 13. At 8, 16.7, 33.3 and 50 ms a frame, Bodycam (no damping) and Stable (350 ms, 0.25 m). ----
+  // in scenario 13. At 8, 16.7, 33.3 and 50 ms a frame, Bodycam (no damping) and Stable (350 ms, 0.25 m).
+  // What is measured is the head node (round 19 review), which the head camera's own smoothing keeps within 0.06 m
+  // of the head: it moves 0.34 m against the root in that frame. At 50 ms a frame that is under the cut's bound there
+  // (150 m/s^2 times the frame's time squared, 0.375 m: prone out of an emote moves the head 0.30 m in such a frame
+  // from rest), and it is shown as it was before round 19; a cut of the head of 0.55 m (the most seen, 0.553 m of the
+  // node) is a cut at 50 ms too (`big`). ----
   {
-    static const double times[] = {8, 16.7, 33.3, 50};
-    for (int stable = 0; stable < 2; ++stable) for (int thrown = 0; thrown < 2; ++thrown) for (double dt : times) {
+    static const double times[] = {8, 16.7, 33.3, 50, 50};
+    for (int stable = 0; stable < 2; ++stable) for (int thrown = 0; thrown < 2; ++thrown) for (int at = 0; at < 5; ++at) {
+      const double dt = times[at]; const bool big = at == 4, under = dt == 50 && !big;
       fresh(true, true, true, 0.0f, !stable);
       Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
       TfpCameraTraceRow rows[128];
@@ -1055,17 +1081,19 @@ int main() {
       };
       auto changed = [&]() { float d = 0; for (int k = 0; k < 3; ++k) { const float e = against[2][k] - 2 * against[1][k] + against[0][k]; d += e * e; } return std::sqrt(d); };
       g.hip(); g.frame(dt); note(); g.hip(); g.frame(dt); note();
-      float x = 1.08f; g.pose(x, 2, 0, .2f + 2.8f, 1.1f); g.hip(); g.frame(dt); note();
+      const float height = big ? .95f : 1.1f;
+      float x = 1.08f; g.pose(x, 2, 0, .2f + 2.8f, height); g.hip(); g.frame(dt); note();
       tfp_camera_trace_edge();
       uint32_t count = tfp_camera_trace_read(rows, 128);
       const bool said = count >= 1 && (rows[count - 1].what & TFP_CAMERA_TRACE_CUT) != 0;
       const float in_cut = changed(); // in the frame of the cut
       float worst = 0;
-      for (int i = 0; i < (int)(800 / dt); ++i) { x += 5 * (float)dt / 1000; g.pose(x, 2, 0, .2f + 2.8f, 1.1f); g.hip(); g.frame(dt); worst = std::fmax(worst, g.from_head_eye()); }
-      std::printf("a pose cut out of an emote, %s, %s, %g ms a frame: the step against the root's place changes by %.3f m in its frame%s, the eye %.3f m from the "
-                  "head's at most and %.4f m after 0.8 s\n", stable ? "Stable" : "Bodycam", thrown ? "thrown off foot" : "on foot", dt, in_cut,
+      for (int i = 0; i < (int)(800 / dt); ++i) { x += 5 * (float)dt / 1000; g.pose(x, 2, 0, .2f + 2.8f, height); g.hip(); g.frame(dt); worst = std::fmax(worst, g.from_head_eye()); }
+      std::printf("a pose cut of %.2f m out of an emote, %s, %s, %g ms a frame: the step against the root's place changes by %.3f m in its frame%s, the eye %.3f m from the "
+                  "head's at most and %.4f m after 0.8 s\n", 1.5f - height, stable ? "Stable" : "Bodycam", thrown ? "thrown off foot" : "on foot", dt, in_cut,
                   said ? " (cut)" : "", worst, g.from_head_eye());
       if (thrown) CHECK(!said && in_cut > .35f && worst < .065f); // the body's own motion, shown as it is
+      else if (under) CHECK(!said); // under the bound at 50 ms: shown as before round 19
       else {
         CHECK(said);
         CHECK(in_cut < .04f);                       // not shown in its frame
@@ -1074,6 +1102,77 @@ int main() {
       }
       g.end();
     }
+  }
+  // ---- 26. What is no cut (round 19 review), in the head camera on foot with nothing looked for (1.3 s of nothing
+  // changing), at 8, 16.7, 33.3 and 50 ms a frame, Bodycam and Stable:
+  //  - a flick of the mouse, 95 and 180 degrees in one frame after a calm one. The head camera's eye is 0.18 m ahead
+  //    of the head along the level view and swings round it by up to 0.36 m; the root does not turn with the view.
+  //    The head does not move, and the eye is shown where the head camera puts it, every frame (as before round 19).
+  //  - the body root moving by itself 0.3 and 0.5 m, the head, the rig and the eye still in the world (the game
+  //    re-seating the root): read as before round 19, the eye no further off the head camera's eye than the damping
+  //    and the head camera's own smoothing leave it (Bodycam 0.060 m, Stable 0.310 m at most). ----
+  {
+    static const double times[] = {8, 16.7, 33.3, 50};
+    for (int stable = 0; stable < 2; ++stable) for (int what = 0; what < 4; ++what) for (double dt : times) {
+      fresh(true, true, true, 0.0f, !stable);
+      Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+      TfpCameraTraceRow rows[128];
+      standing(g, (int)(1300 / dt), dt, false);
+      tfp_camera_trace_read(rows, 128);
+      g.hip(); g.frame(dt); g.hip(); g.frame(dt);
+      if (what < 2) g.look(.2f + (what == 0 ? 95.f : 180.f) * 3.14159265f / 180, 0);
+      else g.root_only(1 - (what == 2 ? .3f : .5f), 2, 0);
+      g.hip(); g.frame(dt);
+      tfp_camera_trace_edge();
+      bool said = false;
+      for (uint32_t i = 0, count = tfp_camera_trace_read(rows, 128); i < count; ++i) said = said || (rows[i].what & TFP_CAMERA_TRACE_CUT) != 0;
+      const float first = g.from_head_eye(); float worst = first;
+      for (int i = 0; i < (int)(400 / dt); ++i) { g.hip(); g.frame(dt); worst = std::fmax(worst, g.from_head_eye()); }
+      tfp_camera_trace_edge();
+      for (uint32_t i = 0, count = tfp_camera_trace_read(rows, 128); i < count; ++i) said = said || (rows[i].what & TFP_CAMERA_TRACE_CUT) != 0;
+      std::printf("no cut, %s, %s, %g ms a frame: the eye %.3f m off the head camera's eye in the frame, %.3f m at most in 400 ms%s\n", stable ? "Stable" : "Bodycam",
+                  what == 0 ? "a flick of 95 degrees" : what == 1 ? "a flick of 180 degrees" : what == 2 ? "the root alone 0.3 m" : "the root alone 0.5 m",
+                  dt, first, worst, said ? " (CUT)" : "");
+      CHECK(!said);
+      if (what < 2) CHECK(worst < 1e-3f);
+      else CHECK(worst < (stable ? .315f : .065f));
+      g.end();
+    }
+  }
+  // ---- 27. Where the head is not given, each on its own: a cut of the head (0.4 m lower in one frame, from rest, after
+  // 1.3 s of nothing changing) is no cut in a camera of the lock that is not the ordinary one (kind 5), in a body that
+  // is down (its head over 3 m from the root, the root left behind), nor in the first frame out of full aim (the head
+  // is not given in full aim, so its place the frame before is not known). [0] is the same in the ordinary camera on
+  // foot: a cut. (The ADS gap is not here: it begins with a change of camera and lasts under 250 ms, inside the 600 ms
+  // in which jumps are looked for after one, and a frame looked at is no cut either.) ----
+  for (int way = 0; way < 4; ++way) {
+    const double dt = 16.7;
+    fresh(true, true, true, 0.0f, true);
+    Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+    TfpCameraTraceRow rows[128];
+    TfpCameraDownStats down_before{}; tfp_camera_down_stats(&down_before);
+    auto still = [&](int frames) {
+      for (int i = 0; i < frames; ++i) {
+        g.hip(); if (way == 1) g.s.request[0] = 5; if (way == 3) g.s.aim = 1;
+        if (way == 2) g.root_only(1 - 3.4f, 2, 0); // the root left 3.4 m behind the head
+        g.frame(dt);
+      }
+    };
+    still((int)(1300 / dt));
+    tfp_camera_trace_read(rows, 128);
+    g.pose(1, 2, 0, .2f, 1.1f); if (way == 2) g.root_only(1 - 3.4f, 2, 0);
+    g.hip(); if (way == 1) g.s.request[0] = 5; // way 3: the aim let go in this frame
+    g.frame(dt);
+    tfp_camera_trace_edge();
+    bool said = false;
+    for (uint32_t i = 0, count = tfp_camera_trace_read(rows, 128); i < count; ++i) said = said || (rows[i].what & TFP_CAMERA_TRACE_CUT) != 0;
+    TfpCameraDownStats down{}; tfp_camera_down_stats(&down);
+    static const char *const ways[] = {"the ordinary camera on foot", "kind 5", "a body that is down", "the first frame out of full aim"};
+    std::printf("a cut of the head in %s: %s\n", ways[way], said ? "a cut" : "no cut");
+    CHECK(said == (way == 0));
+    if (way == 2) CHECK(down.frames > down_before.frames + 50); // the scene is a body that is down
+    CHECK(tfp_camera_error() == 0);
+    g.end();
   }
   std::printf("camera smooth: %d checks, %d failed\n", checks, failed);
   return failed != 0;

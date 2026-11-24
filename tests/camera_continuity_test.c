@@ -598,11 +598,23 @@ static Flipped flipped(float far, float dt_ms, float blind_ms) {
 #define CUT_STEP(c, rel, world, basis, head, source, detect, tick, out) \
   tfp_continuity_step_cut(c, rel, world, basis, head, source, detect, false, tick, 250, &T, out)
 #define CUTS(c) ((c)->cuts)
+#define CUT_STEP_Q(c, rel, world, basis, head, source, detect, quiet, tick, out) \
+  tfp_continuity_step_cut(c, rel, world, basis, head, source, detect, quiet, tick, 250, &T, out)
 #else
+#define CUT_STEP_Q(c, rel, world, basis, head, source, detect, quiet, tick, out) \
+  ((void)(head), tfp_continuity_step_in(c, rel, world, basis, source, detect, quiet, tick, 250, &T, out))
 #define CUT_STEP(c, rel, world, basis, head, source, detect, tick, out) \
   ((void)(head), tfp_continuity_step_in(c, rel, world, basis, source, detect, false, tick, 250, &T, out))
 #define CUTS(c) ((void)(c), 0u)
 #endif
+/* The head node of a logged row, in the root's frame: the point the head camera's eye is built on, before the eye
+ * damping (the wanted eye less the damping, less 0.18 m along the level view and 0.04 m up; replay.py head_node). */
+static void head_node(const HeadFrame *f, float *head) {
+  float level[2] = {f->view[0], f->view[1]}; float length = sqrtf(level[0]*level[0]+level[1]*level[1]);
+  if (length < 1e-4f) { level[0] = f->axes[3]; level[1] = f->axes[4]; length = sqrtf(level[0]*level[0]+level[1]*level[1]); }
+  const float node[3] = {f->wanted[0]-f->damp[0]-level[0]/length*.18f, f->wanted[1]-f->damp[1]-level[1]/length*.18f, f->wanted[2]-f->damp[2]-.04f};
+  for (int a = 0; a < 3; ++a) { head[a] = 0; for (int k = 0; k < 3; ++k) head[a] += (node[k]-f->root[k])*f->axes[a*3+k]; }
+}
 /* Logged head-camera rows (tests/reference/soak-30-cut.h) through the filter, the head given where the helper gives it
  * (a head-camera frame of a body on foot; `always`: in every head-camera row, off foot too). The presented eye's step
  * is measured against the root's place in the world (the eye less the root: a root that turns does not move it, a
@@ -619,8 +631,8 @@ static CutScene cut_scene(const HeadFrame *rows, int count, int cut, bool always
   CutScene s = {0, 0, 0, 0, 0, 0, 0}; float shown[3][3] = {{0}}, wanted[3][3] = {{0}}, logged[3][3] = {{0}};
   for (int i = 0; i < count; ++i) {
     const HeadFrame *f = &rows[i]; float relative[3] = {0}, head[3] = {0}, out[3], world[3], apart = 0;
-    for (int a = 0; a < 3; ++a) for (int k = 0; k < 3; ++k) { relative[a] += (f->wanted[k]-f->root[k])*f->axes[a*3+k];
-      head[a] += (f->wanted[k]-f->damp[k]-f->root[k])*f->axes[a*3+k]; }
+    for (int a = 0; a < 3; ++a) for (int k = 0; k < 3; ++k) relative[a] += (f->wanted[k]-f->root[k])*f->axes[a*3+k];
+    head_node(f, head);
     const bool given = f->kind == 4 && f->source == HEAD && (always || !f->off_foot);
     const uint64_t taken = c.jumps+c.edges;
     CUT_STEP(&c, relative, f->wanted, f->axes, given ? head : NULL, (uint32_t)f->source, f->looked != 0, 1000.0+(double)f->ms, out);
@@ -671,6 +683,15 @@ static MadeCut made_cut(float far, float accel, float top, float dt_ms, bool jum
   }
   m.cuts = (unsigned)CUTS(&c);
   return m;
+}
+/* A plain head-camera scene for THE CUT's exclusions: the root at `root` turned by `yaw`, the head node at `node` in
+ * the world, the eye 0.18 m ahead of it along the world's +y and 0.04 m up (a view that does not turn). One frame
+ * through the filter; `give`: the head node is given (in the root's frame), as the helper gives it on foot. */
+static float plain_frame(TfpContinuity *c, const float *root, float yaw, const float *node, uint32_t source, bool detect, bool quiet, double tick, bool give) {
+  const float co = cosf(yaw), si = sinf(yaw), basis[9] = {co, si, 0, -si, co, 0, 0, 0, 1};
+  const float eye[3] = {node[0], node[1]+.18f, node[2]+.04f}; float relative[3] = {0}, head[3] = {0}, out[3];
+  for (int a = 0; a < 3; ++a) for (int k = 0; k < 3; ++k) { relative[a] += (eye[k]-root[k])*basis[a*3+k]; head[a] += (node[k]-root[k])*basis[a*3+k]; }
+  return CUT_STEP_Q(c, relative, eye, basis, give ? head : NULL, source, detect, quiet, tick, out);
 }
 int main(void) {
   Run r;
@@ -1810,14 +1831,20 @@ int main(void) {
   }
   /* THE CUT (round 19): a move straight out of an emote, the head camera holding the view and the gun out of the hands.
    * The game cuts the pose in one frame and the head camera rode it: nothing was looked for (no event in 600 ms), so
-   * the whole cut was shown (0.27 to 0.62 m of step change). The rows of five soaks. */
+   * the whole cut was shown (0.27 to 0.62 m of step change). The ten cuts of four soaks (eleven frames), the head
+   * given as the helper gives it: the head node, not the eye (round 19 review). */
   {
     static const struct { const HeadFrame *rows; int count, cut, frames; const char *name; } scenes[] = {
       {soak30_sprint, (int)(sizeof soak30_sprint/sizeof *soak30_sprint), 6, 1, "feel.51 Stable, sprint out of an emote"},
       {soak30_dive_back, (int)(sizeof soak30_dive_back/sizeof *soak30_dive_back), 6, 1, "feel.51 Stable, dive-back out of an emote"},
       {soak29_dive, (int)(sizeof soak29_dive/sizeof *soak29_dive), 6, 1, "feel.51 Bodycam, dive out of an emote"},
       {soak29_dive_back, (int)(sizeof soak29_dive_back/sizeof *soak29_dive_back), 6, 1, "feel.51 Bodycam, dive-back out of an emote"},
-      {soak27_dive_back, (int)(sizeof soak27_dive_back/sizeof *soak27_dive_back), 6, 2, "feel.50 Stable, dive-back, a cut in two frames"},
+      {soak27_dive_back, (int)(sizeof soak27_dive_back/sizeof *soak27_dive_back), 6, 2, "feel.50 Stable, dive-back, a cut in two frames (0.255 m, the least)"},
+      {soak27_cut_130444, (int)(sizeof soak27_cut_130444/sizeof *soak27_cut_130444), 6, 1, "feel.50 Stable, 13:04:44"},
+      {soak27_cut_130517, (int)(sizeof soak27_cut_130517/sizeof *soak27_cut_130517), 6, 1, "feel.50 Stable, 13:05:17"},
+      {soak28_cut_160334, (int)(sizeof soak28_cut_160334/sizeof *soak28_cut_160334), 6, 1, "feel.51 Bodycam, 16:03:34"},
+      {soak28_cut_160402, (int)(sizeof soak28_cut_160402/sizeof *soak28_cut_160402), 5, 1, "feel.51 Bodycam, 16:04:02 (in its 6th row)"},
+      {soak30_cut_163801, (int)(sizeof soak30_cut_163801/sizeof *soak30_cut_163801), 6, 1, "feel.51 Stable, 16:38:01"},
     };
     for (unsigned n = 0; n < sizeof scenes/sizeof *scenes; ++n) {
       const CutScene s = cut_scene(scenes[n].rows, scenes[n].count, scenes[n].cut+scenes[n].frames-1, false);
@@ -1862,6 +1889,61 @@ int main(void) {
       CHECK(fall.cuts == 0 && fall.carried == 0);
     }
   }
+  /* Round 19 review. Each exclusion of THE CUT on its own, against the same scene with the cut taken (`taken`): the
+   * head node stands 0.4 s in the world, then drops 0.4 m in one frame (33.3 ms a frame). */
+#ifdef TFP_CONTINUITY_CUT_M
+  {
+    enum { PLAIN_STILL = 12 };
+    const float root[3] = {0, 0, 0}, high[3] = {.1f, .05f, 1.6f}, low[3] = {.1f, .05f, 1.2f}, lower[3] = {.1f, .05f, .8f}, lowest[3] = {.1f, .05f, .4f};
+    TfpContinuity c; double tick;
+#define PLAIN_START() do { memset(&c, 0, sizeof c); tick = 1000; for (int i = 0; i < PLAIN_STILL; ++i, tick += 33.3) plain_frame(&c, root, 0, high, HEAD, false, false, tick, true); } while (0)
+    PLAIN_START(); plain_frame(&c, root, 0, low, HEAD, false, false, tick, true);
+    CHECK(c.cuts == 1 && c.edges == 0); /* taken: the scene is a cut */
+    /* a third cut in a row is none: the frame after a cut can be a cut too (seen: 0.39 and then 0.32 m), not a third */
+    PLAIN_START();
+    plain_frame(&c, root, 0, low, HEAD, false, false, tick, true); tick += 33.3;
+    plain_frame(&c, root, 0, lower, HEAD, false, false, tick, true); tick += 33.3;
+    plain_frame(&c, root, 0, lowest, HEAD, false, false, tick, true);
+    CHECK(c.cuts == 2);
+    /* a frame in which jumps are looked for is no cut (the native view's rule takes it, or not) */
+    PLAIN_START(); plain_frame(&c, root, 0, low, HEAD, true, false, tick, true);
+    CHECK(c.cuts == 0);
+    /* nor is one in full aim (quiet: nothing is taken up) */
+    PLAIN_START(); plain_frame(&c, root, 0, low, HEAD, false, true, tick, true);
+    CHECK(c.cuts == 0);
+    /* nor a change of camera in that frame: it is taken up as a change of camera, and counted so */
+    PLAIN_START(); plain_frame(&c, root, 0, low, NATIVE, false, false, tick, true);
+    CHECK(c.cuts == 0 && c.edges == 1);
+    /* the head's speed is not known in the frame after a start, nor after a restart: no cut there */
+    memset(&c, 0, sizeof c); tick = 1000;
+    plain_frame(&c, root, 0, high, HEAD, false, false, tick, true); tick += 33.3;
+    plain_frame(&c, root, 0, low, HEAD, false, false, tick, true);
+    CHECK(c.cuts == 0 && !c.active);
+    PLAIN_START(); tick += 400; /* longer than the frame gap: the filter starts again */
+    plain_frame(&c, root, 0, high, HEAD, false, false, tick, true); tick += 33.3;
+    plain_frame(&c, root, 0, low, HEAD, false, false, tick, true);
+    CHECK(c.restarts == 1 && c.cuts == 0);
+    /* the root moving alone, the head node and the eye still in the world (the game re-seating the root): the head
+     * moves against the root, not in the world, and it is no cut. 0.3, 0.5 and 1.0 m, and the root's yaw flipped
+     * 160 degrees under a head node 0.1 m off its axis. Round 19 review: 0.5 m was a cut, the eye 0.500 m off. */
+    static const float alone[] = {.3f, .5f, 1.0f};
+    for (unsigned n = 0; n < 3; ++n) {
+      PLAIN_START(); const float moved[3] = {-alone[n], 0, 0};
+      plain_frame(&c, moved, 0, high, HEAD, false, false, tick, true);
+      CHECK(c.cuts == 0);
+    }
+    PLAIN_START(); plain_frame(&c, root, 2.8f, high, HEAD, false, false, tick, true);
+    CHECK(c.cuts == 0);
+    /* and the head given without the world (no root's place known): nothing says the head moved in the world */
+    memset(&c, 0, sizeof c); tick = 1000;
+    for (int i = 0; i <= PLAIN_STILL; ++i, tick += 33.3) {
+      const float relative[3] = {.1f, .23f, i < PLAIN_STILL ? 1.64f : 1.24f}, head[3] = {.1f, .05f, i < PLAIN_STILL ? 1.6f : 1.2f}; float out[3];
+      CUT_STEP(&c, relative, NULL, NULL, head, HEAD, false, tick, out);
+    }
+    CHECK(c.cuts == 0);
+#undef PLAIN_START
+  }
+#endif
   printf("camera continuity: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

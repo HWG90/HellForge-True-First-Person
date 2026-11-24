@@ -1016,8 +1016,11 @@ static bool smooth_detect(const Policy *p, uint32_t kind, uint32_t source, doubl
   return tick < smooth_watch.until || in_run;
 }
 /* The eye about to be presented, in the world; `root`/`root_basis` are the body root's position and axis rows.
- * True: `shown` differs from `wanted` and is what to present. Always records the frame for the trace. */
-static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const float *root, const float *root_basis, const float *wanted, double tick, float *shown) {
+ * `node`: in the head camera's own frame, the point its eye is built on (the head node as the head camera's
+ * smoothing left it, before the eye damping), in the world; NULL in every other frame. True: `shown` differs from
+ * `wanted` and is what to present. Always records the frame for the trace. */
+static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const float *root, const float *root_basis, const float *wanted, const float *node,
+                           double tick, float *shown) {
   float wanted_relative[3] = {0}, relative[3] = {0}, correction = 0, moved = 0; uint32_t what = 0; bool looked = false;
   for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
     wanted_relative[axis] += (wanted[component]-root[component])*root_basis[axis*3+component];
@@ -1033,12 +1036,16 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
     const uint64_t jumps = smooth.jumps, edges = smooth.edges, reseats = smooth.reseats, restarts = smooth.restarts, cuts = smooth.cuts; const bool began = !smooth.known;
     looked = detect;
     /* THE CUT (round 19, camera_continuity.h): in a head-camera frame of a body on foot the filter is also given the
-     * head the eye is built on, before the eye damping (what lock_damp_eye added this frame taken off again), so a pose
-     * cut out of an emote is taken up as a change of camera. Not off foot or down (a throw is the body's own motion, as
-     * above), not in full aim or its gap (the sights stay on the eye), not in the orphaned native view (kind 6). */
-    float head[3] = {0}; const bool head_given = source == SMOOTH_HEAD && kind == 4 && !p->lock_down && !p->lock_off_foot && !p->full_ads && !p->ads_gap_active;
+     * head node the eye is built on, before the eye damping, so a pose cut out of an emote is taken up as a change of
+     * camera. The node, not the eye: the eye is 0.18 m ahead of it along the level view, and a flick of the mouse swings
+     * it round the node by up to 0.36 m in one frame against a root that does not turn with the view (round 19 review:
+     * flicks of 95 and 180 degrees were cuts). Not off foot or down (a throw is the body's own motion, as above), not
+     * in full aim or its gap (the sights stay on the eye; nor is the head known for the frame after), not in any other
+     * camera of the lock (kind 5) or the orphaned native view (kind 6). */
+    float head[3] = {0};
+    const bool head_given = node && source == SMOOTH_HEAD && kind == 4 && !p->lock_down && !p->lock_off_foot && !p->full_ads && !p->ads_gap_active;
     if (head_given) for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
-      head[axis] += (wanted[component]-trace_damp.added[component]-root[component])*root_basis[axis*3+component];
+      head[axis] += (node[component]-root[component])*root_basis[axis*3+component];
     /* The eye in the world goes with it: the root re-seated by itself is not the eye jumping (camera_continuity.h). */
     correction = tfp_continuity_step_cut(&smooth, wanted_relative, wanted, root_basis, head_given ? head : NULL, source == SMOOTH_REPEAT ? SMOOTH_NATIVE : source,
                                          detect, p->full_ads, tick, p->c.max_gap_ms, &smooth_tuning, relative);
@@ -1141,7 +1148,7 @@ static bool smooth_native(Policy *p, const NativeSample *sample, const float *gi
   for (unsigned component = 0; component < 3; ++component) { wanted[component] = position[component];
     for (unsigned axis = 0; axis < 3; ++axis) wanted[component] += local[axis]*parent_basis[axis*3+component]; }
   if (finite3(parent_basis + 3)) memcpy(trace_damp.view, parent_basis + 3, 12); /* the rig eye's forward axis: for the trace only */
-  if (!finite3(wanted) || !smooth_present(p, kind, source, root + 12, root_basis, wanted, tick, shown)) return false;
+  if (!finite3(wanted) || !smooth_present(p, kind, source, root + 12, root_basis, wanted, NULL, tick, shown)) return false;
   float moved[3] = {0};
   for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
     moved[axis] += (shown[component]-position[component])*parent_basis[axis*3+component];
@@ -1175,7 +1182,7 @@ static bool orphan_head(Policy *p, const float *given, uint32_t kind, double tic
   }
   if (!finite3(wanted) || !isfinite(behind)) return false;
   memcpy(trace_damp.view, forward, 12);
-  smooth_present(p, kind, SMOOTH_HEAD, root, root_basis, wanted, tick, shown);
+  smooth_present(p, kind, SMOOTH_HEAD, root, root_basis, wanted, NULL, tick, shown);
   for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
     moved[axis] += (shown[component]-position[component])*parent_basis[axis*3+component];
   if (!finite3(moved)) return false;
@@ -1518,7 +1525,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
               if (policy.lock_now) { float shown[3] = {0}; const float smoothed[3] = {head[0]+lag[0], head[1]+lag[1], head[2]+lag[2]};
                 eye_damped = lock_damp_eye(&policy, kind, root, root_basis, smoothed, tick, adjusted);
                 if (finite3(forward)) memcpy(trace_damp.view, forward, 12);
-                if (smooth_present(&policy, kind, SMOOTH_HEAD, root, root_basis, adjusted, tick, shown)) memcpy(adjusted, shown, 12); }
+                if (smooth_present(&policy, kind, SMOOTH_HEAD, root, root_basis, adjusted, smoothed, tick, shown)) memcpy(adjusted, shown, 12); }
               memcpy(policy.last_head_world, adjusted, 12);
               /* Beyond retail, round 14: after everything that keeps the eye (the swap's hold and glide, the continuity, the
                * damping, the trace), so only what this frame hands the game changes. */
