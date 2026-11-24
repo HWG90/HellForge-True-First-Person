@@ -85,7 +85,9 @@ Defaults are the store's defaults (retail's, and the locked view's); on a first 
 | Locked view | Camera lock | toggle |  | on | locked_view.json camera_lock |
 | Locked view | Field of view lock | toggle |  | on | locked_view.json fov_lock |
 | Locked view | Field of view (degrees) | slider | 50 to 120, step 1 | 80 | locked_view.json fov_degrees |
-| Locked view | Zoom when aiming | toggle |  | on | locked_view.json fov_zoom_when_aiming |
+| Locked view | Aim field of view | choice | The game's zoom / Your locked view / A chosen value | The game's zoom | locked_view.json fov_aim (1, 2, 3); fov_zoom_when_aiming is kept in step for older builds |
+| Locked view | Aim field of view (degrees) | slider | 20 to 90, step 1 | 50 | locked_view.json fov_aim_degrees; greyed unless A chosen value |
+| Locked view | Sight distance in aim (cm) | slider | 0 to 30, step 1 | 10 | locked_view.json ads_sight_cm; 0 is the game's own seat |
 | Locked view | Camera style | choice | Stable / Bodycam | Stable | locked_view.json bodycam |
 | Locked view | View kick strength (%) | slider | 0 to 100, step 5 | 35 | locked_view.json kick_strength |
 | Locked view | View kick limit (degrees) | slider | 0 to 20, step 1 | 8 | locked_view.json kick_max_degrees |
@@ -155,6 +157,13 @@ Retail's editor (`src/first_person/placement_editor.lua`) translated to C and co
 **Open and close:** Page Up (the menu's "Open / close placement editor" key), or the menu's "Edit arms and weapon placement" button. Opening closes the settings menu first and switches first person on if it was off. F8 is HellForge's own editor and is not used.
 
 **What it edits:** the placement of weapon and arms for the weapon in your hands and one action at a time.
+
+**In full aim (round 20):** opened while aiming, the editor begins on the ADS action and the log says so. What you drag
+and scroll then moves what full aim draws, live: the ADS placement, on top of the Sight distance in aim (the wheel
+moves the sight toward you or away). Saving keeps it for this weapon's ADS action. Before round 20 the editor opened on
+idle and its preview went to the hip placement, which full aim does not draw, so nothing moved while aiming. Whether
+the game keeps the aim while the editor has the cursor is not yet known; the `Aim:` line says whether the editor was
+open in an aim. See `docs/design/specs/2026-11-22-locked-view-design.md` "Round 20".
 
 | Input | Effect |
 |---|---|
