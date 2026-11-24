@@ -423,10 +423,10 @@ static bool locked_as_feel24(void) {
 static int aim_part(void) {
   static TfpSettings s;
   char why[200], text[1 << 14];
-  /* defaults: the game's zoom in aim (as "Zoom when aiming" on), a chosen value of 50 degrees, the sight brought to 15 cm (round 20 review: the cautious default) */
+  /* defaults: the game's zoom in aim (as "Zoom when aiming" on), a chosen value of 50 degrees, the sight distance in aim off (0: the game's own seat, round 20c) */
   CHECK(tfp_settings_defaults(&s));
   CHECK(tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim) == 1 && tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim_degrees) == 50);
-  CHECK(tfp_settings_locked_number(&s, TFP_LOCKED_ads_sight_cm) == 15 && tfp_settings_locked_flag(&s, TFP_LOCKED_fov_zoom_when_aiming));
+  CHECK(tfp_settings_locked_number(&s, TFP_LOCKED_ads_sight_cm) == 0 && tfp_settings_locked_flag(&s, TFP_LOCKED_fov_zoom_when_aiming));
   /* a file of feel.51 and before: the toggle off is "your locked view", on is "the game's zoom" */
   static const char off[] = "{\"format\":1,\"locked_view\":{\"fov_zoom_when_aiming\":false}}", on[] = "{\"format\":1,\"locked_view\":{\"fov_zoom_when_aiming\":true}}";
   CHECK(tfp_settings_defaults(&s) && tfp_settings_load_locked(&s, off, strlen(off), why, sizeof why));

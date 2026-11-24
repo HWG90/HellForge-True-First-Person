@@ -86,7 +86,7 @@ static const Control CONTROLS[] = {
       .note = "Used when Aim field of view is A chosen value."),
   ROW("ads_sight_cm", TFP_MK_SLIDER, "Sight distance in aim (cm)", 2, L(ads_sight_cm), RANGE(0, 30, 1),
       TIP("How close full aim brings the sight to your eye. The weapon is moved toward you until its sight is this far away; a sight that "
-          "is already closer is left where it is. 0 keeps the game's own distance. Default 15. Fine-tune one weapon with the placement "
+          "is already closer is left where it is. 0 keeps the game's own distance (the default). Fine-tune one weapon with the placement "
           "editor's ADS action (aim, then Page Up).")),
   /* the camera style (src/camera_damp.h): Boolean `bodycam` in the file, a choice of two here */
   ROW("camera_style", TFP_MK_CHOICE, "Camera style", 2, L(bodycam), .choices = STYLES, .choice_count = 2,
