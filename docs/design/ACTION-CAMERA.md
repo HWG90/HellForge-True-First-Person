@@ -176,6 +176,8 @@ No action mask is named: whatever flag takes `safe` away is held, as long as the
 
 **The arm drive** (`tfp_arm_drive_set_hold_ready`, on while a lease runs; `tfp_arm_drive_set_hold`, on while the controller holds). While ready: a gun that is absent or off the rig's socket is not a refusal; a failed full snapshot falls back to the player's; the binding and its entry alignment stay while only the gun differs; the gun's units are refreshed only while the gun is on the rig. Ready and not only holding, for the pose helper's reason: the action's first frame is drawn before the tick that sees the action, and a refusal in that frame would drop the binding and take a new entry alignment from the middle of the action. The game's joint values are put back after every draw of a hold and after any draw whose gun is away (the retired mod's path for draws and holsters; the reason is in the comment at `tfp_arm_drive_render`). With the gun on the rig and no hold, a ready frame is the frame it was before.
 
+Since round 13 (2026-11-24) the game's joint values are put back after **every** driven draw, in a hold or not: the game seats the first-person eye by the rig's weapon socket, and a written socket left in the rig moved the camera ([specs/2026-11-24-residual-jumps.md](specs/2026-11-24-residual-jumps.md), "Round 13"). So a hold no longer changes what the game finds in the rig, and the sentence above describes only the test switch `arms_live_keep.txt`, which leaves the written values as before.
+
 **Not changed:** `src/camera_helper.c`. In the native view it forwards the game's camera; nothing in the hold needs it to do otherwise. Whether its camera lock and the field-of-view lock behave during a hold is for the first run.
 
 **The log.**
@@ -273,6 +275,7 @@ Built offline; nothing of this section has run in the game.
 4. *The trace* (`tfp_camera_trace_edge` / `tfp_camera_trace_read`, `src/mod_view.c` `trace_note`). For the 0.5 s
    after each State edge (native view entered or left, hold begun or ended) and the six frames before it:
    `Trace: t=<ms from the edge> kind=<top request> eye_world=(x y z) step=<m> wanted=(x y z) correction=<m> lease=<record> pose_armed=<0/1> entry_ease=<0..1> source=<head|native|repeat> root=(x y z) axes=(nine) looked=<0/1> taken=<jump|edge|root|restart|start|-> quiet=<0/1> tick=<ms>`
+   (later builds add after `tick=`: `off_foot`, `damped`, `damp`, `view` in 0.6.0-feel.49 and `sock`, `arms`, `eye_edge` in round 13; they are described at `trace_note` in `src/mod_view.c`)
    one line per camera call, from the helper's own record of what it presented. `tools/harness/trace.py` reads them.
    From `root=` on the line holds what the continuity was given in that call (the body root and its axis rows,
    whether jumps were looked for, full aim, the helper's clock) and what it did; `tools/harness/replay.py` runs the
