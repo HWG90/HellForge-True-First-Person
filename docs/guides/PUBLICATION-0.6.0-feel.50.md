@@ -25,6 +25,8 @@
   https://github.com/HWG90/HellForge-True-First-Person/issues/1
   It names the known issues of this build, including a slight field-of-view pulse while aiming that is not in
   TEST-BUILD.md and is fixed for the next build.
+  Edited the same day to add a "Weapon positions" section (not every weapon's position is set yet; the placement
+  editor's controls; testers asked to send the values of weapons they place) and a checklist line for the editor.
 - The 0.6.0-feel.18 and feel.19 pre-releases stay up beside it.
 - Discord, at the user's request (2026-11-24): a post "True First Person" in HellForge Official's `mod-showcase`
   forum, tags Mod, Work in Progress and Available, linking the pre-release and the playtest issue:
