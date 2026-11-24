@@ -10,6 +10,7 @@
  * This file is compiled twice (tests/run-wire-pose.sh): as C for the test, and as C++ with
  * -DTFP_POSE_WORLD_SHIM for the few lines that build that world, which is a C++ header. */
 #ifdef TFP_POSE_WORLD_SHIM
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include "diff_pose_helper_world.h"
@@ -63,6 +64,35 @@ void pose_world_second_request(int pushed) {
 }
 /* One 32-bit field of the owned record's header, in place: 0 kind, 4 avatar, 8 weapon, 12 body. */
 void pose_world_request_field(unsigned at, uint32_t value) { std::memcpy(scene.request + at, &value, 4); sync(); }
+/* The optic, for the zoom depth (the differential test's optic()): the middle zoom level selected and the lens
+ * settled on it, the gate clear. The depth term then has something to add. */
+static float optic_target;
+void pose_world_optic(void) {
+  const unsigned level = 1; const float zero = 0; const uint8_t clear = 0;
+  scene.depth.packed = 64 | (level << 4);
+  optic_target = (scene.depth.degrees / scene.depth.zoom[level]) * .01745329238474369f;
+  const float distance = .03391552f / (std::tan(optic_target * .5f) * scene.depth.coefficient[level]);
+  std::memcpy(scene.request + 0x90, &distance, 4); std::memcpy(scene.request + 0x9C, &zero, 4); std::memcpy(scene.request + 0xA0, &optic_target, 4);
+  std::memcpy(scene.request + 0x8D, &clear, 1); std::memcpy(scene.request + 0x8F, &clear, 1);
+  std::memset(scene.frame, 0, sizeof scene.frame);
+  std::memcpy(scene.frame + 0x18, &optic_target, 4); std::memcpy(scene.frame + 0x1C, &optic_target, 4); std::memcpy(scene.request + 0x84, &optic_target, 4);
+  sync();
+}
+/* The game's unzoom gate for the next frame: the avatar's packed bit (the evaluator's local at stack +0x44) and
+ * request+0x8f. Either set: the lens target is the wide 90 degrees and the lens on its way (67.6); both clear: the
+ * optic's own target, the lens on it. */
+void pose_world_gate(int avatar_bit, int ability) {
+  const float wide = 1.5707964f, on_the_way = 1.18052f; const bool gated = avatar_bit || ability;
+  scene.frame[0] = avatar_bit ? 1 : 0; scene.request[0x8F] = ability ? 1 : 0;
+  std::memcpy(scene.frame + 0x18, gated ? &wide : &optic_target, 4); std::memcpy(scene.frame + 0x1C, gated ? &on_the_way : &optic_target, 4);
+  std::memcpy(scene.request + 0x84, gated ? &on_the_way : &optic_target, 4);
+  sync();
+}
+/* The avatar's main row (avatar owner + 0x53d8b0 + index * 0x1238): byte +5, byte +0x3d, the float at +0x11ac. */
+void pose_world_main_row(unsigned index, int five, int three_d, float scalar) {
+  const uint64_t row = W.a[A_OWNER] + 0x53d8b0 + static_cast<uint64_t>(index) * 0x1238;
+  World::put<uint8_t>(row + 5, five ? 1 : 0); World::put<uint8_t>(row + 0x3d, three_d ? 1 : 0); World::put(row + 0x11ac, scalar);
+}
 void pose_world_build(PoseWorld *out) {
   W.build(HERE);
   for (uint32_t i = 0; i < RIG_NODES; ++i) { scene.hashes[i] = 0x1000 + i; scene.links[i] = 0x10001; }
@@ -475,6 +505,9 @@ typedef struct PoseWorld {
 } PoseWorld;
 void pose_world_build(PoseWorld *out);
 void pose_world_third_person(void);
+void pose_world_optic(void);
+void pose_world_gate(int avatar_bit, int ability);
+void pose_world_main_row(unsigned index, int five, int three_d, float scalar);
 void pose_world_first_person(void);
 void pose_world_action(unsigned flags);
 void pose_world_weapon(int present);
@@ -538,6 +571,13 @@ static TfpOpsResult game_frame(TfpOpsHandle *handle, TfpOpsHelperStats *stats, u
   now_ms += step_ms;
   tfp_pose_position_from(world.rig_return, world.viewmodel, 5, (const float *)(uintptr_t)(world.request + 0x48), world.stack);
   return poll(handle, stats);
+}
+/* The same with the look evaluator's read of the rig eye before it (the position getter, from its pinned call site):
+ * that is where the helper reads the evaluator's lens locals, without which the zoom depth is passed. */
+static void depth_frame(uint64_t step_ms) {
+  now_ms += step_ms;
+  tfp_pose_position_getter_from(world.getter_return, world.viewmodel, 50, world.stack, world.request);
+  tfp_pose_position_from(world.rig_return, world.viewmodel, 5, (const float *)(uintptr_t)(world.request + 0x48), world.stack);
 }
 static bool applied_is(double x, double y, double z) {
   return near(forwarded[0] - NATIVE[0], x, 2e-6) && near(forwarded[1] - NATIVE[1], y, 2e-6) && near(forwarded[2] - NATIVE[2], z, 2e-6);
@@ -638,6 +678,61 @@ static int real(void) {
   tfp_wire_pose_second(&wire, fragment, sizeof fragment);
   CHECK(strstr(fragment, "look=refused(2)") && logged("Refused: look gain: the look evaluator's code proof is not established on build 25480438") == 1);
   CHECK(logged("Retail's two extra hooks are installed") == 1);
+
+  /* ---- the "Gate:" line's counts and the depth switch (src/gate_log.h; neither is retail's) ---- */
+  {
+    TfpGateSecond g;
+    char line[640];
+    CHECK(tfp_pose_gate_take(&g) == 1 && g.frames > 0 && g.lens_frames <= 1 && g.applied == 0); /* the frames so far: the lens was read for the last only, with no optic set */
+    CHECK(tfp_pose_gate_take(&g) == 1 && g.frames == 0 && !tfp_gate_worth(&g));
+    pose_world_optic();
+    for (int i = 0; i < 4; i++) depth_frame(16);
+    const float depth = forwarded[1] - NATIVE[1] - .02f; /* what the zoom depth adds along the rig's forward axis on top of the placement */
+    CHECK(fabsf(depth) > .01f && fabsf(depth) < 1 && near(forwarded[0] - NATIVE[0], .11, 2e-6) && near(forwarded[2] - NATIVE[2], -.12, 2e-6));
+    CHECK(tfp_pose_gate_take(&g) == 1 && g.generation == 1 && g.frames == 4 && g.lens_frames == 4 && g.applied == 4 && g.nothing == 0 && tfp_gate_passed(&g) == 0);
+    CHECK(near(g.correction_min, depth, 2e-6) && near(g.correction_max, depth, 2e-6) && g.avatar_set == 0 && g.request_set == 0 && !tfp_gate_worth(&g));
+    CHECK(g.row_asked == 0 && g.row_frames == 0 && g.depth_off == 0 && near(g.target_min, g.target_max, 0) && near(g.lens_min * 57.29578, 36, .01));
+    /* the avatar bit set every other frame: the depth term goes on and off with it, as it did before this was counted */
+    for (int i = 0; i < 6; i++) {
+      pose_world_gate(i % 2 == 0, 0);
+      depth_frame(16);
+      CHECK(i % 2 == 0 ? applied_is(.11, .02, -.12) : applied_is(.11, .02 + (double)depth, -.12));
+    }
+    CHECK(tfp_pose_gate_take(&g) == 1 && g.frames == 6 && g.avatar_set == 3 && g.avatar_changes == 6 && g.request_set == 0 && g.request_changes == 0);
+    CHECK(g.applied == 3 && g.passed[TFP_GATE_GATED] == 3 && tfp_gate_passed(&g) == 3 && tfp_gate_worth(&g));
+    CHECK(near(g.target_min * 57.29578, 36, .01) && near(g.target_max * 57.29578, 90, .01) && near(g.lens_max * 57.29578, 67.64, .01));
+    /* request+0x8f the same; the main row read from now on (the binder asks for it), its byte +5 following a frame behind */
+    CHECK(tfp_pose_set_gate_reads(1) == 1);
+    for (int i = 0; i < 6; i++) {
+      pose_world_gate(0, i % 2);
+      pose_world_main_row(0, i % 2 == 0, 1, .25f + .125f * (float)(i % 2));
+      depth_frame(16);
+    }
+    CHECK(tfp_pose_gate_take(&g) == 1 && g.frames == 6 && g.request_set == 3 && g.request_changes == 5 && g.avatar_set == 0 && g.avatar_changes == 0);
+    CHECK(g.row_asked == 6 && g.row_frames == 6 && g.row5_set == 3 && g.row5_changes == 5 && g.row3d_set == 6 && g.row11ac_min == .25f && g.row11ac_max == .375f);
+    CHECK(g.applied == 3 && g.passed[TFP_GATE_GATED] == 3 && g.request_8d == 0);
+    tfp_gate_line(&g, false, line, sizeof line);
+    CHECK(strstr(line, "; request+0x8f set in 3, changed 5 times; ") && strstr(line, "main row read in 6: +5 set in 3, changed 5 times, +0x3d set in 6, +0x11ac 0.2500 to 0.3750"));
+    CHECK(tfp_pose_set_gate_reads(0) == 1);
+    /* depth_off.txt: nothing is added on any frame, gated or clear, and the line says why */
+    pose_world_gate(0, 0);
+    CHECK(tfp_pose_set_depth_off(1) == 1);
+    for (int i = 0; i < 4; i++) {
+      pose_world_gate(i == 3, 0);
+      depth_frame(16);
+      CHECK(applied_is(.11, .02, -.12));
+    }
+    CHECK(tfp_pose_gate_take(&g) == 1 && g.frames == 4 && g.applied == 0 && g.nothing == 0 && g.passed[TFP_GATE_SWITCHED_OFF] == 3 && g.passed[TFP_GATE_GATED] == 1);
+    CHECK(g.depth_off == 1 && g.avatar_changes == 1 && g.row_asked == 0 && tfp_gate_worth(&g));
+    tfp_gate_line(&g, true, line, sizeof line);
+    CHECK(strstr(line, "passed in 4 (unzoom gate or request state 1, depth_off.txt 3)")
+          && strstr(line, "; main row not read; depth_off.txt: the mod's zoom depth is forced to nothing; the first second of a native entry"));
+    CHECK(tfp_pose_set_depth_off(0) == 1);
+    pose_world_gate(0, 0);
+    depth_frame(16);
+    CHECK(applied_is(.11, .02 + (double)depth, -.12)); /* and back */
+    CHECK(tfp_pose_gate_take(&g) == 1 && g.frames == 1 && g.applied == 1 && g.depth_off == 0 && g.avatar_changes == 1);
+  }
 
   /* ---- finish: every slot holds the game's function again ---- */
   CHECK(H->finish(H->user, handle, &has_stats, &stats, &why) == TFP_OPS_TRUE && has_stats && handle->disarmed);

@@ -224,6 +224,7 @@ typedef struct TfpContinuity {
   bool trial; float held[3], held_loose[3]; /* last frame was followed as the eye going on after a stop; the speeds kept until then (THE TRIAL) */
   double tick, started, run_started; /* run_started: the first jump of the present run */
   float wanted[3], speed[3], shown[3];   /* last frame: the wanted eye, its smoothed speed (m/s), the presented eye */
+  bool ago_known; float ago[3];          /* the wanted eye of the frame before the last, same camera (THE WAY BACK) */
   float from[3], from_speed[3], duration; /* the correction's curve: value and speed at `started`, length in ms */
   float recent[TFP_CONTINUITY_SPEED_FRAMES][3]; uint32_t recent_at; /* the last frames' steps as speeds (m/s), a ring */
   bool placed, coursed;                  /* last frame's root is known (tfp_continuity_step_in); so is its course */
@@ -388,6 +389,11 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
   }
   float step[3], expected[3], difference[3];
   const bool edge = source != c->source;
+  /* THE WAY BACK: a move over the measure that ends within a quarter of its own length of where the eye was two
+   * frames ago, in a frame in which jumps are not looked for. */
+  float back_by[3], went_by[3]; for (unsigned i = 0; i < 3; ++i) { back_by[i] = wanted[i]-c->ago[i]; went_by[i] = wanted[i]-c->wanted[i]; }
+  const float went_far = tfp_continuity_length(went_by);
+  const bool back = !detect && !edge && c->ago_known && went_far > fmaxf(t->pop_m, t->pop_accel*dt*dt) && tfp_continuity_length(back_by) <= went_far/4;
   for (unsigned i = 0; i < 3; ++i) { step[i] = wanted[i]-c->wanted[i];
     /* The first step after a start gives the speed; it is not measured against a speed of nothing. */
     expected[i] = c->moving || edge ? c->speed[i]*dt : step[i]; difference[i] = step[i]-expected[i]; }
@@ -589,12 +595,16 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
     for (unsigned i = 0; i < 3; ++i) c->speed[i] += (step[i]/dt-c->speed[i])*k;
     const float fast = tfp_continuity_length(c->speed);
     if (fast > 8) for (unsigned i = 0; i < 3; ++i) c->speed[i] *= 8/fast;
+    /* THE WAY BACK: the eye went and came back, which is no speed. Kept whole (as it was until 0.6.0-feel.46), a
+     * flip of 0.2 m a frame was 6 m/s, and the first frame looked at afterwards sent the presented eye on at it. */
+    if (back) for (unsigned i = 0; i < 3; ++i) c->speed[i] = 0;
     if (quiet && c->active && c->started+c->duration-tick > TFP_CONTINUITY_QUIET_MS) tfp_continuity_begin(c, value, speed, tick, TFP_CONTINUITY_QUIET_MS);
     if (placed) { /* the speed with the turning left out, kept and averaged as the other is */
       const float kept = returned ? 0 : loose_size > limit || denied || !c->loose ? 1 : 1-expf(-dt/.05f);
       for (unsigned i = 0; i < 3; ++i) c->loose_speed[i] += (free_step[i]/dt-c->loose_speed[i])*kept;
       const float quick = tfp_continuity_length(c->loose_speed);
       if (quick > 8) for (unsigned i = 0; i < 3; ++i) c->loose_speed[i] *= 8/quick;
+      if (back) for (unsigned i = 0; i < 3; ++i) c->loose_speed[i] = 0;
       c->loose = isfinite(quick);
     }
   }
@@ -617,7 +627,8 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
   if (c->active && tick-c->started >= c->duration) c->active = false;
   const float carried = tfp_continuity_length(value);
   if (carried > c->largest) c->largest = carried;
-  for (unsigned i = 0; i < 3; ++i) { out[i] = wanted[i]+value[i]; c->wanted[i] = wanted[i]; c->shown[i] = out[i]; }
+  for (unsigned i = 0; i < 3; ++i) { out[i] = wanted[i]+value[i]; c->ago[i] = c->wanted[i]; c->wanted[i] = wanted[i]; c->shown[i] = out[i]; }
+  c->ago_known = !edge; /* across a change of camera the eye before is another camera's */
   c->tick = tick; c->source = source;
   return carried;
 }

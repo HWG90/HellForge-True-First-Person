@@ -81,6 +81,10 @@ static bool mcm_wanted; /* test switch mcm_on.txt: the settings menu in DBF-MCM 
  * draw instead of leaving them; arm_bend.txt makes it bend one shoulder instead of following the body; rest_trace.txt
  * makes the "Rest:" line (the resting weapon pose, once a second) come every tick. */
 static bool arms_live, arms_restore, arms_bend, arms_rest_trace;
+/* Test switch depth_off.txt, read once at the start: the pose helper's zoom-depth term adds nothing on any frame, so
+ * neither the rig nor its root is shifted for the optic. It is there to find out in the game whether that shift is
+ * part of the unzoom gate's flipping (docs/design/specs/2026-11-23-gate-flip.md). */
+static bool depth_off;
 /* The action hold (docs/design/ACTION-CAMERA.md "Action hold") is on: the Weapon put-away option, or its files.
  * While it is off none of the hold's code is reached. */
 static bool hold_lease;
@@ -712,6 +716,10 @@ static void start(void) {
           if (arm_file) fclose(arm_file);
           *arm_switches[i] = arm_file != NULL;
         }
+        strcpy(slash + 1, "depth_off.txt");
+        FILE *depth_file = fopen(parts_path, "r");
+        if (depth_file) fclose(depth_file);
+        depth_off = depth_file != NULL;
         /* The overrides of the three live features (src/wire_options.h): for testing only. */
         static const struct { const char *name; TfpFeature feature; bool on; } forced[] = {
           {"arms_live.txt", TFP_FEATURE_ARMS, true}, {"arms_off.txt", TFP_FEATURE_ARMS, false},
@@ -782,6 +790,12 @@ static void start(void) {
     tfp_wire_options_start(&wire, &options);
     arms_start();
     hold_start();
+    /* The game's unzoom gate, watched for the log (src/gate_log.h), and the depth switch. */
+    tfp_pose_set_gate_reads(1);
+    tfp_pose_set_depth_off(depth_off);
+    say("Ready: unzoom gate watched: a \"Gate:\" line in a second in which a gate byte changes or the zoom depth is added in some frames and "
+        "passed in others, and once at each native entry; the avatar's main row is read for it (two guarded reads a frame); nothing is changed by it");
+    if (depth_off) say("Test: depth_off.txt: the mod's zoom depth is forced to nothing on every frame (neither the rig nor its root is shifted for the optic)");
     if (!lock_wanted) say("Smooth: eye continuity stays off whatever the option says: the camera lock is off (lock_off.txt)");
     else say(smooth_wanted ? "Smooth: on: while the lock holds the view, a change of camera (head camera, native view) and a one-frame move of the "
                              "first-person rig are carried as a correction of at most 1 m and eased out over 100 to 400 ms; farther than 1.5 m is "
@@ -924,7 +938,31 @@ static void lock_note(void) { /* once a second while the view is on: frames by c
           (double)c.largest_m, (unsigned long long)c.restarts);
     told_jumps = c.jumps; told_edges = c.edges; told_reseats = c.reseats;
   }
+  /* The eye going back and forth (src/camera_alternation.h): counted, nothing is done. A second without it writes nothing. */
+  static TfpCameraAlternationStats told_alternation; TfpCameraAlternationStats a; tfp_camera_alternation_stats(&a);
+  if (a.frames != told_alternation.frames)
+    say("Alternation: %llu frames of the eye going back and forth (would be held; nothing is done), largest move %.3f m; jumps were looked for in "
+        "%llu of them; the fire flag was set in %llu (flag byte 12 bit 0x40, not proven on this build); kind %u",
+        (unsigned long long)(a.frames - told_alternation.frames), (double)a.largest_m, (unsigned long long)(a.looked - told_alternation.looked),
+        (unsigned long long)(a.fire - told_alternation.fire), a.kind);
+  told_alternation = a;
 }
+#ifdef TFP_FEEL
+static void gate_note(void) { /* once a second: what the pose helper counted of the game's unzoom gate, where it is worth a line (src/gate_log.h) */
+  static uint64_t next, told_generation;
+  const uint64_t now = GetTickCount64();
+  if (now < next) return;
+  next = now + 1000;
+  TfpGateSecond g;
+  if (!tfp_pose_gate_take(&g) || !g.frames) return;
+  const bool entry = g.generation != told_generation; /* the first frames of a new lease: written whatever they hold */
+  told_generation = g.generation;
+  if (!entry && !tfp_gate_worth(&g)) return;
+  char line[640];
+  tfp_gate_line(&g, entry, line, sizeof line);
+  say("%s", line);
+}
+#endif
 static void fov_note(void) { /* once a second, on its own: the field-of-view lock also runs with the camera lock off, when lock_note has nothing to say */
   static uint64_t next, told_fov;
   const uint64_t now = GetTickCount64();
@@ -936,6 +974,9 @@ static void fov_note(void) { /* once a second, on its own: the field-of-view loc
   told_fov = f.applied;
 }
 static void tick_body(void) {
+#ifdef TFP_FEEL
+  if (stage == RUNNING) gate_note();
+#endif
   if (stage == RUNNING) { quit_guard(); fov_lock_tick(); lock_note(); fov_note(); }   /* not earlier: the game module and the guarded reader are set up in WAIT_MODULES */
   if (stage == REFUSED) return;
   tick_thread = GetCurrentThreadId();

@@ -219,6 +219,12 @@ typedef struct TfpCameraContinuityStats { uint64_t jumps, edges, restarts; float
 /* Counts since the start; the largest correction carried since the last call. reseats: frames in which the body
  * root alone was re-seated (a jump in the root's frame with the eye going on evenly in the world; nothing taken up). */
 void tfp_camera_continuity_stats(TfpCameraContinuityStats *out);
+/* The eye going back and forth, watched only (src/camera_alternation.h; nothing is held). Counts since the start:
+ * frames the rule counted under the lock, how many of them in a frame in which jumps were looked for, how many with
+ * the controller's fire flag set (flag byte 12 bit 0x40, which has no proven reader on this build). largest_m: the
+ * largest move among them since the last call. kind: the camera kind of the last frame counted. */
+typedef struct TfpCameraAlternationStats { uint64_t frames, looked, fire; float largest_m; uint32_t kind; } TfpCameraAlternationStats;
+void tfp_camera_alternation_stats(TfpCameraAlternationStats *out);
 /* The trace: a State edge was just written. The presented frames of the next 500 ms, and the six before it that
  * were not yet handed out, are given to tfp_camera_trace_read (oldest first, each once). `ms` counts from the edge.
  * source: 1 head camera, 2 native view, 3 the last native argument repeated. root: the body root the eye was

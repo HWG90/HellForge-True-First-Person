@@ -8,6 +8,7 @@
 #include "camera_helper.h"
 #include "camera_lock.h"
 #include "camera_continuity.h"
+#include "camera_alternation.h"
 #include "camera_damp.h"
 #include "camera_glide.h"
 #include "camera_math.h"
@@ -213,6 +214,10 @@ static _Atomic uint32_t lock_body_distance, lock_down_distance, lock_down_head[3
 enum { SMOOTH_HEAD = 1, SMOOTH_NATIVE = 2, SMOOTH_REPEAT = 3 };
 static _Atomic uint32_t smooth_on, trace_on;
 static TfpContinuity smooth; static const TfpContinuityTuning smooth_tuning = TFP_CONTINUITY_DEFAULT;
+/* THE ALTERNATION, watched only (src/camera_alternation.h): the frames in which the wanted eye goes back and forth
+ * are counted for the "Alternation:" line. Nothing is done about them; the filter is given the eye as before. */
+static TfpAlternation alternation;
+static struct { uint64_t frames, looked, fire; float largest; uint32_t kind; } alternation_seen;
 /* Within the native view a jump is looked for only for SMOOTH_EVENT_MS after something that can re-seat the rig: the
  * control mask, the top request's kind or weapon, or the binder's weapon key changed, or the binder said so (a lease
  * or a hold begun or ended: tfp_camera_continuity_event). Anywhere else the rig eye's motion is the game's own (a
@@ -980,7 +985,7 @@ static void lock_body_shown(Policy *p, uint32_t kind, const float *head, double 
 }
 
 /* ---- beyond retail: continuity of the presented eye, and the trace (lock frames only) ---- */
-static void smooth_forget(void) { tfp_continuity_reset(&smooth); trace.last_known = false; eye_watch_known = false; eye_unsettled_until = 0;
+static void smooth_forget(void) { tfp_continuity_reset(&smooth); memset(&alternation, 0, sizeof alternation); trace.last_known = false; eye_watch_known = false; eye_unsettled_until = 0;
   memset(&smooth_watch, 0, sizeof smooth_watch); }
 /* True: jumps are looked for in this native frame. Called once for every frame presented under the lock. */
 static bool smooth_detect(const Policy *p, uint32_t kind, uint32_t source, double tick) {
@@ -1000,7 +1005,7 @@ static bool smooth_detect(const Policy *p, uint32_t kind, uint32_t source, doubl
 /* The eye about to be presented, in the world; `root`/`root_basis` are the body root's position and axis rows.
  * True: `shown` differs from `wanted` and is what to present. Always records the frame for the trace. */
 static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const float *root, const float *root_basis, const float *wanted, double tick, float *shown) {
-  float wanted_relative[3] = {0}, relative[3] = {0}, correction = 0; uint32_t what = 0;
+  float wanted_relative[3] = {0}, relative[3] = {0}, correction = 0, moved = 0; uint32_t what = 0; bool looked = false;
   for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
     wanted_relative[axis] += (wanted[component]-root[component])*root_basis[axis*3+component];
   memcpy(shown, wanted, 12);
@@ -1013,6 +1018,7 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
      * and native frames are as before. smooth_detect is called first: it keeps the watch on every frame. */
     const bool detect = smooth_detect(p, kind, source, tick) && !p->lock_down && !(source == SMOOTH_HEAD && p->lock_off_foot);
     const uint64_t jumps = smooth.jumps, edges = smooth.edges, reseats = smooth.reseats, restarts = smooth.restarts; const bool began = !smooth.known;
+    looked = detect;
     /* The eye in the world goes with it: the root re-seated by itself is not the eye jumping (camera_continuity.h). */
     correction = tfp_continuity_step_in(&smooth, wanted_relative, wanted, root_basis, source == SMOOTH_REPEAT ? SMOOTH_NATIVE : source, detect, p->full_ads, tick,
                                         p->c.max_gap_ms, &smooth_tuning, relative);
@@ -1022,6 +1028,11 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
     what = (detect ? TFP_CAMERA_TRACE_LOOKED : 0u) | (smooth.jumps != jumps ? TFP_CAMERA_TRACE_JUMP : 0u) | (smooth.edges != edges ? TFP_CAMERA_TRACE_EDGE : 0u)
         | (smooth.reseats != reseats ? TFP_CAMERA_TRACE_ROOT : 0u) | (smooth.restarts != restarts ? TFP_CAMERA_TRACE_RESTART : 0u)
         | (began ? TFP_CAMERA_TRACE_START : 0u) | (p->full_ads ? TFP_CAMERA_TRACE_QUIET : 0u);
+  }
+  /* Counted only: the eye the filter was given, whether or not the continuity is on. */
+  if (tfp_alternation_step(&alternation, wanted_relative, source == SMOOTH_REPEAT ? SMOOTH_NATIVE : source, p->full_ads, tick, p->c.max_gap_ms, &moved)) {
+    ++alternation_seen.frames; alternation_seen.looked += looked ? 1u : 0u; alternation_seen.fire += p->fire ? 1u : 0u; alternation_seen.kind = kind;
+    if (moved > alternation_seen.largest) alternation_seen.largest = moved;
   }
   if (atomic_load_explicit(&trace_on, memory_order_relaxed)) {
     TraceFrame *row = &trace.frames[trace.head++ % TRACE_RING];
@@ -1732,6 +1743,15 @@ void tfp_camera_continuity_stats(TfpCameraContinuityStats *out) {
   policy_acquire();
   out->jumps = smooth.jumps; out->edges = smooth.edges; out->restarts = smooth.restarts; out->largest_m = smooth.largest; smooth.largest = 0;
   out->reseats = smooth.reseats;
+  policy_release();
+}
+void tfp_camera_alternation_stats(TfpCameraAlternationStats *out) {
+  if (!out) return;
+  memset(out, 0, sizeof *out);
+  if (!host.lock_exclusive) return;
+  policy_acquire();
+  out->frames = alternation_seen.frames; out->looked = alternation_seen.looked; out->fire = alternation_seen.fire;
+  out->largest_m = alternation_seen.largest; alternation_seen.largest = 0; out->kind = alternation_seen.kind;
   policy_release();
 }
 void tfp_camera_trace_edge(void) {
