@@ -486,6 +486,17 @@ static void release(void) {
     const float anew[3] = {.3f, -.2f, .1f}; memcpy(eye, anew, 12); memcpy(before, eye, 12);
     CHECK(tfp_eye_glide_release(&g, eye, end, .0333f) && apart(eye, before) < .006f);
   }
+  /* A swap's glide that goes on from a release under way (tfp_eye_glide_lock_step to a new target while the eye is
+   * still being let go) is a swap's glide from then on, not taken for a release: tfp_eye_glide_releasing says no, so the
+   * helper does not send the next frames, or a later swap, through the release's rates (review of round 19, M6). */
+  {
+    TfpEyeGlide g; tfp_eye_glide_reset(&g); float eye[3], end[3]; end_of(.44f, end); memcpy(eye, START, 12);
+    for (int i = 0; i < 4; ++i) tfp_eye_glide_release(&g, eye, end, .0333f);
+    CHECK(tfp_eye_glide_releasing(&g));
+    const float near[3] = {eye[0]+.1f, eye[1], eye[2]};
+    CHECK(tfp_eye_glide_lock_step(&g, eye, near, .0333f) && g.active && !g.release && !tfp_eye_glide_releasing(&g));
+    for (int i = 0; i < 3; ++i) { tfp_eye_glide_lock_step(&g, eye, near, .0333f); CHECK(!tfp_eye_glide_releasing(&g)); }
+  }
   /* No number, no time: nothing moves; no number forgets the glide. */
   {
     TfpEyeGlide g; tfp_eye_glide_reset(&g); float eye[3], end[3], before[3]; end_of(.44f, end); memcpy(eye, START, 12);
