@@ -6,6 +6,7 @@
  *   arm_drive_test FIXTURE */
 #include "fake_native.h"
 #include "arm_drive.h"
+#include "offhand_grip.h"
 #include "snapshot.h"
 #include <stdlib.h>
 
@@ -1843,6 +1844,219 @@ static void test_hold_begins_under_put_back(void) {
   }
 }
 
+
+/* ---- the support hand on the weapon's grip (round 23; src/offhand_grip.h) ----
+ * The game pins the body's left hand on the gun's grip node in the world while the rig is the view. Here the gun hangs
+ * on the rig's socket as the rig shows it, and its grip node (name 67C94E4B) is put where the recorded body's left hand
+ * is: what the game does. The drawn left hand is then to be on that node as the drive draws the gun. */
+#define GRIP_NAME_T UINT32_C(0x67c94e4b)
+static unsigned body_left_hand(void) {
+  for (unsigned i = 0; i < TFP_GRAFT_BODY_NODES; i++) if (bn[i] == TFP_GRAFT_NAME_L_HAND) return i;
+  CHECK(!"the body has a left hand");
+  return 0;
+}
+/* The gun (and, with a foregrip, the optic standing in for one) evaluated on the rig's own socket; grip nodes on gun
+ * node 2 and optic node 1; `on_gun`, `on_optic`: where each is, relative to the body's left hand (NULL: no such node). */
+static void grip_world(const TfpGraftMatrix *gun_root, const float *on_gun, const float *on_optic) {
+  put(worlds_of(GUN), gun_root, 64);
+  put(worlds_of(GUN) + 64, gun_root, 64); /* node 1, the optic's mount: at the root */
+  put(worlds_of(OPTIC), gun_root, 64);
+  const TfpGraftMatrix hand = body_now[body_left_hand()];
+  if (on_gun) {
+    TfpGraftMatrix g = hand;
+    for (unsigned i = 0; i < 3; i++) g.values[12 + i] += on_gun[i];
+    n32(names_of(GUN) + 2 * 4, GRIP_NAME_T), put(worlds_of(GUN) + 2 * 64, &g, 64);
+  }
+  if (on_optic) {
+    TfpGraftMatrix g = hand;
+    for (unsigned i = 0; i < 3; i++) g.values[12 + i] += on_optic[i];
+    n32(names_of(OPTIC) + 1 * 4, GRIP_NAME_T), put(worlds_of(OPTIC) + 64, &g, 64);
+  }
+}
+/* The drawn hand (rig node 13) and socket (node 8) in node 7's frame, from the rig's locals as written. */
+static void drawn(TfpGraftMatrix *hand, TfpGraftMatrix *socket) {
+  TfpGraftLocal now[TFP_GRAFT_RIG_NODES];
+  rig_locals(now);
+  const TfpGraftMatrix upper = tfp_graft_local_matrix(&now[10]), fore = tfp_graft_local_matrix(&now[12]), h = tfp_graft_local_matrix(&now[13]);
+  const TfpGraftMatrix elbow = tfp_graft_product(&fore, &upper);
+  *hand = tfp_graft_product(&h, &elbow);
+  *socket = tfp_graft_local_matrix(&now[TFP_GRAFT_RIG_SOCKET]);
+}
+static float grip_m(const TfpGraftMatrix *a, const TfpGraftMatrix *b) {
+  float x = a->values[12] - b->values[12], y = a->values[13] - b->values[13], z = a->values[14] - b->values[14];
+  return sqrtf(x * x + y * y + z * z);
+}
+static float grip_degrees(const TfpGraftMatrix *a, const TfpGraftMatrix *b) {
+  const TfpOgFrame x = tfp_og_frame(a), y = tfp_og_frame(b);
+  return (float)(tfp_og_angle(x.r, y.r) * 180 / TFP_OG_PI);
+}
+/* One driven frame under put-back at clock `now`: the drawn hand and socket, then the game's values back. */
+static void grip_draw(uint64_t now, TfpGraftMatrix *hand, TfpGraftMatrix *socket) {
+  tfp_arm_drive_set_rest(now, TFP_ARM_REST_NONE, 0);
+  const bool after = tfp_arm_drive_render(WORLD, true); /* false only when nothing was written (weight 0) */
+  drawn(hand, socket);
+  if (after) tfp_arm_drive_after_render();
+}
+/* Where the grip is, relative to the socket, in the game: the hand drawn there sits on it. */
+static TfpGraftMatrix grip_on_socket(const float *offset) {
+  TfpGraftMatrix g = body_now[body_left_hand()];
+  for (unsigned i = 0; i < 3; i++) g.values[12 + i] += offset[i];
+  return tfp_graft_relative(&g, &rig_world[TFP_GRAFT_RIG_SOCKET]);
+}
+
+static void test_grip_holds(void) {
+  static const float zero[3] = {0, 0, 0};
+  TfpGraftMatrix hand, socket, first_hand, first_socket;
+  fresh();
+  grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], zero, NULL);
+  tfp_arm_drive_set(true, true, 1);
+  /* switched off (the default): the drive is what it was, the hand where the body's pose puts it, 0.3 m and more from the grip */
+  grip_draw(1000, &first_hand, &first_socket);
+  const TfpGraftMatrix want = grip_on_socket(zero), held_at = tfp_graft_product(&want, &first_socket);
+  const float before = grip_m(&first_hand, &held_at);
+  CHECK(before > .25f && before < TFP_OG_SHIFT_M);
+  TfpArmDriveGrip g;
+  tfp_arm_drive_grip_take(&g);
+  CHECK(!g.frames && g.state == TFP_ARM_GRIP_OFF);
+  tfp_arm_drive_set_grip(true, false);
+  float last = before;
+  uint64_t t = 1000;
+  for (int i = 1; i <= 30; i++) {
+    grip_draw(t += 16, &hand, &socket);
+    const TfpGraftMatrix at = tfp_graft_product(&want, &socket);
+    const float now = grip_m(&hand, &at);
+    if (i == 1) CHECK(now == last); /* its first frame has no time before it: nothing moves yet */
+    else if (i < 5) CHECK(now < last); /* on its way */
+    last = now;
+    CHECK(!memcmp(&socket, &first_socket, sizeof socket)); /* the gun is drawn where it was: only the arm moves */
+  }
+  const TfpGraftMatrix at = tfp_graft_product(&want, &socket);
+  printf("arm drive: grip: the drawn left hand from the grip: %.3f m / %.1f degrees with the grip off, %.4f m / %.2f degrees on it\n",
+         (double)before, (double)grip_degrees(&first_hand, &held_at), (double)grip_m(&hand, &at), (double)grip_degrees(&hand, &at));
+  CHECK(grip_m(&hand, &at) < .001f && grip_degrees(&hand, &at) < .01f);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(g.frames == 30 && g.held > 10 && g.state == TFP_ARM_GRIP_HELD && g.found && !g.attachment && g.nodes == 1 && g.units == 1);
+  CHECK(g.body_m < .001f && g.to_m < .001f && g.weight == 1 && g.step_degrees <= g.limit_degrees + 1e-3f && g.limit_degrees > 11 && g.limit_degrees < 12);
+  CHECK(strstr(tfp_arm_drive_grip_line(&g), "30 frames") && strstr(tfp_arm_drive_grip_line(&g), "on the grip; the gun's own grip node"));
+  /* the rest of the arm and the right side are the drive's: only nodes 10, 12, 13 and what hangs on them moved */
+  TfpGraftLocal with[TFP_GRAFT_RIG_NODES], without[TFP_GRAFT_RIG_NODES];
+  tfp_arm_drive_set_rest(t += 16, TFP_ARM_REST_NONE, 0);
+  CHECK(tfp_arm_drive_render(WORLD, true));
+  rig_locals(with);
+  tfp_arm_drive_after_render();
+  tfp_arm_drive_set_grip(false, false);
+  for (int i = 0; i < 20; i++) grip_draw(t += 16, &hand, &socket);
+  /* switched off it went back to the body's pose and holds nothing of the reach */
+  CHECK(!memcmp(&hand, &first_hand, sizeof hand));
+  tfp_arm_drive_set_rest(t += 16, TFP_ARM_REST_NONE, 0);
+  CHECK(tfp_arm_drive_render(WORLD, true));
+  rig_locals(without);
+  tfp_arm_drive_after_render();
+  for (unsigned n = 0; n < TFP_GRAFT_RIG_NODES; n++) {
+    const bool corrected = n == 10 || n == 12 || n == 13;
+    CHECK(corrected ? memcmp(with[n].basis, without[n].basis, 36) != 0 : !memcmp(&with[n], &without[n], 64));
+    CHECK(!memcmp(with[n].position, without[n].position, 12)); /* bone lengths: positions never change */
+  }
+}
+/* A foregrip: its own node, where the body's hand is, and the gun's own node 17 cm from there: the foregrip's is held. */
+static void test_grip_foregrip(void) {
+  static const float zero[3] = {0, 0, 0}, gun_own[3] = {0, .17f, 0};
+  TfpGraftMatrix hand, socket;
+  fresh();
+  grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], gun_own, zero);
+  tfp_arm_drive_set(true, true, 1);
+  tfp_arm_drive_set_grip(true, false);
+  uint64_t t = 1000;
+  for (int i = 0; i < 30; i++) grip_draw(t += 16, &hand, &socket);
+  const TfpGraftMatrix want = grip_on_socket(zero), at = tfp_graft_product(&want, &socket);
+  CHECK(grip_m(&hand, &at) < .001f);
+  TfpArmDriveGrip g;
+  tfp_arm_drive_grip_take(&g);
+  CHECK(g.found && g.attachment && g.nodes == 2 && g.units == 2 && g.state == TFP_ARM_GRIP_HELD);
+  CHECK(strstr(tfp_arm_drive_grip_line(&g), "an attachment's grip node (2 grip nodes on 2 of the gun's units)"));
+  /* the gun evaluated a frame behind its rig (root and nodes 4 cm off together): the grip read through the gun's own
+   * matrices is the same relation, and the hand stays on it */
+  TfpGraftMatrix behind = rig_world[TFP_GRAFT_RIG_SOCKET];
+  behind.values[12] += .04f;
+  static const float shifted[3] = {.04f, 0, 0}, shifted_gun[3] = {.04f, .17f, 0};
+  grip_world(&behind, shifted_gun, shifted);
+  for (int i = 0; i < 3; i++) grip_draw(t += 16, &hand, &socket);
+  CHECK(grip_m(&hand, &at) < .002f);
+}
+/* The body's left hand on no grip node (a reload, a weapon the game does not pin): the arm is the body's. One-handed,
+ * aiming (weight 0), and the test switch off: the same. */
+static void test_grip_left_alone(void) {
+  static const float far[3] = {.2f, 0, 0}, zero[3] = {0, 0, 0};
+  TfpGraftMatrix hand, socket, plain_hand, plain_socket;
+  for (int way = 0; way < 4; way++) {
+    fresh();
+    grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], way == 0 ? far : zero, NULL);
+    tfp_arm_drive_set(true, true, way == 2 ? 0 : 1);
+    grip_draw(1000, &plain_hand, &plain_socket);
+    tfp_arm_drive_set_grip(way != 3, way == 1);
+    uint64_t t = 1000;
+    for (int i = 0; i < 10; i++) {
+      grip_draw(t += 16, &hand, &socket);
+      CHECK(!memcmp(&hand, &plain_hand, sizeof hand) && !memcmp(&socket, &plain_socket, sizeof socket));
+    }
+    TfpArmDriveGrip g;
+    tfp_arm_drive_grip_take(&g);
+    static const uint32_t expected[4] = {TFP_ARM_GRIP_FREE, TFP_ARM_GRIP_ONE_HANDED, TFP_ARM_GRIP_AIMING, TFP_ARM_GRIP_OFF};
+    CHECK(g.state == expected[way] && !g.held && g.frames == (way == 3 ? 0u : 10u));
+    if (!way) CHECK(g.nodes == 1 && g.body_m > .19f && strstr(tfp_arm_drive_grip_line(&g), "the body's left hand is on no grip"));
+  }
+  /* held, then the body's hand leaves (a reload): back to the body's pose within the step limit, then exactly it */
+  fresh();
+  grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], zero, NULL);
+  tfp_arm_drive_set(true, true, 1);
+  grip_draw(1000, &plain_hand, &plain_socket);
+  tfp_arm_drive_set_grip(true, false);
+  uint64_t t = 1000;
+  for (int i = 0; i < 30; i++) grip_draw(t += 16, &hand, &socket);
+  grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], far, NULL);
+  TfpGraftMatrix prev = hand;
+  TfpArmDriveGrip g;
+  tfp_arm_drive_grip_take(&g);
+  int frames = 0;
+  for (; frames < 40 && memcmp(&hand, &plain_hand, sizeof hand); frames++) {
+    grip_draw(t += 16, &hand, &socket);
+    CHECK(grip_degrees(&hand, &prev) < 60); /* the hand's world turn: a sum of three limited joints */
+    prev = hand;
+  }
+  tfp_arm_drive_grip_take(&g);
+  CHECK(frames > 2 && frames < 40 && g.state == TFP_ARM_GRIP_FREE && g.step_degrees <= g.limit_degrees + 1e-3f);
+}
+/* A moving body and a grip that wanders, at four frame times: no joint's correction ever changes by more than the
+ * frame's allowance. */
+static void test_grip_step_limit(void) {
+  static const unsigned frame_ms[4] = {8, 17, 33, 50};
+  uint64_t seedling = 12345;
+  for (unsigned k = 0; k < 4; k++) {
+    TfpGraftMatrix hand, socket;
+    fresh();
+    tfp_arm_drive_set(true, true, 1);
+    tfp_arm_drive_set_grip(true, false);
+    uint64_t t = 1000;
+    float most = 0;
+    for (int i = 0; i < 200; i++) {
+      seedling = seedling * 6364136223846793005u + 1442695040888963407u;
+      float off[3];
+      for (unsigned j = 0; j < 3; j++) off[j] = (float)((seedling >> (20 + 10 * j)) & 1023) / 1023.f * .02f - .01f;
+      if (i % 37 == 36) off[1] += .3f; /* the hand off the grip for a frame */
+      put(worlds_of(BODY), i % 2 ? body_later : body_now, sizeof body_now);
+      grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], off, NULL);
+      grip_draw(t += frame_ms[k], &hand, &socket);
+      TfpArmDriveGrip g;
+      tfp_arm_drive_grip_take(&g);
+      const float allowed = fminf(720.f * (float)frame_ms[k] / 1000, 30);
+      CHECK(g.step_degrees <= allowed + 1e-3f && fabsf(g.limit_degrees - allowed) < 1e-3f + (g.step_degrees == 0 ? 1e9f : 0));
+      if (g.step_degrees > most) most = g.step_degrees;
+    }
+    printf("arm drive: grip at %u ms frames with a moving body: largest joint step %.2f degrees (allowed %.2f)\n", frame_ms[k], (double)most,
+           (double)fminf(720.f * (float)frame_ms[k] / 1000, 30));
+  }
+}
+
 int main(int argc, char **argv) {
   if (argc != 2 && argc != 3) { fprintf(stderr, "usage: arm_drive_test FIXTURE [EVERY-FRAME-FIXTURE]\n"); return 2; }
   load(argv[1]);
@@ -1873,6 +2087,10 @@ int main(int argc, char **argv) {
   test_game_sees_its_own_socket();
   test_fade_and_ease_under_put_back();
   test_hold_begins_under_put_back();
+  test_grip_holds();
+  test_grip_foregrip();
+  test_grip_left_alone();
+  test_grip_step_limit();
   if (argc == 3) test_rest_recorded(argv[2]);
   printf("arm drive: %u checks passed\n", checks);
   return 0;

@@ -815,7 +815,7 @@ static int panel_part(void) {
   new_host(11);
   CHECK(tfp_wire_panel_bind(&wire, &api, &platform, TFP_MENU_NO_ARMS | TFP_MENU_NO_EDITOR, NULL));
   game_update(); draw_frame();
-  CHECK(drawn("check:First Person Arms=on (disabled)") && drawn("text:Sleeves and hand grips are refused on this build.") && !drawn_part("Fird") && drawn("button:Edit arms and weapon placement (disabled)") && drawn("button:Change##editor_key (disabled)"));
+  CHECK(drawn("check:First Person Arms=on (disabled)") && drawn("text:The arm drive is refused on this build, so the hand grip cannot run.") && !drawn_part("Fird") && drawn("button:Edit arms and weapon placement (disabled)") && drawn("button:Change##editor_key (disabled)"));
   CHECK(drawn("button:Change##toggle_key") && drawn("check:True First Person: show torso=off"));
   tfp_wire_menu_unbind(&wire);
   tfp_wire_panel_free(&wire);

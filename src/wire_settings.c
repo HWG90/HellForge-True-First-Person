@@ -712,6 +712,16 @@ float tfp_locked_view_aim_field(TfpWire *w) {
   if (aim == 3) return (float)(tfp_locked_view_fov_aim_degrees(w)*3.14159265358979/180);
   return aim == 2 ? TFP_FOV_AIM_LOCKED : TFP_FOV_AIM_ZOOM;
 }
+bool tfp_wire_settings_first_person_arms(TfpWire *w) {
+  Settings *st = state(w);
+  return st ? tfp_settings_menu_flag(&st->store, TFP_MENU_fird_person_arms) : true;
+}
+bool tfp_wire_settings_sidearm(TfpWire *w) {
+  Settings *st = state(w);
+  const char *key = w && w->ops.has_placement_weapon_key ? w->ops.placement_weapon_key : NULL;
+  const TfpActionWeapon *info = st && key ? tfp_action_weapon_info(&st->catalogue, key) : NULL;
+  return info && info->family == TFP_FAMILY_SIDEARM;
+}
 void tfp_wire_settings_save_frame(TfpWire *w) {
   static const char *const what[2] = {"settings", "locked view options"};
   Settings *st = state(w);
