@@ -10,6 +10,7 @@
 #include "reference/soak-18-steps.h"
 #include "reference/soak-19-steps.h"
 #include "reference/soak-slowing-steps.h"
+#include "reference/soak-21-alternation.h"
 static int checks, failed;
 #define CHECK(c) do { ++checks; if (!(c)) { ++failed; printf("FAILED line %d: %s\n", __LINE__, #c); } } while (0)
 static const TfpContinuityTuning T = TFP_CONTINUITY_DEFAULT;
@@ -547,6 +548,49 @@ static Taken taken(float v, float part, int scene, float dt) {
   return s;
 }
 #define ROWS(a) a, (int)(sizeof a/sizeof *a)
+
+/* THE WAY BACK. Logged rows through the filter, started from nothing at the first: `step` the largest step of the
+ * presented eye in the rows from `from` on, `carried` the most carried there, `off` how far the presented eye gets
+ * from the middle of the two places (`a`, `b`: two of the rows) at most, `speed` the largest speed kept after a row
+ * before `from` that is not the first two (m/s). */
+typedef struct Flipped { float step, carried, off, speed; } Flipped;
+static Flipped flipped_logged(const SoakFrame *rows, int count, int from, int a, int b) {
+  TfpContinuity c; memset(&c, 0, sizeof c); Flipped f = {0, 0, 0, 0}; float shown[3] = {0, 0, 0};
+  for (int i = 0; i < count; ++i) {
+    const SoakFrame *r = &rows[i]; float relative[3] = {0}, out[3], world[3], step = 0, off = 0;
+    for (int x = 0; x < 3; ++x) for (int k = 0; k < 3; ++k) relative[x] += (r->wanted[k]-r->root[k])*r->axes[x*3+k];
+    const float carried = tfp_continuity_step_in(&c, relative, r->wanted, r->axes, (uint32_t)r->source, r->looked != 0, false, 1000.0+(double)r->ms, 250, &T, out);
+    for (int k = 0; k < 3; ++k) { world[k] = r->root[k]; for (int x = 0; x < 3; ++x) world[k] += out[x]*r->axes[x*3+k];
+      const float middle = (rows[a].wanted[k]+rows[b].wanted[k])/2;
+      step += (world[k]-shown[k])*(world[k]-shown[k]); off += (world[k]-middle)*(world[k]-middle); }
+    const float fast = sqrtf(c.speed[0]*c.speed[0]+c.speed[1]*c.speed[1]+c.speed[2]*c.speed[2]);
+    if (i >= 2 && i < from && fast > f.speed) f.speed = fast;
+    if (i >= from) { if (sqrtf(step) > f.step) f.step = sqrtf(step); if (carried > f.carried) f.carried = carried; if (sqrtf(off) > f.off) f.off = sqrtf(off); }
+    memcpy(shown, world, sizeof world);
+  }
+  return f;
+}
+/* Made up: the eye goes back and forth between two places `far` apart along x every frame, `dt_ms` a frame; jumps
+ * are not looked for during the first `blind_ms`, then they are (an event) while it goes on for 600 ms, then it stands
+ * at the nearer place for 600 ms. `off`: the farthest the presented eye gets from the middle of the two places from
+ * the event on; `step`: its largest step there; `speed`: the largest speed kept at a frame not looked at after the
+ * first two (m/s). */
+static Flipped flipped(float far, float dt_ms, float blind_ms) {
+  Run r; start(&r); Flipped f = {0, 0, 0, 0}; float last = 0; int n = 0;
+  for (float t = 0; t < blind_ms+1200; t += dt_ms, ++n) {
+    const bool looked = t >= blind_ms, stands = t >= blind_ms+600;
+    const float x = stands ? 0 : (n & 1) ? far : 0;
+    frame(&r, x, 1.5f, 0.1f, NATIVE, looked, false, dt_ms);
+    const float fast = sqrtf(r.c.speed[0]*r.c.speed[0]+r.c.speed[1]*r.c.speed[1]+r.c.speed[2]*r.c.speed[2]);
+    if (!looked && n >= 2 && fast > f.speed) f.speed = fast;
+    if (looked) { const float off = fabsf(r.shown[0]-far/2), step = fabsf(r.shown[0]-last);
+      if (off > f.off) f.off = off;
+      if (step > f.step) f.step = step;
+      if (r.correction > f.carried) f.carried = r.correction; }
+    last = r.shown[0];
+  }
+  return f;
+}
 int main(void) {
   Run r;
   /* A still eye and an eye moving evenly: nothing is added, at 30 and at 144 frames a second. */
@@ -1633,6 +1677,54 @@ int main(void) {
       printf("  %s, %g ms a frame: step change %.4f m (%.4f m), %.4f m past the wanted eye (%.4f m), settled in %.0f ms (%.0f ms)\n", scenes[l].name,
              (double)times[d], (double)g.change, (double)w[0], (double)g.past, (double)w[1], (double)g.settled, (double)w[2]);
       CHECK(g.change <= w[0]+.0005f && g.past <= w[1]+.0005f && g.settled <= w[2]+1);
+    }
+  }
+  /* THE WAY BACK: a frame not looked at that takes the eye back to where it was two frames ago is no speed. Until
+   * 0.6.0-feel.46 a frame over the measure in which jumps are not looked for set the kept speed to its own step whole,
+   * a flip of 0.2 m too (6 to 7 m/s at 33 ms a frame). The first frame looked at after it met that speed: the flip back
+   * was a jump against it, taken up, and the presented eye went on at it (tests/reference/soak-21-alternation.h, the
+   * soak of 2026-11-23, 03:13:53.490: 0.217 m past the far place, then 0.179 m more, 0.435 m carried, 0.54 m from the
+   * middle of the two places). Now such a frame keeps no speed: the first frame looked at is a jump against an eye
+   * that stands, and the presented eye stays between the two places. */
+  {
+    const Flipped g = flipped_logged(soak21_alternation, (int)(sizeof soak21_alternation/sizeof *soak21_alternation), 6, 4, 5);
+    printf("  soak 21, the end of the alternation (03:13:53.490 on): the presented eye steps %.4f m at most (the log: 0.2168 m), is %.4f m from the "
+           "middle of the two places at most (0.54 m), %.4f m carried at most (0.4465 m); the largest speed kept from a flip not looked at %.2f m/s "
+           "(6.4 m/s)\n", (double)g.step, (double)g.off, (double)g.carried, (double)g.speed);
+    CHECK(g.speed < .01f);  /* rows 2 to 5 are returns: no speed is kept from them */
+    CHECK(g.step < .06f);   /* the log: 0.2168 and 0.1789 m */
+    CHECK(g.off < .15f);    /* half the flip is 0.105 m; the log: 0.54 m */
+    CHECK(g.carried < .25f); /* the flip itself, taken up; the log: 0.4465 m */
+  }
+  /* The same made up, at four frame times: 0.21 m back and forth every frame for 1.5 s with jumps not looked for, then
+   * an event while it goes on. The filter of 0.6.0-feel.46 ended 1.0 to 1.5 m from the middle of the two places. */
+  {
+    static const float times[] = {8, 16.7f, 33.3f, 50};
+    for (unsigned d = 0; d < 4; ++d) {
+      const Flipped g = flipped(.21f, times[d], 1500);
+      printf("  0.21 m back and forth every frame, not looked at for 1.5 s, then an event, %g ms a frame: %.4f m from the middle at most, largest step "
+             "%.4f m, %.4f m carried at most, largest speed kept from a flip not looked at %.2f m/s\n", (double)times[d], (double)g.off, (double)g.step,
+             (double)g.carried, (double)g.speed);
+      CHECK(g.speed < .01f);
+      CHECK(g.off < .16f);     /* never outside the two places by more than 0.055 m */
+      CHECK(g.carried < .27f); /* a flip and what a frame adds, not a speed run on */
+    }
+  }
+  /* What is no way back keeps its speed as before: a sprint (7 m/s, even), a dive (the eye going faster every frame), and a single step that is not undone, all with jumps not looked for. */
+  {
+    static const float times[] = {8, 16.7f, 33.3f, 50};
+    static const float dive[] = {3.5521f, 6.7848f, 7.9920f, 8}; /* the speed kept at the end by the filter of 0.6.0-feel.46 (m/s; under the measure a frame is averaged in) */
+    for (unsigned d = 0; d < 4; ++d) {
+      Run r; start(&r); float x = 0; const float dt = times[d]/1000;
+      for (int i = 0; i < 40; ++i) { x += 7*dt; frame(&r, x, 1.5f, 0, NATIVE, false, false, times[d]); }
+      CHECK(fabsf(r.c.speed[0]-7) < .01f && r.correction == 0);
+      start(&r); x = 0; float v = 0; /* 60 m/s^2 */
+      for (int i = 0; i < 12 && v < 7.5f; ++i) { v += 60*dt; x += v*dt; frame(&r, x, 1.5f, 0, NATIVE, false, false, times[d]); }
+      CHECK(fabsf(r.c.speed[0]-dive[d]) < .0005f && r.correction == 0);
+      start(&r); /* stands, steps 0.2 m once, stands: the step's speed is kept for its frame as before (the next frame is a stop) */
+      for (int i = 0; i < 5; ++i) frame(&r, 0, 1.5f, 0, NATIVE, false, false, times[d]);
+      frame(&r, .2f, 1.5f, 0, NATIVE, false, false, times[d]);
+      CHECK(fabsf(r.c.speed[0]-fminf(.2f/dt, 8)) < .01f);
     }
   }
   printf("camera continuity: %d checks, %d failed\n", checks, failed);
