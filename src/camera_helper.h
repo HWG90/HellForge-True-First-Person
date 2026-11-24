@@ -313,7 +313,7 @@ enum { TFP_CAMERA_TRACE_LOOKED = 1,  /* jumps within the camera were looked for 
  * zeros where it moved nothing. `eye` is the eye before it (what the continuity, the damping and `step` work on), so
  * the eye shown is eye + veil. Round 18 found the veil moving the shown eye up to 0.32 m forward for a frame or two at
  * most leaves of the native view, and no row said so. */
-typedef struct TfpCameraTraceRow { float ms; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; float root[3]; uint32_t what; float axes[9]; double tick; float damp[3], view[3]; float sock; uint32_t arms; float veil[3]; } TfpCameraTraceRow;
+typedef struct TfpCameraTraceRow { float ms; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; float root[3]; uint32_t what; float axes[9]; double tick; float damp[3], view[3]; float sock; uint32_t arms; float veil[3]; float turn[3]; } TfpCameraTraceRow;
 void tfp_camera_trace_edge(void);
 /* The arm drive's figures of the last primary draw, for the newest frame presented. The draw comes after the frame's
  * camera call and before the next tick, so the binder calls this once a tick, when the drive has seen a draw since the

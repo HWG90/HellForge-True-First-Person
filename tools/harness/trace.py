@@ -35,6 +35,7 @@ DRAWN = re.compile(r" sock=(-?[\d.]+) arms=(\d+)(?: eye_edge=(\d))?")
 VEIL = re.compile(r" veil=(?:\(([-\d. ]+)\)|0\b)")
 # What the head camera's eye damping added to the wanted eye (0.6.0-feel.48 on): the raw target is wanted less it.
 DAMP = re.compile(r" damp=\(([-\d. ]+)\)")
+TURN = re.compile(r" turn=\(([-\d. ]+)\)")   # round 24: the direction the frame was shown with (unit vector; zeros: not known)
 # Round 24: a float. The presented eye's offset from the raw target (the wanted eye less the damping: the head camera's
 # own eye, or the rig eye), the least it is over FLOAT_MS: a step judge (POP_M between two frames) does not see an eye
 # that drifts 0.6 m off and back at 0.04 m a frame, which is how the clambers of the user's log of 2026-11-24 floated
@@ -118,6 +119,8 @@ def frames(lines):
         row["veil"] = numbers(veil[1]) if veil and veil[1] else None
         damp = DAMP.search(line)
         row["damp"] = numbers(damp[1]) if damp else None
+        turn = TURN.search(line)
+        row["turn"] = numbers(turn[1]) if turn and any(float(x) for x in turn[1].split()) else None
         if group and row["t"] < group[-1]["t"] - 1:   # an edge without a State line: t starts again
             groups.append(group)
             group = []

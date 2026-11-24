@@ -405,6 +405,8 @@ static void entry_note(void) {
  *                written values left (arms_live_keep.txt), 3 driven in a hold or with the gun away (put back)
  *   eye_edge     1: the presented eye's step changed by 0.15 m or more in this frame; the camera helper opened this
  *                window itself, or kept it open (src/trace_edges.h)
+ *   turn         round 24: the direction the frame was shown with (the forward axis of the rotation handed to the game,
+ *                in the world; in the native view through the rig eye's axes), (0 0 0) where it was not known
  *   veil         round 19: how far the helmet veil moved the eye handed to the game in this frame, in the world
  *                (src/camera_helper.h tfp_camera_set_veil), or 0 where it moved nothing. eye_world is the eye before
  *                it, so the eye shown is eye_world + veil (round 18: up to 0.32 m forward at a leave of the native
@@ -462,7 +464,7 @@ static void trace_note(void) {
       snprintf(veil, sizeof veil, "(%.5f %.5f %.5f)", (double)r->veil[0], (double)r->veil[1], (double)r->veil[2]);
     say("Trace: t=%.1f kind=%u eye_world=(%.5f %.5f %.5f) step=%.4f wanted=(%.5f %.5f %.5f) correction=%.4f lease=0x%llx pose_armed=%d entry_ease=%.2f source=%s"
         " root=(%.5f %.5f %.5f) axes=(%.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f) looked=%d taken=%s quiet=%d tick=%.3f"
-        " off_foot=%d damped=%d damp=(%.5f %.5f %.5f) view=(%.5f %.5f %.5f) sock=%.5f arms=%u eye_edge=%d veil=%s",
+        " off_foot=%d damped=%d damp=(%.5f %.5f %.5f) view=(%.5f %.5f %.5f) sock=%.5f arms=%u eye_edge=%d veil=%s turn=(%.4f %.4f %.4f)",
         (double)r->ms, r->kind, (double)r->eye[0], (double)r->eye[1], (double)r->eye[2], (double)r->step, (double)r->wanted[0], (double)r->wanted[1],
         (double)r->wanted[2], (double)r->correction, lease, (int)(pose.armed != 0), (double)r->entry_ease, sources[r->source < 4 ? r->source : 0],
         (double)r->root[0], (double)r->root[1], (double)r->root[2], (double)r->axes[0], (double)r->axes[1], (double)r->axes[2], (double)r->axes[3],
@@ -470,7 +472,7 @@ static void trace_note(void) {
         (int)((r->what & TFP_CAMERA_TRACE_LOOKED) != 0), taken[0] ? taken + 1 : "-", (int)((r->what & TFP_CAMERA_TRACE_QUIET) != 0), r->tick,
         (int)((r->what & TFP_CAMERA_TRACE_OFF_FOOT) != 0), (int)((r->what & TFP_CAMERA_TRACE_DAMPED) != 0), (double)r->damp[0], (double)r->damp[1],
         (double)r->damp[2], (double)r->view[0], (double)r->view[1], (double)r->view[2], (double)r->sock, (unsigned)r->arms,
-        (int)((r->what & TFP_CAMERA_TRACE_SELF) != 0), veil);
+        (int)((r->what & TFP_CAMERA_TRACE_SELF) != 0), veil, (double)r->turn[0], (double)r->turn[1], (double)r->turn[2]);
   }
 }
 #endif

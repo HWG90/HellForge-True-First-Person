@@ -255,7 +255,10 @@ static _Atomic uint32_t settle_arm; static double settle_armed_at;
 #define TRACE_RING 128u
 #define TRACE_BEFORE 6u   /* frames before the edge that are written with it */
 #define TRACE_MS 500.0
-typedef struct TraceFrame { double tick; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease, root[3]; uint32_t what; float axes[9], damp[3], view[3], sock; uint32_t arms; float veil[3]; } TraceFrame;
+typedef struct TraceFrame { double tick; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease, root[3]; uint32_t what; float axes[9], damp[3], view[3], sock; uint32_t arms; float veil[3], turn[3]; } TraceFrame;
+/* Round 24, the log only: the native view's parent (the rig eye's axis rows) in the frame being presented, for the
+ * direction shown (lock_rotation: the argument there is parent-local). trace_parent_tick: whose frame; policy lock. */
+static float trace_parent[9]; static double trace_parent_tick = -1;
 /* What the eye damping did in the frame being presented, for its trace row (lock_damp_eye writes, smooth_present
  * reads and clears): what it added to the eye in the world, whether it ran, and whether the body was off foot. That
  * last is asked only in a head-camera frame (on_foot()): Policy.lock_off_foot in a native frame is the answer of the
@@ -988,6 +991,17 @@ static void lock_rotation(Policy *p, const float *native, uint32_t kind, double 
   const TfpQ out = tfp_kick_apply(kind == 6 ? given : view, kick);
   lock_last_kick = kick;
   if (tfp_q_valid(out)) memcpy(argument, &out, 16);
+  /* Round 24, the log only: the direction the frame is shown with (the rotation handed to the game, its forward axis in
+   * the world; in the native view the argument is the rig eye's local one), on this frame's Trace row. The diagnosis
+   * suspects a turn of 27 to 96 degrees in one frame at the hand-off to and from the head camera; nothing said it. */
+  if (atomic_load_explicit(&trace_on, memory_order_relaxed) && trace.head && tfp_q_valid(out)) {
+    TraceFrame *row = &trace.frames[(trace.head-1) % TRACE_RING];
+    const float ahead[3] = {0, 1, 0}; float local[3] = {0, 0, 0};
+    tfp_q_rotate(out, ahead, local);
+    if (row->tick == tick && kind != 6) memcpy(row->turn, local, 12);
+    else if (row->tick == tick && trace_parent_tick == tick) for (unsigned k = 0; k < 3; ++k) {
+      row->turn[k] = 0; for (unsigned a = 0; a < 3; ++a) row->turn[k] += local[a]*trace_parent[a*3+k]; }
+  }
 }
 
 /* A head-camera frame the lock held was presented: the body's state for the "Lock:" and "Dead:" lines, and for
@@ -1098,6 +1112,7 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
     row->entry_ease = p->entry.ease.active && p->entry.ease.duration > 0 ? (float)fmin(1.0, fmax(0.0, (tick-p->entry.ease.started)/p->entry.ease.duration)) : 1;
     row->sock = 0; row->arms = 0; /* tfp_camera_trace_draw says them, after this frame's draw */
     memset(row->veil, 0, sizeof row->veil); /* the setter says it, after the veil (round 19) */
+    memset(row->turn, 0, sizeof row->turn); /* lock_rotation says it, after the rotation is final (round 24) */
     if (trace.head-trace.sent > TRACE_RING) trace.sent = trace.head-TRACE_RING;
     /* The log only: the eye opens a window itself where its step changes by TFP_TRACE_SELF_M or more
      * (src/trace_edges.h: a melee has no State line and no change of action). In an open window the time goes on and
@@ -1180,6 +1195,7 @@ static bool smooth_native(Policy *p, const NativeSample *sample, const float *gi
   for (unsigned component = 0; component < 3; ++component) { wanted[component] = position[component];
     for (unsigned axis = 0; axis < 3; ++axis) wanted[component] += local[axis]*parent_basis[axis*3+component]; }
   if (finite3(parent_basis + 3)) memcpy(trace_damp.view, parent_basis + 3, 12); /* the rig eye's forward axis: for the trace only */
+  memcpy(trace_parent, parent_basis, 36); trace_parent_tick = tick; /* round 24: the direction shown, for the trace only */
   if (!finite3(wanted) || !smooth_present(p, kind, source, root + 12, root_basis, wanted, NULL, tick, shown)) return false;
   float moved[3] = {0};
   for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
@@ -1935,7 +1951,7 @@ uint32_t tfp_camera_trace_read(TfpCameraTraceRow *rows, uint32_t capacity) {
     row->step = frame->step; row->correction = frame->correction; row->entry_ease = frame->entry_ease;
     memcpy(row->root, frame->root, 12); memcpy(row->axes, frame->axes, 36); row->what = frame->what; row->tick = frame->tick;
     memcpy(row->damp, frame->damp, 12); memcpy(row->view, frame->view, 12); row->sock = frame->sock; row->arms = frame->arms;
-    memcpy(row->veil, frame->veil, 12);
+    memcpy(row->veil, frame->veil, 12); memcpy(row->turn, frame->turn, 12);
   }
   policy_release();
   return count;

@@ -1189,11 +1189,14 @@ int main() {
     static const float times[] = {8, 16.7f, 33.3f, 50};
     for (unsigned d = 0; d < 4; ++d) for (int bodycam = 0; bodycam < 2; ++bodycam) {
       const double dt = times[d];
-      fresh(true, true, false, bodycam ? 180.0f : 0.0f, bodycam != 0);
+      fresh(true, true, true, bodycam ? 180.0f : 0.0f, bodycam != 0);
       tfp_camera_set_action_tuning(0x22, 900, true); // the binder's: the head camera takes the clamber's mask
       Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.native(); g.begin();
       standing(g, static_cast<int>(500 / dt), dt, true);
       tfp_camera_continuity_event(); // "hold ended: the gun has left the hands"
+      { TfpCameraTraceRow drop[128]; while (tfp_camera_trace_read(drop, 128)) {} }
+      tfp_camera_trace_edge();
+      unsigned turned = 0, rows_read = 0; float worst_turn = 0;
       float climbing = 0, after = 0, risen = 0; double t = 0;
       const float c = std::cos(.2f), n = std::sin(.2f);
       for (; t < 1.3; t += dt / 1000) {
@@ -1206,6 +1209,14 @@ int main() {
         const uint32_t mask = t < .15 ? 0x22u : t < .55 ? 0x20u : 2u; // the gun drawn in the stand-up, as at 20:28:14
         if (t < .9) g.hip(mask); else g.native(0);
         g.frame(dt);
+        { TfpCameraTraceRow rows[128]; // round 24: every head-camera row says the direction shown, a unit vector along the look (yaw 0.2, level)
+          for (uint32_t i = 0, count = tfp_camera_trace_read(rows, 128); i < count; ++i) {
+            if (rows[i].kind != 4) continue; // the fake's native argument is not a rig-local direction
+            ++rows_read;
+            const float *v = rows[i].turn, length = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+            if (length > .99f && length < 1.01f) ++turned;
+            worst_turn = std::fmax(worst_turn, std::sqrt((v[0] + n) * (v[0] + n) + (v[1] - c) * (v[1] - c) + v[2] * v[2]));
+          } }
         if (t < .9) {
           climbing = std::fmax(climbing, g.from_head_eye());
           if (t >= .4) after = std::fmax(after, g.from_head_eye());
@@ -1217,6 +1228,8 @@ int main() {
                   bodycam ? "Bodycam" : "Stable", dt, climbing, after, risen, g.world_change);
       CHECK(climbing <= .25f);
       CHECK(after <= .10f);
+      if (!(rows_read > 0 && turned == rows_read && worst_turn < .01f)) std::printf("  turn: %u rows, %u unit, %.4f off\n", rows_read, turned, worst_turn);
+      CHECK(rows_read > 0 && turned == rows_read && worst_turn < .01f);
       CHECK(tfp_camera_error() == 0);
       g.end();
       tfp_camera_set_action_tuning(0, 300, false); // the defaults again for what runs after
