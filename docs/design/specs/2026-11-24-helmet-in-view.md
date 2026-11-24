@@ -360,11 +360,13 @@ in round 19; the log now says it:
   frame` (or `opens at the tick that sees the leave (veil_second.txt)`). Neither field makes a line by itself.
 - **The judges** (`tools/harness/matrix.py measure`, so `soak.py` and `matrix.py` alike) measure the shown eye. A frame
   over the limit with a veiled frame among its three, whose eye before the veil is under it, is **the veil's**: listed
-  as such with `veil 0.320` on its line, and counted apart (`...; 0 the filter's; 3 the veil's`). Where the eye before
-  the veil is over the limit as well, it stays the eye's own or the filter's, judged on that eye. Rows without `veil=`
-  (every log before round 19) and rows with `veil=0` are judged exactly as before: soaks 8 to 30 give the same replay
-  output as on main, and the same judge output but for the added `0 the veil's` (`~/.cache/tfp-round19/before` and
-  `after`).
+  as such with `veil 0.320` on its line, and counted apart. Where the eye before the veil is over the limit as well, it
+  stays the eye's own or the filter's, judged on that eye. The veil's frames do not set "largest", fail a matrix phase
+  or flag a soak action: `largest_jump_m` is the eye's own (measured without the veil's move) and `largest_veil_m` the
+  veil's, printed beside it (`jump 0.012 m ... (veil 0.320 not counted)`; soak: `...; 0 the filter's), largest
+  0.041 m; 3 the veil's, largest 0.320 m, not counted; ...`). A soak has some 70 leaves, and each would otherwise have
+  marked its window bad and read 0.32 m as the run's largest. Rows without `veil=` (every log before round 19) and rows
+  with `veil=0` are judged exactly as before (the same pass, largest and whose).
 - `tools/harness/replay.py` reads `veil=` into `row["veil"]` and uses nothing of it: it replays the filter, which
   never saw the veil.
 
@@ -376,11 +378,22 @@ with the body still hidden, the frame with the body after it) that moves only th
 frame of 0.32 m forward and back instead of two. With the file `veil_second.txt` beside the DLL
 (`tfp_camera_set_veil_second`):
 
-- the hook only notes the leave; the next tick opens the veil if it is still armed and did not itself find the body
-  drawn again and switch it off; the tick after that closes it whatever it found. A leave is taken by one tick.
+- the hook only notes the leave; the next tick opens the veil if it did not itself find the body drawn again and
+  switch it off; the tick after that closes it whatever it found, unless it saw another leave. A leave is taken by
+  one tick; switching the veil off and the helper's begin and end drop a noted one.
 - In the other order (the tick before the first head-camera frame; not seen in soak 27) that frame is the one with the
   body, and it is not moved.
 - The log says it once at the start (`Test: veil_second.txt: ...`) and on every `Head:` line.
+
+### A second leave while the veil is open
+
+A leave that goes straight back to the native view within a tick and leaves again (soak 27 had three) is a second
+leave while the veil is open. The tick that sees it keeps the veil open, counted as the first of two ticks again
+(unless it found the body drawn again and switched it off), so the frame the game draws that leave's body in is veiled
+too, and the veil closes at the tick after; the leave is counted in `leaves`. Both ways of opening take it the same way.
+Before, with `veil_second.txt`, the open veil closed at that tick and left the leave noted, so the next tick opened it
+again a tick late and moved the frame after it 0.31 m for a whole tick; and by default a second leave did not extend
+the veil, so its body frame was drawn unveiled (on main as well).
 
 ### What only the game can show
 
