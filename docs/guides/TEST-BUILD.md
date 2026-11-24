@@ -5,8 +5,6 @@ hear what breaks.
 
 ## Install
 
-Take the **complete** ZIP unless you already run DBF-MCM and NEST for HellForge.
-
 1. Close the game and the HellForge launcher.
 2. Unpack the ZIP into HellForge's `mods` folder. It adds three folders:
    - `true-first-person`: the mod.
@@ -19,7 +17,7 @@ Take the **complete** ZIP unless you already run DBF-MCM and NEST for HellForge.
 4. Start HellForge and check that all three are switched on in the mod list.
 
 If you already have `mcm` or `overlay-host`, keep yours when they are newer and take only
-`true-first-person` (or the smaller `-test.zip`, which holds just the mod). Without DBF-MCM the mod opens its
+`true-first-person` from the ZIP. Without DBF-MCM the mod opens its
 own panel with the same pages instead.
 
 ## Use

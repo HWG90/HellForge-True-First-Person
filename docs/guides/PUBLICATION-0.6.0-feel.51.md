@@ -40,3 +40,8 @@
   depth, remove the older test mod's MCM page, the complete ZIP's contents, feel.51 link):
   https://discord.com/channels/1555635878775361606/1574781605258469456
   Nothing posted elsewhere (no Nexus or HellForge listing).
+- Later on 2026-11-24 the user asked for "only one zip" after a player in the Discord thread asked which of the
+  two was the right one. The `-test.zip` asset was deleted from the release; only the complete ZIP (sha256 above,
+  unchanged) is left. The release text, the playtest issue and `TEST-BUILD.md` no longer mention a second ZIP. The
+  `README-TEST.md` inside the complete ZIP still names the `-test.zip` once (the ZIP was left byte for byte as
+  published). From now on a release has one ZIP.
