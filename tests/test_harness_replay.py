@@ -54,6 +54,20 @@ class NewFields(unittest.TestCase):
         import matrix
         self.assertEqual(matrix.measure(old), matrix.measure(new))   # the judge's figures do not depend on them
 
+    def test_a_line_with_the_veil_reads_the_same(self):
+        # Round 19: veil= follows eye_edge=. The filter was given the eye before the veil, which is eye_world: that is
+        # what is replayed; the move is read beside it.
+        axes = (1, 0, 0, 0, 1, 0, 0, 0, 1)
+        before = [line(33 * i, 33.0 * i, 4, (0.01 * i, 1, 2), (0.01 * i, 1, 2.1), 0.1, axes=axes, source="head",
+                       tail=" quiet=0 tick=%.3f off_foot=0 damped=1 damp=(0.00000 0.00000 0.00000) view=(0.00000 1.00000 0.00000) sock=0.00000 arms=0 eye_edge=0"
+                       % (5000 + 33.0 * i)) for i in range(4)]
+        longer = [text + (" veil=(0.00000 0.32000 0.00000)" if i in (1, 2) else " veil=0") for i, text in enumerate(before)]
+        strip = lambda rows: [{k: v for k, v in row.items() if k != "veil"} for row in rows]
+        self.assertEqual(strip(replay.read(before)), strip(replay.read(longer)))
+        self.assertEqual(strip(replay.frames(before)), strip(replay.frames(longer)))
+        self.assertEqual([row["veil"] for row in replay.read(before)], [None] * 4)
+        self.assertEqual([row["veil"] for row in replay.read(longer)], [None, [0.0, 0.32, 0.0], [0.0, 0.32, 0.0], None])
+
 
 class Frames(unittest.TestCase):
     def test_lines_with_and_without_the_axes(self):

@@ -405,6 +405,10 @@ static void entry_note(void) {
  *                written values left (arms_live_keep.txt), 3 driven in a hold or with the gun away (put back)
  *   eye_edge     1: the presented eye's step changed by 0.15 m or more in this frame; the camera helper opened this
  *                window itself, or kept it open (src/trace_edges.h)
+ *   veil         round 19: how far the helmet veil moved the eye handed to the game in this frame, in the world
+ *                (src/camera_helper.h tfp_camera_set_veil), or 0 where it moved nothing. eye_world is the eye before
+ *                it, so the eye shown is eye_world + veil (round 18: up to 0.32 m forward at a leave of the native
+ *                view, which no row said)
  * A window is also opened when the body's action changes (src/trace_edges.h); such a window has no State line before
  * it, and "t=" starts again in it. So does one the eye opens itself (eye_edge), unless a window was open. */
 static void trace_note(void) {
@@ -447,9 +451,12 @@ static void trace_note(void) {
     snprintf(taken, sizeof taken, "%s%s%s%s%s", r->what & TFP_CAMERA_TRACE_JUMP ? "+jump" : "", r->what & TFP_CAMERA_TRACE_EDGE ? "+edge" : "",
              r->what & TFP_CAMERA_TRACE_ROOT ? "+root" : "", r->what & TFP_CAMERA_TRACE_RESTART ? "+restart" : "",
              r->what & TFP_CAMERA_TRACE_START ? "+start" : "");
+    char veil[64] = "0";
+    if (r->veil[0] != 0 || r->veil[1] != 0 || r->veil[2] != 0)
+      snprintf(veil, sizeof veil, "(%.5f %.5f %.5f)", (double)r->veil[0], (double)r->veil[1], (double)r->veil[2]);
     say("Trace: t=%.1f kind=%u eye_world=(%.5f %.5f %.5f) step=%.4f wanted=(%.5f %.5f %.5f) correction=%.4f lease=0x%llx pose_armed=%d entry_ease=%.2f source=%s"
         " root=(%.5f %.5f %.5f) axes=(%.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f) looked=%d taken=%s quiet=%d tick=%.3f"
-        " off_foot=%d damped=%d damp=(%.5f %.5f %.5f) view=(%.5f %.5f %.5f) sock=%.5f arms=%u eye_edge=%d",
+        " off_foot=%d damped=%d damp=(%.5f %.5f %.5f) view=(%.5f %.5f %.5f) sock=%.5f arms=%u eye_edge=%d veil=%s",
         (double)r->ms, r->kind, (double)r->eye[0], (double)r->eye[1], (double)r->eye[2], (double)r->step, (double)r->wanted[0], (double)r->wanted[1],
         (double)r->wanted[2], (double)r->correction, lease, (int)(pose.armed != 0), (double)r->entry_ease, sources[r->source < 4 ? r->source : 0],
         (double)r->root[0], (double)r->root[1], (double)r->root[2], (double)r->axes[0], (double)r->axes[1], (double)r->axes[2], (double)r->axes[3],
@@ -457,7 +464,7 @@ static void trace_note(void) {
         (int)((r->what & TFP_CAMERA_TRACE_LOOKED) != 0), taken[0] ? taken + 1 : "-", (int)((r->what & TFP_CAMERA_TRACE_QUIET) != 0), r->tick,
         (int)((r->what & TFP_CAMERA_TRACE_OFF_FOOT) != 0), (int)((r->what & TFP_CAMERA_TRACE_DAMPED) != 0), (double)r->damp[0], (double)r->damp[1],
         (double)r->damp[2], (double)r->view[0], (double)r->view[1], (double)r->view[2], (double)r->sock, (unsigned)r->arms,
-        (int)((r->what & TFP_CAMERA_TRACE_SELF) != 0));
+        (int)((r->what & TFP_CAMERA_TRACE_SELF) != 0), veil);
   }
 }
 #endif
@@ -528,6 +535,7 @@ static void head_note(void) {
   TfpCameraVeilStats veil;
   tfp_camera_veil_stats(&veil);
   tick.veil_leaves = veil.leaves, tick.veil_frames = veil.frames, tick.veil_moved = veil.moved, tick.veil_behind = veil.behind;
+  tick.veil_largest_m = veil.largest_m, tick.veil_second = veil.second; /* round 19 */
   if (tfp_head_log_step(&seen, &tick, text, sizeof text)) say("%s", text);
 }
 #endif
@@ -800,6 +808,13 @@ static void start(void) {
         FILE *steady_file = fopen(parts_path, "r");
         if (steady_file) fclose(steady_file);
         depth_steady_off = steady_file != NULL;
+        /* Round 19: the helmet veil opens at the tick that sees a leave of the native view, not at the first head-camera
+         * frame (src/camera_helper.h tfp_camera_set_veil_second). The "Head:" line says which way it opens. */
+        strcpy(slash + 1, "veil_second.txt");
+        FILE *veil_file = fopen(parts_path, "r");
+        if (veil_file) fclose(veil_file);
+        tfp_camera_set_veil_second(veil_file != NULL);
+        if (veil_file) say("Test: veil_second.txt: the helmet veil opens at the tick that sees a leave of the native view, so only the frame that draws the body is moved");
         /* The overrides of the three live features (src/wire_options.h): for testing only. */
         static const struct { const char *name; TfpFeature feature; bool on; } forced[] = {
           {"arms_live.txt", TFP_FEATURE_ARMS, true}, {"arms_off.txt", TFP_FEATURE_ARMS, false},

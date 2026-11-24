@@ -47,6 +47,10 @@ What this leaves out:
    replay from nothing, and its second row cannot be a jump in the replay as it can in the game.
  - What a line carries after "tick=" (off_foot, damped, damp, view; from round 13 sock, arms, eye_edge) is not read
    here: the filter was not given it. tools/harness/trace.py reads it for the judge.
+ - The helmet veil (round 19: "veil=", the last field) moves the eye handed to the game after the filter, in a frame
+   or two at a leave of the native view. It is read into row["veil"] (None where it moved nothing or the line does
+   not say), and nothing here uses it: eye_world is the filter's own eye, before the veil, and that is what is
+   replayed and judged. tools/harness/matrix.py judges the eye shown, eye + veil.
  - A row's time is its "tick=" where the line has one (0.6.0-feel.41 on). Before that it is "t=", to 0.1 ms and from
    the window's edge, and the edge is placed by the line's own stamp (to 1 ms, and written up to a frame late): the
    time between the last row of one window and the first of the next can be a millisecond or two off.
@@ -79,6 +83,7 @@ CARRY_M = 0.05   # a correction over this, carried on after a change of camera, 
 TRACE = re.compile(r"^(\d+):(\d+):(\d+)\.(\d+) Trace: t=(-?[\d.]+) kind=(\d+) eye_world=\(([-\d. ]+)\) step=[-\d.]+ wanted=\(([-\d. ]+)\) "
                    r"correction=([-\d.]+).*?source=(\S+) root=\(([-\d. ]+)\)(?: axes=\(([-\d. ]+)\))? looked=(\d) taken=(\S+)"
                    r"(?: quiet=(\d))?(?: tick=([\d.]+))?")
+VEIL = re.compile(r" veil=\(([-\d. ]+)\)")
 SOURCES = {"head": 1, "native": 2, "repeat": 2}
 TAKEN = ((1, "jump"), (2, "edge"), (4, "root"), (8, "restart"))
 
@@ -100,6 +105,8 @@ def read(lines):
                "wanted": [float(x) for x in m[8].split()], "carried": float(m[9]), "source": m[10],
                "root": [float(x) for x in m[11].split()], "axes": [float(x) for x in m[12].split()] if m[12] else None,
                "looked": int(m[13]), "taken": m[14], "quiet": int(m[15] or 0), "clock": float(m[16]) if m[16] else None, "at": line[:12]}
+        veil = VEIL.search(line)
+        row["veil"] = [float(x) for x in veil[1].split()] if veil else None
         if window and row["t"] < window[-1]["t"] - 1:  # an edge without a State line (the orphaned view): t starts again
             windows.append(window)
             window = []
