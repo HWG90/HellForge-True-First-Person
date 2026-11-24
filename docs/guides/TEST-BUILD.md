@@ -1,4 +1,4 @@
-# True First Person for HellForge: test build 0.6.0-feel.50
+# True First Person for HellForge: test build 0.6.0-feel.51
 
 For HellForge on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
@@ -46,6 +46,36 @@ To get the old behaviour back: tick **Bodycam**. Your slider values are still th
 
 Tested in the game: ten actions in each style (Stable: no kick at all; Bodycam: 2.4 to 5.8 degrees); I have not played it yet.
 
+## Fixed in 0.6.0-feel.51
+
+- **Your own helmet no longer fills the view** for a moment at a weapon swap or a grenade throw. When the
+  view hands over to the head camera, the game draws your body again for a frame or two before the mod
+  hides it; the view now steps in front of the head for those frames.
+- **Aiming down sights is steady.** The zoom no longer breathes in and out while you aim. The game sets the
+  field of view twice a frame and the two were pulling against each other.
+- **The settings menu shows everything.** With DBF-MCM installed, every option is on its "True First Person"
+  page: First person, Bob and sway, and Locked view (camera style, field of view and zoom when aiming, view
+  kick, camera damping, animated arms, weapon put-away, smooth eye). F10 opens it. Without DBF-MCM, F10 opens
+  the mod's own panel with the same pages. Camera style is now a choice of Stable or Bodycam, and the
+  Bodycam-only sliders are greyed out in Stable. "Fird Person Arms" is now spelled right.
+- **The placement editor rotates.** Right-drag turns the weapon (yaw and pitch), middle-drag rolls it, live,
+  and it is saved with the placement. While the editor is open, bob and sway pause.
+- **Page Up and Page Down no longer change depth in the placement editor.** Use the mouse wheel. Page Up
+  still opens and closes the editor.
+- If you used my older experimental "True First Person" page in MCM: that came from a separate test mod, not
+  this one. Remove it; this build has its own page.
+- **Checked in the game (2026-11-24, solo missions):** the same runs of random actions as for feel.50, in
+  both camera styles, and the 35-phase check. No crash. The helmet was moved clear at all 66 swaps and throws
+  in Stable; in Bodycam 3 frames in a whole session still caught it.
+
+**Known issues in this build:**
+- Sprinting or diving straight out of an emote can jump the view 0.2 to 0.6 m for a frame. feel.50 has this
+  too.
+- About a second after the hands go empty at a swap, grenade or stratagem, the view can step about 0.15 m as
+  it settles back.
+- At a swap, throw or stratagem the view moves forward for one or two frames (up to about 0.3 m) instead of
+  showing the inside of the helmet. I have not measured how visible that is yet; tell me if you notice it.
+
 ## Fixed in 0.6.0-feel.50
 
 - **The view no longer lurches when the arms move.** The game places the first-person view by where the rig
@@ -58,8 +88,8 @@ Tested in the game: ten actions in each style (Stable: no kick at all; Bodycam: 
   crash.
 - The gun can now sit a little nearer or farther than before in the middle of an action, because the view no
   longer moves to hide it. At rest it is where it was.
-- **Not fixed, and you will see it:** for a moment after a grenade throw begins, and sometimes at a weapon
-  swap, the back of your own helmet fills the view. It is being worked on.
+- (Fixed in feel.51:) for a moment after a grenade throw begins, and sometimes at a weapon swap, the back of
+  your own helmet filled the view.
 - **Not fixed:** a backward dive still throws the view (up to 0.6 m in one frame); smaller jumps remain in
   dives, vaults, going prone and reloads (0.06 to 0.14 m).
 - For testing: `arms_live_keep.txt` beside the DLL brings the old behaviour back.
