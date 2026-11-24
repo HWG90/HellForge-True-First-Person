@@ -294,6 +294,130 @@ class Measure(unittest.TestCase):
         self.assertEqual(matrix.describe(result), "not traced")
 
 
+def viewed(ms, eye, view, **more):
+    """A Trace line as 0.6.0-feel.49 on writes it: with which way the view pointed."""
+    return full(ms, eye, **more) + f" off_foot=0 damped=0 damp=(0.00000 0.00000 0.00000) view=({view[0]:.5f} {view[1]:.5f} {view[2]:.5f})"
+
+
+class AlongTheView(unittest.TestCase):
+    """Round 13: the judge says how much of a flagged change lies along view= and how much across it. Printed with the
+    frame; nothing is excused for it. The melee of 10:17:00 in the Stable soak of 2026-11-24: the body still, the view
+    15.5 degrees up, the eye -0.254, -0.170, 0, 0, +0.711, +0.277 m along the view in six frames at 33.3 ms."""
+    VIEW = (0.0, 0.96363, 0.26724)
+    MELEE = (-0.254, -0.170, 0.0, 0.0, 0.711, 0.277)
+
+    def lines(self, steps, way, dt=33.3, carried=0.0, view=True):
+        out, place = ["19:00:00.000 State: swap", HELD], [0.0, 1.0, 2.0]
+        for i, step in enumerate([0.0, 0.0] + list(steps) + [0.0, 0.0]):
+            place = [p + step * w for p, w in zip(place, way)]
+            wanted = [p + carried * w for p, w in zip(place, way)]
+            out.append(viewed(dt * i, place, self.VIEW, wanted=wanted, carried=carried, looked=0) if view else full(dt * i, place, wanted=wanted, carried=carried, looked=0))
+        return out
+
+    def test_the_melee_is_flagged_and_named_along_the_view_at_every_frame_time(self):
+        for dt in (8.0, 16.7, 33.3, 50.0):
+            steps = [s * dt / 33.3 * (4.0 if dt < 10 else 1.0) for s in self.MELEE]   # at 8 ms the same speeds are under the limit: four times as fast
+            result = matrix.judge(self.lines(steps, self.VIEW, dt))
+            self.assertFalse(result["pass"], dt)
+            pops = result["pops"]
+            self.assertTrue(pops, dt)
+            for p in pops:
+                self.assertEqual(p["whose"], "own")
+                self.assertAlmostEqual(p["along"], p["beyond"], places=3)
+                self.assertLess(p["across"], 0.01)
+            text = matrix.pop_lines(result)
+            self.assertTrue(all("the eye's own, along the view" in t and "(along the view " in t and ", across 0.00" in t for t in text), text)
+            self.assertEqual(matrix.whose_counts(pops)["along"], len(pops))
+
+    def test_the_same_sideways_is_flagged_and_not_so_named(self):
+        side = (1.0, 0.0, 0.0)
+        result = matrix.judge(self.lines(self.MELEE, side))
+        self.assertFalse(result["pass"])
+        for p in result["pops"]:
+            self.assertLess(p["along"], 0.01)
+            self.assertAlmostEqual(p["across"], p["beyond"], places=3)
+        text = matrix.pop_lines(result)
+        self.assertTrue(all("the eye's own (nothing carried)" in t and "along the view 0.00" in t for t in text), text)
+        self.assertEqual(matrix.whose_counts(result["pops"])["along"], 0)
+
+    def test_with_something_carried_it_is_the_filters_as_before(self):
+        result = matrix.judge(self.lines(self.MELEE, self.VIEW, carried=0.05))
+        self.assertTrue(result["pops"])
+        self.assertTrue(all(p["whose"] == "filter" for p in result["pops"]))
+        self.assertTrue(all("the filter's" in t and "(along the view " in t for t in matrix.pop_lines(result)))
+        counts = matrix.whose_counts(result["pops"])
+        self.assertEqual((counts["filter"], counts["own"]), (len(result["pops"]), 0))
+
+    def test_without_view_the_line_is_as_it_was(self):
+        result = matrix.judge(self.lines(self.MELEE, self.VIEW, view=False))
+        self.assertTrue(result["pops"])
+        for p, text in zip(result["pops"], matrix.pop_lines(result)):
+            self.assertIsNone(p["along"])
+            self.assertNotIn("along", text)
+            self.assertTrue(text.endswith(f"beyond the body {p['beyond']:.3f}: the eye's own (nothing carried)"), text)
+
+    def test_the_figures_judged_are_the_same_with_and_without_view(self):
+        with_view, without = matrix.judge(self.lines(self.MELEE, self.VIEW)), matrix.judge(self.lines(self.MELEE, self.VIEW, view=False))
+        keep = lambda r: [(p["tick"], round(p["shown"], 6), round(p["beyond"], 6), p["whose"]) for p in r["pops"]]
+        self.assertEqual(keep(with_view), keep(without))
+        self.assertEqual(with_view["largest_jump_m"], without["largest_jump_m"])
+
+    def test_the_bodys_lunge_is_taken_off_before_the_split(self):
+        # the root lunges 0.1 m sideways and the eye goes with it and 0.04 m along the view besides: what is split is the 0.04
+        lines = ["19:00:00.000 State: swap", HELD]
+        eye, root = [0.0, 1.0, 2.0], [0.0, 0.0, 0.0]
+        for i, (side, along) in enumerate([(0, 0), (0, 0), (0, 0), (0.1, 0.04), (0.1, 0.04), (0.1, 0.04)]):
+            root = [root[0] + side, root[1], root[2]]
+            eye = [eye[0] + side, eye[1] + along * self.VIEW[1], eye[2] + along * self.VIEW[2]]
+            lines.append(viewed(33.3 * i, eye, self.VIEW, root=root, looked=0))
+        pops = matrix.judge(lines)["pops"]
+        first = pops[0]
+        self.assertEqual(first["whose"], "body")
+        self.assertAlmostEqual(first["beyond"], 0.04, places=3)
+        self.assertAlmostEqual(first["along"], 0.04, places=3)
+        self.assertLess(first["across"], 0.001)
+        self.assertIn("beyond the body 0.040 (along the view 0.040, across 0.000): the body's own, not counted", matrix.pop_lines({"pops": pops})[0])
+
+
+class CameraStyle(unittest.TestCase):
+    """Round 13: the style a soak ran in is the log's ("Camera style:" lines), never a file's name. The two feel.49
+    soaks of 2026-11-24 were named the wrong way round."""
+    LOG = ["10:01:21.333 Camera style: Bodycam (the view moves with the head: the kick sliders and camera damping apply)",
+           "10:02:38.000 State: entered the native view", HELD,
+           "10:19:44.016 Saved: locked view options",
+           "10:19:44.878 Camera style: Stable (no view kick on foot; a thrown body sways the view at half the thrown strength)",
+           "10:19:51.000 State: swap"]
+
+    def test_the_style_in_force_is_the_last_line_before(self):
+        self.assertEqual(matrix.camera_styles(self.LOG), [("10:01:21.333", "Bodycam"), ("10:19:44.878", "Stable")])
+        self.assertEqual(matrix.style_in_force(self.LOG[:3]), "Bodycam")
+        self.assertEqual(matrix.style_in_force(self.LOG), "Stable")
+        self.assertIsNone(matrix.style_in_force(self.LOG[1:3]))
+
+    def test_the_header_and_a_change_inside_a_run(self):
+        self.assertEqual(matrix.style_header(self.LOG[:3]), "camera style: Bodycam (the log's line of 10:01:21.333)")
+        self.assertEqual(matrix.style_header([HELD]), "camera style: not in the log (a build before the camera styles, or the log's start is missing)")
+        self.assertEqual(matrix.style_changes(self.LOG[3:]), ["camera style from here: Stable (the log's line of 10:19:44.878)"])
+        self.assertEqual(matrix.style_changes(self.LOG[1:3]), [])
+
+    def test_the_summary_names_every_style_the_run_had(self):
+        self.assertEqual(matrix.style_summary("Bodycam", self.LOG[1:3]), "camera style: Bodycam throughout")
+        self.assertEqual(matrix.style_summary("Bodycam", self.LOG[1:]), "camera style: Bodycam, then Stable from 10:19:44.878: NOT ONE STYLE, judge the stretches apart")
+        self.assertEqual(matrix.style_summary(None, self.LOG[1:3]), "camera style: not in the log")
+        self.assertEqual(matrix.style_summary("Stable", ["11:00:00.000 Camera style: Stable (again)"]), "camera style: Stable throughout")
+
+    def test_a_whole_log_is_judged_style_by_style(self):
+        import soak
+        eyes = path([0.0, 0.0, 0.1, 0.1, 0.0, 0.0])
+        def stretch(second, style):
+            out = [f"19:00:{second:02d}.000 Camera style: {style} (words)", HELD]
+            return out + [viewed(1000.0 * second + 33.0 * i, (0.0, 1.0 + x, 2.0), (0.0, 1.0, 0.0), looked=0) for i, x in enumerate(eyes)]
+        text = soak.judge_log(stretch(1, "Bodycam") + stretch(5, "Stable") + [viewed(9000.0, (5.0, 1.0, 2.0), (0.0, 1.0, 0.0))])
+        self.assertEqual(text[0], "camera style: Bodycam (the log's line of 19:00:01.000), 30 frames held, 0 missed: 2 frames flagged (2 the eye's own, 2 of them along the view; 0 the filter's), largest 0.100 m; 0 the body's own, not counted")
+        self.assertEqual(text[1], "camera style: Stable (the log's line of 19:00:05.000), 30 frames held, 0 missed: 2 frames flagged (2 the eye's own, 2 of them along the view; 0 the filter's), largest 0.100 m; 0 the body's own, not counted")
+        self.assertEqual(len(text), 2)
+
+
 class SeenInTheGame(unittest.TestCase):
     """Two stretches of the Stable soak of 2026-11-24 on 0.6.0-feel.48 (~/.cache/tfp-soak-24.modlog)."""
 

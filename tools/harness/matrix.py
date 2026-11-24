@@ -9,6 +9,10 @@ A phase passes when the mod logged no frame of the view that was not first perso
 of the phase), the largest camera jump it logged is under LIMIT_M, and nothing was refused. The result is printed
 and written to OUT_DIR/matrix.json; one capture per phase goes beside it. A pass says the camera stayed first
 person and did not jump; it does not say the picture looks right: look at the captures.
+
+The camera style the run was in (Bodycam or Stable) is read from the log's own "Camera style:" lines and printed at
+the top, where it changes, and in the summary; each phase's result carries it. It is never taken from an argument or a
+file name: the two feel.49 soaks of 2026-11-24 were named the wrong way round.
 """
 import json
 import re
@@ -60,6 +64,7 @@ PHASES = {
 }
 LOCK = re.compile(r"Lock: \+(\d+) frames held \(\+(\d+) in another camera, kind now (\d+)\), \+(\d+) missed \(kind (\d+), helper error (\d+)\), largest kick ([\d.]+)")
 CUT = re.compile(r"Cut: largest camera jump ([\d.]+) m")
+STYLE = re.compile(r"^(\d+:\d+:\d+\.\d+) Camera style: (\w+)")
 POP_M = 0.06   # the presented eye's step may change by this much between two frames (30 a second in the harness)
 
 
@@ -80,6 +85,59 @@ def _length(v):
     return sum(x * x for x in v) ** 0.5
 
 
+def camera_styles(lines):
+    """Every "Camera style:" line of `lines`: (its stamp, the style). The mod writes one at the start and at every change."""
+    return [(m[1], m[2]) for m in map(STYLE.match, lines) if m]
+
+
+def style_in_force(lines):
+    """The style after the last of `lines`, or None where they say none."""
+    found = camera_styles(lines)
+    return found[-1][1] if found else None
+
+
+def style_header(lines):
+    """The first line of a run's output, from the log up to where the run begins."""
+    found = camera_styles(lines)
+    if not found:
+        return "camera style: not in the log (a build before the camera styles, or the log's start is missing)"
+    return f"camera style: {found[-1][1]} (the log's line of {found[-1][0]})"
+
+
+def style_changes(lines):
+    """One line for every "Camera style:" line inside a stretch of a run."""
+    return [f"camera style from here: {style} (the log's line of {stamp})" for stamp, style in camera_styles(lines)]
+
+
+def style_summary(start, lines):
+    """The summary's line: the style at the run's start (None: not known) and every other style its log has."""
+    names = [(None, start)] if start else []
+    for stamp, style in camera_styles(lines):
+        if not names or names[-1][1] != style:
+            names.append((stamp, style))
+    if not names:
+        return "camera style: not in the log"
+    if len(names) == 1:
+        return f"camera style: {names[0][1]} throughout" if names[0][0] is None else f"camera style: {names[0][1]} from {names[0][0]} (not in the log before)"
+    text = ", then ".join(style if stamp is None else f"{style} from {stamp}" for stamp, style in names)
+    return f"camera style: {text}: NOT ONE STYLE, judge the stretches apart"
+
+
+def whose_counts(pops):
+    """How many of the listed frames are whose: own, filter, body; along: those of the eye's own that lie along the view."""
+    counts = {"own": 0, "filter": 0, "body": 0, "along": 0}
+    for p in pops:
+        counts[p["whose"]] += 1
+        counts["along"] += _along_named(p)
+    return counts
+
+
+def _along_named(p):
+    """The eye's own, at or over POP_M along the view and under it across: what the arm drive's written socket did to
+    the eye until round 13 (the game seats the eye by the socket, and the socket moved along the view)."""
+    return p["whose"] == "own" and p.get("along") is not None and p["along"] >= POP_M and p["across"] < POP_M
+
+
 def measure(rows):
     """One dict for every three consecutive frames of `rows` (trace.frames), named for the third:
       shown    how much the presented eye's step changed, as a vector: |(c-b) - (b-a)|
@@ -93,6 +151,10 @@ def measure(rows):
       whose    "body" (shown is POP_M or more and beyond is not), "own" (the wanted eye makes 0.8 of it and under
                OWN_M is carried: the eye's own start or stop, the filter did nothing), "filter" (anything else), or
                None under POP_M
+      along, across  the vector that is judged (the shown eye's change, less the body's where that is taken off) split
+               along the third frame's view= and across it; None where the line has no view=. Printed, and "the eye's
+               own" is named "along the view" where that is where it lies. Nothing is excused or counted otherwise
+               for it (round 13).
     The body's own: a climb lifts the root 1.2 m in eight frames, its step 0.03, 0.13, 0.29, 0.38, 0.30, 0.15, 0.02 m
     (the vaults of that soak, 5 of 5 flagged at 0.09 to 0.17 m), and the rig eye is the root a frame late: the game's
     own lag, in every native frame. The eye moves with the body and no more; a camera fixed to a body shows it
@@ -151,12 +213,17 @@ def measure(rows):
     for i, change in changes.items():
         c, b = rows[i], rows[i - 1]
         shown = _length(change["eye"])
-        beyond, body, after = shown, 0.0, None
+        beyond, body, after, judged = shown, 0.0, None, change["eye"]
         if i in lunge:
             root = changes[lunge[i]]["root"]
             left = _length(_sub(change["eye"], root))
             if left < beyond:
-                beyond, body, after = left, _length(root), i - lunge[i]
+                beyond, body, after, judged = left, _length(root), i - lunge[i], _sub(change["eye"], root)
+        along = across = None
+        view = c.get("view")
+        if view and _length(view) > 0.5:
+            along = abs(sum(x * y for x, y in zip(judged, view))) / _length(view)
+            across = max(0.0, beyond * beyond - along * along) ** 0.5
         wanted = _length(change["wanted"]) if change["wanted"] else None
         whose = None
         if shown >= POP_M:
@@ -168,7 +235,7 @@ def measure(rows):
                 whose = "filter"
         found.append({"at": c["at"], "written": c["written"], "tick": c["tick"], "kind": c["kind"], "looked": c["looked"], "taken": c["taken"], "carried": c["carried"], "shown": shown,
                       "lengths": change["lengths"], "wanted": wanted, "root": _length(change["root"]) if change["root"] else None,
-                      "body": body, "after": after, "beyond": beyond, "whose": whose})
+                      "body": body, "after": after, "beyond": beyond, "whose": whose, "along": along, "across": across})
     return found
 
 
@@ -186,16 +253,18 @@ def describe(result):
 
 def pop_lines(result, indent="       "):
     """One line for every frame at or over POP_M: when (the frame's own time, and the stamp of its line where that
-    is another: frames from before an edge are written with it), what the eye did, whose it is."""
+    is another: frames from before an edge are written with it), what the eye did, how much of what is judged lies
+    along the view and across it (where the line says which way the view pointed), whose it is."""
     out = []
     for p in result.get("pops", []):
         body = "the body's own" + {0: "", 1: " a frame after the root, with the wanted eye"}.get(p.get("after"), "") + ", not counted"
-        who = {"body": body, "own": "the eye's own (nothing carried)", "filter": "the filter's"}[p["whose"]]
+        who = {"body": body, "own": "the eye's own, along the view" if _along_named(p) else "the eye's own (nothing carried)", "filter": "the filter's"}[p["whose"]]
+        split = "" if p.get("along") is None else f" (along the view {p['along']:.3f}, across {p['across']:.3f})"
         wanted = "-" if p["wanted"] is None else f"{p['wanted']:.3f}"
         root = "-" if p["root"] is None else f"{p['root']:.3f}"
         when = p["at"] if p.get("written", p["at"]) == p["at"] else f"{p['at']} (written {p['written']})"
         out.append(f"{indent}{when} kind {p['kind']} looked {'-' if p['looked'] is None else p['looked']} taken {p['taken']}: shown {p['shown']:.3f} m "
-                   f"(by lengths {p['lengths']:.3f}), wanted {wanted}, root {root}, carried {p['carried']:.3f}, beyond the body {p['beyond']:.3f}: {who}")
+                   f"(by lengths {p['lengths']:.3f}), wanted {wanted}, root {root}, carried {p['carried']:.3f}, beyond the body {p['beyond']:.3f}{split}: {who}")
     return out
 
 
@@ -244,6 +313,10 @@ def main(argv):
     with drive.Input() as device:
         if "frames held" not in log.read_text(errors="replace")[-4000:]:
             device.run("key f11; wait 2.5")   # the view on
+        begun = log.stat().st_size
+        before = log.read_text(errors="replace").splitlines()
+        style = style_in_force(before)
+        print(style_header(before), flush=True)
         for name in names:
             script, settle = PHASES[name]
             start = log.stat().st_size
@@ -258,12 +331,19 @@ def main(argv):
                 handle.seek(start); lines = handle.read().splitlines()
             results[name] = judge(lines, name.startswith('toggle'))
             r = results[name]
+            for text in style_changes(lines):
+                print(text)
+            style = style_in_force(lines) or style
+            r["camera_style"] = style
             print(f"{'pass' if r['pass'] else 'FAIL':4} {name:16} frames {r['frames']:4} other-camera {r['other_camera_frames']:4} missed {r['missed']:3} "
                   f"{describe(r)} kick {r['largest_kick_deg']:.1f} deg kinds {r['kinds']}")
             for note in r["notes"] + pop_lines(r, ""):
                 print(f"       {note}")
     (out / "matrix.json").write_text(json.dumps(results, indent=1))
     failed = [n for n, r in results.items() if not r["pass"]]
+    with open(log, errors="replace") as handle:
+        handle.seek(begun); run = handle.read().splitlines()
+    print(style_summary(style_in_force(before), run))
     print(f"{len(results) - len(failed)} of {len(results)} passed" + (f"; failed: {', '.join(failed)}" if failed else ""))
     return 1 if failed else 0
 

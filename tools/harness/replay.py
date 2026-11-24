@@ -45,6 +45,8 @@ What this leaves out:
  - Only the rows in the Trace windows are there (0.5 s after each State edge and six frames before it). What the
    filter carried into a stretch is not known, nor the eye's speed it had kept: the first row of a stretch starts the
    replay from nothing, and its second row cannot be a jump in the replay as it can in the game.
+ - What a line carries after "tick=" (off_foot, damped, damp, view; from round 13 sock, arms, eye_edge) is not read
+   here: the filter was not given it. tools/harness/trace.py reads it for the judge.
  - A row's time is its "tick=" where the line has one (0.6.0-feel.41 on). Before that it is "t=", to 0.1 ms and from
    the window's edge, and the edge is placed by the line's own stamp (to 1 ms, and written up to a frame late): the
    time between the last row of one window and the first of the next can be a millisecond or two off.

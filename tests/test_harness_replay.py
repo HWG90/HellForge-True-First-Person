@@ -29,8 +29,30 @@ class NewFields(unittest.TestCase):
         self.assertEqual(len(replay.read(more)), 4)
         self.assertEqual(replay.read(more)[2]["clock"], 5066.0)
         import trace
-        self.assertEqual(trace.frames(plain), trace.frames(more))
+        self.assertEqual(trace.frames(plain), [{**row, "view": None} for row in trace.frames(more)])   # all but the view, which the judge now reads
         self.assertEqual(trace.frames(more)[3]["tick"], 5099.0)
+        self.assertEqual(trace.frames(more)[3]["view"], [-0.29552, 0.95534, 0.0])
+
+    def test_a_line_with_what_the_arm_drive_drew_reads_the_same(self):
+        # Round 13: sock=, arms= and eye_edge= follow view=. replay.py takes the longer line as it is; trace.py reads them.
+        axes = (1, 0, 0, 0, 1, 0, 0, 0, 1)
+        before = [line(33 * i, 33.0 * i, 6, (0.01 * i, 1, 2), (0.01 * i, 1, 2.1), 0.1, axes=axes,
+                       tail=" quiet=0 tick=%.3f off_foot=0 damped=0 damp=(0.00000 0.00000 0.00000) view=(0.00000 0.96593 -0.25882)" % (5000 + 33.0 * i))
+                  for i in range(4)]
+        longer = [text + " sock=%.5f arms=%d eye_edge=%d" % (-0.19512 + 0.1 * i, 1 + i % 3, i == 2) for i, text in enumerate(before)]
+        self.assertEqual(replay.read(before), replay.read(longer))
+        self.assertEqual(replay.frames(before), replay.frames(longer))
+        import trace
+        old, new = trace.frames(before), trace.frames(longer)
+        self.assertEqual([(row["sock"], row["arms"], row["eye_edge"]) for row in old], [(None, None, None)] * 4)   # a feel.49 line still reads
+        self.assertEqual([row["arms"] for row in new], [1, 2, 3, 1])
+        self.assertEqual([row["eye_edge"] for row in new], [0, 0, 1, 0])
+        self.assertAlmostEqual(new[0]["sock"], -0.19512)
+        self.assertAlmostEqual(new[3]["sock"], 0.10488)
+        strip = lambda rows: [{k: v for k, v in row.items() if k not in ("sock", "arms", "eye_edge")} for row in rows]
+        self.assertEqual(strip(old), strip(new))
+        import matrix
+        self.assertEqual(matrix.measure(old), matrix.measure(new))   # the judge's figures do not depend on them
 
 
 class Frames(unittest.TestCase):
