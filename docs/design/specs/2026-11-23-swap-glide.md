@@ -215,3 +215,117 @@ Camera lock on, either camera style, 30 and 60 frames a second.
   native view's return is taken up as a change of camera as before.
 - `python3 tools/harness/replay.py LOG --logged REV`: the "carried:" lines now say settled or cut off; the count of the
   filter's steps should not rise against soak 19's 17.
+
+## Round 19: the held eye let go (2026-11-24)
+
+The fade named under "Not done" above. Nothing here was run in the game.
+
+### The cause
+
+About 0.9 s after the hands go empty (an emote, the stratagem menu, a grenade held, a stim, a long swap) the hold lapses
+(`keep` goes false: `TFP_ACTION_EYE_IDLE_MS`, 900, of mask 0 in `src/wire_action.h`, or 2500 ms of hold), and
+`eye_delta`, the native view's eye held as a difference from the head camera's own, was faded by `expf(-dt/.08f)` a
+frame. With the LAS-5 Scythe the difference is about 0.44 m (its eye is behind the head), so at 33 ms a frame the first
+frame stepped 0.15 m from a standing start, then 0.10, 0.064, 0.041 (each 0.645 of the one before, `e^(-33.5/80)`).
+In soak 27 (feel.50 Stable, `--logged b70333e`) all three traced emotes show it at 900 to 901 ms into the head camera:
+12:59:52.767, 13:00:22.114 and 13:04:39.025, the wanted eye's step against the root 0.149, 0.096, 0.064, 0.041 m (the
+first a change of step of 0.153 to 0.156 m), from a held 0.45 m. The matrix of feel.51 (`~/.cache/tfp-feel51s/
+matrix.out`) fails grenade-held at 0.156 m and stratagem-menu at 0.157 m on the same frame. The filter does not take it
+up (the wanted eye moves: the judge calls it the game's), so the step is shown as it is.
+
+### What it does now
+
+In a frame the lock holds, the lapsed hold is let go on a glide from rest to rest (`src/camera_glide.h`
+`tfp_eye_glide_release`, THE RELEASE), on the swap glide's shape (gathering way for 0.6 of the time, losing it 1.5 times
+as hard for the rest), to the head camera's own eye:
+
+- its time follows from the distance at 9 m/s^2, 300 to 450 ms: 0.44 m takes 404 ms, slowing down at 13.5 m/s^2. A
+  frame's step changes by no more than that times its time squared: 0.0009 m at 8 ms, 0.004 at 16.7, 0.015 at 33.3,
+  0.034 at 50 (the judge's limit: 0.06 m at 33.3 ms, scaled by the frame time squared, or linearly where that is less);
+- a swap's glide under way when the hold lapses runs to its end first (the gentle one to its own end, retail's to
+  within 1 mm of its target), and the release starts from rest after it (`tfp_eye_glide_lapse`, THE LAPSE); it always
+  starts from rest. (The review of round 19 found both ways of taking the swap's glide over in the lapse frame wrong:
+  from rest it stopped retail's glide dead, 0.08 m of step change at 33 ms a frame; with retail's speed, 4 to 13 m/s,
+  the eye shot up to 0.29 m behind the incoming eye and 0.45 m outside the span of the eye, the swap's target and the
+  head camera's eye; with a gentle glide's speed it overshot a head camera's eye at or near the swap's target by 0.05
+  to 0.085 m.) Through the helper, swapping in every frame from 10 before the lapse to 2 after, both ways, 0.44 and
+  0.70 m, continuity off and on, 8 to 50 ms a frame (`hold_release`, scene 7): never outside that span (beyond what the
+  continuity does with the swap alone, 1.9 and 3.2 mm for 0.70 m at 16.7 ms), and no frame from the lapse on over the
+  judge's limit, retail's own slowing or that frame of the swap alone;
+- a new hold while letting go takes over from where the eye is and the way it is going, without a step: the same
+  weapon back in the hands (the hold resumes, the eye comes to rest, or glides back to that weapon's eye: below), or a
+  weapon whose eye is remembered (the eye's return, `TFP_ACTION_EYE_RETURN`, now also while the eye is being let go,
+  where it waited for the fade to end before), which glides on to that eye at the release's rates, not the swap's
+  250 ms;
+- that take-over carries the eye's speed only as far as it can lose it before the new eye (`tfp_eye_glide_take_over`,
+  THE TAKE-OVER): along the way the eye is going, all of it when v^2 <= 2 a d (a: the running glide's own hardest rate,
+  13.5 m/s^2 at least; d: the way to the new eye along the motion) and the new eye is no further on along the motion
+  than where the eye was going (d <= the way to that), on a glide shortened where it must be so that it comes to rest
+  along the motion at the new eye itself; otherwise none of it (a new eye too near ahead, beyond where the eye was
+  going, behind, or too far aside for the speed), the eye eased to rest on its line at that
+  rate (v^2 / 2a further on, never past where it was going: a release from rest never goes faster than that rate stops
+  at its own target) and then from rest straight to the new eye. (The review of round 19 found the take-over carrying
+  all of it: an emote with the rifle up, the sidearm drawn 260 to 360 ms into the release, the eye going 2 m/s toward
+  the head camera's eye and the sidearm's 0.07 m short of it; it went up to 0.026 m past the head camera's eye for a
+  held 0.44 m and 0.063 m for 0.70 m, and came back.) Arithmetic alone (`tests/camera_glide_test.c`, `take_over`): the
+  other eye drawn every frame (every second at 8 ms) from 0 to 450 ms into the release, forward and reverse, 0.44 and
+  0.70 m, on a line and 0.06 m off it, 8 to 50 ms a frame: 0.000002 m outside the span of the held eye, the incoming eye
+  and the head camera's own at most (was 0.071), never past the head camera's eye (was 0.069), no frame over the judge's
+  limit or that frame of the release alone, at the incoming eye within 533 ms of the draw. An incoming eye beyond the
+  head camera's own along the release's way (the second review of round 19: carried onto it, the path bulged out of the
+  span, 0.0147 to 0.0156 m through the helper for a sidearm's eye 2 cm ahead and 3 cm aside, up to 0.075 m in 3-D
+  pairs) is eased to first (`take_over_ahead`: 0.02, 0.05 and 0.10 m ahead, on the line and 0.03 and 0.06 m off it,
+  the rest as above): 0.000009 m outside the span at most (was 0.0248), no frame over the bound, at the incoming eye
+  within 600 ms of the draw; through the helper (`hold_release`, scene 9: four sidearm eyes 0.02 to 0.08 m ahead of
+  the head camera's, 0 to 0.06 m aside) outside the span 0.00000 m (was 0.0052 to 0.0305), no frame over the judge's
+  limit or the release alone. `take_over_rates` pins the conditions one call at a time: a new eye too near to lose the
+  speed in, or too far aside for the carried glide's time, is eased to (nothing planned harder than 13.5 m/s^2), and
+  the ease runs at the running glide's own hardest rate where that is above 13.5 m/s^2. Through the helper (`hold_release`,
+  scene 8; drawn every 10 ms while the release is under way, continuity off and on): outside the span 0 (was up to
+  0.063 m), past the head camera's eye 0 (was 0.062), the highest point ahead of the head node 0.180, the head
+  camera's eye, as on main (was 0.194 to 0.243), largest change of step that of the release alone (0.0009 to 0.043 m);
+- without the lock it is retail's fade, unchanged (`tests/run-native.sh`).
+
+Through the helper (`tests/camera_glide_helper_test.cpp`, `hold_release`, on the fake game memory, continuity off and
+on, at 8, 16.7, 33.3 and 50 ms a frame): an emote with a 0.44 m held eye is held for 900 ms and let go over 408 to
+450 ms with a largest change of step of 0.0009, 0.0038, 0.015 and 0.034 m (it was 0.042, 0.083, 0.151 and 0.206 m),
+never further from the head camera's eye on the way, and ends there; a short 0.10 m way takes 300 ms; the rifle back
+150 ms in, the sidearm drawn 150 ms in, and a long swap whose hold lapses at 2500 ms with the sidearm then drawn all stay
+under the limit (0.0004 to 0.029 m) and end at that weapon's eye. Without the lock: the fade, 0.151 m.
+
+Soak 27's three releases with the logged held offset swapped for the release, replayed through the present filter
+(the substitution itself is outside the repo: the wanted eye of each row from the release frame on is moved by the
+difference of the two curves, in the root's frame): largest change of the shown eye 0.015 to 0.016 m, none at 0.06 m
+(as logged: 0.153 to 0.155 m, one each). `tools/harness/replay.py` itself replays the logged wanted eye through the
+filter, which this round does not change, so its figures for soaks 8 to 30 are the same before and after.
+
+### The risk named in round 14: the eye off the head for longer
+
+The head camera's eye now stays off the head for up to 450 ms more than the fade's 130 ms or so. What that can show:
+
+- The eye only moves along the line from the held eye to the head camera's own eye, towards the latter, and never
+  past it: it was at the held eye, 0.44 m off, for the 900 ms before, and the release shortens that, it adds no new
+  place off that line. Passing through the head on that line is what the fade did too, in three frames. A take-over
+  keeps the eye inside the span of the held eye, the incoming eye and the head camera's own (to 0.05 mm in the
+  arithmetic, 1 mm through the helper, as tested), and along the release's way never further on than the further of
+  the head camera's eye and the incoming eye: past the head camera's eye only toward an incoming eye that is itself
+  past it, and then no further than that eye. The speed is carried only onto an incoming eye no further on along the
+  motion than where the eye was going (in a release, the head camera's eye); onto one beyond it the eye is eased to
+  rest on its line first, at or short of where it was going, and goes from rest straight to the incoming eye.
+- What is around the head is hidden in the head camera: head visibility takes the head (5 meshes), torso and shoulders
+  (31 meshes) out of the camera's sight on the tick after the view leaves the native view, and nothing in the logs
+  shows them drawn again inside a head-camera stretch. Soak 27: at each of the three releases the last `Head:` line
+  before it is the hide at the leave (12:59:51.899, `31 again (5 of the head) ... switched off 31, left drawn 0`), and
+  none follows until the next leave. Soaks 27 to 30: 521 `Head:` lines, none with `still` or `left drawn` above 0.
+- The veil (round 14) is open for at most two ticks after a leave, 0.9 s before any release, and moves only what is
+  handed to the game after the hold and the release; its guarantee is untouched (`tests/run-camera-veil.sh` passes as
+  it was).
+
+### To look at in the game
+
+- An emote, the stratagem menu and a grenade held for over a second with the LAS-5 Scythe up, standing, Stable and
+  Bodycam, 30 and 60 frames a second: about 0.9 s in the view should drift back to the head over 0.4 s instead of
+  stepping. The matrix's grenade-held and stratagem-menu should pass where they failed at 0.156 and 0.157 m.
+- Whether anything of the body (the collar, the arms, a cape) is seen while the eye passes the head; the hidden meshes
+  are head, torso and shoulders only.
+- Drawing a weapon during the 0.4 s (the take-over), and a dive or prone during it (`lock_off_foot`).
