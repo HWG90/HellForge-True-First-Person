@@ -1425,12 +1425,13 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
                   }
                 }
               }
-              else if (!policy.eye_delta_active && policy.control_mask == 2 && policy.weapon_key
+              else if ((!policy.eye_delta_active || (policy.lock_now && tfp_eye_glide_releasing(&policy.eye_glide))) && policy.control_mask == 2 && policy.weapon_key
                   && atomic_load_explicit(&tuning_eye_return, memory_order_relaxed) && eye_memory_recorded(policy.weapon_key)) {
                 /* Beyond retail: the eye let go (hands empty for longer than the tolerance) and a weapon whose eye
                  * is known is being drawn. Start from where the eye is and glide to that eye, so the native view
-                 * returns to a camera that is already there. */
-                memset(policy.eye_delta, 0, sizeof policy.eye_delta); tfp_eye_glide_reset(&policy.eye_glide);
+                 * returns to a camera that is already there. (Round 19: while it is being let go, from where it is
+                 * and the way it is going: the release glides on to that eye.) */
+                if (!policy.eye_delta_active) { memset(policy.eye_delta, 0, sizeof policy.eye_delta); tfp_eye_glide_reset(&policy.eye_glide); }
                 policy.eye_delta_active = true; policy.eye_returning = true; policy.eye_hold_started = tick; policy.eye_swap_tick = tick;
               }
               if (policy.eye_delta_active) {
@@ -1446,12 +1447,22 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
                  * first frame is no jump for the continuity to take up; a longer one is retail's there too. And an eye
                  * that is under way when there is no eye to go to any more comes to rest, it does not stop in the
                  * frame. src/camera_glide.h.) */
+                /* (Beyond retail, round 19: a glide that began as the release and is under way goes on to the incoming
+                 * eye on the release's rates; src/camera_glide.h THE RELEASE.) */
                 if (incoming) {
-                  if (policy.lock_now ? tfp_eye_glide_lock_step(&policy.eye_glide, policy.eye_delta, incoming->delta, dt)
-                                      : tfp_eye_glide_retail(policy.eye_delta, incoming->delta, dt)) ++policy.eye_glides;
+                  if (policy.lock_now && tfp_eye_glide_releasing(&policy.eye_glide)) {
+                    if (tfp_eye_glide_release(&policy.eye_glide, policy.eye_delta, incoming->delta, dt)) ++policy.eye_glides;
+                  } else if (policy.lock_now ? tfp_eye_glide_lock_step(&policy.eye_glide, policy.eye_delta, incoming->delta, dt)
+                                             : tfp_eye_glide_retail(policy.eye_delta, incoming->delta, dt)) ++policy.eye_glides;
                 } else if (policy.lock_now && keep) tfp_eye_glide_rest(&policy.eye_glide, policy.eye_delta, dt);
-                if (!policy.lock_now || !keep) tfp_eye_glide_reset(&policy.eye_glide);
-                if (!keep) {
+                if (!policy.lock_now) tfp_eye_glide_reset(&policy.eye_glide);
+                if (!keep && policy.lock_now) {
+                  /* Beyond retail, round 19: the hold lapsed; the held eye is let go from rest to rest over 300 to 450 ms
+                   * (src/camera_glide.h THE RELEASE), not on retail's 80 ms fade, whose first frame was 0.15 m. */
+                  static const float own[3] = {0, 0, 0};
+                  tfp_eye_glide_release(&policy.eye_glide, policy.eye_delta, own, dt);
+                  if (!tfp_eye_glide_releasing(&policy.eye_glide)) { policy.eye_delta_active = false; tfp_eye_glide_reset(&policy.eye_glide); }
+                } else if (!keep) {
                   const float fade = dt > 0 ? expf(-dt/.08f) : 1; float square = 0;
                   for (unsigned axis = 0; axis < 3; ++axis) { policy.eye_delta[axis] *= fade; square += policy.eye_delta[axis]*policy.eye_delta[axis]; }
                   if (square < .002f*.002f) policy.eye_delta_active = false;

@@ -33,6 +33,122 @@ static float swap_back(bool lock, float way, float *moved, int back_at = 0) {
   return std::sqrt(square);
 }
 
+// ---- The held eye let go (round 19). ----
+// The judge's limit on a frame's change of step: 0.06 m at 30 frames a second. A change of step is a rate of change of
+// speed times the frame's time squared, so 0.06 m there is 54 m/s^2; at other frame times the limit is that rate's
+// (dt/33.3 ms)^2 or, where it is less, 0.06 m in proportion to the frame time (the stricter of the two everywhere).
+static float judge_limit(double dt) { const double r = dt / 33.3; return static_cast<float>(.06 * std::min(r, r * r)); }
+struct Release {
+  float largest_change = 0;   // the largest change of step of the drawn eye, as a vector, over the whole head-camera stretch
+  double first_move_ms = -1;  // since the view left the native view: the first frame the drawn eye moved by more than 0.1 mm
+  double still_ms = -1;       // the first frame from which on the drawn eye does not move any more
+  bool toward = true;         // from the first move on, the drawn eye never went further from where it ends
+  float held = 0;             // how far the held eye was from the head camera's own when it was let go
+  float from_head_eye = 0;    // at the end
+  float from_end[3] = {};     // where it ends, in the body's frame
+};
+// An emote: the rifle (`first`) up in the native view, its eye `way` behind the head camera's own (as the LAS-5 Scythe's
+// is); the hands go empty (mask 0) and the view goes to the head camera for `ms`. The held eye is let go 900 ms after
+// the hands went empty (TFP_ACTION_EYE_IDLE_MS, as the feel build sets it). `then`: at `then_ms` after the view left,
+// 0: nothing; 1: the same rifle back in the hands (mask 2); 2: the sidearm (`second`, whose eye is remembered, 0.11 m
+// in front of the head) comes up (mask 2). `long_hold`: the head camera holds mask 2 (a long swap) for 1700 ms first,
+// so the hold lapses on its 2500 ms and is let go while the hands are full; `then` then comes after that.
+static Release emote(bool lock, bool smooth, double dt, float way, int then = 0, double then_ms = 0, bool long_hold = false, float *sidearm = nullptr, float *rifle = nullptr) {
+  fresh(lock, smooth);
+  tfp_camera_set_action_tuning(0, 900, true);
+  Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+  const uint32_t first = 0x1111, second = 0x2222;
+  const int settle = static_cast<int>(400 / dt) + 1;
+  CHECK(tfp_camera_set_weapon_key(g.gen, second) == 1);
+  standing(g, settle, dt, false); standing(g, settle, dt, true);
+  if (sidearm) std::memcpy(sidearm, g.body, 12);
+  standing(g, 3, dt, false, 2);                                  // the sidearm's eye is remembered as the view leaves
+  CHECK(tfp_camera_set_weapon_key(g.gen, first) == 1);
+  g.eye[1] = .17f - way; standing(g, settle, dt, true);          // the rifle in the hands, its eye `way` behind the head camera's
+  if (rifle) std::memcpy(rifle, g.body, 12);
+  Release r; float last[3], step[3] = {}, ends[3]; std::memcpy(last, g.body, 12);
+  const int frames = static_cast<int>(3000 / dt);
+  float at[400][3]; int count = 0; float held_before = g.from_head_eye();
+  for (int i = 1; i <= frames && count < 400; ++i) {
+    const double t = i * dt; uint32_t mask = long_hold && t <= 1700 ? 2 : 0;
+    if (then && t >= then_ms) { mask = 2; if (then == 2) CHECK(tfp_camera_set_weapon_key(g.gen, second) == 1); }
+    g.hip(mask); g.frame(dt);
+    float now[3], change[3];
+    for (int k = 0; k < 3; ++k) { now[k] = g.body[k] - last[k]; change[k] = now[k] - step[k]; }
+    const float moved = std::sqrt(now[0] * now[0] + now[1] * now[1] + now[2] * now[2]);
+    r.largest_change = std::max(r.largest_change, std::sqrt(change[0] * change[0] + change[1] * change[1] + change[2] * change[2]));
+    if (moved > 1e-4f && r.first_move_ms < 0) { r.first_move_ms = t; r.held = held_before; }
+    held_before = g.from_head_eye();
+    if (moved > 1e-5f) r.still_ms = -1; else if (r.still_ms < 0) r.still_ms = t;
+    std::memcpy(at[count++], g.body, 12);
+    std::memcpy(step, now, 12); std::memcpy(last, g.body, 12);
+  }
+  std::memcpy(ends, g.body, 12); std::memcpy(r.from_end, ends, 12);
+  float before = 1e9f; bool started = false;
+  for (int i = 0; i < count; ++i) {
+    float d = 0; for (int k = 0; k < 3; ++k) d += (at[i][k] - ends[k]) * (at[i][k] - ends[k]);
+    d = std::sqrt(d);
+    if (i * dt + dt >= r.first_move_ms && r.first_move_ms >= 0) { if (started && d > before + 1e-5f) r.toward = false; started = true; }
+    before = d;
+  }
+  r.from_head_eye = g.from_head_eye();
+  if (std::getenv("TFP_RELEASE_DEBUG")) std::printf("  emote lock=%d smooth=%d dt=%.1f way=%.2f then=%d at %.0f long=%d: change %.4f (limit %.4f) first %.1f still %.1f toward %d held %.3f head %.4f\n",
+      lock, smooth, dt, way, then, then_ms, long_hold, r.largest_change, judge_limit(dt), r.first_move_ms, r.still_ms, r.toward, r.held, r.from_head_eye);
+  g.end();
+  return r;
+}
+static float apart3(const float *a, const float *b) { float d = 0; for (int k = 0; k < 3; ++k) d += (a[k] - b[k]) * (a[k] - b[k]); return std::sqrt(d); }
+static void hold_release() {
+  const double frames[4] = {8, 16.7, 33.3, 50};
+  for (int f = 0; f < 4; ++f) for (int smooth = 0; smooth < 2; ++smooth) {
+    const double dt = frames[f];
+    // 1. The emote, the Scythe's 0.44 m: held for 900 ms, then let go from rest to rest over 300 to 450 ms, no frame's
+    // step changing by more than the judge allows, at the head camera's own eye at the end and never further from it on
+    // the way. (Before round 19: faded on 80 ms, the first frame 0.15 m at 33 ms a frame.)
+    {
+      const Release r = emote(true, smooth, dt, .44f);
+      CHECK(r.held > .43f && r.held < .46f);
+      CHECK(r.first_move_ms > 900 - dt && r.first_move_ms <= 900 + 2 * dt + .5);
+      CHECK(r.largest_change <= judge_limit(dt));
+      CHECK(r.still_ms - r.first_move_ms >= 300 - dt && r.still_ms - r.first_move_ms <= 450 + dt);
+      CHECK(r.toward && r.from_head_eye < 1e-3f);
+    }
+    // 2. A short way (0.10 m) is let go over 300 ms all the same: no faster than the long one.
+    {
+      const Release r = emote(true, smooth, dt, .10f);
+      CHECK(r.largest_change <= judge_limit(dt) && r.still_ms - r.first_move_ms >= 300 - dt && r.from_head_eye < 1e-3f);
+    }
+    // 3. The same rifle back in the hands 150 ms into the letting go (the hold is 1050 ms old, under its 2500 ms): the
+    // hold takes over and the eye comes to rest where it is, without a step. At 2500 ms the hold lapses with the hands
+    // full, and the eye's return glides it back to the rifle's eye, from where it rests.
+    {
+      float rifle[3]; const Release r = emote(true, smooth, dt, .44f, 1, 1050, false, nullptr, rifle);
+      CHECK(r.largest_change <= judge_limit(dt));
+      CHECK(apart3(r.from_end, rifle) < 1e-3f);
+    }
+    // 4. The sidearm, whose eye is remembered, comes up 150 ms into the letting go: the glide to its eye takes over from
+    // where the eye is and the way it is going, without a step, and ends there.
+    {
+      float sidearm[3]; const Release r = emote(true, smooth, dt, .44f, 2, 1050, false, sidearm);
+      CHECK(r.largest_change <= judge_limit(dt));
+      CHECK(apart3(r.from_end, sidearm) < 1e-3f);
+    }
+    // 5. A long swap: the hold lapses on its 2500 ms while the hands are full and the eye is let go; 150 ms into that the
+    // sidearm comes up (the eye's return, TFP_ACTION_EYE_RETURN): it takes over without a step and ends at its eye.
+    {
+      float sidearm[3]; const Release r = emote(true, smooth, dt, .44f, 2, 2650, true, sidearm);
+      CHECK(r.first_move_ms > 2500 - dt && r.first_move_ms <= 2500 + 2 * dt + .5);
+      CHECK(r.largest_change <= judge_limit(dt));
+      CHECK(apart3(r.from_end, sidearm) < 1e-3f);
+    }
+  }
+  // 6. Without the lock it is retail's: faded on 80 ms, its first frame the largest (0.15 m at 33 ms a frame).
+  {
+    const Release r = emote(false, false, 33.3, .44f);
+    CHECK(r.largest_change > .14f && r.largest_change < .17f && r.still_ms - r.first_move_ms < 500);
+  }
+}
+
 int main() {
   W.build(HERE); // the world, as camera_smooth_main sets it up
   W.native_value = W.a[A_EXE] + HERE.setter; W.hook_value = reinterpret_cast<uint64_t>(&hook_marker);
@@ -69,6 +185,7 @@ int main() {
     CHECK(went > .03f && went < .06f);
     for (int i = 7; i < 12; ++i) CHECK(locked[i] < 1e-5f);
   }
+  hold_release();
   std::printf("camera glide through the helper: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }
