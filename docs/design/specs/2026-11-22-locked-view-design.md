@@ -1941,3 +1941,130 @@ one frame (L, V, U's tail), C, U, R2/T at a set-off, W; the glide for swaps over
 the glide: a near swap with under about 170 ms of head camera hands back with more left than retail's glide
 (0.062 m against 0.023 m), not met in the logs; no test pins the glide's state across a far then a near swap.
 Nothing of feel.45 has been played by hand.
+
+## After feel.45 (2026-11-23): the let-down at a slowing (branch `round7`; offline, not yet in a build)
+
+Item 1 of the soak 19 analysis: a frame followed as "the motion slowing down" drops the kept speed whole, and where
+that speed was kept through frames taken up (lent at a change of camera, or believed when a run's time was over) the
+presented eye was still going at it, so its step drops in one frame. Eleven logs (soaks 8 to 20, exact frames, the
+vector measure) and the probes were the judge, with the carries read as settled or cut off by the trace.
+
+**The frame has two cases, and they are not the same thing.** What matters is where the presented eye is when the
+speed is dropped.
+
+- *Behind the wanted eye* (what is carried points against the speed dropped). A motion that began was taken up
+  frame by frame, the run's time ran out and its speed was believed; the presented eye is far behind and gathering
+  that speed along the curve. The next frame is shorter, the same way: followed, the speed dropped, and the curve,
+  begun for an eye going faster, throws the presented eye back from the eye it is closing on. Soak 20 (feel.45):
+  09:06:29.235, 4.7 m/s believed and 0.048 m gone, 0.114 m of step change and 0.046 m further behind, 0.061 m in the
+  frame after; 09:11:59.029 in a dive, 6.4 m/s and 0.044 m, the presented steps 0.226, 0.128, 0.187, 0.246, 0.293 m
+  where the wanted eye went 0.46, 0.225, 0.223, 0.222, 0.220 m: the eye stalls in the middle of its catch-up. To go
+  on at what it had is here to go on closing: nothing is past anything.
+- *Ahead of the wanted eye* (L, V, U's tail: the frames the analysis names). The presented eye went on at the kept
+  speed through frames the wanted eye did not go, and is past it: 0.32 m at 07:19:31.978, 0.30 m at 07:13:24.300. To
+  let the speed down is to go further from the wanted eye, which is round 1's eye coasting past a stop.
+
+**What is in** (`src/camera_continuity.h`, THE LET-DOWN AT A SLOWING; tests from the logged frames in
+`tests/reference/soak-slowing-steps.h`, 19 of the 96 new checks fail on main with the logged steps). In a frame
+followed as slowing down, over the measure, the frame before taken up, and no stop (THE STOP's frames are as they
+were): the part of the speed dropped that points at the wanted eye is kept by the presented eye and let down by
+`pop_accel` a frame (36 m/s^2, 0.04 m a frame at 30 frames a second), and sooner where the way to the wanted eye is
+shorter than that takes. The way counts less what the curve's own closing speed needs (a cubic from d closing at v
+with T to go passes its end when d is under v T / 3): with the bare way as the room the presented eye came 0.007 m
+past the wanted one at 00:25:52.043 of soak 9. Only where that part's step is over the measure. What it goes is
+taken off what is carried and the curve keeps its end. The frames are asked as before: none is taken up or followed
+that was not, no curve begins at another time, the kept speed is the wanted eye's new one at once. The part of the
+speed that points away from the wanted eye, or across, is dropped as it was.
+
+09:06:29.235: 0.114 to 0.034 m, the frame after 0.061 to 0.025 m, and the carry that the trace cut off at 467 ms with
+0.080 m left settles at 434 ms. 09:11:59.029: 0.144 to 0.054 m, then 0.080 to 0.038 and 0.066 to 0.020 m; presented
+steps 0.226, 0.252, 0.282, 0.296, 0.293 m; 0.661 m carried at the trace's end where 0.960 m was. 05:06:55.307 of soak
+15: 0.105 to 0.099 m (0.05 m of way, and most of the speed dropped is across). 00:25:52.009 of soaks 8 and 9: 0.095
+to 0.081 m. Over the eleven logs the new filter is never on the other side of the wanted eye from main's, and
+further from the wanted eye than main's by 0.009 m at most (after a later change of camera taken up from another
+place).
+
+**Replayed** (exact frames, the vector measure; "main" is b8a591b, the filter of feel.45; settled and cut off: the
+longest carry of each kind after a change of camera, with their counts, and what the longest cut-off one still
+carried):
+
+| Log | Filter | Filter's steps | largest (m) | game's own | reduced | by lengths | metre-frames | longest settled (ms) | cut off |
+|---|---|---|---|---|---|---|---|---|---|
+| Soak 8, by 9a3470b | main | 9 | 0.214, 0.142, 0.107 | 5 | 2 | 5 | 179.5 | 468 (39) | 3: 468 ms, 0.188 m |
+| Soak 8, by 9a3470b | round7 | 9 | 0.214, 0.142, 0.107 | 5 | 2 | 5 | 179.5 (-0.02 %) | 468 (39) | 3: 468 ms, 0.188 m |
+| Soak 9, by 9a3470b | main | 16 | 0.214, 0.142, 0.137 | 9 | 5 | 7 | 313.0 | 566 (69) | 8: 468 ms, 0.232 m |
+| Soak 9, by 9a3470b | round7 | 16 | 0.214, 0.142, 0.137 | 9 | 5 | 7 | 312.9 (-0.01 %) | 566 (69) | 8: 468 ms, 0.232 m |
+| Soak 10, by 66ee111 | main | 4 | 0.085, 0.064, 0.062 | 7 | 2 | 1 | 117.8 | 501 (37) | 1: 467 ms, 0.197 m |
+| Soak 10, by 66ee111 | round7 | 4 | 0.085, 0.064, 0.062 | 7 | 2 | 1 | 117.8 (-0.02 %) | 501 (37) | 1: 467 ms, 0.197 m |
+| Soak 11, by 66ee111 | main | 7 | 0.085, 0.071, 0.064 | 7 | 3 | 3 | 209.5 | 501 (66) | 2: 467 ms, 0.197 m |
+| Soak 11, by 66ee111 | round7 | 7 | 0.085, 0.071, 0.064 | 7 | 3 | 3 | 209.5 (-0.01 %) | 501 (66) | 2: 467 ms, 0.197 m |
+| Soak 13, by f557194 | main | 7 | 0.121, 0.090, 0.086 | 6 | 1 | 2 | 115.7 | 435 (38) | none |
+| Soak 13, by f557194 | round7 | 7 | 0.121, 0.090, 0.086 | 6 | 1 | 2 | 115.6 (-0.00 %) | 435 (38) | none |
+| Soak 14, by f557194 | main | 7 | 0.090, 0.077, 0.076 | 3 | 0 | 2 | 95.6 | 467 (24) | 4: 467 ms, 0.271 m |
+| Soak 14, by f557194 | round7 | 7 | 0.090, 0.076, 0.076 | 3 | 0 | 2 | 95.6 (-0.03 %) | 467 (24) | 4: 467 ms, 0.271 m |
+| Soak 15, by b486193 | main | 10 | 0.179, 0.146, 0.130 | 3 | 1 | 7 | 110.1 | 468 (35) | 1: 466 ms, 0.093 m |
+| Soak 15, by b486193 | round7 | 10 | 0.179, 0.146, 0.130 | 3 | 1 | 7 | 110.1 (-0.04 %) | 468 (35) | 1: 466 ms, 0.093 m |
+| Soak 17, by ebe3c1f | main | 10 | 0.173, 0.161, 0.142 | 3 | 1 | 6 | 126.6 | 467 (31) | 5: 467 ms, 0.319 m |
+| Soak 17, by ebe3c1f | round7 | 10 | 0.173, 0.161, 0.142 | 3 | 1 | 6 | 126.6 (-0.01 %) | 467 (31) | 5: 467 ms, 0.319 m |
+| Soak 18, by ebe3c1f | main | 26 | 0.265, 0.200, 0.173 | 12 | 7 | 18 | 268.4 | 467 (59) | 8: 468 ms, 0.134 m |
+| Soak 18, by ebe3c1f | round7 | 26 | 0.265, 0.200, 0.173 | 12 | 7 | 18 | 268.4 (-0.00 %) | 467 (59) | 8: 468 ms, 0.134 m |
+| Soak 19, by ebe3c1f | main | 17 | 0.182, 0.148, 0.134 | 14 | 10 | 11 | 257.1 | 801 (61) | 11: 835 ms, 0.180 m |
+| Soak 19, by ebe3c1f | round7 | 17 | 0.182, 0.148, 0.134 | 14 | 10 | 11 | 256.8 (-0.11 %) | 801 (61) | 11: 835 ms, 0.180 m |
+| Soak 20, by b8a591b | main | 20 | 0.291, 0.139, 0.125 | 20 | 13 | 8 | 336.3 | 734 (74) | 14: 833 ms, 0.123 m |
+| Soak 20, by b8a591b | round7 | 17 | 0.291, 0.139, 0.125 | 20 | 11 | 8 | 334.0 (-0.69 %) | 734 (75) | 13: 833 ms, 0.123 m |
+
+No log has a step more, none carries more, no settled carry is longer, and no cut-off carry has more left (taken one
+by one, not only the longest). Soak 20 has three steps fewer (09:06:29.268, 09:11:59.063 and .097; the two at .235
+and .029 were "reduced" and are gone too). The 108 probe scenes are the same to the last digit, THE STOP's and THE
+HITCH's among them.
+
+**The eye ahead: what was tried, and why L, V and U's tail stand as they were.** Steps on soaks 8, 9, 10, 11, 13, 14,
+15, 17, 18, 19, 20 each time, main's being 9, 16, 4, 7, 7, 7, 10, 10, 26, 17, 20; "L" is 07:19:31.978, 07:04:27.579
+and 07:08:04.691 (0.182, 0.179, 0.171 m), "V" 07:13:24.300 (0.074 m). Every variant here acts on the same frames and
+adds a let-down of what points away from the wanted eye or across.
+
+- *All of the speed dropped let down by `pop_accel`, whichever way it points*: 8, 14, 4, 7, 7, 6, 9, 10, 26, 17, 14.
+  L 0.056, 0.056, 0.055 m; V 0.044 m; 04:00:51.667 of soak 14 0.077 to 0.031 m. But the presented eye goes 0.14 m
+  further past a rig eye that stands (0.324 to 0.465 m carried at 07:19:32.044) and 0.087 m is still carried when
+  the trace ends, 130 ms after main's eye was back; three new steps on soak 19 (0.060 to 0.066 m in the
+  frames after L) and U's second frame 0.091 to 0.123 m; 2.2 % more carried on soak 19; one more cut-off carry on
+  soaks 8, 9 and 19. THE STOP's scene of 20 mm against the way at 4 m/s and 16.7 ms: 0.324 to 0.413 m past the eye;
+  the 5 m/s lent scenes settle in 468 and 484 ms where 418 ms is recorded (two probe cells worse); the frames of
+  07:04:11.051 that are held to the log are not the log's. At 48 m/s^2: L 0.069, 0.069, 0.067 m, new steps of 0.063 to 0.079 m in the frames after it and 21 on soak 19.
+- *The same, the rate raised so that the eye goes no more than 0.08 or 0.04 m further* (v^2 / 2 d): nothing is left
+  of 5.3 m/s within 0.08 m, L as it was; V 0.044 and 0.065 m; the same STOP scene and the held frames fail.
+- *The speed dropped handed to the curve as its start speed*: 10, 19, 7, 10, 7, 8, 11, 11, 28, 28, 20. A curve of
+  400 ms at most cannot take 5 m/s: 0.130 m in the frame after L. Nine earlier checks fail, four probe cells worse.
+- *A faster let-down in the lent frames themselves* (54 and 72 m/s^2 for 36), so that less is left to drop: L 0.140,
+  0.137, 0.129 m and 0.097, 0.096, 0.088 m, no count up (9, 16, 4, 7, 7, 7, 10, 10, 26, 17, 19), but the frames
+  taken up then change by 0.063 to 0.102 m themselves ("reduced"), THE STOP's lent column moves (0.0513 to 0.0599 m
+  and 0.0900 to 0.1100 m at 54) and the 5 m/s lent scenes at 50 ms a frame go from 0.112 and 0.120 m to 0.135 m (two
+  probe cells worse). With a let-down at the slowing frame as well, both at 54: L 0.073, 0.073, 0.071 m and 20 on
+  soak 19.
+- *What is in, and the rest of the speed let down as far as 0.03 m further* (0.05, 0.08, 0.12 m: 19, 19 and 20 on
+  soak 19): 8, 14, 4, 7, 7, 6, 10, 10, 26, 17, 14. L 0.152, 0.149, 0.141 m, V 0.044 m. THE STOP's scene again (the
+  step 0.0702 to 0.0502 m, 0.3238 to 0.3283 m past the eye): the figure that is to stand to the digit.
+- *The same, but not where the wanted eye all but stands* (its step under a quarter of the step predicted), which is
+  the stop's scene and L: 9, 15, 4, 7, 7, 6, 10, 10, 26, 16, 15 at 0.03 m. Every earlier check passes and the 108
+  probe scenes are the same to the digit; no log carries more (+0.0 %), no settled carry is longer. V 0.074 to
+  0.044 m, U's tail 0.131 and 0.091 m to 0.104 and 0.115 m, 04:00:51.667 0.077 to 0.047 m, 00:30:53.421 of soak 9
+  0.084 to 0.054 m; L as it was. Outside by one condition: three carries cut off by the trace have more left,
+  07:13:23.867 0.2045 to 0.2323 m (V's own, 34 ms after the frame: the 0.03 m is the design), 07:13:15.354 0.1208 to
+  0.1220 m and 09:08:14.871 of soak 20 0.5658 to 0.5666 m. The longest cut-off carry of each log, its remainder and
+  the counts are as on main or better. Not in; the header is kept outside the tree
+  (`~/.cache/tfp-round7-work/p2s03/`) should that condition be read as the longest one's.
+- *What is in, allowed 0.02 or 0.04 m past the wanted eye*: no figure moves; the way is not what limits it.
+
+L cannot be mended inside the conditions. Its speed is 0.175 m a frame when it is dropped and the rig eye stands:
+whatever is not dropped in that frame is distance past a standing eye, which is THE STOP's scene of round 1 and is
+held to the digit; and to take more off in the two frames before is to change the let-down of a lent speed, whose
+scenes are recorded too and get worse at 50 ms a frame. What would mend it without either is the head camera's eye
+not being lent at 7.7 m/s under a rig eye that all but stands, and the filter does not know that in the change's
+own frame. Left as it is: three times in 508 actions, only prone out of an emote.
+
+Tests on the branch: `tests/run-camera-continuity.sh` 3,018 checks (main's 2,922 unchanged and 96 new: the logged
+frames of soaks 20, 15 and 9 with the eye behind, those of soak 19 with the eye ahead held to the log, and made-up
+scenes at 8, 16.7, 33.3 and 50 ms a frame, 2, 4 and 6.5 m/s believed and a quarter or a half of it after, behind and
+ahead); the other five `run-camera-*.sh` pass (3,403, 229, 75, 2,377 and 301 checks); the harness's python tests 33,
+both probe tests with their recorded bounds as they were; all 47 `tests/run-*.sh` pass; `build.sh --feel` builds.
+Nothing here has been run in the game.
