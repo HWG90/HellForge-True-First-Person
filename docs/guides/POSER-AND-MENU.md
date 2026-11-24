@@ -103,6 +103,8 @@ Limits are retail's: 50 cm on each axis, 90 degrees on each angle. A weapon swap
 
 **Saving:** a save goes through the same store as the menu, so the file is written once, on the save.
 
+**How rotation is shown (fixed in round 16, after 0.6.0-feel.50):** moving and rotating take different roads. A move goes to the controller and the pose helper, which take x, y, z only. Yaw, pitch and roll are drawn by the motion runtime, as in retail: while the editor is open it asks the editor for the draft's rotation and hands it to the pose helper as the motion rotation, on the rig node that carries the arms and the gun (`src/arm_graft.h`, `tfp_graft_view_node`). In play it adds the saved placement's yaw, pitch and roll to its own bob and sway. Up to feel.50 the motion runtime was never given the editor (`src/wire_motion.c` had both editor hooks empty). A right or middle drag changed the numbers on the panel, but nothing on screen moved until the placement was saved and used in play. Now `src/editor_motion.h` hands the editor over, and `tests/run-editor-rotation.sh` drags each axis through the real editor and motion runtime and checks that the drawn rotation changes during the drag, that the save keeps it, and that it is drawn in play. As in retail, bob and sway pause while the editor is open: only the edited rotation is drawn.
+
 **How it is drawn:** the editor lays out its own panel (retail's geometry, top left of the screen) and hit-tests its own buttons. `src/mod_editor.c` draws those rectangles and texts with the overlay host's theme tokens (`ov->theme()`), shaped per `HD2-UI-Style/DESIGN.md` (panel rounding 10 with a 1 px line border, buttons rounding 6, hover fill under the pointer). It holds no placement logic.
 
 **While it is open** the overlay host has the game's keyboard and mouse, as retail's captured input did: you cannot move or look around.
@@ -129,4 +131,5 @@ Limits are retail's: 50 cm on each axis, 90 degrees on each angle. A weapon swap
 4. `set_label` and `set_disabled` on the status rows, and the per-weapon drafts following the weapon.
 5. Unregistering during a live replace.
 6. The editor in the game, all of it: that the overlay host's window gives the cursor and the mouse as the panel expects (buttons and wheel are read in the host's draw callback on the render thread and handed to the game thread), that the first frame arrives before the editor's first input sample, that `Window.mouse_focus()` / `show_cursor()` answer true / false when it opens, text sizes and positions against the panel, and the key poll while the host holds the keyboard.
-7. `%+.1f` number texts are formatted by the C library of the build (zig's), compared natively with glibc only.
+7. That the editor's yaw, pitch and roll turn the drawn gun and arms in the game, live while dragging, in the direction you drag. The test above follows the rotation only up to what the pose helper is handed. Whether the rig turns the way the drag suggests, and what the arm drive's put-back after each draw does to it, can only be seen in the game.
+8. `%+.1f` number texts are formatted by the C library of the build (zig's), compared natively with glibc only.

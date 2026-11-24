@@ -5,6 +5,8 @@
 #include "wire_motion.h"
 #include "wire_off.h"
 #include "wire_settings.h"
+#include "wire_editor.h"
+#include "editor_motion.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -307,6 +309,16 @@ static bool host_player_snapshot(void *user, bool *controller_active, bool *shou
   *controller_active = s.controller_active, *shoulder_aim = s.shoulder_aim;
   return true;
 }
+/* editor:is_active() and editor:preview_rotation() (rt:673-674 hands the motion runtime the editor):
+ * the placement editor's yaw, pitch and roll are drawn here, as retail draws them (src/editor_motion.h).
+ * Asked for the editor at each call: it is bound after motion, and made anew by the runtime's on_enable. */
+static bool host_editor_is_active(void *user, bool *active, const char **problem) {
+  (void)problem;
+  return tfp_editor_motion_is_active(tfp_wire_editor_of(((Motion *)user)->w), active);
+}
+static TfpMotionRuntimeGot host_editor_preview_rotation(void *user, TfpActionPlacement *out) {
+  return tfp_editor_motion_preview(tfp_wire_editor_of(((Motion *)user)->w), out);
+}
 static TfpMotionRuntimeGot host_action_placement(void *user, const char *key, TfpAct action, TfpActionPlacement *out) { /* rt:740 */
   Motion *m = user;
   TfpRtArgs args;
@@ -528,7 +540,7 @@ bool tfp_wire_motion_bind(TfpWire *w) {
     .action_placement = host_action_placement, .action_mapping = host_action_mapping,
     .presentation_transition = host_presentation_transition, .presentation_action = host_presentation_action,
     .presentation_resume = host_presentation_resume,
-    .editor_is_active = NULL, .editor_preview_rotation = NULL, /* no placement editor in this build */
+    .editor_is_active = host_editor_is_active, .editor_preview_rotation = host_editor_preview_rotation, /* round 16 */
     .sample = host_sample, .to_parent = NULL};
   w->ext[TFP_WIRE_EXT_MOTION] = m;
   TfpRtHost *h = &w->host;
@@ -540,7 +552,8 @@ bool tfp_wire_motion_bind(TfpWire *w) {
   h->transition_action = rt_transition_action;
   h->transition_resume = rt_transition_resume;
   tfp_wire_say(w, "Ready: motion bound: bob, sway and per-action placements through the game's own snapshot (backend_ops); "
-                  "sprint is seen by animation layer 3 = 71 only (the gait-flag and bridge tests are off on build 25480438); no placement editor");
+                  "sprint is seen by animation layer 3 = 71 only (the gait-flag and bridge tests are off on build 25480438); "
+                  "the placement editor's yaw, pitch and roll drawn here");
   return true;
 }
 void tfp_wire_motion_free(TfpWire *w) {

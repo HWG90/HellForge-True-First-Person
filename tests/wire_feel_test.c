@@ -261,6 +261,14 @@ int main(void) {
     CHECK((why = tfp_wire_editor_toggle(&wire)) && strstr(why, "DBF-MCM captured placement input is unavailable")); /* no overlay platform yet */
     ed.available = ed.focused = true; ed.menu_open = true;
     CHECK(!tfp_wire_editor_toggle(&wire) && tfp_wire_editor_active(&wire) && logged("Placement editor: Opening placement editor"));
+    {                                                                                                     /* round 16: motion is handed the editor */
+      const TfpMotionRuntime *motion = tfp_wire_motion_runtime(&wire);
+      bool open = false;
+      TfpActionPlacement preview;
+      CHECK(motion && motion->host->editor_is_active && motion->host->editor_preview_rotation);       /* feel.1-feel.50: both NULL */
+      CHECK(motion->host->editor_is_active(motion->host->user, &open, NULL) && open);                  /* queued counts as active, as retail */
+      CHECK(motion->host->editor_preview_rotation(motion->host->user, &preview) == TFP_MOTION_GOT_NIL); /* no draft before it is active */
+    }
     CHECK((why = tfp_wire_feel_held(&wire)) && strstr(why, "the placement editor is open"));            /* a live replace waits for it */
     CHECK(wire.rt.store_mode == 1);                                                                     /* store.select_mode('weapon') reached the runtime */
     CHECK((why = tfp_wire_editor_toggle(&wire)) == NULL && !tfp_wire_editor_active(&wire));              /* the key again: cancelled */
@@ -278,6 +286,11 @@ int main(void) {
     CHECK(logged("Placement editor: Close other menus before positioning the weapon") && !tfp_wire_editor_active(&wire));
     ed.busy = false;
     CHECK(!strcmp(tfp_wire_editor_status(&wire), "Close other menus before positioning the weapon"));
+    {
+      const TfpMotionRuntime *motion = tfp_wire_motion_runtime(&wire);
+      bool open = true;
+      CHECK(motion->host->editor_is_active(motion->host->user, &open, NULL) && !open);                 /* closed: motion's play path */
+    }
     if (getenv("TFP_SHOW_LOG")) for (int i = 0; i < line_count; i++) printf("  log: %s\n", lines[i]);
   }
   /* An idle motion phase retains the previous sampled action during disable or a lost lease. */
