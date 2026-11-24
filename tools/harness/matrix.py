@@ -167,6 +167,8 @@ def measure(rows):
                makes 0.8 of it, of the eye before the veil where the veil moved one of the frames, and under OWN_M is carried: the eye's own start or stop, the filter did nothing),
                "filter" (anything else), or None under POP_M
       veil     the largest move of the veil in the three frames (m; 0: none)
+      bare     the eye's own measure: beyond, of the eye before the veil (the same as beyond where the veil moved none
+               of the three frames). The eye's largest is taken from it, the veil's from the beyond of its own frames.
       along, across  the vector that is judged (the shown eye's change, less the body's where that is taken off) split
                along the third frame's view= and across it; None where the line has no view=. Printed, and "the eye's
                own" is named "along the view" where that is where it lies. Nothing is excused or counted otherwise
@@ -257,7 +259,7 @@ def measure(rows):
         found.append({"at": c["at"], "written": c["written"], "tick": c["tick"], "kind": c["kind"], "looked": c["looked"], "taken": c["taken"], "carried": c["carried"], "shown": shown,
                       "lengths": change["lengths"], "wanted": wanted, "root": _length(change["root"]) if change["root"] else None,
                       "body": body, "after": after, "beyond": beyond, "whose": whose, "along": along, "across": across,
-                      "veil": change["veil"]})
+                      "veil": change["veil"], "bare": bare})
     return found
 
 
@@ -270,6 +272,8 @@ def describe(result):
     text = f"jump {result['largest_jump_m']:.3f} m"
     if result["body_m"] >= POP_M:
         text += f" (body {result['body_m']:.3f})"
+    if result.get("largest_veil_m"):
+        text += f" (veil {result['largest_veil_m']:.3f} not counted)"
     return text + f" [by lengths {result['by_lengths_m']:.3f}]"
 
 
@@ -317,11 +321,14 @@ def judge(lines, toggles=False):
     rows = trace_reader.frames(lines)
     traced = bool(rows)
     found = measure(rows)
+    veil_m = max([0.0] + [f["beyond"] for f in found if f["whose"] == "veil"])
     if traced:
-        jump = max([0.0] + [f["beyond"] for f in found])
+        # Round 19: the eye's own largest, without the veil's move; the veil's frames have their own largest and do
+        # not fail a phase (a soak has some 70 leaves, each with a frame or two the veil moved up to 0.32 m).
+        jump = max([0.0] + [f["bare"] for f in found])
     ok = held > 0 and missed == 0 and (jump < (POP_M if traced else LIMIT_M) or toggles) and not refused   # F11 itself is a cut by design
     return {"pass": ok, "frames": held, "other_camera_frames": other, "missed": missed, "kinds": sorted(kinds),
-            "largest_jump_m": jump, "from_trace": traced, "judged": len(found),
+            "largest_jump_m": jump, "largest_veil_m": veil_m, "from_trace": traced, "judged": len(found),
             "by_lengths_m": max([0.0] + [f["lengths"] for f in found]), "body_m": max([0.0] + [f["body"] for f in found]),
             "pops": [f for f in found if f["whose"]], "largest_kick_deg": kick, "notes": sorted(set(notes))[:6]}
 

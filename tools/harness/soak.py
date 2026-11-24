@@ -16,8 +16,9 @@ The camera style (Bodycam or Stable) is the log's: the last "Camera style:" line
 at the top, a change of style inside the run where it falls, and the summary says whether the run had one style. No
 argument and no file name says it (the two feel.49 soaks of 2026-11-24 were named the wrong way round). The summary
 also counts the flagged frames by whose they are, and how many of the eye's own lie along the view. Round 19: the eye
-judged is the eye shown (the row's eye plus the helmet veil's move, veil=), and a frame flagged for the veil alone is
-"the veil's", counted apart from the eye's own.
+judged is the eye shown (the row's eye plus the helmet veil's move, veil=), and a frame over the limit for the veil
+alone is "the veil's": printed, with its own largest, and neither a flag nor the eye's largest (the eye's is measured
+without the veil's move).
 """
 import random
 import sys
@@ -52,15 +53,17 @@ def listed(pops):
 
 def unlisted(whole, seen):
     """The frames over the limit in the whole log that no action's own stretch listed (`seen`: their ticks)."""
-    return [p for p in whole if p["whose"] != "body" and p["tick"] not in seen]
+    return [p for p in whole if p["whose"] not in ("body", "veil") and p["tick"] not in seen]
 
 
 def counted(pops):
     """The summary's words for the frames at or over the limit: how many, whose, the largest."""
     counts = matrix.whose_counts(pops)
-    flagged = [p for p in pops if p["whose"] != "body"]
-    return (f"{len(flagged)} frames flagged ({counts['own']} the eye's own, {counts['along']} of them along the view; {counts['filter']} the filter's; {counts['veil']} the veil's), "
-            f"largest {max([0.0] + [p['beyond'] for p in flagged]):.3f} m; {counts['body']} the body's own, not counted")
+    flagged = [p for p in pops if p["whose"] not in ("body", "veil")]
+    veiled = [p["beyond"] for p in pops if p["whose"] == "veil"]
+    veil = f"{len(veiled)} the veil's" + (f", largest {max(veiled):.3f} m" if veiled else "") + ", not counted"
+    return (f"{len(flagged)} frames flagged ({counts['own']} the eye's own, {counts['along']} of them along the view; {counts['filter']} the filter's), "
+            f"largest {max([0.0] + [p.get('bare', p['beyond']) for p in flagged]):.3f} m; {veil}; {counts['body']} the body's own, not counted")
 
 
 def judge_log(lines):
@@ -97,7 +100,7 @@ def main(argv):
     before = log.read_text(errors="replace").splitlines()
     print(matrix.style_header(before), flush=True)
     end = time.time() + minutes * 60
-    worst, bad, count, seen = 0.0, [], 0, set()
+    worst, veiled, bad, count, seen = 0.0, 0.0, [], 0, set()
     while time.time() < end:
         if rng.random() < 0.3:
             name, script, settle = "overlap", rng.choice(OVERLAPS), 3.0
@@ -119,6 +122,7 @@ def main(argv):
         j = matrix.judge(lines)
         count += 1
         worst = max(worst, j["largest_jump_m"])
+        veiled = max(veiled, j.get("largest_veil_m", 0.0))
         flag = j["missed"] or j["largest_jump_m"] >= matrix.POP_M or any("Refused" in n for n in j["notes"])
         if flag:
             bad.append((count, name, script, j["missed"], round(j["largest_jump_m"], 3)))
@@ -133,7 +137,7 @@ def main(argv):
     j = matrix.judge(lines)
     refused = sorted({l.split(" ", 1)[-1][:120] for l in lines if "Refused" in l or "refused 1" in l or " error " in l.lower()})[:8]
     arms = [l for l in lines if " Arms:" in l and "refused 0" not in l][:3]
-    print(f"\n{count} actions, {j['frames']} frames held, {j['missed']} missed, largest step {worst:.3f} m; {len(bad)} flagged")
+    print(f"\n{count} actions, {j['frames']} frames held, {j['missed']} missed, largest step {worst:.3f} m (the veil's {veiled:.3f} m, not counted); {len(bad)} flagged")
     print("  " + matrix.style_summary(matrix.style_in_force(before), lines))
     print("  the whole log: " + counted(j["pops"]))
     for row in bad:

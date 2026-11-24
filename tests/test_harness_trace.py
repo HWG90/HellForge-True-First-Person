@@ -413,8 +413,8 @@ class CameraStyle(unittest.TestCase):
             out = [f"19:00:{second:02d}.000 Camera style: {style} (words)", HELD]
             return out + [viewed(1000.0 * second + 33.0 * i, (0.0, 1.0 + x, 2.0), (0.0, 1.0, 0.0), looked=0) for i, x in enumerate(eyes)]
         text = soak.judge_log(stretch(1, "Bodycam") + stretch(5, "Stable") + [viewed(9000.0, (5.0, 1.0, 2.0), (0.0, 1.0, 0.0))])
-        self.assertEqual(text[0], "camera style: Bodycam (the log's line of 19:00:01.000), 30 frames held, 0 missed: 2 frames flagged (2 the eye's own, 2 of them along the view; 0 the filter's; 0 the veil's), largest 0.100 m; 0 the body's own, not counted")
-        self.assertEqual(text[1], "camera style: Stable (the log's line of 19:00:05.000), 30 frames held, 0 missed: 2 frames flagged (2 the eye's own, 2 of them along the view; 0 the filter's; 0 the veil's), largest 0.100 m; 0 the body's own, not counted")
+        self.assertEqual(text[0], "camera style: Bodycam (the log's line of 19:00:01.000), 30 frames held, 0 missed: 2 frames flagged (2 the eye's own, 2 of them along the view; 0 the filter's), largest 0.100 m; 0 the veil's, not counted; 0 the body's own, not counted")
+        self.assertEqual(text[1], "camera style: Stable (the log's line of 19:00:05.000), 30 frames held, 0 missed: 2 frames flagged (2 the eye's own, 2 of them along the view; 0 the filter's), largest 0.100 m; 0 the veil's, not counted; 0 the body's own, not counted")
         self.assertEqual(len(text), 2)
 
 
@@ -451,8 +451,11 @@ class Veil(unittest.TestCase):
         for dt in (8.0, 16.7, 33.3, 50.0):
             for walk in (0.0, 0.04):
                 result = matrix.judge(self.leave(dt, walk=walk))
-                self.assertFalse(result["pass"], (dt, walk))
-                self.assertGreater(result["largest_jump_m"], 0.3, (dt, walk))
+                # the veil's frames are printed with their own largest, and neither set the eye's nor fail the leave
+                self.assertTrue(result["pass"], (dt, walk))
+                self.assertLess(result["largest_jump_m"], 1e-3, (dt, walk))
+                self.assertAlmostEqual(result["largest_veil_m"], 0.32, 3)
+                self.assertIn("veil 0.320 not counted", matrix.describe(result))
                 pops = result["pops"]
                 self.assertTrue(pops)
                 self.assertTrue(all(p["whose"] == "veil" for p in pops), [(p["whose"], p["beyond"]) for p in pops])
@@ -467,6 +470,8 @@ class Veil(unittest.TestCase):
         result = matrix.judge(self.leave(33.3, veiled=(2,)))
         self.assertEqual([round(p["beyond"], 3) for p in result["pops"]], [0.32, 0.64, 0.32])
         self.assertEqual({p["whose"] for p in result["pops"]}, {"veil"})
+        self.assertTrue(result["pass"])
+        self.assertEqual((round(result["largest_jump_m"], 3), round(result["largest_veil_m"], 3)), (0.0, 0.64))
 
     def test_the_row_keeps_the_eye_before_the_veil(self):
         rows = trace.frames(self.leave(33.3))
@@ -487,6 +492,15 @@ class Veil(unittest.TestCase):
         whose = {p["tick"]: p["whose"] for p in result["pops"]}
         self.assertEqual(whose[1000000 + 33.3 * 9], "own")
         self.assertIn("veil", whose.values())
+        # the eye's own jump fails the leave, and the eye's largest is its own, without the veil's move
+        self.assertFalse(result["pass"])
+        self.assertAlmostEqual(result["largest_jump_m"], 0.2, 3)
+        self.assertGreater(result["largest_veil_m"], 0.3)
+
+    def test_a_leave_with_nothing_veiled_says_no_veil(self):
+        result = matrix.judge(self.leave(33.3, veiled=()))
+        self.assertEqual(result["largest_veil_m"], 0.0)
+        self.assertNotIn("veil", matrix.describe(result))
 
 
 class SeenInTheGame(unittest.TestCase):
