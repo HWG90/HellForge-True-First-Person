@@ -41,6 +41,15 @@ int main(void) {
   CHECK(near(tfp_ads_near(.173f, .073f), .10f, 1e-6) && tfp_ads_near(.173f, 0) == .173f);
   CHECK(tfp_ads_near(.066f, .03f) == .05f && tfp_ads_near(.05f, .2f) == .05f && tfp_ads_near(.35f, .25f) > .0999f);
   CHECK(isnan(tfp_ads_near(NAN, .1f)) && tfp_ads_near(.2f, NAN) == .2f);
+  /* ---- the near clip's lead (the review's B1): coming in, three times the last step ahead; going out, the gun itself ---- */
+  TfpAdsLead lead; memset(&lead, 0, sizeof lead);
+  CHECK(tfp_ads_lead(&lead, 0, 100) == 0);
+  CHECK(near(tfp_ads_lead(&lead, .01f, 116), .04f, 1e-7));                                   /* 1 cm in: led by 3 cm more */
+  CHECK(near(tfp_ads_lead(&lead, .02f, 132), .05f, 1e-7));
+  CHECK(near(tfp_ads_lead(&lead, .02f, 148), .02f, 1e-7));                                   /* standing: the gun itself */
+  CHECK(near(tfp_ads_lead(&lead, .015f, 164), .015f, 1e-7));                                 /* going out: the gun itself */
+  CHECK(near(tfp_ads_lead(&lead, .05f, 600), .05f, 1e-7));                                   /* after a pause: no step is known */
+  CHECK(tfp_ads_lead(&lead, NAN, 616) == 0 && tfp_ads_lead(&lead, -.1f, 632) == 0);
   /* ---- the "Aim:" line ---- */
   TfpAimLog log; tfp_aim_log_reset(&log);
   char line[700];

@@ -12,6 +12,8 @@
 #include <string.h>
 #include "wire_win_pose.h"
 #include "slot_platform.h"
+#include "near_helper.h"
+#include "pose_helper.h"
 
 /* The function each pose slot must hold before one of the helper's values goes in: exe RVA and the
  * bytes there. The same numbers as src/pose_helper.c B_EXE_POSITION / _ROTATION / _BRANCH_ROTATION /
@@ -222,4 +224,7 @@ void tfp_win_pose_hosts(void) {
   host.lock_shared = host_lock_shared, host.unlock_shared = host_unlock_shared;
   host.writable32 = host_writable32, host.cas32 = host_cas32, host.region = host_region, host.allocate = host_allocate;
   tfp_pose_set_host(&host);
+  /* Round 20: in full aim the near helper reads how far the gun is drawn in from the pose helper in each of its own
+   * calls, so the near clip comes in with the gun in the same frame (src/ads_seat.h, the review's B1). */
+  tfp_near_set_ads_source(tfp_pose_ads_near);
 }

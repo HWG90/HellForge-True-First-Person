@@ -51,6 +51,21 @@ static inline float tfp_ads_closer(float pull, float share, float ads_forward) {
   const float closer = pull*share - (isfinite(ads_forward) ? ads_forward : 0);
   return closer > 0 && isfinite(closer) ? closer : 0;
 }
+/* What the near clip is moved in by (round 20 review, B1). The game may call its near setter before the gun's node in
+ * a frame, and then the near clip would stand where last frame's gun was: behind the sight's rear while the gun comes
+ * in, cutting into the sight. So while the gun comes closer the near clip leads it by three times the last frame's
+ * step: the next step of the aim's smoothstep is at most three times the one before (after its first frame, the next is
+ * a little under three times; later ones less), and the pull's glide has shrinking steps. Twice left 0.12 mm cut at
+ * 60 fps (tests/wire_pose_test.c ads_frames). Going out it follows the gun itself (a near clip short of the sight cuts
+ * nothing; only one beyond it does). `last` is the closer published the frame before, within TFP_ADS_STALE_MS. */
+typedef struct TfpAdsLead { float last; double at; bool has; } TfpAdsLead;
+static inline float tfp_ads_lead(TfpAdsLead *l, float closer, double tick) {
+  if (!isfinite(closer) || closer < 0) closer = 0;
+  const bool fresh = l->has && isfinite(tick) && tick >= l->at && tick - l->at <= TFP_ADS_STALE_MS;
+  const float grow = fresh ? closer - l->last : 0;
+  l->last = closer; l->at = isfinite(tick) ? tick : 0; l->has = true;
+  return grow > 0 ? closer + 3*grow : closer;
+}
 /* The near clip in full aim: the game's `native`, moved in with the gun, never under the game's 0.05. */
 static inline float tfp_ads_near(float native, float closer) {
   if (!isfinite(native) || !(closer > 0) || !isfinite(closer)) return native;

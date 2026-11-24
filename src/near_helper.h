@@ -103,11 +103,15 @@ uint32_t tfp_near_read_stats(uint64_t generation, TfpNearStats *stats);
 uint32_t tfp_near_error(void);
 /* Copies up to capacity rows; returns the number of distinct callers seen. */
 uint32_t tfp_near_read_sites(TfpNearSite *output, uint32_t capacity);
-/* Not in retail (round 20, src/ads_seat.h): in full aim the near clip moves in with the gun, by `closer` metres (what the
- * pose helper drew the gun closer than the game seats it), never under the game's own 0.05. 0, the start-up value, is
- * retail's: full aim forwards the game's own value. Any thread. tfp_near_ads_probe: the game's sight (its near clip of a
- * sight in the first-person request, m; 0 when none is seen or no lease is armed), the game's last value and what was
- * handed on. false: no lease. */
-void tfp_near_set_ads_closer(float meters);
+/* Not in retail (round 20, src/ads_seat.h): in full aim the near clip moves in with the gun. `source` is asked in each
+ * call of the game's near setter in full aim (the pose helper's tfp_pose_ads_near: `*closer` m the gun is drawn closer
+ * than the game seats it, `*sight_least` the least distance the sight can be at, 0 for none); the near clip goes to the
+ * game's value (or `*sight_least`, if nearer) less `*closer`, never under the game's own 0.05, and a change toward the
+ * eye is taken at once. NULL (the start-up value), false or nothing closer is retail's: full aim forwards the game's own
+ * value. Set it before arming; it must not block. tfp_near_ads_probe: the game's sight (its near clip of a sight in the
+ * first-person request, m; 0 when none is seen or no lease is armed), the game's last value and what was handed on.
+ * false: no lease. */
+typedef bool (*TfpNearAdsSource)(float *closer, float *sight_least);
+void tfp_near_set_ads_source(TfpNearAdsSource source);
 bool tfp_near_ads_probe(float *sight, float *native, float *applied);
 #endif

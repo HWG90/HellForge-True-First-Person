@@ -1072,7 +1072,8 @@ static void steady_note(void) { /* once a second: the rig's depth held steady (s
 }
 /* Round 20: the sight distance in aim (src/ads_seat.h) and the "Aim:" line (src/aim_log.h), every tick. The near
  * helper saw the game's sight (its near clip); the pose helper is handed it with the wanted distance and pulls the gun
- * in full aim; the near helper is handed back how much closer the gun was drawn. */
+ * in full aim. How much closer the gun was drawn the near helper reads from the pose helper itself, in its own calls
+ * (src/wire_win_pose.c), not through this tick, which would leave the near clip a tick behind the gun. */
 static void ads_seat_tick(void) {
   static TfpAimLog aim_log;
   float sight = 0, native = 0, applied = 0;
@@ -1080,7 +1081,6 @@ static void ads_seat_tick(void) {
   tfp_pose_set_ads_seat(near_on ? sight : 0, (float)(tfp_locked_view_ads_sight_cm(&wire)/100));
   TfpPoseAdsProbe ads;
   const bool pose_on = tfp_pose_ads_probe(&ads) && ads.armed;
-  tfp_near_set_ads_closer(pose_on ? ads.closer : 0);
   TfpFovLockStats f; tfp_fov_lock_stats(&f);
   const TfpEditor *editor = tfp_wire_editor_of(&wire);
   TfpAimSample sample = {

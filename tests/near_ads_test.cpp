@@ -39,6 +39,10 @@ static bool host_write(void *, void *out, const void *data, size_t length) { std
 static bool host_pin(void *, uint64_t) { return true; }
 static void host_lock(void *, int) {}
 static void host_forward(void *, uint64_t, void *, float meters) { sent.seen = true; sent.meters = meters; }
+// The pose helper's side (tfp_pose_ads_near), scripted: how far the gun is drawn in, and the least distance of the sight.
+static struct { float closer, least; bool on; unsigned asked; } pose = {0, 0, true, 0};
+static bool pose_source(float *closer, float *least) { ++pose.asked; *closer = pose.closer; *least = pose.least; return pose.on; }
+static void set_closer(float m) { pose.closer = m; }
 
 // One call of the hook from the pinned site on the armed camera, 8 ms later. Returns what the game's setter was handed.
 static float frame(float native) {
@@ -65,38 +69,67 @@ int main() {
   uint64_t gen = 0;
   W.apply(scene, 0);
   if (tfp_near_begin(&c, &gen) != 1) { std::printf("the near helper did not arm (error %u)\n", tfp_near_error()); return 2; }
+  tfp_near_set_ads_source(pose_source);
   float sight = 0, native = 0, applied = 0;
   // At the hip: the game's sight (0.173 m, the Scythe's) is seen and published; the hip clearance is what is shown.
   float last = 0;
   for (int i = 0; i < 60; ++i) last = frame(.173f);
   CHECK(tfp_near_ads_probe(&sight, &native, &applied) && near(sight, .173, 1e-6) && near(native, .173, 1e-6));
   CHECK(near(last, .10, 1e-3));
+  // At the hip the gun drawn in is nothing to the near clip: the hip clearance, and the pose helper is not even asked
+  set_closer(.073f); pose.asked = 0;
+  for (int i = 0; i < 20; ++i) last = frame(.173f);
+  CHECK(near(last, .10, 1e-6) && pose.asked == 0);
+  set_closer(0);
   // Full aim, nothing closer (the start-up value): the game's own value, as retail.
   scene.controls[4] = 1;
   for (int i = 0; i < 60; ++i) last = frame(.173f);
   CHECK(near(last, .173, 1e-6) && tfp_near_ads_probe(&sight, &native, &applied) && near(sight, .173, 1e-6) && near(applied, .173, 1e-6));
-  // The gun 7.3 cm closer: the near clip comes in with it, eased, never in a step.
-  tfp_near_set_ads_closer(.073f);
-  float worst = 0, before = last;
-  for (int i = 0; i < 60; ++i) { last = frame(.173f); CHECK(last <= before + 1e-6f); if (before - last > worst) worst = before - last; before = last; }
-  CHECK(near(last, .10, 1e-3) && worst < .02f);
+  // The gun 7.3 cm closer: the near clip comes in with it in the same call, never behind it (the review's B1)
+  set_closer(.073f);
+  last = frame(.173f);
+  CHECK(near(last, .10, 1e-6));
+  // a sight the pose helper knows to be nearer than the game's value: the near clip goes in from there
+  pose.least = .15f;
+  last = frame(.173f);
+  CHECK(near(last, .15 - .073, 1e-6));
+  pose.least = .30f;                                                        // farther than the game's value: the game's,
+  last = frame(.173f);                                                      // eased out to (a step away from the eye)
+  CHECK(last > .077f && last < .10f);
+  for (int i = 0; i < 60; ++i) last = frame(.173f);
+  CHECK(near(last, .10, 1e-6));
+  pose.least = 0;
+  // the gun going back out: the near clip eases out after it, never ahead of it
+  set_closer(.02f);
+  float before = last, worst = 0;
+  for (int i = 0; i < 60; ++i) { last = frame(.173f); CHECK(last >= before - 1e-6f && last <= .173f - .02f + 1e-6f); if (last - before > worst) worst = last - before; before = last; }
+  CHECK(near(last, .153, 1e-3) && worst < .02f && worst > 0);
+  // the pose helper with no lease: nothing closer
+  pose.on = false; set_closer(.073f);
+  for (int i = 0; i < 80; ++i) last = frame(.173f);
+  CHECK(near(last, .173, 1e-3));
+  pose.on = true;
+  set_closer(.073f);
+  last = frame(.173f);
+  CHECK(near(last, .10, 1e-6));
   // never under the game's own 0.05
-  tfp_near_set_ads_closer(.3f);
+  set_closer(.3f);
   for (int i = 0; i < 60; ++i) last = frame(.173f);
   CHECK(near(last, .05, 1e-6));
   // a pistol's iron sights: the game's 0.05 (its own constant) is no sight; nothing published, nothing changed
-  tfp_near_set_ads_closer(.073f);
+  set_closer(.073f);
   for (int i = 0; i < 60; ++i) last = frame(.05f);
   CHECK(near(last, .05, 1e-6) && tfp_near_ads_probe(&sight, &native, &applied) && sight == 0);
   // nothing closer again: back to the game's value
-  tfp_near_set_ads_closer(0);
+  set_closer(0);
   for (int i = 0; i < 80; ++i) last = frame(.173f);
   CHECK(near(last, .173, 1e-3));
   // a bad value is nothing
-  tfp_near_set_ads_closer(NAN);
+  set_closer(NAN);
   for (int i = 0; i < 80; ++i) last = frame(.173f);
   CHECK(near(last, .173, 1e-6));
   scene.controls[4] = 0;
+  tfp_near_set_ads_source(nullptr);
   tfp_near_end(gen);
   CHECK(!tfp_near_ads_probe(&sight, &native, &applied) && sight == 0);      // no lease: nothing known
   std::printf("near ads: %d checks, %d failed\n", checks, failed);

@@ -248,4 +248,8 @@ typedef struct TfpPoseAdsProbe {
   float depth;        /* m: the game's own depth in the last frame of full aim (request+0x90 blended); NAN: not worked out */
 } TfpPoseAdsProbe;
 bool tfp_pose_ads_probe(TfpPoseAdsProbe *out); /* reads only */
+/* For the near helper's own calls (tfp_near_set_ads_source): how far in the near clip goes in full aim this frame, `closer`
+ * m (the gun's move toward the eye, leading it while it comes in: src/ads_seat.h tfp_ads_lead), and the least distance
+ * the sight can be at, `sight_least` m (0: none known). false, both 0: no lease. Any thread; reads only. */
+bool tfp_pose_ads_near(float *closer, float *sight_least);
 #endif

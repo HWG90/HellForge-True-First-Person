@@ -128,12 +128,15 @@ void pose_world_build(PoseWorld *out) {
 #else
 #define _GNU_SOURCE
 #include <math.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/uio.h>
 #include <unistd.h>
 #include "wire_pose.h"
 #include "wire_off.h"
+#include "near_helper.h"
+#include "pose_helper.h"
 
 static unsigned checks;
 #define CHECK(condition) do { checks++; if (!(condition)) { printf("wire pose: FAILED %s (line %d)\n", #condition, __LINE__); return 1; } } while (0)
@@ -613,6 +616,72 @@ static bool aimed_is(double y) {
 }
 static bool meter_is_applied(void) { /* the meter's commanded shift is what the helper really added to the game's pose */
   return applied_is(pose.meter.shift[0], pose.meter.shift[1], pose.meter.shift[2]);
+}
+
+/* ---- round 20, the review's B1 (2026-11-24): the gun and the near clip, frame by frame ----
+ * The pose helper moves the gun toward the eye in one frame; the near clip has to be there in the same frame, or it
+ * stands behind the sight's rear and cuts into the sight. Here both real helpers, each on its own fake game memory
+ * (tests/near_world_shim.cpp for the near helper), are stepped through aims at 60, 116 and 144 fps, with the game
+ * calling the near setter before the gun's node in a frame and after it. The game's sight (its near clip) is S; the
+ * sight's rear is drawn at S less what the gun was moved toward the eye in that frame (the hip placement's forward is 0
+ * here). In no frame may the near clip handed to the game be farther than that. */
+int near_world_begin(float hip, uint64_t now_us);
+float near_world_frame(float native, int full_aim, uint64_t now_us);
+void near_world_end(void);
+static float ads_sight_cut(float sight, float near_clip) { return near_clip - (sight - (NATIVE[1] - forwarded[1])); }
+/* One frame: the game's near setter before (0) or after (1) the rig's node 5; returns the near clip handed on. */
+static float ads_frame(TfpOpsHandle *handle, TfpOpsHelperStats *stats, uint64_t step, int order, float sight, int aim) {
+  float near_clip = 0;
+  if (order == 0) near_clip = near_world_frame(sight, aim, (now_ms + step) * 1000);
+  game_frame(handle, stats, step);
+  if (order == 1) near_clip = near_world_frame(sight, aim, now_ms * 1000);
+  return near_clip;
+}
+static int ads_frames(const TfpOpsPoseHelper *H, const TfpOpsHelperConfig *c) {
+  static const uint64_t steps[3] = {16, 9, 7};
+  static const float sights[3] = {.173f, .22f, .35f};
+  TfpOpsText why;
+  TfpOpsHandle *handle = NULL;
+  TfpOpsHelperStats stats;
+  void *native = NULL;
+  bool has_stats = false;
+  tfp_near_set_ads_source(tfp_pose_ads_near); /* as src/wire_win.c binds it */
+  for (int s = 0; s < 3; s++) for (int f = 0; f < 3; f++) for (int order = 0; order < 2; order++) {
+    const float sight = sights[s];
+    pose_world_third_person();
+    CHECK(H->prepare(H->user, c, &native, &why) == TFP_OPS_TRUE && H->begin(H->user, c, native, &handle, &why) == TFP_OPS_TRUE);
+    pose_world_first_person();
+    game_frame(handle, &stats, 300);
+    CHECK(near_world_begin(.05f, now_ms * 1000));
+    tfp_pose_set_ads_seat(sight, .10f);
+    float near_clip = 0, worst = 0, worst_out = 0;
+    for (int i = 0; i < 10; i++) near_clip = ads_frame(handle, &stats, steps[f], order, sight, 0);
+    CHECK(near(near_clip, .05, 1e-6) && near(forwarded[1] - NATIVE[1], 0, 1e-6)); /* at the hip: the hip clearance, nothing pulled */
+    pose_world_aim(1);
+    for (int i = 0; i < (int)(600 / steps[f]); i++) {
+      near_clip = ads_frame(handle, &stats, steps[f], order, sight, 1);
+      const float cut = ads_sight_cut(sight, near_clip);
+      if (cut > worst) worst = cut;
+    }
+    /* settled: the sight 10 cm from the eye (at most 0.25 m pulled) and the near clip at its rear */
+    const float pulled = sight - .10f > .25f ? .25f : sight - .10f;
+    CHECK(near(NATIVE[1] - forwarded[1], pulled, 1e-4) && near(near_clip, sight - pulled, 2e-3));
+    pose_world_aim(0);
+    for (int i = 0; i < (int)(600 / steps[f]); i++) {
+      near_clip = ads_frame(handle, &stats, steps[f], order, sight, 0);
+      const float cut = ads_sight_cut(sight, near_clip);
+      if (cut > worst_out) worst_out = cut;
+    }
+    if (worst > 1e-4f || worst_out > 1e-4f)
+      printf("wire pose: sight %.3f m, %llu ms frames, near setter %s the gun: the near clip cut %.2f mm into the sight aiming in, %.2f mm aiming out\n",
+             sight, (unsigned long long)steps[f], order ? "after" : "before", worst * 1000, worst_out * 1000);
+    near_world_end();
+    H->finish(H->user, handle, &has_stats, &stats, &why);
+    if (!getenv("TFP_ADS_ALL")) CHECK(worst <= 1e-4f && worst_out <= 1e-4f);
+  }
+  tfp_near_set_ads_source(NULL);
+  pose_world_third_person();
+  return 0;
 }
 
 static int real(void) {
@@ -1134,6 +1203,7 @@ static int real(void) {
     H->finish(H->user, handle, &has_stats, &stats, &why);
     pose_world_third_person();
   }
+  if (ads_frames(H, &c)) return 1;
   CHECK(lock_faults == 0 && lock_depth[0] == 0 && lock_depth[1] == 0);
   return 0;
 }

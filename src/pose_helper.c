@@ -786,8 +786,9 @@ static float depth_delta(Policy *p, const DepthObservation *observation, uint64_
 static TfpSteady steady; static TfpSteadyLog steady_log; static TfpSteadyPair steady_pair;
 /* Not in retail (round 20, src/ads_seat.h): the binder's sight and wanted distance, and what the last frame did. */
 static _Atomic uint32_t ads_sight, ads_wanted, ads_pull_bits, ads_share_bits, ads_closer_bits, ads_forward_bits, ads_depth_bits = UINT32_C(0x7fc00000);
-static _Atomic uint32_t ads_full;
+static _Atomic uint32_t ads_full, ads_near_bits; /* ads_near_bits: what the near clip moves in by (tfp_pose_ads_near) */
 static TfpAdsPull ads_pull;
+static TfpAdsLead ads_lead;
 static _Atomic uint32_t steady_mode;
 static bool steady_frame(Policy *p, const DepthObservation *observation, uint64_t native_stack, uint64_t now, uint32_t mode, float argument, float *delta) {
   const uint64_t generation = atomic_load_explicit(&active_generation, memory_order_relaxed);
@@ -1427,7 +1428,9 @@ static void position_locked(uint32_t unit, uint32_t node, const float *pose, uin
     atomic_store_explicit(&ads_pull_bits, float_bits(pull), memory_order_relaxed);
     atomic_store_explicit(&ads_share_bits, float_bits(policy.ads_share), memory_order_relaxed);
     atomic_store_explicit(&ads_forward_bits, float_bits(forward), memory_order_relaxed);
-    atomic_store_explicit(&ads_closer_bits, float_bits(tfp_ads_closer(pull, policy.ads_share, forward)), memory_order_relaxed);
+    const float closer = tfp_ads_closer(pull, policy.ads_share, forward);
+    atomic_store_explicit(&ads_closer_bits, float_bits(closer), memory_order_relaxed);
+    atomic_store_explicit(&ads_near_bits, float_bits(tfp_ads_lead(&ads_lead, closer, (double)now)), memory_order_relaxed);
     atomic_store_explicit(&ads_full, policy.full_ads ? 1u : 0u, memory_order_relaxed);
   }
   /* This presentation-only term is independent of saved placement/shoulder
@@ -2152,7 +2155,8 @@ void tfp_pose_reset_for_tests(void) {
   memset(&steady, 0, sizeof steady); memset(&steady_log, 0, sizeof steady_log); memset(&steady_pair, 0, sizeof steady_pair); atomic_store(&steady_mode, 0);
   atomic_store(&ads_sight, 0); atomic_store(&ads_wanted, 0); atomic_store(&ads_pull_bits, 0); atomic_store(&ads_share_bits, 0);
   atomic_store(&ads_closer_bits, 0); atomic_store(&ads_forward_bits, 0); atomic_store(&ads_depth_bits, UINT32_C(0x7fc00000)); atomic_store(&ads_full, 0);
-  tfp_ads_pull_reset(&ads_pull);
+  atomic_store(&ads_near_bits, 0);
+  tfp_ads_pull_reset(&ads_pull); memset(&ads_lead, 0, sizeof ads_lead);
 }
 /* Not in retail (pose_helper.h). */
 uint32_t tfp_pose_set_hold(uint32_t on) {
@@ -2171,6 +2175,14 @@ uint32_t tfp_pose_hold_probe(TfpPoseHoldProbe *out) {
 void tfp_pose_set_ads_seat(float sight, float wanted) {
   atomic_store_explicit(&ads_sight, float_bits(isfinite(sight) ? sight : 0), memory_order_relaxed);
   atomic_store_explicit(&ads_wanted, float_bits(isfinite(wanted) && wanted > 0 ? wanted : 0), memory_order_relaxed);
+}
+/* Read by the near helper in each call of the game's near setter (src/wire_win_pose.c binds it), not through the tick:
+ * the near clip moves in with the gun in the same frame (the review's B1). */
+bool tfp_pose_ads_near(float *closer, float *sight_least) {
+  const bool on = atomic_load_explicit(&armed, memory_order_acquire) != 0;
+  if (closer) *closer = on ? bits_float(atomic_load_explicit(&ads_near_bits, memory_order_relaxed)) : 0;
+  if (sight_least) *sight_least = 0;
+  return on;
 }
 bool tfp_pose_ads_probe(TfpPoseAdsProbe *out) {
   if (!out) return false;
