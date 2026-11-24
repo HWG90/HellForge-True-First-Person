@@ -109,7 +109,8 @@ def path(steps, start=0.0):
 
 class Measure(unittest.TestCase):
     """How a jump is measured (round 10, 2026-11-24): the change of the presented eye's step as a vector, and what
-    the body root itself does in that frame or the one before, with the wanted eye, is the body's own."""
+    the body root itself does, where the wanted eye makes it in this very frame, is the body's own (round 11: in that
+    frame only, and one change of the root once)."""
 
     def judge(self, eyes, roots=None, wanted=None, carried=None, **more):
         lines = ["19:00:00.000 State: swap", HELD]
@@ -169,6 +170,88 @@ class Measure(unittest.TestCase):
         result = self.judge(path([0.0, 0.0, 0.0, 0.30, 0.30, 0.30], 1.0), roots)
         self.assertAlmostEqual(result["largest_jump_m"], 0.30, places=3)
 
+    def test_one_lunge_of_the_root_is_taken_off_once(self):
+        # Scene C2 of the review of round 10: the body sets off at 0.15 m a frame and the eye takes that; in the next
+        # frame the eye lurches a further 0.15 m a frame and eases back, ending 0.30 m ahead of the body. The root's
+        # one lunge was taken off the eye's change in its own frame and again in the next: 0.050 m, a pass.
+        roots = path([0.0, 0.0, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15])
+        eyes = path([0.0, 0.0, 0.15, 0.30, 0.25, 0.20, 0.15, 0.15], 1.0)
+        for wanted in (None, [1.0 + x for x in roots]):          # the eye its own wanted one, and the wanted eye with the body
+            for ms in (8.0, 16.7, 33.3, 50.0):
+                lines = ["19:00:00.000 State: swap", HELD]
+                for i, x in enumerate(eyes):
+                    lines.append(full(ms * i, (x, 1.0, 2.0), None if wanted is None else (wanted[i], 1.0, 2.0), (roots[i], 0.0, 0.0)))
+                result = matrix.judge(lines)
+                self.assertAlmostEqual(result["largest_jump_m"], 0.15, places=3, msg=(ms, wanted is None))
+                self.assertFalse(result["pass"], (ms, wanted is None))
+                self.assertAlmostEqual(result["body_m"], 0.15, places=3)   # the first frame is the body's, and said so
+
+    def test_two_lunges_of_the_root_are_each_taken_off(self):
+        # the same eye over a body that does lurch twice: both frames are the body's
+        roots = path([0.0, 0.0, 0.15, 0.30, 0.30, 0.30, 0.30])
+        result = self.judge([1.0 + x for x in roots], roots)
+        self.assertLess(result["largest_jump_m"], 0.001)
+        self.assertEqual([p["whose"] for p in result["pops"]], ["body", "body"])
+
+    def test_an_eye_that_goes_with_the_root_a_frame_before_the_rig_eye_is_the_bodys(self):
+        # 08:07:04.723, a climb: the root brakes by 0.113 m a frame and the shown eye with it (0.110), in the root's
+        # own frame; the rig eye, the root a frame late, makes it in the next, where the shown eye does nothing.
+        roots = path([0.3, 0.3, 0.3, 0.2, 0.2, 0.2, 0.2])
+        wanted = [0.7] + [1.0 + x for x in roots[:-1]]
+        result = self.judge([1.0 + x for x in roots], roots, wanted, [0.0, 0.0, 0.0, 0.0, 0.1, 0.0, 0.0, 0.0])
+        self.assertLess(result["largest_jump_m"], 0.001)
+        self.assertEqual([(p["whose"], p["after"]) for p in result["pops"]], [("body", 0)])
+        # and with the rig eye, a frame after the root: the same lunge, said so
+        result = self.judge(wanted, roots)
+        self.assertEqual([(p["whose"], p["after"]) for p in result["pops"]], [("body", 1)])
+        self.assertIn("a frame after the root, with the wanted eye", matrix.pop_lines(result)[0])
+
+    def test_an_eye_given_the_bodys_lunge_a_frame_after_the_wanted_eye_is_a_jump(self):
+        # R2: the head camera; the root and the head (the wanted eye) brake by 0.10 m a frame in one frame, the shown
+        # eye goes on for that frame (0.10 m carried) and brakes in the next. Round 10 called that frame the body's.
+        roots = path([0.2, 0.2, 0.2, 0.1, 0.1, 0.1, 0.1])
+        wanted = [1.0 + x for x in roots]
+        eyes = path([0.2, 0.2, 0.2, 0.2, 0.1, 0.1, 0.1], 1.0)
+        result = self.judge(eyes, roots, wanted, [0.0, 0.0, 0.0, 0.0, 0.1, 0.1, 0.1, 0.1], kind=4)
+        self.assertAlmostEqual(result["largest_jump_m"], 0.10, places=3)
+        self.assertEqual([p["whose"] for p in result["pops"]], ["filter"])
+        self.assertFalse(result["pass"])
+
+    def test_an_eye_that_makes_the_bodys_lunge_a_frame_before_the_wanted_eye_is_a_jump(self):
+        # (a guard: round 10 flagged this already)
+        roots = path([0.2, 0.2, 0.2, 0.2, 0.1, 0.1, 0.1])
+        eyes = path([0.2, 0.2, 0.2, 0.1, 0.1, 0.1, 0.1], 1.0)
+        result = self.judge(eyes, roots, [1.0 + x for x in roots], kind=4)
+        self.assertAlmostEqual(result["largest_jump_m"], 0.10, places=3)
+        self.assertFalse(result["pass"])
+
+    def test_the_wanted_eye_has_to_make_the_roots_change_in_the_frame_judged(self):
+        # the root lunges in one frame; the shown eye makes that change in the next and the wanted eye only in the
+        # one after. Round 10 looked for the wanted eye a frame either side of the frame judged, whichever frame the
+        # root's change was from, and found it two frames after the root.
+        roots = path([0.0, 0.0, 0.0, 0.1, 0.1, 0.1, 0.1, 0.1])
+        wanted = path([0.0, 0.0, 0.0, 0.0, 0.0, 0.1, 0.1, 0.1], 1.0)
+        eyes = path([0.0, 0.0, 0.0, 0.0, 0.1, 0.1, 0.1, 0.1], 1.0)
+        result = self.judge(eyes, roots, wanted)
+        self.assertAlmostEqual(result["largest_jump_m"], 0.10, places=3)
+        self.assertFalse(result["pass"])
+
+    def test_a_frame_over_the_limit_has_its_own_time_and_tick(self):
+        # Frames from before an edge are written with the edge, all under one stamp (four of 08:10:44.575 in soak 24).
+        # Each is its own frame: the time is the frame's, and the tick tells two of them apart.
+        eyes = path([0.0, 0.0, 0.1, 0.1, 0.0, 0.0, 0.0])
+        lines = ["19:00:01.000 State: swap", HELD]
+        for i, x in enumerate(eyes):
+            t = 33.0 * i - 198.0                                                          # the edge is the seventh frame
+            line = full(1000.0 + max(0.0, t), (x, 1.0, 2.0), t=t)                         # six written at 19:00:01.000
+            lines.append(line.rsplit(" tick=", 1)[0] + f" tick={1000802.0 + 33.0 * i:.3f}")
+        pops = matrix.judge(lines)["pops"]
+        self.assertEqual([p["at"] for p in pops], ["19:00:00.901", "19:00:00.967"])
+        self.assertEqual([p["written"] for p in pops], ["19:00:01.000", "19:00:01.000"])
+        self.assertEqual([p["tick"] for p in pops], [1000901.0, 1000967.0])
+        text = matrix.pop_lines({"pops": pops})
+        self.assertIn("19:00:00.901 (written 19:00:01.000)", text[0])
+
     def test_every_frame_over_the_limit_is_listed_with_its_time(self):
         result = self.judge(path([0.0, 0.0, 0.1, 0.1, 0.1, 0.0, 0.0]), carried=[0, 0, 0, 0.1, 0.1, 0.1, 0, 0], looked=1)
         self.assertEqual([p["at"] for p in result["pops"]], ["19:00:00.099", "19:00:00.198"])
@@ -223,6 +306,16 @@ class SeenInTheGame(unittest.TestCase):
         self.assertLess(result["largest_jump_m"], matrix.POP_M)
         self.assertGreater(result["body_m"], 0.13)
         self.assertGreaterEqual(sum(p["whose"] == "body" for p in result["pops"]), 4)
+
+    def test_a_landing_given_to_the_eye_a_frame_late_is_the_filters(self):
+        # 08:34:07.181, the head camera, a landing inside a swap: the root brakes by 0.099 m a frame at .148 and the
+        # head by 0.321 m; the shown eye stands (0.317 m taken up) and brakes by 0.099 m in the next frame, in which
+        # the wanted eye does something else (0.180 m, 0.081 m off the root's). Flagged at 0.092 m by the lengths;
+        # round 10 called it the body's, a frame late, with the wanted eye of the frame after that.
+        result = matrix.judge((ROOT / "tests/reference/trace-landing-late.log").read_text().splitlines() + [HELD])
+        self.assertFalse(result["pass"])
+        self.assertAlmostEqual(result["largest_jump_m"], 0.099, places=3)
+        self.assertEqual([(p["written"], p["whose"]) for p in result["pops"]], [("08:34:07.181", "filter")])
 
     def test_a_braking_given_to_the_eye_a_frame_late_is_still_the_filters(self):
         # 08:13:20.317: the sprint ends 330 ms after the native view came back; the root's change is set aside in one

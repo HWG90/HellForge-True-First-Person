@@ -72,14 +72,21 @@ prints `no frames traced`, not `pop 0.000`.
 The same log, judged both ways (frames at 0.06 m or more; the old judge would also have missed those across a State
 line):
 
-| Stretch | By lengths (old) | By vector: the filter's | the eye's own | the body's (not counted) | Old flags that are now the body's |
-|---|---|---|---|---|---|
-| feel.48 Stable soak and matrix (4439 frames) | 31 | 28 | 12 | 17 | 12 |
-| feel.48 Bodycam soak to 08:46:24 (3280) | 21 | 20 | 12 | 12 | 6 |
-| feel.47 Stable soak, `tfp-soak-22` (4755) | 24 | 24 | 19 | 9 | 5 |
+| Stretch | By lengths, every frame | The old judge as it ran | By vector: the filter's | the eye's own | the body's (not counted) | By lengths that are now the body's |
+|---|---|---|---|---|---|---|
+| feel.48 Stable soak and matrix (4439 frames) | 31 | 28 | 28 | 12 | 17 | 12 |
+| feel.48 Bodycam soak to 08:46:24 (3284) | 21 | 19 | 20 | 12 | 12 | 6 |
+| feel.47 Stable soak, `tfp-soak-22` (4755) | 24 | 20 | 24 | 19 | 9 | 5 |
 
-So a soak now fails on more frames than before (40 for 31, 32 for 21), not fewer. **Figures from this
+"By lengths, every frame" is the old measure over every three frames next to each other in time: more than the old
+judge ever saw. As it ran it flagged 28, 19 and 20 (corrected in round 11; the first writing of this table gave the
+31, 21 and 24 as the old judge's): it did not measure across a State line, and in the Bodycam soak two frames lay
+across an action's cut.
+
+So a soak now fails on more frames than before (40 for 28, 32 for 19), not fewer. **Figures from this
 judge are not comparable with those written down before round 10.** The "by lengths" figure is printed for that.
+The three columns of the vector judge are round 10's; round 11 changed the rule for the body's own, and its
+figures are in "Round 11" below.
 
 **What can now slip through:**
 
@@ -87,14 +94,120 @@ judge are not comparable with those written down before round 10.** The "by leng
   that frame or the one before.
 - R2's second frame. The root's change is set aside in its own frame and the eye is given it whole in the next.
   That reads as the body's, a frame late. In this log: 08:34:07.181 (a landing inside a swap, 0.099 m shown, the
-  root's 0.092 m of the frame before, 0.551 m carried) and 08:37:14.177. The eye does no more than the body did,
-  but a diagnosis called the first one the filter's, and the judge no longer flags it.
+  root's 0.099 m of the frame before, 0.551 m carried; 0.092 m is what the old judge read by the lengths) and
+  08:37:14.177. The eye does no more than the body did, but a diagnosis called the first one the filter's, and the
+  judge no longer flags it. **Closed in round 11 for the first: see below.**
 - The body itself. A climb's 0.15 m is felt, and is no longer a failure. It is printed.
 
 Also listed as the body's in this log, outside the climbs: 08:10:44.575, 08:15:21.651, 08:28:15.384, 08:35:53.884
 and the root's hop of 08:37:13.8 (0.142 m up in one frame at the end of a sprint, the head camera riding it).
 
-Tests: `tests/test_harness_trace.py` `Measure` (twelve made-up cases) and `SeenInTheGame` (a climb and a braking cut
+### Round 11: the body's lunge once, in the frame it reaches the eye
+
+Written 2026-11-24 (branch `round11`), after the review of round 10. Harness only; nothing was run in the game.
+
+The review found four holes in the rule above, and they are closed:
+
+1. **One lunge was excused twice.** The root's change was taken off the eye's change in its own frame and again in
+   the next. A made-up scene: the body sets off at 0.15 m a frame, the eye takes that, lurches a further 0.15 m a
+   frame in the next frame and eases back, ending 0.30 m ahead of the body. The lengths read 0.150 m; round 10 read
+   0.050 m and passed it, at 8, 16.7, 33.3 and 50 ms a frame. Now one change of the root is taken off in one frame.
+2. **An eye given the root's change late read as the body's.** 08:34:07.181: the head camera, a landing inside a
+   swap. The root brakes by 0.099 m a frame at .148 and the head by 0.321 m; the shown eye stands (0.317 m taken
+   up) and makes the 0.099 m in the next frame, in which the wanted eye does something else (0.180 m, 0.081 m off
+   the root's change). Round 10 found a wanted eye for it in the frame after that.
+3. **The wanted eye was looked for a frame either side of the frame judged**, whichever frame the root's change was
+   from: up to two frames after the root.
+4. **A frame was named by the stamp of its line.** The frames from before an edge are written with the edge, six or
+   so under one stamp; a soak dropped a frame over the limit that lay across two actions when another frame under
+   the same stamp was listed. A frame is now named by its `tick=`, and its line gives its own time, with the stamp
+   beside it where that is another (`08:10:44.540 (written 08:10:44.575)`).
+
+**The rule now.** The root's change of step (0.06 m or more) is taken off the shown eye's change in the frame in
+which the body's lunge reaches the eye, which is one of two:
+
+- the root's own frame, where the wanted eye makes that change (to 0.03 m or half of it) in that frame or the next:
+  the shown eye went with the root;
+- the frame after the root's, where the wanted eye makes that change in that same frame: the shown eye went with
+  the rig eye.
+
+Once: only frames over the limit ask for a change of the root, a frame whose own wanted eye makes it comes before
+one whose wanted eye makes it a frame later, then the better fit, and of two alike the root's own frame.
+
+**"The same frame as the root" cannot be the whole rule, and the notes above say why.** In a native frame the rig
+eye makes the root's steps one frame later, to the millimetre: that is the game. 17 of the 21 climb frames are the
+shown eye making the root's change with the rig eye, a frame after the root. A rule that fails every eye a frame
+after the root fails the climbs again, with the filter not looking at all. So "late" is measured against the wanted
+eye: an eye that makes the body's lunge in a frame in which the wanted eye does not make it has nothing taken off.
+What this cannot tell apart from a climb, and still reads as the body's: 08:37:14.177 (a native frame, the root's
+0.081 m of the frame before, the rig eye 0.074 m and the shown eye 0.063 m in the same frame, 0.224 m carried),
+08:10:44.575 and 08:15:21.651 (nothing carried; the shown eye is the wanted one). The old judge did not flag any of
+the three (0.002, 0.046 and 0.077 m by the lengths, the last across a State line).
+
+The same three stretches (the Bodycam soak read to 08:46:24.999: 3284 frames):
+
+| Stretch | The old judge as it ran | Round 10: the filter's / the eye's own / the body's | Now: the filter's / the eye's own / the body's |
+|---|---|---|---|
+| feel.48 Stable soak and matrix (4439 frames) | 28 | 28 / 12 / 17 | 28 / 13 / 16 |
+| feel.48 Bodycam soak (3284) | 19 | 20 / 12 / 12 | 23 / 12 / 9 |
+| feel.47 Stable soak (4755) | 20 | 24 / 19 / 9 | 24 / 19 / 9 |
+
+Four frames changed hands, all towards a failure:
+
+- 08:34:07.181, the body's to the filter's at 0.099 m (hole 2).
+- 08:06:31.271 (the frame of that time itself; five more are written under its stamp), a climb, the body's to the eye's own at 0.106 m. Nothing is
+  carried and the shown eye is the rig eye. The rig eye's change is 0.045 m off the root's 0.081 m of the frame
+  before, over the 0.040 m that counts as making it; round 10 had it by a wanted eye of a neighbouring frame.
+- 08:28:14.483, a climb, the body's to the filter's at 0.098 m. The shown eye makes the root's 0.087 m of the frame
+  before to 0.013 m; the rig eye makes only its level part (0.050 m, 0.054 m off). Round 10 had it by the wanted
+  eye of the frame after.
+- 08:28:14.550, the same climb, the body's to the filter's at 0.068 m. The root's 0.060 m of that frame was taken
+  off here and again at .584, where the rig eye makes it (hole 1, in the game).
+
+So of the 21 climb frames 18 still read as the body's, and two of the four climbs of feel.48 are flagged again
+(08:06:31 and 08:28:14); 08:07:04 and 08:17:16 pass, and feel.47's.
+
+Every frame the old judge flagged that is the body's now (19), with what makes it so. "With the rig eye": the
+root's change is of the frame before, and the wanted eye and the shown eye make it in this one.
+
+| Frame | The lengths | The root's change | The wanted eye's | Shown | Left | Carried | How |
+|---|---|---|---|---|---|---|---|
+| 08:06:31.236 (written under 08:06:31.271), climb | 0.091 | 0.110 | 0.111 | 0.111 | 0.006 | 0.000 | with the rig eye; the shown eye is the rig eye |
+| 08:06:31.403, climb | 0.081 | 0.112 | 0.123 | 0.100 | 0.017 | 0.251 | with the rig eye |
+| 08:07:04.590, climb | 0.107 | 0.122 | 0.089 | 0.128 | 0.006 | 0.092 | with the rig eye |
+| 08:07:04.622, climb | 0.135 | 0.158 | 0.158 | 0.137 | 0.021 | 0.103 | with the rig eye |
+| 08:07:04.689, climb | 0.075 | 0.072 | 0.072 | 0.078 | 0.008 | 0.049 | with the rig eye |
+| 08:07:04.723, climb | 0.109 | 0.113 | 0.046, and 0.113 in the next frame | 0.110 | 0.012 | 0.049 | with the root, in the root's own frame; in the next the shown eye does 0.022 m |
+| 08:07:04.790, climb | 0.112 | 0.124 | 0.124 | 0.173 | 0.050 | 0.020 | with the rig eye; 0.050 m of it is not the body's, under the limit |
+| 08:17:16.133, climb | 0.109 | 0.118 | 0.079 | 0.119 | 0.006 | 0.035 | with the rig eye |
+| 08:17:16.166, climb | 0.140 | 0.153 | 0.150 | 0.142 | 0.017 | 0.070 | with the rig eye |
+| 08:17:16.299, climb | 0.126 | 0.115 | 0.106 | 0.126 | 0.012 | 0.081 | with the rig eye |
+| 08:17:16.333, climb | 0.101 | 0.125 | 0.126 | 0.158 | 0.032 | 0.097 | with the rig eye |
+| 08:28:14.517, climb | 0.089 | 0.123 | 0.123 | 0.106 | 0.028 | 0.104 | with the rig eye |
+| 08:28:14.651, climb (the landing) | 0.169 | 0.205 | 0.205 | 0.225 | 0.021 | 0.118 | with the rig eye |
+| 08:28:15.384, after that climb | 0.114 | 0.117 | 0.115 | 0.122 | 0.006 | 0.029 | with the rig eye: the root rises 0.108 m a frame more at .352 |
+| 08:37:13.810 (the frame of that time itself), head camera | 0.077 | 0.102 | 0.096 | 0.083 | 0.021 | 0.000 | root, head and shown eye in one frame: the root's hop at the end of a sprint coming down |
+| 05:22:12.982, feel.47's climb | 0.148 | 0.185 | 0.176 | 0.167 | 0.020 | 0.103 | with the rig eye |
+| 05:22:13.148, the same | 0.073 | 0.080 | 0.080 | 0.084 | 0.021 | 0.070 | with the rig eye |
+| 05:22:20.059, feel.47, head camera | 0.098 | 0.099 | 0.118 | 0.101 | 0.004 | 0.376 | root, head and shown eye in one frame: the body is thrown up 0.099 m a frame; what is carried goes from 0.381 to 0.376 m in it |
+| 05:29:01.778, feel.47 | 0.158 | 0.195 | 0.190 | 0.187 | 0.016 | 0.000 | with the rig eye; nothing carried |
+
+The review listed 05:22:20.059 with the frames that should fail. It is not an eye given the root's change late:
+the root, the head and the shown eye make it in the same frame, to 0.004 m. It stays the body's.
+
+What can still slip through: a step the filter makes in the very frame the body's lunge reaches the eye, of that
+lunge's size and way (within 0.06 m), once. And in a native frame, a lunge of the root that the filter set aside
+and the rig eye then makes: the shown eye making it with the rig eye is the body's whatever was carried
+(08:37:14.177).
+
+Tests: `Measure` has seven more cases (the scene of hole 1 at four frame times, two lunges each taken off, an eye
+a frame after the wanted eye, a frame before it, the wanted eye two frames after the root, an eye with the root a
+frame before the rig eye, a frame's own time and tick); `SeenInTheGame` has the landing
+(`tests/reference/trace-landing-late.log`); `SoakWholeLog` has two frames under one stamp. Three were written as guards and did not fail
+first: the two lunges, the eye a frame before the wanted eye, and the eye with the root (the climb cut from the
+log failed for that one before the rule had its first case).
+
+Tests of round 10: `tests/test_harness_trace.py` `Measure` (twelve made-up cases) and `SeenInTheGame` (a climb and a braking cut
 from the log: `tests/reference/trace-climb.log` reads 0.135 m by lengths and 0.050 m now, "body 0.158";
 `trace-braking.log`, R2 at 08:13:20.3, is still the filter's at 0.119 m). `tests/test_harness_soak.py`
 `SoakWholeLog`.
@@ -111,6 +224,9 @@ four new fields after `tick=`:
   eye. With `damped=0` it is a lag being let go.
 - `view=(x y z)`: which way the view pointed. The head camera's forward; in a native frame the forward axis of the
   rig eye the camera hangs on.
+
+Nothing reads these four yet: not the judge, not `trace.py`, not `replay.py`. They are in the log for a diagnosis
+to use.
 
 And a window of Trace lines is opened when the body's action changes (idle, sprint, crouch, prone, dive), not only
 at a lease or a hold. An action begun and ended inside the native view left no traced frame: 23 of 32 dives in the

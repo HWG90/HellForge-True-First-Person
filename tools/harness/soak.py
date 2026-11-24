@@ -7,7 +7,7 @@ Needs a harness session in a mission with player control; takes the keyboard and
 matrix.py checks; this looks for what one action leaves behind for the next: a frame out of first person, a camera
 step over POP_M between two traced frames, a refusal, the arm drive refusing, an action after which the view does
 not come back. Every action and what the judge said of its stretch of the log go to stdout, with one line for every
-frame at or over the limit (its time, kind, whether jumps were looked for, what was carried, whose it is); at the end
+frame at or over the limit (its own time, kind, whether jumps were looked for, what was carried, whose it is); at the end
 the whole log is judged once more in one piece, for the frames that lie across two actions. The seed repeats a run.
 The view is switched on at the start if it is not, and is not toggled (toggling is a cut by design). No death: that ends the body.
 """
@@ -36,9 +36,15 @@ def verdict(frames, flagged):
     return 1 if flagged else 0
 
 
+def listed(pops):
+    """What names a frame: its tick (the helper's clock). Not its time: that is the stamp of its line, and the frames
+    from before an edge are written with the edge, several under one stamp."""
+    return {p["tick"] for p in pops}
+
+
 def unlisted(whole, seen):
-    """The frames over the limit in the whole log that no action's own stretch listed (`seen`: their times)."""
-    return [p for p in whole if p["whose"] != "body" and p["at"] not in seen]
+    """The frames over the limit in the whole log that no action's own stretch listed (`seen`: their ticks)."""
+    return [p for p in whole if p["whose"] != "body" and p["tick"] not in seen]
 
 
 def main(argv):
@@ -79,7 +85,7 @@ def main(argv):
         print(f"{count:3d} {'BAD ' if flag else 'ok  '}{name:16s} missed {j['missed']} {matrix.describe(j)} kinds {j['kinds']}  {script[:60]}", flush=True)
         for text in matrix.pop_lines(j):
             print(text, flush=True)
-        seen.update(p["at"] for p in j["pops"])
+        seen |= listed(j["pops"])
     d.run("up w; up s; up shift; up right; wait 2.0")
     with open(log, errors="replace") as handle:
         handle.seek(whole)

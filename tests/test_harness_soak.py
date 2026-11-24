@@ -24,9 +24,14 @@ class SoakWholeLog(unittest.TestCase):
     2026-11-24: 08:31:09.150 at 0.072 m and 08:32:05.640 at 0.061 m were over the limit and not flagged)."""
 
     def test_frames_over_the_limit_that_no_action_listed(self):
-        whole = [{"at": "08:31:09.150", "whose": "own"}, {"at": "08:31:12.000", "whose": "filter"}, {"at": "08:31:15.000", "whose": "body"}]
-        seen = {"08:31:12.000"}
-        self.assertEqual([p["at"] for p in soak.unlisted(whole, seen)], ["08:31:09.150"])   # the body's own is not a flag
+        whole = [{"at": "08:31:09.150", "tick": 1.0, "whose": "own"}, {"at": "08:31:12.000", "tick": 2.0, "whose": "filter"},
+                 {"at": "08:31:15.000", "tick": 3.0, "whose": "body"}]
+        self.assertEqual([p["at"] for p in soak.unlisted(whole, {2.0})], ["08:31:09.150"])   # the body's own is not a flag
+
+    def test_two_frames_written_under_one_stamp_are_two_frames(self):
+        # frames from before an edge are all written with it: one of them listed by an action does not list the other
+        whole = [{"at": "08:31:12.000", "tick": 182331157.344, "whose": "filter"}, {"at": "08:31:12.000", "tick": 182331190.535, "whose": "filter"}]
+        self.assertEqual([p["tick"] for p in soak.unlisted(whole, soak.listed([whole[0]]))], [182331190.535])
 
 
 if __name__ == "__main__":
