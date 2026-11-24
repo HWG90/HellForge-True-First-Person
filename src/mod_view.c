@@ -34,6 +34,7 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "arm_drive.h"
 #include "wire_options.h"
 #include "arm_weight.h"
+#include "trace_edges.h"
 #define TFP_VIEW_VERSION "0.6.0-feel.48"
 #else
 #include "wire_win.h"
@@ -385,14 +386,18 @@ static void entry_note(void) {
  *   damp         what the damping added to the true eye, in the world: wanted - damp is the head camera's own eye.
  *                With damped=0 it is a lag being let go. (Round 10, 2026-11-24: the wanted eye is written after the
  *                damping, so the lines could not say whether its 0.25 m limit came into force in a frame, nor give
- *                the head's own path for a change to the damping to be tried on.) */
+ *                the head's own path for a change to the damping to be tried on.)
+ * A window is also opened when the body's action changes (src/trace_edges.h); such a window has no State line before
+ * it, and "t=" starts again in it. */
 static void trace_note(void) {
-  static bool was_leased, was_holding;
-  const bool leased = wire.log.has_lease, holding = wire.controller.holding, edge = leased != was_leased || holding != was_holding;
-  was_leased = leased, was_holding = holding;
-  if (edge && lock_wanted) tfp_camera_continuity_event(); /* a lease or a hold begun or ended: the rig may be re-seated */
+  static TfpTraceEdges edges;
+  /* The body's action, where the motion runtime samples it: a change of it opens a window too (src/trace_edges.h). */
+  const TfpMotionRuntime *motion = tfp_wire_motion_runtime(&wire);
+  const int action = motion && motion->state.phase == TFP_MOTION_PHASE_ACTIVE && motion->state.action != TFP_ACT_NONE ? (int)motion->state.action : -1;
+  const unsigned edge = tfp_trace_edges_step(&edges, wire.log.has_lease, wire.controller.holding, action);
+  if ((edge & TFP_TRACE_EDGE_EVENT) && lock_wanted) tfp_camera_continuity_event(); /* a lease or a hold begun or ended: the rig may be re-seated */
   if (!lock_wanted || !trace_wanted) return;
-  if (edge) tfp_camera_trace_edge();
+  if (edge & TFP_TRACE_EDGE_WINDOW) tfp_camera_trace_edge();
   TfpCameraTraceRow rows[48];
   const uint32_t count = tfp_camera_trace_read(rows, 48);
   if (!count) return;
