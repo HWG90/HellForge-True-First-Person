@@ -654,6 +654,79 @@ static void take_over(void) {
     CHECK(worst.took_ms <= 2*TFP_EYE_RELEASE_MAX_MS+2*FRAMES[f]);
   }
 }
+/* The incoming eye AHEAD of the head camera's own along the release's way (past it, as the eye goes), on the line and
+ * off it (round 19, second review: the speed carried onto such an eye bulged the path out of the span, 0.015 m through
+ * the helper, up to 0.075 m in 3-D pairs). The release's speed is carried only onto an eye no further on than where the
+ * release was going; otherwise it is eased away first, so the eye stays inside the span of the held eye, the incoming
+ * eye and the head camera's own, with no frame over the bound, and ends at the incoming eye. */
+static void take_over_ahead(void) {
+  const float line[3] = {.36f, .80f, -.48f}, fore[3] = {0, 1, 0};
+  const float *dirs[2] = {fore, line};
+  for (unsigned f = 0; f < 4; ++f) {
+    TakeRun worst = {0, -1, -1, 0, true, true}; int runs = 0;
+    for (unsigned d = 0; d < 2; ++d) for (int sign = -1; sign <= 1; sign += 2)
+      for (float way = .44f; way < .71f; way += .26f) for (int k = 0; k < 3; ++k) for (int across = 0; across < 3; ++across) {
+        const float ahead[3] = {.02f, .05f, .10f}, aside[3] = {0, .03f, .06f};
+        for (double draw = 0; draw <= 450.001; draw += FRAMES[f] < 10 ? 2*FRAMES[f] : FRAMES[f]) {
+          const TakeRun r = take_run(dirs[d], sign*way, -sign*ahead[k], aside[across], draw, FRAMES[f]);
+          if (!r.drawn) continue;
+          ++runs;
+          if (getenv("TFP_TAKEOVER_TABLE") && (r.outside > 5e-5f || r.over_bound > 0))
+            printf("    take-over ahead dir %u held %+.2f incoming %+.2f aside %.2f drawn %3.0f ms, %4.1f ms a frame: outside %.4f over bound %+.5f\n",
+                d, sign*way, -sign*ahead[k], aside[across], draw, FRAMES[f], r.outside, r.over_bound);
+          worst.outside = fmaxf(worst.outside, r.outside); worst.over_bound = fmaxf(worst.over_bound, r.over_bound);
+          worst.ended = worst.ended && r.ended; worst.took_ms = fmaxf(worst.took_ms, r.took_ms);
+        }
+      }
+    if (getenv("TFP_TAKEOVER_TABLE")) printf("  take-over ahead, %4.1f ms a frame: %d runs, outside the span %.6f m, over the bound %+.6f m, longest %.0f ms\n",
+        FRAMES[f], runs, worst.outside, worst.over_bound, worst.took_ms);
+    CHECK(runs > 200 && worst.outside <= 5e-5f && worst.over_bound <= 0 && worst.ended);
+    CHECK(worst.took_ms <= 2*TFP_EYE_RELEASE_MAX_MS+2*FRAMES[f]);
+  }
+}
+/* The take-over's conditions and rates, one call at a time (tfp_eye_glide_take_over): the eye at 0 going 'v' m/s along
+ * y, where it was going 1 m on. */
+static void take_over_rates(void) {
+  const float zero[3] = {0, 0, 0}, toward[3] = {0, 1, 0}, rate = TFP_EYE_RELEASE_SLOW;
+  /* The new target 0.1 m on, on the line, but too near to lose the speed in at the rate (v^2 / (2 rate) = 0.1056 m),
+   * though a release from rest of that way would be quick enough to carry it: eased away, nothing planned harder than
+   * the rate. (Carried, it lost the speed at v^2 / (2 * 0.1 m) = 14.25 m/s^2.) */
+  {
+    const float v = sqrtf(2*.1f*14.25f), speed[3] = {0, v, 0}, target[3] = {0, .1f, 0};
+    TfpEyeGlide g; tfp_eye_glide_reset(&g); tfp_eye_glide_take_over(&g, zero, speed, target, toward, 0);
+    CHECK(g.slow <= rate*1.001f && same(g.goal, target));
+  }
+  /* The new target 0.1 m on along the motion and 0.5 m aside: the speed could be lost before it, but a release from
+   * rest of the whole 0.51 m takes longer than the carried glide may last: eased away, nothing harder than the rate.
+   * (Carried, the eye went aside at 21.6 m/s^2.) */
+  {
+    const float speed[3] = {0, 1.2f, 0}, target[3] = {.5f, .1f, 0};
+    TfpEyeGlide g; tfp_eye_glide_reset(&g); tfp_eye_glide_take_over(&g, zero, speed, target, toward, 0);
+    CHECK(g.slow <= rate*1.001f && same(g.goal, target));
+  }
+  /* Eased away at the running glide's own hardest rate where it is above TFP_EYE_RELEASE_SLOW: the eye comes to rest
+   * v^2 / (2 slow) on (1/60 m at 30 m/s^2, not 1/27 m), and at TFP_EYE_RELEASE_SLOW where it is below. */
+  {
+    const float speed[3] = {0, 1, 0}, behind[3] = {0, -.1f, 0};
+    TfpEyeGlide g; tfp_eye_glide_reset(&g); tfp_eye_glide_take_over(&g, zero, speed, behind, toward, 30);
+    CHECK(fabsf(g.target[1]-1.f/60) < 1e-5f && fabsf(g.target[0]) < 1e-7f && same(g.goal, behind));
+    tfp_eye_glide_reset(&g); tfp_eye_glide_take_over(&g, zero, speed, behind, toward, 5);
+    CHECK(fabsf(g.target[1]-1/(2*rate)) < 1e-5f);
+  }
+  /* Through tfp_eye_glide_release: a release of a long way (1.2 m: 450 ms, losing its way at about 30 m/s^2) whose
+   * target goes back behind the eye 200 ms in is eased away at the release's own hardest rate, not at 13.5 m/s^2. */
+  {
+    const float held[3] = {0, -1.2f, 0}, back[3] = {0, -1.5f, 0};
+    TfpEyeGlide g; tfp_eye_glide_reset(&g); float eye[3]; memcpy(eye, held, 12);
+    for (int i = 0; i < 12; ++i) tfp_eye_glide_release(&g, eye, zero, .0167f);
+    CHECK(g.slow > 2*rate);
+    float place[3], speed[3]; tfp_eye_glide_at(&g, g.elapsed, place, speed);
+    const float v = sqrtf(dot3(speed, speed)), slow = g.slow;
+    CHECK(v > .5f);
+    tfp_eye_glide_release(&g, eye, back, 0);
+    CHECK(fabsf(g.target[1]-(place[1]+v*v/(2*slow))) < 1e-4f && same(g.goal, back));
+  }
+}
 
 int main(void) {
   retail();
@@ -666,6 +739,8 @@ int main(void) {
   release();
   lapse_mid_swap();
   take_over();
+  take_over_ahead();
+  take_over_rates();
   printf("camera glide: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

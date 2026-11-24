@@ -207,14 +207,20 @@ static inline bool tfp_eye_glide_lock_step(TfpEyeGlide *g, float *value, const f
  * the eye can lose that speed at: the running glide's own hardest one, and no less than TFP_EYE_RELEASE_SLOW. A release
  * from rest never goes faster than that brings to rest at its own target (v^2 <= 2 slow way), so the eye can always
  * come to rest on its line short of `toward`.
- *  - All of it is carried when it can be lost before the new target: v^2 <= 2 slow d, d the way to the new target
- *    along the motion, and a glide no shorter than the release from rest of the whole way would be. One glide of the
- *    release's to the new target, shortened where it must be so that along the motion it loses the speed and comes to
- *    rest at the new target itself, never beyond it.
- *  - Otherwise (the new target too near ahead, behind, or the motion pointing away from it) none of it is carried on:
+ *  - All of it is carried when it can be lost before the new target, and the new target is no further on than
+ *    `toward`: v^2 <= 2 slow d and d <= ahead, d the way to the new target along the motion and ahead the way to
+ *    `toward`, and a glide no shorter than the release from rest of the whole way would be. One glide of the release's
+ *    to the new target, shortened where it must be so that along the motion it loses the speed and comes to rest at
+ *    the new target itself, never beyond it. (Carried onto a new target beyond `toward`, a sidearm's eye 2 cm ahead of
+ *    the head camera's and 3 cm aside, the path bulged out of the span by 0.015 m: round 19, second review.)
+ *  - Otherwise (the new target too near ahead, beyond `toward`, behind, too far aside for the carried glide's time, or
+ *    the motion pointing away from it) none of it is carried on:
  *    it is eased away, the eye coming to rest on its line at that rate, v^2 / (2 slow) further on and never past
  *    `toward`, and the release goes from rest from there, straight to the new target. Both stages are straight lines
  *    inside the span.
+ * So the eye stays inside the span of where the take-over began, `toward` and the new target (the held eye, the head
+ * camera's and the incoming one, in a release; as tested, to 0.05 mm), and along the motion never further on than the
+ * further of `toward` and the new target.
  * Its speed is continuous, and no frame's step changes by more than `slow` (or the release's own rates) times the
  * frame's time squared. */
 static inline void tfp_eye_glide_take_over(TfpEyeGlide *g, const float *from, const float *speed, const float *target, const float *toward, float slow) {
@@ -229,7 +235,7 @@ static inline void tfp_eye_glide_take_over(TfpEyeGlide *g, const float *from, co
   for (unsigned i = 0; i < 3; ++i) { dir[i] = speed[i]/fast; d += (target[i]-from[i])*dir[i]; ahead += (toward[i]-from[i])*dir[i]; }
   const float shortest = sqrtf(2*whole/(share*TFP_EYE_RELEASE_ACCEL)); /* s: the release from rest of the whole way */
   float stop = fast*fast/(2*rate);                                     /* m: the way it comes to rest in */
-  if (d > 0 && stop <= d && fast*share*shortest <= 2*d) {
+  if (d > 0 && d <= ahead && stop <= d && fast*share*shortest <= 2*d) {
     tfp_eye_glide_plan(g, from, speed, target, TFP_EYE_RELEASE_ACCEL, TFP_EYE_RELEASE_MIN_MS, TFP_EYE_RELEASE_MAX_MS);
     const float ms = 2000*d/(share*fast); /* the longest that does not take it past the target along the motion */
     if (g->duration > ms) tfp_eye_glide_plan(g, from, speed, target, TFP_EYE_RELEASE_ACCEL, ms, ms);
