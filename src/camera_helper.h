@@ -227,6 +227,8 @@ typedef struct TfpCameraAlternationStats { uint64_t frames, looked, fire; float 
 void tfp_camera_alternation_stats(TfpCameraAlternationStats *out);
 /* The trace: a State edge was just written. The presented frames of the next 500 ms, and the six before it that
  * were not yet handed out, are given to tfp_camera_trace_read (oldest first, each once). `ms` counts from the edge.
+ * The helper opens such a window itself in a frame whose eye says TFP_CAMERA_TRACE_SELF (the edge is that frame; in
+ * a window that is open, the window lasts 500 ms from that frame and `ms` goes on).
  * source: 1 head camera, 2 native view, 3 the last native argument repeated. root: the body root the eye was
  * measured against, axes: that root's axis rows (the eye in the root's frame is axes times (eye - root); the
  * continuity works there, and a root whose axes turn in one frame moves that eye without moving the root). what:
@@ -241,12 +243,20 @@ enum { TFP_CAMERA_TRACE_LOOKED = 1,  /* jumps within the camera were looked for 
        TFP_CAMERA_TRACE_START = 32,  /* the continuity began from nothing in this frame (its first, or the first after the helper forgot it) */
        TFP_CAMERA_TRACE_QUIET = 64,  /* full aim: the continuity was told to take nothing up */
        TFP_CAMERA_TRACE_OFF_FOOT = 128, /* a head-camera frame of a body that was not on foot: its eye is not damped and jumps in it are not looked for. A native frame never says it: the question is not asked there */
-       TFP_CAMERA_TRACE_DAMPED = 256 /* the eye damping ran in this frame (src/camera_damp.h); without it a `damp` that is not nothing is a lag being let go */ };
+       TFP_CAMERA_TRACE_DAMPED = 256, /* the eye damping ran in this frame (src/camera_damp.h); without it a `damp` that is not nothing is a lag being let go */
+       TFP_CAMERA_TRACE_SELF = 512   /* the presented eye changed its step by TFP_TRACE_SELF_M or more in this frame: the helper opened a window itself, or kept one open (src/trace_edges.h) */ };
 /* damp: what the eye damping added to the true eye of this frame, in the world (wanted - damp is the eye the head
  * camera would have had without it); zeros where it added nothing. view: which way the view pointed, a unit vector
  * in the world (the head camera's forward; in a native frame the forward axis of the rig eye the camera hangs on);
  * zeros where the frame did not have it. */
-typedef struct TfpCameraTraceRow { float ms; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; float root[3]; uint32_t what; float axes[9]; double tick; float damp[3], view[3]; } TfpCameraTraceRow;
+/* sock, arms: what the arm drive drew in this frame, as the binder told it (tfp_camera_trace_draw): the weapon socket
+ * as drawn less the game's own, along the view, in metres, and TFP_ARM_DRAW_* (src/arm_drive.h; 0: not driven, or not
+ * told for this frame). */
+typedef struct TfpCameraTraceRow { float ms; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; float root[3]; uint32_t what; float axes[9]; double tick; float damp[3], view[3]; float sock; uint32_t arms; } TfpCameraTraceRow;
 void tfp_camera_trace_edge(void);
+/* The arm drive's figures of the last primary draw, for the newest frame presented. The draw comes after the frame's
+ * camera call and before the next tick, so the binder calls this once a tick, when the drive has seen a draw since the
+ * last call, before it reads the rows. A frame nobody spoke for says arms 0. The log only. */
+void tfp_camera_trace_draw(float sock_m, uint32_t arms);
 uint32_t tfp_camera_trace_read(TfpCameraTraceRow *rows, uint32_t capacity);
 #endif

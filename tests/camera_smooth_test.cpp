@@ -974,6 +974,59 @@ int main() {
     CHECK(angle(turned.view, body.view) < 2e-3f && std::fabs(angle(turned.axes + 3, body.axes + 3) - .7f) < 2e-3f);
     g.end();
   }
+  // ---- 23. The trace is opened by the eye itself (round 13). A melee: the action does not change, no State line is
+  // written, and the eye went 0.7 m in a frame with no traced frame at all (16 of 17 melees in the soak of 2026-11-24,
+  // and both 1.6 m back-and-forth seconds). When the presented eye's step changes by 0.15 m or
+  // more in a frame, a window opens there: the six frames before it, that frame, 500 ms after. Nothing shown differs. ----
+  for (int at = 0; at < 4; ++at) {
+    const double dt = at == 0 ? 8 : at == 1 ? 16.7 : at == 2 ? 33.3 : 50;
+    fresh(true, true, true);
+    Game g; g.pose(0, 0, 0, .3f); g.look(.3f, -.2f); g.hip(); g.begin();
+    TfpCameraTraceRow rows[128];
+    standing(g, 12, dt, false); standing(g, static_cast<int>(700 / dt) + 2, dt, true); // the entry and its 600 ms are over
+    CHECK(tfp_camera_trace_read(rows, 128) == 0); // nothing opened a window: the change of camera was taken up
+    g.eye[1] += .7f; g.native(); g.frame(dt);      // not looked for: shown as the game put it
+    CHECK(g.from_rig_eye() < 1e-4f && !g.forwarded_own);
+    uint32_t count = tfp_camera_trace_read(rows, 128);
+    CHECK(count == 7 && rows[6].ms == 0 && (rows[6].what & TFP_CAMERA_TRACE_SELF) && !(rows[5].what & TFP_CAMERA_TRACE_SELF));
+    CHECK(rows[0].ms < -5.5 * dt && std::fabs(rows[6].step - .7f) < .01f && rows[5].step < .001f);
+    g.eye[1] -= .7f; g.native(); g.frame(dt);      // and back: the window is open, "t=" goes on from the first
+    count = tfp_camera_trace_read(rows, 128);
+    CHECK(count == 1 && (rows[0].what & TFP_CAMERA_TRACE_SELF) && rows[0].ms > dt - 1 && rows[0].ms < dt + 1);
+    standing(g, static_cast<int>(700 / dt), dt, true);
+    count = tfp_camera_trace_read(rows, 128);       // the stop is the third such frame; 500 ms after it, no more
+    CHECK(count > 2 && (rows[0].what & TFP_CAMERA_TRACE_SELF) && rows[count - 1].ms <= 2 * dt + 500 + .01 && rows[count - 1].ms > dt + 500);
+    for (uint32_t i = 1; i < count; ++i) CHECK(!(rows[i].what & TFP_CAMERA_TRACE_SELF) && rows[i].ms - rows[i - 1].ms > dt - .01 && rows[i].ms - rows[i - 1].ms < dt + .01);
+    CHECK(tfp_camera_trace_read(rows, 128) == 0);
+    // under 0.15 m: a crouch, a turn, a 0.1 m re-seat. Nothing opens.
+    g.eye[1] += .1f; g.native(); g.frame(dt); standing(g, 5, dt, true);
+    for (int i = 0; i < 8; ++i) { g.look(.3f + .2f * (i + 1), -.2f); g.native(); g.frame(dt); }
+    CHECK(tfp_camera_trace_read(rows, 128) == 0);
+    g.end();
+    // with the trace switched off nothing is kept and nothing opens
+    fresh(true, true, false);
+    Game h; h.pose(0, 0, 0, .3f); h.look(.3f, -.2f); h.hip(); h.begin();
+    standing(h, 12, dt, false); standing(h, 30, dt, true); h.eye[1] += .7f; h.native(); h.frame(dt);
+    CHECK(tfp_camera_trace_read(rows, 128) == 0);
+    h.end();
+  }
+  // ---- 24. The trace says what the arm drive drew in the frame (round 13): the binder hands the helper the drive's
+  // figures of the last primary draw at the next tick, for the newest frame presented. sock: the socket as drawn less
+  // the game's own, along the view; arms: TFP_ARM_DRAW_* (0: not driven, or not known for the frame). ----
+  {
+    fresh(true, true, true);
+    Game g; g.pose(0, 0, 0, 0); g.look(0, 0); g.hip(); g.begin();
+    TfpCameraTraceRow rows[64];
+    tfp_camera_trace_draw(.5f, 1); // nothing presented yet: nothing to say it of
+    standing(g, 3, 33.3, true); tfp_camera_trace_draw(.25f, 1);
+    standing(g, 1, 33.3, true); tfp_camera_trace_draw(-.125f, 3);
+    standing(g, 1, 33.3, true); // this frame's draw has not been told yet
+    tfp_camera_trace_edge();
+    const uint32_t count = tfp_camera_trace_read(rows, 64);
+    CHECK(count == 5 && rows[0].arms == 0 && rows[0].sock == 0 && rows[1].arms == 0);
+    CHECK(rows[2].arms == 1 && rows[2].sock == .25f && rows[3].arms == 3 && rows[3].sock == -.125f && rows[4].arms == 0 && rows[4].sock == 0);
+    g.end();
+  }
   std::printf("camera smooth: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }
