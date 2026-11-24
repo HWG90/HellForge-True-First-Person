@@ -76,7 +76,9 @@ static TfpWireOptions options;
 /* Under the camera lock: the eye's continuity (src/camera_continuity.h) and the per-frame "Trace:" lines after each
  * State edge. A file trace_off.txt beside the DLL switches the lines off; neither does anything without the lock. */
 static bool smooth_wanted = true, trace_wanted = true;
-static bool mcm_wanted; /* test switch mcm_on.txt: the settings menu in DBF-MCM instead of the mod's own panel */
+/* Test switch panel_on.txt: the settings menu is the mod's own panel even when DBF-MCM is loaded (src/wire_panel.h).
+ * mcm_on.txt, the switch of builds up to 0.6.0-feel.50, is still read and changes nothing: MCM is the default now. */
+static bool panel_wanted;
 /* The arm drive (src/arm_drive.h). arms_live: it is on (the Animated arms option, or its files). While it is on, the
  * game's joint values are put back after every primary draw (round 13, 2026-11-24: the game seats the first-person
  * eye by the rig's weapon socket, and a written socket left in the rig moved the camera; src/arm_drive.c). Test
@@ -769,8 +771,11 @@ static void start(void) {
         strcpy(slash + 1, "mcm_on.txt");
         FILE *mcm_file = fopen(parts_path, "r");
         if (mcm_file) fclose(mcm_file);
-        mcm_wanted = mcm_file != NULL;
-        if (mcm_wanted) say("Test: mcm_on.txt: the settings menu is registered with DBF-MCM (goose.mcm) instead of the mod's own panel");
+        if (mcm_file) say("Test: mcm_on.txt is no longer needed and changes nothing: the settings menu is DBF-MCM's whenever it is loaded");
+        strcpy(slash + 1, "panel_on.txt");
+        FILE *panel_file = fopen(parts_path, "r");
+        if (panel_file) fclose(panel_file);
+        panel_wanted = panel_file != NULL;
 #ifdef TFP_FEEL
         static const char *const arm_files[] = {"arms_live_keep.txt", "arms_live_restore.txt", "arm_bend.txt", "rest_trace.txt"};
         bool *const arm_switches[] = {&arms_keep, &arms_restore, &arms_bend, &arms_rest_trace};
@@ -892,9 +897,9 @@ static void start(void) {
   stage = RUNNING;
 #ifdef TFP_FEEL
   say("Ready. F11 toggles True First Person (view, weapon and arm placement, motion; head hiding, sleeves, hand grips and the effects once "
-      "their checks pass: see the Ready / Check / Refused lines). F10 opens the mod's own settings panel when NEST (Goose Overlay "
-      "Host) is loaded; it is also in the host's panel list (Page Down). DBF-MCM is not needed and not used (a file mcm_on.txt beside "
-      "the DLL puts the menu there instead). Settings are saved when they change. Page Up (the menu's editor key) opens the placement "
+      "their checks pass: see the Ready / Check / Refused lines). F10 opens the settings menu: DBF-MCM's page when DBF-MCM is loaded, "
+      "else the mod's own panel through NEST (Goose Overlay Host; also in the host's panel list, Page Down); a file panel_on.txt beside "
+      "the DLL asks for the panel. Settings are saved when they change. Page Up (the menu's editor key) opens the placement "
       "editor; F8 is HellForge's own editor. Not in this build: the eye-camera editor, Photo Mode camera sharing.");
 #else
   say("Ready. F11 toggles the view. Not in this build: arms and weapon placement, sleeves, hand grips, motion, head and body hiding, "
@@ -1127,7 +1132,7 @@ static void tick_body(void) {
     const char *refused = tfp_wire_editor_toggle(&wire);
     if (refused) say("Placement editor: %s", refused);
   }
-  if (tfp_mod_editor_settled()) tfp_mod_panel_tick(hf, owner, &wire, mcm_wanted, menu_unavailable(), tfp_wire_editor_toggle);
+  if (tfp_mod_editor_settled()) tfp_mod_panel_tick(hf, owner, &wire, panel_wanted, menu_unavailable(), tfp_wire_editor_toggle);
   tfp_wire_frame(&wire, extra);
   entry_note();
   head_note();   /* before the trace: a "Head:" line then stands above the rows of the frames it is about */

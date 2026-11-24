@@ -102,9 +102,9 @@ static TfpSettingsCopy test_copy(void *user, TfpSettingsFile file, const char *s
 }
 static const TfpSettingsDisk test_disk = {NULL, test_save, test_copy, NULL};
 /* ---- a stand-in for MCM: the saved values, and what the binder asked of it ---- */
-static struct { const char *id; TfpMenuValue v; } mcm_values[40];
+static struct { const char *id; TfpMenuValue v; } mcm_values[64];
 static unsigned mcm_count, mcm_sets, mcm_labels, mcm_disables;
-static char mcm_last_label[2][300], mcm_disabled[400];
+static char mcm_last_label[2][300], mcm_disabled[1200];
 static TfpMenuValue *mcm_slot(const char *id) {
   for (unsigned i = 0; i < mcm_count; i++) if (!strcmp(mcm_values[i].id, id)) return &mcm_values[i].v;
   return NULL;
@@ -123,9 +123,19 @@ static bool mcm_set(void *u, const char *id, const TfpMenuValue *value) {
   tfp_wire_menu_changed(&wire, id, value, &before); /* MCM calls `changed` back after a set */
   return true;
 }
+static struct { char id[40]; bool disabled; } mcm_state[64]; /* each control's disabled state as last set */
+static unsigned mcm_state_count;
+static bool mcm_is_disabled(const char *id) {
+  for (unsigned i = 0; i < mcm_state_count; i++) if (!strcmp(mcm_state[i].id, id)) return mcm_state[i].disabled;
+  return false;
+}
 static bool mcm_set_disabled(void *u, const char *id, bool disabled) {
   (void)u; mcm_disables++;
-  if (disabled) { strcat(mcm_disabled, id); strcat(mcm_disabled, " "); }
+  if (disabled && strlen(mcm_disabled) + strlen(id) + 2 < sizeof mcm_disabled) { strcat(mcm_disabled, id); strcat(mcm_disabled, " "); }
+  unsigned i = 0;
+  while (i < mcm_state_count && strcmp(mcm_state[i].id, id)) i++;
+  if (i == mcm_state_count && mcm_state_count < COUNT(mcm_state)) snprintf(mcm_state[mcm_state_count++].id, sizeof mcm_state[0].id, "%s", id);
+  if (i < COUNT(mcm_state)) mcm_state[i].disabled = disabled;
   return true;
 }
 static bool mcm_set_label(void *u, const char *id, const char *label) {
@@ -409,6 +419,126 @@ static bool locked_as_feel24(void) {
   return !tfp_locked_view_animated_arms(&wire) && tfp_locked_view_camera_lock(&wire) && tfp_locked_view_fov_degrees(&wire) == 104 &&
          !tfp_locked_view_fov_zoom_when_aiming(&wire) && tfp_locked_view_kick_strength(&wire) == 55 && tfp_locked_view_put_away(&wire);
 }
+/* ---- the one list (src/wire_menu.c): every option of both files, each with a setter, once ---- */
+static bool has_fird(const char *text) {
+  for (const char *t = text; t && *t; t++) if ((t[0] == 'F' || t[0] == 'f') && !strncmp(t + 1, "ird", 3)) return true;
+  return false;
+}
+static int list_part(void) {
+  int count = 0, skipped = 0;
+  const TfpMenuControl *controls = tfp_wire_menu_controls(&count);
+  const TfpMenuNotOffered *out = tfp_wire_menu_not_offered(&skipped);
+  CHECK(controls && count >= 42 && out && skipped > 0);
+  /* no duplicate id or label; a page each, every page used; no "Fird" in what the user reads (the stored key
+   * fird_person_arms keeps its name: settings.json files have it) */
+  int per_page[TFP_MENU_PAGES] = {0};
+  for (int i = 0; i < count; i++) {
+    const TfpMenuControl *c = &controls[i];
+    CHECK(c->id && c->label && c->page >= 0 && c->page < TFP_MENU_PAGES);
+    per_page[c->page]++;
+    CHECK(!has_fird(c->label) && !has_fird(c->description) && !has_fird(c->note));
+    for (int j = 0; j < i; j++) CHECK(strcmp(controls[j].id, c->id) && strcmp(controls[j].label, c->label));
+  }
+  for (int page = 0; page < TFP_MENU_PAGES; page++) CHECK(per_page[page] > 0 && tfp_wire_menu_pages[page] && !has_fird(tfp_wire_menu_pages[page]));
+  CHECK(!strcmp(tfp_wire_menu_pages[2], "Locked view") && !strcmp(tfp_wire_menu_page_ids[2], "locked_view"));
+  /* where each control is stored: one place, never two; a button and a status row store nothing */
+  for (int i = 0; i < count; i++) {
+    const TfpMenuControl *c = &controls[i];
+    const int places = (c->menu >= 0) + (c->locked >= 0) + (c->config >= 0);
+    CHECK(places == (c->kind == TFP_MK_BUTTON || c->kind == TFP_MK_STATUS ? 0 : 1));
+    if (c->kind == TFP_MK_CHOICE) CHECK(c->choices && c->choice_count >= 2);
+    if (c->locked >= 0) {
+      /* the third page holds the locked view's options, with the store's own ranges */
+      const TfpSettingsLockedInfo *info = tfp_settings_locked_info((TfpSettingsLockedId)c->locked);
+      CHECK(info && c->page == 2);
+      if (c->kind == TFP_MK_SLIDER) CHECK(!info->is_bool && c->min == info->min && c->max == info->max && c->step == info->step);
+      else CHECK(info->is_bool && (c->kind == TFP_MK_TOGGLE || c->kind == TFP_MK_CHECK || (c->kind == TFP_MK_CHOICE && c->choice_count == 2)));
+    }
+  }
+  /* every key of both files: a control's or a reason's, exactly once */
+  int named = 0;
+  for (int id = 0; id < TFP_MENU_COUNT; id++, named++) {
+    int controls_of = 0, reasons = 0;
+    for (int i = 0; i < count; i++) controls_of += controls[i].menu == id;
+    for (int i = 0; i < skipped; i++) reasons += !strcmp(out[i].file, "settings.json menu") && !strcmp(out[i].key, tfp_settings_menu_name((TfpSettingsMenuId)id));
+    if (controls_of + reasons != 1) printf("wire settings: menu.%s: %d controls, %d reasons\n", tfp_settings_menu_name((TfpSettingsMenuId)id), controls_of, reasons);
+    CHECK(controls_of + reasons == 1);
+  }
+  for (int id = 0; id < TFP_LOCKED_COUNT; id++, named++) {
+    int controls_of = 0, reasons = 0;
+    for (int i = 0; i < count; i++) controls_of += controls[i].locked == id;
+    for (int i = 0; i < skipped; i++) reasons += !strcmp(out[i].file, "locked_view.json") && !strcmp(out[i].key, tfp_settings_locked_info((TfpSettingsLockedId)id)->name);
+    if (controls_of + reasons != 1) printf("wire settings: locked_view.%s: %d controls, %d reasons\n", tfp_settings_locked_info((TfpSettingsLockedId)id)->name, controls_of, reasons);
+    CHECK(controls_of + reasons == 1);
+  }
+  for (int id = 0; id < TFP_SET_COUNT; id++, named++) {
+    int controls_of = 0, reasons = 0;
+    for (int i = 0; i < count; i++) controls_of += controls[i].config == id;
+    for (int i = 0; i < skipped; i++) reasons += !strcmp(out[i].file, "settings.json first_person") && !strcmp(out[i].key, tfp_settings_field_name((TfpSettingsField)id));
+    if (controls_of + reasons != 1) printf("wire settings: first_person.%s: %d controls, %d reasons\n", tfp_settings_field_name((TfpSettingsField)id), controls_of, reasons);
+    CHECK(controls_of + reasons == 1);
+  }
+  int stored = 0;
+  for (int i = 0; i < count; i++) stored += controls[i].kind != TFP_MK_BUTTON && controls[i].kind != TFP_MK_STATUS;
+  CHECK(named == stored + skipped);   /* and no reason names a key that is not there */
+  for (int i = 0; i < skipped; i++) CHECK(out[i].why && strlen(out[i].why) > 20 && out[i].key);
+  /* the options the locked view brought are all in: field of view and its lock and zoom, the camera style, the kicks,
+   * damping, the three live features */
+  static const char *const wanted[] = {"camera_lock", "fov_lock", "fov_degrees", "fov_zoom_when_aiming", "camera_style", "kick_strength",
+                                        "kick_max_degrees", "thrown_kick_strength", "camera_damping", "animated_arms", "one_handed_pistols",
+                                        "put_away", "smooth_eye", "edit_placement", "editor_key", "toggle_key", "fird_person_arms"};
+  for (size_t k = 0; k < COUNT(wanted); k++) {
+    const TfpMenuControl *c = NULL;
+    for (int i = 0; i < count; i++) if (!strcmp(controls[i].id, wanted[k])) c = &controls[i];
+    if (!c) printf("wire settings: no control %s\n", wanted[k]);
+    CHECK(c);
+  }
+  for (int i = 0; i < count; i++)
+    if (!strcmp(controls[i].id, "fird_person_arms")) CHECK(!strcmp(controls[i].label, "First Person Arms"));
+    else if (!strcmp(controls[i].id, "camera_style"))
+      CHECK(controls[i].kind == TFP_MK_CHOICE && controls[i].locked == TFP_LOCKED_bodycam && !strcmp(controls[i].choices[0], "Stable") && !strcmp(controls[i].choices[1], "Bodycam"));
+    else if (!strcmp(controls[i].id, "one_handed_pistols")) CHECK(controls[i].note && controls[i].note_when == 0 && controls[i].inert);
+    else CHECK(!controls[i].inert);
+  /* every stored control reaches its store through the menu (the setter), at once, and shows the new value */
+  new_wire();
+  CHECK(tfp_wire_settings_bind(&wire, settings_user_json, sizeof settings_user_json - 1, "settings.json"));
+  TfpSettings *s = tfp_wire_settings(&wire);
+  mcm_count = mcm_sets = mcm_labels = mcm_disables = mcm_state_count = 0, mcm_disabled[0] = 0;
+  TfpMenuHost host = {NULL, mcm_get, mcm_set, mcm_set_disabled, mcm_set_label, NULL, 33};
+  CHECK(tfp_wire_menu_bind(&wire, &host, 0, test_edit));
+  for (int i = 0; i < count; i++) {
+    const TfpMenuControl *c = &controls[i];
+    TfpMenuValue now, want;
+    if (c->menu < 0 && c->locked < 0) continue;   /* the two `config` toggles go through the runtime: below in the MCM part */
+    CHECK(tfp_wire_menu_default(&wire, c, 33, &now));
+    want = now;
+    switch (c->kind) {
+      case TFP_MK_TOGGLE: case TFP_MK_CHECK: want.boolean = !now.boolean; break;
+      case TFP_MK_SLIDER: want.number = now.number == c->max ? c->min : c->max; break;
+      case TFP_MK_CHOICE: want.number = now.number == 1 ? 2 : 1; break;
+      case TFP_MK_KEY: want.number = now.number == 0x41 ? 0x42 : 0x41; break;
+      default: CHECK(false);
+    }
+    const uint64_t before = s->menu_writes + s->locked_writes;
+    tfp_wire_menu_changed(&wire, c->id, &want, &now);
+    TfpMenuValue after;
+    CHECK(tfp_wire_menu_default(&wire, c, 33, &after) && after.kind == want.kind && after.boolean == want.boolean && after.number == want.number);
+    if (s->menu_writes + s->locked_writes != before + 1) printf("wire settings: %s reached no store\n", c->id);
+    CHECK(s->menu_writes + s->locked_writes == before + 1);
+  }
+  CHECK(tfp_settings_locked_flag(s, TFP_LOCKED_bodycam) != tfp_settings_locked_info(TFP_LOCKED_bodycam)->value);   /* the style choice moved bodycam */
+  /* every button is one the menu knows */
+  for (int i = 0; i < count; i++) if (controls[i].kind == TFP_MK_BUTTON) CHECK(!tfp_wire_menu_activate(&wire, controls[i].id));
+  line_count = 0;
+  tfp_wire_menu_frame(&wire);
+  CHECK(!logged("Unknown button"));
+  tfp_wire_menu_unbind(&wire);
+  tfp_wire_settings_free(&wire);
+  printf("wire settings: the one list: %d controls on %d pages, %d keys of the files that are no control, each with its reason\n", count,
+         TFP_MENU_PAGES, skipped);
+  return 0;
+}
+
 static int compat_part(void) {
   char problem[200], names[200];
   { /* ---- what this build writes as settings.json is what 0.6.0-feel.19 (e9b3c10) reads: its loader refuses the whole
@@ -1462,7 +1592,7 @@ int main(int argc, char **argv) {
     tfp_wire_settings_free(&wire);
   }
   { /* ---- the menu on MCM (src/wire_menu.c) ---- */
-    static char definition[16384];
+    static char definition[65536];
     TfpRtValue r[30];
     new_wire();
     CHECK(tfp_wire_settings_bind(&wire, settings_user_json, sizeof settings_user_json - 1, "settings.json"));
@@ -1476,12 +1606,44 @@ int main(int argc, char **argv) {
     CHECK(strstr(definition, "\"id\":\"toggle_key\",\"type\":\"keybind\",\"label\":\"Toggle True First Person\",\"default\":122"));
     CHECK(strstr(definition, "\"id\":\"weapon_sway_speed\",\"type\":\"slider\",\"label\":\"Weapon sway response speed\",\"min\":25,\"max\":200,\"step\":5"));
     CHECK(!strstr(definition, "start_free_aim") && !strstr(definition, "start_native_test"));
+    /* the whole menu: an id old values cannot be read into, MCM keeps no file of its own, three pages, every control */
+    CHECK(strstr(definition, "{\"id\":\"" TFP_MENU_MOD_ID "\",") == definition && strstr(definition, "\"storage\":true"));
+    CHECK(strcmp(TFP_MENU_MOD_ID, "goose_true_first_person") && strcmp(TFP_MENU_MOD_ID, "true_first_person") && strcmp(TFP_MENU_MOD_ID, "first_person"));
+    CHECK(!strstr(definition, "Fird") && !strstr(definition, "fird_person_arms\",\"type\":\"toggle\",\"label\":\"Fird"));
+    CHECK(strstr(definition, "\"id\":\"fird_person_arms\",\"type\":\"toggle\",\"label\":\"First Person Arms\""));
+    CHECK(strstr(definition, "{\"id\":\"locked_view\",\"name\":\"Locked view\""));
+    CHECK(strstr(definition, "\"id\":\"fov_degrees\",\"type\":\"slider\",\"label\":\"Field of view (degrees)\",\"min\":50,\"max\":120,\"step\":1,\"default\":80"));
+    CHECK(strstr(definition, "\"id\":\"camera_style\",\"type\":\"choice\",\"label\":\"Camera style\",\"presentation\":\"dropdown\",\"choices\":[\"Stable\",\"Bodycam\"],\"default\":1"));
+    CHECK(strstr(definition, "\"id\":\"camera_damping\",\"type\":\"slider\""));
+    {
+      int count = 0;
+      const TfpMenuControl *controls = tfp_wire_menu_controls(&count);
+      for (int i = 0; i < count; i++) {
+        char id[64];
+        snprintf(id, sizeof id, "\"id\":\"%s\",", controls[i].id);
+        CHECK(strstr(definition, id));
+        if (controls[i].kind == TFP_MK_CHOICE)
+          for (int k = 0; k < controls[i].choice_count; k++) CHECK(strstr(definition, controls[i].choices[k]));
+      }
+    }
 #ifdef TFP_HAVE_MCM_SCHEMA
     {
       char error[256] = "";
       McmModDef *def = schema_parse(definition, n, error, sizeof error);
       if (!def) printf("wire settings: DBF-MCM refuses the definition: %s\n", error);
-      CHECK(def && !strcmp(def->id, TFP_MENU_MOD_ID) && def->page_count == 2 && !def->pages[0].require_confirmation);
+      CHECK(def && !strcmp(def->id, TFP_MENU_MOD_ID) && def->page_count == 3 && !def->pages[0].require_confirmation && def->storage);
+      CHECK(!strcmp(def->pages[2].id, "locked_view") && !def->pages[2].require_confirmation);
+      int count = 0;
+      const TfpMenuControl *controls = tfp_wire_menu_controls(&count);
+      for (int i = 0; i < count; i++) {
+        const int at = schema_find(def, controls[i].id);
+        if (at < 0) printf("wire settings: MCM has no control %s\n", controls[i].id);
+        CHECK(at >= 0 && def->controls[at].page == (uint32_t)controls[i].page);
+        if (controls[i].kind == TFP_MK_SLIDER) CHECK(def->controls[at].type == MCM_SLIDER && def->controls[at].min == controls[i].min && def->controls[at].max == controls[i].max);
+        if (controls[i].kind == TFP_MK_CHOICE) CHECK(def->controls[at].type == MCM_CHOICE && def->controls[at].choice_count == (uint32_t)controls[i].choice_count);
+      }
+      const int style = schema_find(def, "camera_style"), fov = schema_find(def, "fov_degrees");
+      CHECK(style >= 0 && def->controls[style].def.number == 1 && fov >= 0 && def->controls[fov].def.number == 80);
       int strength = schema_find(def, "motion_strength"), preset = schema_find(def, "motion_preset"), key = schema_find(def, "editor_key");
       CHECK(strength >= 0 && def->controls[strength].type == MCM_SLIDER && def->controls[strength].def.number == 135 && def->controls[strength].max == 200);
       CHECK(preset >= 0 && def->controls[preset].type == MCM_CHOICE && key >= 0 && def->controls[key].type == MCM_KEYBIND && def->controls[key].def.number == 33);
@@ -1490,7 +1652,7 @@ int main(int argc, char **argv) {
     }
 #endif
     /* MCM's file holds other values than settings.json: they win */
-    mcm_count = mcm_sets = mcm_labels = mcm_disables = 0, mcm_disabled[0] = 0;
+    mcm_count = mcm_sets = mcm_labels = mcm_disables = mcm_state_count = 0, mcm_disabled[0] = 0;
     mcm_put("motion_strength", TFP_MENU_VALUE_NUMBER, false, 150), mcm_put("show_torso", TFP_MENU_VALUE_BOOL, true, 0);
     mcm_put("toggle_key", TFP_MENU_VALUE_NUMBER, false, 121), mcm_put("editor_key", TFP_MENU_VALUE_NUMBER, false, 119);
     mcm_put("weapon_near_hip_cm", TFP_MENU_VALUE_NUMBER, false, 9), mcm_put("weapon_near_aim_cm", TFP_MENU_VALUE_NUMBER, false, 9);
@@ -1501,7 +1663,23 @@ int main(int argc, char **argv) {
     CHECK(tfp_settings_menu_number(s, TFP_MENU_motion_strength) == 150 && tfp_settings_menu_flag(s, TFP_MENU_show_torso));
     CHECK(tfp_wire_menu_toggle_key(&wire) == 121 && tfp_wire_menu_editor_key(&wire, 33) == 33);
     CHECK(strstr(mcm_disabled, "fird_person_arms") && strstr(mcm_disabled, "edit_placement") && logged("Ready: menu: registered with DBF-MCM as"));
-    CHECK(logged("\"Fird Person Arms\" is shown disabled"));
+    CHECK(logged("\"First Person Arms\" is shown disabled") && !logged("Fird"));
+    CHECK(logged("three pages") && mcm_is_disabled("one_handed_pistols"));
+    /* the locked view's options: MCM's values reach the store at once; the Bodycam-only sliders follow the style */
+    CHECK(mcm_is_disabled("kick_strength") && mcm_is_disabled("kick_max_degrees") && mcm_is_disabled("camera_damping") && !mcm_is_disabled("thrown_kick_strength"));
+    {
+      TfpMenuValue style = {TFP_MENU_VALUE_NUMBER, false, 2}, stable = {TFP_MENU_VALUE_NUMBER, false, 1}, fov = {TFP_MENU_VALUE_NUMBER, false, 95};
+      TfpMenuValue fov_before = {TFP_MENU_VALUE_NUMBER, false, 80};
+      tfp_wire_menu_changed(&wire, "fov_degrees", &fov, &fov_before);
+      CHECK(tfp_settings_locked_number(s, TFP_LOCKED_fov_degrees) == 95);
+      tfp_wire_menu_changed(&wire, "camera_style", &style, &stable);
+      CHECK(tfp_settings_locked_flag(s, TFP_LOCKED_bodycam));
+      tfp_wire_menu_frame(&wire);
+      CHECK(!mcm_is_disabled("kick_strength") && !mcm_is_disabled("camera_damping"));
+      tfp_wire_menu_changed(&wire, "camera_style", &stable, &style);
+      tfp_wire_menu_frame(&wire);
+      CHECK(!tfp_settings_locked_flag(s, TFP_LOCKED_bodycam) && mcm_is_disabled("kick_strength") && mcm_is_disabled("camera_damping"));
+    }
     /* a slider moved in MCM reaches the store at once and is saved by the next save frame */
     TfpMenuValue v = {TFP_MENU_VALUE_NUMBER, false, 80}, before = {TFP_MENU_VALUE_NUMBER, false, 150};
     tfp_wire_menu_changed(&wire, "motion_strength", &v, &before);
@@ -1581,6 +1759,7 @@ int main(int argc, char **argv) {
     tfp_wire_menu_unbind(&wire);
     tfp_wire_settings_free(&wire);
   }
+  if (list_part()) return 1;
   if (compat_part()) return 1;
   printf("wire settings: %u checks passed (%zu refusals of the reader and loader; retail's answers on %zu + %zu + %zu operations, the defaults "
          "also with no file and with a broken one; placement refs; mod.set; the runtime's entry placement, near clip and weapon line)\n",
