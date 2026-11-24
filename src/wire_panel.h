@@ -1,12 +1,18 @@
-/* The mod's own settings panel, drawn through NEST (Goose Overlay Host): every control of the menu
- * (src/wire_menu.c: retail's two pages) and the locked view's options (TFP_SETTINGS_LOCKED), on three tabs.
- * The mod no longer needs DBF-MCM; that registration stays behind a switch (TfpPanelPlatform.mcm_wanted).
+/* Which menu a session gets, and the mod's own settings panel.
+ *
+ * The rule (tfp_wire_panel_tick). DBF-MCM first: while goose.mcm has not answered, it is tried once a second for 15 s;
+ * once it takes the registration, the whole menu (src/wire_menu.c: every option, three pages) is there and no panel of
+ * the mod's own is made. F10 then opens MCM's window on this mod's first page, or closes it. When MCM is not loaded or
+ * not ready within those 15 s, or refuses the registration, the same pages and options go to the mod's own panel,
+ * drawn through NEST (Goose Overlay Host), with its own search of 15 s; F10 is the panel's key. A file panel_on.txt
+ * beside the DLL (TfpPanelPlatform.panel_forced) skips MCM: the panel at once. With neither, one line says that no
+ * menu is available and that the settings files can be edited by hand.
  *
  * How a change travels. The panel is a TfpMenuHost, as src/mod_menu.c is for DBF-MCM: it keeps what each
  * control shows, and hands what the user did to tfp_wire_menu_changed / tfp_wire_menu_activate. So a change
- * made here is applied and saved by the same code as a change made in MCM. The locked-view options are
- * not menu controls; they go to tfp_wire_settings_locked_set. Either way the store counts a change and
- * tfp_wire_settings_save_frame writes the file once.
+ * made here is applied and saved by the same code as a change made in MCM, the locked view's options included
+ * (they are controls of the list's third page). The store counts a change and tfp_wire_settings_save_frame
+ * writes the file once.
  *
  * Two threads. The host calls the draw callback on its render thread; everything else here is the game
  * thread's. They share the shown values and a short queue of what the user did, under the platform's lock.
@@ -23,6 +29,14 @@
 enum { TFP_PANEL_KEY = 0x79, /* F10 (VK_F10): OvPanelDef.hotkey; the host's own config can override it */
        TFP_PANEL_API = 6 };  /* the oldest host API the panel draws with (host 0.4.0: key_cap, button_primary) */
 
+/* One try at DBF-MCM's registration (src/mod_menu.c). WAITING: MCM is not loaded, or not ready yet (no McmApi
+ * before its first update); READY: registered (also when it already was); REFUSED: MCM is there and did not take it
+ * (its own line says why), and it is not tried again. */
+typedef enum TfpMcmState { TFP_MCM_WAITING, TFP_MCM_READY, TFP_MCM_REFUSED } TfpMcmState;
+/* What the tick decided. */
+typedef enum TfpMenuChoice { TFP_CHOICE_DECIDING, TFP_CHOICE_MCM, TFP_CHOICE_PANEL, TFP_CHOICE_NONE } TfpMenuChoice;
+enum { TFP_MENU_CONNECT_MS = 15000, TFP_MENU_TRY_MS = 1000 };   /* each search: a try a second for 15 s */
+
 typedef struct TfpPanelPlatform {
   void *user;
   void (*lock)(void *user);                    /* one lock, not taken twice by one thread */
@@ -30,20 +44,25 @@ typedef struct TfpPanelPlatform {
   /* The host's export (ov_api) asked for API `version`: NULL while the host is not loaded, or is older than that.
    * Not ov_connect(), which asks for the header's newest API and so gets NULL from every older host. */
   const OvApi *(*connect)(void *user, uint32_t version);
-  /* DBF-MCM's registration (tfp_mod_menu_tick). Called only when mcm_wanted; may be NULL. */
-  void (*mcm_tick)(void *user, TfpWire *w, unsigned unavailable, TfpMenuEditFn edit);
-  bool mcm_wanted;                             /* the switch: the menu goes to DBF-MCM and no panel is made. Default: false */
+  /* DBF-MCM's registration, one try (tfp_mod_menu_try). NULL: there is no MCM, the panel at once. */
+  TfpMcmState (*mcm_try)(void *user, TfpWire *w, unsigned unavailable, TfpMenuEditFn edit);
+  bool panel_forced;                           /* the test file panel_on.txt: MCM is not tried */
   const char *panel_id;                        /* the same at every game start: the host keeps the window's place and size, and a hotkey override, by it */
   /* Unique per load, or NULL. The host cannot take a panel out and refuses a second one with the same id, and a
    * replaced build of this mod leaves its panel behind: when the host does not take panel_id, this one is tried. */
   const char *panel_id_reload;
   int editor_key;                              /* what a stored 119 (retail's F8) means here: Page Up */
+  /* While MCM holds the menu: F10 (TFP_PANEL_KEY), polled, opens MCM on this mod's page or closes it. Either NULL:
+   * F10 does nothing then. */
+  bool (*key_down)(void *user, int virtual_key);
+  void (*mcm_show)(void *user);
 } TfpPanelPlatform;
 
-/* Every game update while the mode runs, before tfp_wire_panel_frame. Without the switch: looks for the host
- * (a try a second for 15 s, then one line and no more tries) and binds once; a refusal is one line and final.
- * With it: only p->mcm_tick. now_ms: any millisecond clock that does not go back. */
+/* Every game update while the mode runs, before tfp_wire_panel_frame: the rule above. now_ms: any millisecond clock
+ * that does not go back. While MCM holds the menu, MCM is asked again once a second (a released registration, after a
+ * refused live replace, is made again); a REFUSED answer then hands the menu to the panel. */
 void tfp_wire_panel_tick(TfpWire *w, const TfpPanelPlatform *p, uint64_t now_ms, unsigned unavailable, TfpMenuEditFn edit);
+TfpMenuChoice tfp_wire_panel_choice(TfpWire *w);
 /* What the tick does once it has the host; `unavailable` and `edit` as tfp_wire_menu_bind takes them. false,
  * with one `Refused: settings panel: ...` line: the host is older than TFP_PANEL_API or lacks a function, the
  * settings are not bound, the menu is already bound elsewhere, or the host did not take the panel. */

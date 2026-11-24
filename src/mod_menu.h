@@ -1,15 +1,20 @@
-/* The feel build's Windows glue to DBF-MCM (goose.mcm): finds the loaded menu, registers the first-person
- * pages of src/wire_menu.c and forwards its callbacks. Game thread only. */
+/* The feel build's Windows glue to DBF-MCM (goose.mcm): finds the loaded menu, registers the whole menu of
+ * src/wire_menu.c (every option, three pages, "storage": true) and forwards its callbacks. Whether it is tried at all,
+ * and how often: src/wire_panel.h (tfp_wire_panel_tick). Game thread only. */
 #ifndef TFP_MOD_MENU_H
 #define TFP_MOD_MENU_H
 #include "hellforge_mod.h"
 #include "wire_menu.h"
+#include "wire_panel.h"
 
 /* The default key of the placement editor: Page Up (VK_PRIOR). Retail's F8 is HellForge's own editor here. */
 #define TFP_EDITOR_KEY 0x21
-/* Every tick while the mode runs, before the binder's frame: connects (a try a second for 15 s, then one
- * line and no more tries) and registers once. */
-void tfp_mod_menu_tick(const HfApi *hf, HfMod *mod, TfpWire *w, unsigned unavailable, TfpMenuEditFn edit);
+/* One try: TFP_MCM_READY registered (also when it already was), TFP_MCM_WAITING MCM not loaded or not ready yet,
+ * TFP_MCM_REFUSED MCM did not take it (one Refused line). */
+TfpMcmState tfp_mod_menu_try(const HfApi *hf, HfMod *mod, TfpWire *w, unsigned unavailable, TfpMenuEditFn edit);
+/* F10 while MCM holds the menu: MCM's window on this mod's first page, or closed when it is open (not while MCM is
+ * taking a key or text). */
+void tfp_mod_menu_show(void);
 /* Takes the registration out of MCM (a live replace). true: nothing is registered any more. */
 bool tfp_mod_menu_release(const HfApi *hf, HfMod *mod, TfpWire *w);
 bool tfp_mod_menu_registered(void);

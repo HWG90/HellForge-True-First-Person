@@ -3,9 +3,11 @@
  *
  *   1. the eleven locked-view options: defaults, the "locked_view" section of settings.json read and written, the named
  *      getters, and the old "holster_animation" read as put_away;
- *   2. the panel: every option of the MCM registration and the eleven of the Locked view tab is drawn, a changed value
- *      reaches the store and is saved, a missing or old host is refused softly, and DBF-MCM is not called unless its
- *      switch is on;
+ *   2. the panel: every option of the one list (src/wire_menu.c) is drawn, a changed value reaches the store and is
+ *      saved, a missing or old host is refused softly;
+ *   2b. which menu a session gets: DBF-MCM when it is ready within its 15 s (no panel then, F10 opens MCM), the panel
+ *      when MCM is absent, late past its window or refuses, the panel at once with panel_on.txt, and one line when
+ *      neither is there;
  *   3. the three live features (src/wire_options.c): a changed option reaches its setter at the next update, a test
  *      file beats the option both ways, and a change waits while a lease is held through an action. */
 #include <math.h>
@@ -428,10 +430,22 @@ static const OvApi *p_connect(void *u, uint32_t version) {
   ov.connects++, ov.asked = version;
   return ov.no_host || version > api.version ? NULL : &api;
 }
-static unsigned mcm_ticks, edits;
-static void p_mcm(void *u, TfpWire *w, unsigned unavailable, TfpMenuEditFn edit) { (void)u; (void)w; (void)unavailable; (void)edit; mcm_ticks++; }
+/* DBF-MCM, one try each call: what it answers (mcm_ready_after: READY from that many tries on, -1 never), and F10. */
+static unsigned mcm_ticks, edits, mcm_shows;
+static TfpMcmState mcm_answer = TFP_MCM_WAITING;
+static int mcm_ready_after = -1;
+static bool f10_down;
+static TfpMcmState p_mcm(void *u, TfpWire *w, unsigned unavailable, TfpMenuEditFn edit) {
+  (void)u; (void)w; (void)unavailable; (void)edit;
+  mcm_ticks++;
+  return mcm_ready_after >= 0 && (int)mcm_ticks > mcm_ready_after ? TFP_MCM_READY : mcm_answer;
+}
+static bool p_key(void *u, int vk) { (void)u; return vk == TFP_PANEL_KEY && f10_down; }
+static void p_show(void *u) { (void)u; mcm_shows++; }
 static const char *test_edit(TfpWire *w) { (void)w; edits++; return NULL; }
-static const TfpPanelPlatform platform = {NULL, p_lock, p_unlock, p_connect, p_mcm, false, "goose.true-first-person/settings", "goose.true-first-person/settings@test", 33};
+/* panel_on.txt: the panel at once, DBF-MCM is not tried (the parts below about the panel itself) */
+static const TfpPanelPlatform platform = {NULL, p_lock, p_unlock, p_connect, p_mcm, true, "goose.true-first-person/settings", "goose.true-first-person/settings@test", 33,
+                                          p_key, p_show};
 static int log_count(const char *part) {
   int n = 0;
   for (int i = 0; i < line_count; i++) if (strstr(lines[i], part)) n++;
@@ -467,7 +481,7 @@ static bool start_wire(void) {
   new_wire();
   if (!tfp_wire_settings_bind(&wire, settings_json, sizeof settings_json - 1, "test")) return false;
   tfp_wire_settings_disk(&wire, &test_disk, false);
-  saves = 0; mcm_ticks = 0; edits = 0;
+  saves = 0; mcm_ticks = 0; edits = 0; mcm_shows = 0; mcm_answer = TFP_MCM_WAITING; mcm_ready_after = -1; f10_down = false;
   new_options();
   return true;
 }
@@ -478,9 +492,10 @@ static int panel_part(void) {
   CHECK(start_wire());
   new_host(8); ov.no_host = true;
   for (uint64_t ms = 1000; ms < 16000; ms += 100) tfp_wire_panel_tick(&wire, &platform, ms, 0, test_edit);
-  CHECK(ov.connects == 15 && !log_count("Settings panel:") && !tfp_wire_panel_bound(&wire));
+  CHECK(ov.connects == 15 && !log_count("Menu:") && !tfp_wire_panel_bound(&wire));
   for (uint64_t ms = 16000; ms < 30000; ms += 100) tfp_wire_panel_tick(&wire, &platform, ms, 0, test_edit);
-  CHECK(ov.connects == 16 && log_count("Settings panel:") == 1 && logged("is not loaded") && logged("older than API 6") && !tfp_wire_panel_bound(&wire));
+  CHECK(ov.connects == 16 && log_count("Menu: no settings menu") == 1 && logged("is not loaded") && logged("older than API 6") && !tfp_wire_panel_bound(&wire));
+  CHECK(logged("panel_on.txt") && logged("edited by hand") && logged("settings.json and locked_view.json") && tfp_wire_panel_choice(&wire) == TFP_CHOICE_NONE);
   CHECK(ov.asked == TFP_PANEL_API && TFP_PANEL_API == 6);        /* the API the panel draws with, not the header's newest */
   CHECK(!ov.registered && !mcm_ticks && !tfp_wire_menu_bound(&wire) && ov.lock_depth == 0);
   tfp_wire_panel_frame(&wire);                                   /* nothing bound: nothing happens */
@@ -493,7 +508,7 @@ static int panel_part(void) {
   CHECK(start_wire());
   new_host(5);                                                   /* the host's export answers NULL to a request for API 6: as no host */
   for (uint64_t ms = 0; ms < 20000; ms += 100) tfp_wire_panel_tick(&wire, &platform, ms, 0, test_edit);
-  CHECK(ov.connects == 16 && ov.asked == 6 && log_count("Settings panel:") == 1 && logged("older than API 6") && !ov.registered && !tfp_wire_panel_bound(&wire));
+  CHECK(ov.connects == 16 && ov.asked == 6 && log_count("Menu: no settings menu") == 1 && logged("older than API 6") && !ov.registered && !tfp_wire_panel_bound(&wire));
   CHECK(!tfp_wire_menu_bound(&wire) && !mcm_ticks);
   tfp_wire_panel_free(&wire);
   CHECK(!tfp_wire_panel_bind(&wire, &api, &platform, 0, test_edit));   /* handed such a host all the same: refused by name */
@@ -507,7 +522,7 @@ static int panel_part(void) {
     new_host(version);
     CHECK(api.size < sizeof api && OV_API_VERSION > version);
     for (uint64_t ms = 0; ms < 3000; ms += 100) tfp_wire_panel_tick(&wire, &platform, ms, 0, test_edit);
-    CHECK(ov.connects == 1 && ov.asked == 6 && ov.registered == 1 && tfp_wire_panel_bound(&wire) && !logged("Refused") && !log_count("Settings panel:"));
+    CHECK(ov.connects == 1 && ov.asked == 6 && ov.registered == 1 && tfp_wire_panel_bound(&wire) && !logged("Refused") && !log_count("Menu: no settings"));
     ov.hover = true;
     draw_frame(); game_update();
     CHECK(drawn("tab:Locked view") && drawn("primary:Enable True First Person") && drawn_part("cap:") && ov.lock_depth == 0);
@@ -542,7 +557,7 @@ static int panel_part(void) {
   CHECK(logged("Ready: settings panel") && logged("F10") && logged("Ready: menu: registered with the mod's own panel") && !logged("DBF-MCM as"));
   CHECK(!ov.open && !tfp_wire_panel_is_open(&wire) && !saves);
 
-  /* ---- every option of the MCM registration and the eleven of the Locked view tab is drawn ---- */
+  /* ---- every option of the one list is drawn, on the pages MCM gets ---- */
   game_update();
   /* the editor key's retail default (F8, HellForge's own editor) is Page Up in the store once the menu is bound; that is
    * the bind's own doing and no change to save: no file is written until the user changes something */
@@ -552,9 +567,9 @@ static int panel_part(void) {
   ov.hover = true;
   draw_frame();
   CHECK(drawn("tab:First person") && drawn("tab:Bob and sway") && drawn("tab:Locked view"));
-  int count = 0, sliders = 0, checks_drawn = 0, keys = 0, described = 0;
+  int count = 0, sliders = 0, checks_drawn = 0, keys = 0, described = 0, choices = 0;
   const TfpMenuControl *controls = tfp_wire_menu_controls(&count);
-  CHECK(count == 29);
+  CHECK(count == 42);
   for (int i = 0; i < count; i++) {
     const TfpMenuControl *c = &controls[i];
     char line[420];
@@ -563,7 +578,11 @@ static int panel_part(void) {
     switch (c->kind) {
       case TFP_MK_BUTTON: CHECK(drawn_part(c->label) && (strstr(drawn_part(c->label), "button:") || strstr(drawn_part(c->label), "primary:"))); break;
       case TFP_MK_TOGGLE: case TFP_MK_CHECK:
-        if (strcmp(c->id, "show_aim_markers")) { snprintf(line, sizeof line, "check:%s=%s", c->label, v.boolean ? "on" : "off"); CHECK(drawn(line)); }
+        if (strcmp(c->id, "show_aim_markers")) {
+          snprintf(line, sizeof line, "check:%s=%s", c->label, v.boolean ? "on" : "off");
+          if (!drawn(line)) snprintf(line, sizeof line, "check:%s=%s (disabled)", c->label, v.boolean ? "on" : "off");
+          CHECK(drawn(line));
+        }
         else CHECK(drawn_part("check:Show aim markers="));
         checks_drawn++; break;
       case TFP_MK_SLIDER: {
@@ -573,7 +592,7 @@ static int panel_part(void) {
         CHECK(row && strstr(row, line));
         sliders++; break;
       }
-      case TFP_MK_CHOICE: snprintf(line, sizeof line, "combo:%s=%s", c->label, tfp_wire_menu_presets[(int)v.number - 1]); CHECK(drawn(line)); break;
+      case TFP_MK_CHOICE: snprintf(line, sizeof line, "combo:%s=%s", c->label, c->choices[(int)v.number - 1]); CHECK(drawn(line)); choices++; break;
       case TFP_MK_KEY:
         snprintf(line, sizeof line, "text:%s", c->label); CHECK(drawn(line));
         snprintf(line, sizeof line, "button:Change##%s", c->id); CHECK(drawn(line));
@@ -582,7 +601,8 @@ static int panel_part(void) {
     }
     if (c->description) { snprintf(line, sizeof line, "tip:%s", c->description); CHECK(drawn_part(line)); described++; }
   }
-  CHECK(sliders == 9 && checks_drawn == 10 && keys == 2 && described == 16);
+  CHECK(sliders == 14 && checks_drawn == 17 && keys == 2 && choices == 2 && described == 29);
+  CHECK(drawn("text:First person through every action, one field of view, and how much your body's movement moves the view."));
   CHECK(drawn("primary:Enable True First Person") && drawn("cap:F11") && drawn("cap:PAGE UP"));
   CHECK(drawn("slider:Weapon movement strength=120[0..200]") && drawn("slider:Near clip distance (cm)=15[5..40]") && drawn("slider:Weapon bob speed=100[25..200]"));
   CHECK(drawn("text:Status: First person off") && drawn_part("text:Weapon: enable First Person with a firearm"));
@@ -594,8 +614,8 @@ static int panel_part(void) {
    * two styles are; the three sliders only Bodycam uses are greyed through the host, with one line that says so, and
    * the thrown slider, which both styles use, is not. */
   {
-    const char *row = drawn("check:Bodycam=off"), *tip_line = drawn("tip:Off: a steady, traditional first-person camera. On: the view moves with your head, like a body "
-      "camera: it takes kicks from your body's movement and follows the head through actions.");
+    const char *row = drawn("combo:Camera style=Stable"), *tip_line = drawn("tip:Stable: a steady, traditional first-person camera. Bodycam: the view moves with "
+      "your head, like a body camera: it takes kicks from your body's movement and follows the head through actions.");
     const char *note = drawn("text:View kick strength, View kick limit and Camera damping apply to Bodycam.");
     const char *first = drawn("slider:View kick strength (%)=35[0..100] (disabled)"), *above = drawn("check:Zoom when aiming=on");
     CHECK(row && tip_line && note && first && above && above < row && row < tip_line && tip_line < note && note < first && first - note == (ptrdiff_t)sizeof ov.drawn[0]);
@@ -701,10 +721,10 @@ static int panel_part(void) {
   ov.slide = ov.release = NULL;
   CHECK(tfp_locked_view_kick_strength(&wire) == 35 && tfp_locked_view_kick_max_degrees(&wire) == 8 && tfp_locked_view_camera_damping(&wire) == 60);
   /* Bodycam on: saved, and from the next frame the three are ordinary sliders and the line is gone */
-  ov.flip = "Bodycam"; draw_frame(); game_update();
+  ov.pick = "Camera style"; ov.pick_to = 1; draw_frame(); game_update();
   CHECK(tfp_locked_view_bodycam(&wire) && saves == 8 && strstr(saved_text, "\"bodycam\": true"));
   draw_frame();
-  CHECK(drawn("check:Bodycam=on") && drawn("slider:View kick strength (%)=35[0..100]") && drawn("slider:View kick limit (degrees)=8[0..20]") &&
+  CHECK(drawn("combo:Camera style=Bodycam") && drawn("slider:View kick strength (%)=35[0..100]") && drawn("slider:View kick limit (degrees)=8[0..20]") &&
         drawn("slider:Camera damping (%)=60[0..100]") && drawn("slider:View kick when thrown (%)=70[0..100]") && !drawn_part("apply to Bodycam") &&
         !drawn_part("View kick strength (%)=35[0..100] (disabled)"));
   ov.slide = "View kick strength (%)"; ov.slide_to = 52; ov.active = true;
@@ -739,11 +759,11 @@ static int panel_part(void) {
    * the sliders are greyed with the values they had */
   ov.slide = "Camera damping (%)"; ov.slide_to = 90; ov.active = true;
   draw_frame(); game_update();
-  ov.flip = "Bodycam"; draw_frame(); game_update();
+  ov.pick = "Camera style"; ov.pick_to = 0; draw_frame(); game_update();
   CHECK(!tfp_locked_view_bodycam(&wire) && saves == 19 && strstr(saved_text, "\"bodycam\": false") && strstr(saved_text, "\"camera_damping\": 25"));
   ov.active = false; ov.release = "Camera damping (%)";
   draw_frame(); game_update();
-  CHECK(tfp_locked_view_camera_damping(&wire) == 25 && saves == 19 && drawn("check:Bodycam=off") && drawn("slider:Camera damping (%)=25[0..100] (disabled)") &&
+  CHECK(tfp_locked_view_camera_damping(&wire) == 25 && saves == 19 && drawn("combo:Camera style=Stable") && drawn("slider:Camera damping (%)=25[0..100] (disabled)") &&
         drawn("slider:View kick strength (%)=50[0..100] (disabled)") && drawn("slider:View kick limit (degrees)=12[0..20] (disabled)") &&
         drawn("slider:View kick when thrown (%)=85[0..100]") && drawn_part("apply to Bodycam") && !ov.disabled_depth && !ov.disabled);
   ov.release = NULL;
@@ -783,19 +803,107 @@ static int panel_part(void) {
   new_host(11);
   CHECK(tfp_wire_panel_bind(&wire, &api, &platform, TFP_MENU_NO_ARMS | TFP_MENU_NO_EDITOR, NULL));
   game_update(); draw_frame();
-  CHECK(drawn("check:Fird Person Arms=on (disabled)") && drawn("button:Edit arms and weapon placement (disabled)") && drawn("button:Change##editor_key (disabled)"));
+  CHECK(drawn("check:First Person Arms=on (disabled)") && drawn("text:Sleeves and hand grips are refused on this build.") && !drawn_part("Fird") && drawn("button:Edit arms and weapon placement (disabled)") && drawn("button:Change##editor_key (disabled)"));
   CHECK(drawn("button:Change##toggle_key") && drawn("check:True First Person: show torso=off"));
   tfp_wire_menu_unbind(&wire);
   tfp_wire_panel_free(&wire);
   tfp_wire_settings_free(&wire);
 
-  /* ---- the switch: DBF-MCM instead, and then no panel of the mod's own ---- */
+  return 0;
+}
+
+/* ---- which menu a session gets (tfp_wire_panel_tick) ---- */
+static int choice_part(void) {
+  TfpPanelPlatform mcm = platform;
+  mcm.panel_forced = false;
+  /* MCM ready at its first try: the menu is MCM's, no panel, the host is not even asked; MCM is asked again once a
+   * second (a released registration is made again); F10 opens MCM, once per press */
+  CHECK(start_wire());
+  new_host(8); mcm_answer = TFP_MCM_READY;
+  for (uint64_t ms = 0; ms < 3000; ms += 100) tfp_wire_panel_tick(&wire, &mcm, ms, 0, test_edit);
+  CHECK(tfp_wire_panel_choice(&wire) == TFP_CHOICE_MCM && mcm_ticks == 3 && !ov.connects && !ov.registered && !tfp_wire_panel_bound(&wire));
+  CHECK(!mcm_shows && !logged("Menu: no settings menu"));
+  f10_down = true;
+  for (uint64_t ms = 3000; ms < 3500; ms += 100) tfp_wire_panel_tick(&wire, &mcm, ms, 0, test_edit);
+  CHECK(mcm_shows == 1);                                          /* held: once */
+  f10_down = false; tfp_wire_panel_tick(&wire, &mcm, 3600, 0, test_edit);
+  f10_down = true; tfp_wire_panel_tick(&wire, &mcm, 3700, 0, test_edit);
+  CHECK(mcm_shows == 2 && !tfp_wire_panel_is_open(&wire));
+  /* a registration lost later and refused when made again (after a refused live replace): the panel takes over */
+  mcm_answer = TFP_MCM_REFUSED;
+  for (uint64_t ms = 4000; ms < 6000; ms += 100) tfp_wire_panel_tick(&wire, &mcm, ms, 0, test_edit);
+  CHECK(tfp_wire_panel_choice(&wire) == TFP_CHOICE_PANEL && ov.registered == 1 && tfp_wire_panel_bound(&wire));
+  tfp_wire_menu_unbind(&wire);
+  tfp_wire_panel_free(&wire);
+  tfp_wire_settings_free(&wire);
+  /* F10 held down from the start counts only once it has been seen up */
+  CHECK(start_wire());
+  new_host(8); mcm_answer = TFP_MCM_READY; f10_down = true;
+  for (uint64_t ms = 0; ms < 2000; ms += 100) tfp_wire_panel_tick(&wire, &mcm, ms, 0, test_edit);
+  CHECK(!mcm_shows);
+  tfp_wire_panel_free(&wire);
+  tfp_wire_settings_free(&wire);
+  /* MCM late, but inside its 15 s (its first update after this mod's start): still MCM, no panel */
+  CHECK(start_wire());
+  new_host(8); mcm_ready_after = 6;
+  for (uint64_t ms = 0; ms < 20000; ms += 100) tfp_wire_panel_tick(&wire, &mcm, ms, 0, test_edit);
+  CHECK(tfp_wire_panel_choice(&wire) == TFP_CHOICE_MCM && !ov.connects && !ov.registered && !logged("Menu:"));
+  tfp_wire_panel_free(&wire);
+  tfp_wire_settings_free(&wire);
+  /* MCM absent (or later than its 15 s): a try a second, then one line and the panel, with every page */
   CHECK(start_wire());
   new_host(8);
-  TfpPanelPlatform with_mcm = platform;
-  with_mcm.mcm_wanted = true;
-  for (uint64_t ms = 0; ms < 3000; ms += 100) tfp_wire_panel_tick(&wire, &with_mcm, ms, 0, test_edit);
-  CHECK(mcm_ticks == 30 && !ov.connects && !ov.registered && !tfp_wire_panel_bound(&wire) && !tfp_wire_menu_bound(&wire));
+  for (uint64_t ms = 0; ms < 14900; ms += 100) tfp_wire_panel_tick(&wire, &mcm, ms, 0, test_edit);
+  CHECK(tfp_wire_panel_choice(&wire) == TFP_CHOICE_DECIDING && mcm_ticks == 15 && !ov.connects);
+  for (uint64_t ms = 14900; ms < 20000; ms += 100) tfp_wire_panel_tick(&wire, &mcm, ms, 0, test_edit);
+  CHECK(tfp_wire_panel_choice(&wire) == TFP_CHOICE_PANEL && mcm_ticks == 16 && ov.connects == 1 && ov.registered == 1 && tfp_wire_panel_bound(&wire));
+  CHECK(log_count("DBF-MCM (goose.mcm) did not answer") == 1 && logged("Ready: settings panel") && logged("Ready: menu: registered with the mod's own panel"));
+  mcm_ready_after = 0;                                           /* MCM coming after that changes nothing: the panel stays */
+  for (uint64_t ms = 20000; ms < 25000; ms += 100) tfp_wire_panel_tick(&wire, &mcm, ms, 0, test_edit);
+  CHECK(mcm_ticks == 16 && tfp_wire_panel_choice(&wire) == TFP_CHOICE_PANEL);
+  ov.hover = true; draw_frame(); game_update();
+  CHECK(drawn("tab:First person") && drawn("tab:Bob and sway") && drawn("tab:Locked view") && drawn_part("slider:Field of view (degrees)="));
+  f10_down = true; tfp_wire_panel_tick(&wire, &mcm, 26000, 0, test_edit);
+  CHECK(!mcm_shows);                                             /* F10 is the panel's own key here (the host's) */
+  tfp_wire_menu_unbind(&wire);
+  tfp_wire_panel_free(&wire);
+  tfp_wire_settings_free(&wire);
+  /* MCM refuses the registration: the panel at once */
+  CHECK(start_wire());
+  new_host(8); mcm_answer = TFP_MCM_REFUSED;
+  for (uint64_t ms = 0; ms < 3000; ms += 100) tfp_wire_panel_tick(&wire, &mcm, ms, 0, test_edit);
+  CHECK(tfp_wire_panel_choice(&wire) == TFP_CHOICE_PANEL && mcm_ticks == 1 && ov.registered == 1 && tfp_wire_panel_bound(&wire));
+  tfp_wire_menu_unbind(&wire);
+  tfp_wire_panel_free(&wire);
+  tfp_wire_settings_free(&wire);
+  /* panel_on.txt: MCM is not tried, even when it is ready */
+  CHECK(start_wire());
+  new_host(8); mcm_answer = TFP_MCM_READY;
+  tfp_wire_panel_tick(&wire, &platform, 0, 0, test_edit);
+  CHECK(tfp_wire_panel_choice(&wire) == TFP_CHOICE_PANEL && !mcm_ticks && ov.registered == 1 && tfp_wire_panel_bound(&wire) && logged("panel_on.txt"));
+  tfp_wire_menu_unbind(&wire);
+  tfp_wire_panel_free(&wire);
+  tfp_wire_settings_free(&wire);
+  /* no MCM in this build of the glue: the panel */
+  CHECK(start_wire());
+  new_host(8);
+  TfpPanelPlatform none = mcm;
+  none.mcm_try = NULL;
+  tfp_wire_panel_tick(&wire, &none, 0, 0, test_edit);
+  CHECK(tfp_wire_panel_choice(&wire) == TFP_CHOICE_PANEL && ov.registered == 1);
+  tfp_wire_menu_unbind(&wire);
+  tfp_wire_panel_free(&wire);
+  tfp_wire_settings_free(&wire);
+  /* neither MCM nor NEST: 15 s for each, then one line that says there is no menu and where the files are; nothing more,
+   * nothing bound, no crash */
+  CHECK(start_wire());
+  new_host(8); ov.no_host = true;
+  for (uint64_t ms = 0; ms < 60000; ms += 100) tfp_wire_panel_tick(&wire, &mcm, ms, 0, test_edit);
+  CHECK(tfp_wire_panel_choice(&wire) == TFP_CHOICE_NONE && mcm_ticks == 16 && ov.connects == 16 && !tfp_wire_menu_bound(&wire));
+  CHECK(log_count("Menu: no settings menu") == 1 && logged("DBF-MCM (goose.mcm) is not loaded") && logged("NEST (Goose Overlay Host) is not loaded") &&
+        logged("edited by hand") && logged("%LOCALAPPDATA%\\Goose\\HellForge\\TrueFirstPerson"));
+  game_update();
+  CHECK(!tfp_wire_panel_is_open(&wire));
   tfp_wire_panel_free(&wire);
   tfp_wire_settings_free(&wire);
   return 0;
@@ -1050,7 +1158,7 @@ static int rebind_part(void) {
 }
 
 int main(void) {
-  if (store_part() || panel_part() || options_part() || untouched_part() || rebind_part()) return 1;
+  if (store_part() || panel_part() || choice_part() || options_part() || untouched_part() || rebind_part()) return 1;
   printf("wire panel: %u checks passed\n", checks);
   return 0;
 }

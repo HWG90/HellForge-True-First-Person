@@ -5,7 +5,7 @@ Three things retail has that the first HellForge builds lacked. All three are bu
 | Part | State in 0.6.0-feel.7 |
 |---|---|
 | Saving settings | Built. `src/wire_settings.c` (when), `src/mod_view.c` (the file) |
-| Settings menu | Built, on DBF-MCM for HellForge. `src/wire_menu.c`, `src/mod_menu.c` |
+| Settings menu | Built. DBF-MCM when it is loaded, else the mod's own panel (round 15). `src/wire_menu.c` (the one list), `src/mod_menu.c`, `src/wire_panel.c` |
 | Placement editor | Built for the weapon and arms. `src/placement_editor.c` (retail's editor), `src/wire_editor.c` (binder), `src/mod_editor.c` (the panel) |
 
 ## Saving
@@ -22,54 +22,126 @@ Three things retail has that the first HellForge builds lacked. All three are bu
 - **A failed write** is tried once per change, not once a frame. The log says `Refused: settings were not saved: …`, the session keeps its values, and a live replace is refused while a change is unsaved.
 - **Consequence:** once your own file exists, a newer build's shipped `settings.json` no longer applies. Delete your file to take the shipped one again.
 
-## The mod's own settings panel (own-menu branch)
+## The settings menu: DBF-MCM first, the mod's own panel without it (round 15)
 
-Built, not yet run in the game. `src/wire_panel.c` (the panel), `src/mod_panel.c` (lock, clock, the host's `ov_api` asked for API 6), `tests/run-wire-panel.sh`.
+Built after 0.6.0-feel.50, not yet run in the game. One list of every option, `src/wire_menu.c` (`TfpMenuControl`), is the single source of both menus, so both show the same three pages with the same options: **First person**, **Bob and sway** and **Locked view**. Tests: `tests/run-wire-settings.sh` (the list, the MCM definition through MCM's own schema parser) and `tests/run-wire-panel.sh` (the panel, and which menu a session gets).
 
-- **What:** one NEST (Goose Overlay Host) window, "True First Person", with three tabs: **First person** and **Bob and sway** (every control of the menu below: same labels, ranges, steps, descriptions) and **Locked view** (the eleven options of `locked_view` in `settings.json`).
-- **Opening:** F10 (the panel's own hotkey; the host's config can override it), or the host's panel list (Page Down).
-- **Needs:** the host at API 6 or newer. Missing or older: one log line, no panel, the settings in `settings.json` apply.
-- **DBF-MCM is not needed and not called.** A file `mcm_on.txt` beside the DLL is the test switch: the menu then registers with DBF-MCM as before, and the panel is not made.
-- **How a change travels:** the panel is the menu's host, as `src/mod_menu.c` is for MCM, so a change goes through `tfp_wire_menu_changed` / `tfp_wire_menu_activate` exactly as one from MCM does, and is saved the same way. The draw callback (the host's render thread) only queues; the game thread applies at its next update.
-- **Sliders** are taken when let go, not at every step of a drag, so a drag saves once.
-- **Keys:** the host has no key-binding widget. A key row is its label, the key as a key cap, and **Change**, which takes the next key pressed (Esc keeps the old one, Delete clears it; after ten seconds the question goes away).
-- **The two status rows** are plain text here.
-- **Locked view options:** the getters are `tfp_locked_view_*` in `src/wire_settings.h`. Three switch a feature while the game runs (`src/wire_options.c`, called from the tick): **Animated arms** (the arm drive and its render hook), **Weapon put-away** (the action hold) and **Smooth eye** (the eye's continuity). A change is made on the game thread at the next update, and waits while a lease is held through an action or waits for its native exit. Test files beside the DLL override the option: `arms_live.txt` / `hold_lease.txt` force on, `arms_off.txt` / `hold_off.txt` / `smooth_off.txt` force off (off wins when both are there); the log's `Option:` lines say which decided. **One-handed pistols** sets nothing and is drawn greyed with a note. The old `holster_animation` is gone from the panel and the store; a stored value is read as `put_away` unless the file has `put_away`, and is not written back.
-- **The placement editor** closes the panel before it takes the cursor, as it closes MCM.
-- **Live replace:** the panel stays registered with the host, closed and drawing nothing (the host cannot take a panel out). The panel's id is `goose.true-first-person/settings` at every game start, so the host keeps the window's place and size and `hotkey.goose.true-first-person/settings` in `overlay-host.ini` moves its key. The host refuses a second panel with the same id, so the build that replaces one registers as `goose.true-first-person/settings@<process>-<tick>` for the rest of that session (one log line; the window opens at its first place and size).
+### Which menu you get
 
-## The menu (DBF-MCM, behind the `mcm_on.txt` switch)
+| Situation | Menu | F10 |
+|---|---|---|
+| DBF-MCM (`goose.mcm`) loaded and ready within 15 s of the mod's start | DBF-MCM, page "True First Person" (DEL opens MCM as always). No panel of the mod's own is made | Opens MCM on this mod's first page; closes MCM when it is open (not while MCM is taking a key or text) |
+| DBF-MCM not loaded, not ready within 15 s, or refuses the registration | The mod's own panel through NEST (Goose Overlay Host, API 6 or newer), with its own 15 s search | Opens and closes the panel (the host's hotkey; also in the host's panel list, Page Down) |
+| `panel_on.txt` beside the DLL (test file) | The mod's own panel at once; DBF-MCM is not tried | As above |
+| Neither DBF-MCM nor NEST | None. One log line says so and that `settings.json` and `locked_view.json` in `%LOCALAPPDATA%\Goose\HellForge\TrueFirstPerson` can be edited by hand while the game is closed | Nothing |
 
-It needs DBF-MCM for HellForge (`goose.mcm`, opened with DEL). The mod looks for it once a second for 15 seconds after it starts; without it the log says so once and the saved settings apply.
-
-Controls, labels, ranges, steps and descriptions are retail's (`src/first_person/menu.lua:343-418`), on two pages: **First person** and **Bob and sway**.
-
-| Control | What it does here |
-|---|---|
-| Enable True First Person / Turn first-person view off | The same as the toggle key |
-| Show aim markers | Retail's global aim-marker setting; refused and put back if the markers module is off |
-| Edit arms and weapon placement, Open / close placement editor (key) | Opens and closes the editor (below). **Disabled** when Goose Overlay Host is not loaded |
-| Toggle True First Person (key) | The key the mod listens for. Default F11; unbound means no key |
-| True First Person: native ADS, show torso | Stored and read by the translated units as in retail |
-| Fird Person Arms | **Disabled when sleeves and hand grips refused at start-up** (they do on current builds); the log says so |
-| Use weapon-family placement defaults | Saved through retail's `save_presentation` |
-| Motion preset, Weapon movement and its strength, bob, sway, sprint pose | Stored; the motion unit reads them as retail's `menu:motion_options()` |
-| Near clip distance, Near clip while aiming | Stored; read as retail's `menu:near_options()` |
-| This weapon: hip / normal-aim clearance, Save clipping, Use global clipping | Drafts per weapon, saved to `near_clip_profiles` through `save_presentation` with retail's weapon check |
-| Weapon: …, Status: … | Two always-disabled buttons whose label changes (see differences) |
-| Bob and sway page | The five strength and speed sliders, step 5 |
-
-### Differences from retail
-
-- **The editor key's default is Page Up**, not F8: F8 opens HellForge's own editor on this install. A stored 119 (retail's default) is read as Page Up.
-- **Not offered:** "Free aim (30 seconds)" and "Compare native ADS camera (30 seconds)". They are retail's test tools for modes this build does not wire.
-- **The two status rows are disabled buttons**, not text: DBF-MCM for HellForge can relabel only a control it can find by id, and a text block is not one.
-- **Defaults:** each control's default is the value in `settings.json` when the menu registers (on a first run, your retail values). MCM's "reset" goes back to that, not to retail's factory default.
-- **Buttons answer in the log**, not in MCM's footer. MCM calls back from its own update, outside this mod's tick; anything that reaches the runtime (the buttons, the two config toggles) is kept and done at the mod's next tick, and a refusal is logged as `Menu: "<label>": <why>`. Plain values (sliders, checkboxes backed by the store) apply at once.
+- The search: DBF-MCM is asked once a second (its API answers only after its first update, so it may come after this mod). Without an answer after 15 s, one line (`Menu: DBF-MCM (goose.mcm) did not answer within 15 seconds ...`) and the panel's search begins. An MCM that comes later than that changes nothing for the session.
+- `mcm_on.txt`, the switch of builds up to 0.6.0-feel.50, is still read and changes nothing (one `Test:` line): MCM is the default now.
+- While MCM holds the menu it is asked again once a second; that is what makes a registration released for a refused live replace come back. If MCM then refuses it, the panel takes over.
 
 ### Where a value lives
 
-MCM keeps each control's value in its own file once you change it. After registering, the mod reads every value back from MCM into its store, and every later change goes into the store too, so the two agree and the mod's own file holds the same values.
+Only in this mod's two files: `settings.json` (the `menu` member, and `first_person` for Show aim markers and Use weapon-family placement defaults, which the runtime saves there as retail does) and `locked_view.json`. A change in either menu goes through the same setters (`tfp_wire_settings_menu_set`, `tfp_wire_settings_locked_set`, or the runtime for the two `first_person` ones), on the game thread, takes effect live, and is written by the next save frame, once per change.
+
+- **DBF-MCM keeps no file for this mod.** The registration says `"storage": true`; its load answers "no values", so every control starts at the definition's default, which is the store's value, and its save does nothing (the store saves). MCM's reset therefore goes back to the value the menu was registered with, not to retail's factory default.
+- **The MCM id is `goose_tfp`.** Not `goose_true_first_person` (an old Lua experiment's page, whose saved values MCM may still hold), not `true_first_person` (the id builds up to feel.50 used behind `mcm_on.txt`, with two pages) and not `first_person` (retail's). With `"storage": true` MCM reads no `<id>.ini` and imports none from LLL's old folder anyway; the new id also keeps any old registration apart.
+- **The panel** is the menu's host as MCM is: what the user does is queued by the host's render thread and applied by the game thread at its next update. A slider is taken when it is let go.
+
+### Every option
+
+Defaults are the store's defaults (retail's, and the locked view's); on a first run the shipped `settings.json` holds your imported retail values instead.
+
+| Page | Option | Kind | Range / choices | Default | Stored in |
+|---|---|---|---|---|---|
+| First person | Enable True First Person | button |  |  | - |
+| First person | Turn first-person view off | button |  |  | - |
+| First person | Show aim markers | checkbox |  | as saved | settings.json first_person.show_aim_markers (through the runtime) |
+| First person | Edit arms and weapon placement | button |  |  | - |
+| First person | Open / close placement editor | key |  | Page Up (stored 119, retail's F8) | settings.json menu.editor_key |
+| First person | Toggle True First Person | key |  | F11 | settings.json menu.toggle_key |
+| First person | True First Person: native ADS | checkbox |  | off | settings.json menu.true_native_ads |
+| First person | True First Person: show torso | checkbox |  | off | settings.json menu.show_torso |
+| First person | First Person Arms | checkbox |  | on | settings.json menu.fird_person_arms |
+| First person | Use weapon-family placement defaults | checkbox |  | as saved | settings.json first_person.family_placement_defaults (through the runtime) |
+| First person | Motion preset | choice | Custom (keep existing sliders) / Comfort / Natural | Custom (keep existing sliders) | settings.json menu.motion_preset |
+| First person | Weapon movement | toggle |  | on | settings.json menu.motion_enabled |
+| First person | Weapon movement strength | slider | 0 to 200, step 5 | 100 | settings.json menu.motion_strength |
+| First person | Weapon movement: walking bob | checkbox |  | on | settings.json menu.motion_bob_enabled |
+| First person | Weapon movement: sway | checkbox |  | on | settings.json menu.motion_sway_enabled |
+| First person | Weapon movement: sprint pose | checkbox |  | on | settings.json menu.motion_sprint_enabled |
+| First person | Near clip distance (cm) | slider | 5 to 40, step 1 | 15 | settings.json menu.near_clip_cm |
+| First person | Near clip while aiming | toggle |  | off | settings.json menu.near_clip_aim |
+| First person | Weapon: no active firearm | status line |  |  | - |
+| First person | This weapon: hip clearance (cm) | slider | 5 to 40, step 1 | 15 | settings.json menu.weapon_near_hip_cm |
+| First person | This weapon: normal-aim clearance (cm) | slider | 5 to 40, step 1 | 5 | settings.json menu.weapon_near_aim_cm |
+| First person | Save clipping for this weapon | button |  |  | - |
+| First person | Use global clipping for this weapon | button |  |  | - |
+| First person | Status: First person off | status line |  |  | - |
+| Bob and sway | Weapon bob strength | slider | 0 to 300, step 5 | 100 | settings.json menu.weapon_bob_strength |
+| Bob and sway | Weapon bob speed | slider | 25 to 200, step 5 | 100 | settings.json menu.weapon_bob_speed |
+| Bob and sway | Weapon sway strength | slider | 0 to 300, step 5 | 100 | settings.json menu.weapon_sway_strength |
+| Bob and sway | Weapon sway response speed | slider | 25 to 200, step 5 | 100 | settings.json menu.weapon_sway_speed |
+| Bob and sway | Sprint weapon movement | slider | 0 to 200, step 5 | 100 | settings.json menu.sprint_motion_strength |
+| Locked view | Camera lock | toggle |  | on | locked_view.json camera_lock |
+| Locked view | Field of view lock | toggle |  | on | locked_view.json fov_lock |
+| Locked view | Field of view (degrees) | slider | 50 to 120, step 1 | 80 | locked_view.json fov_degrees |
+| Locked view | Zoom when aiming | toggle |  | on | locked_view.json fov_zoom_when_aiming |
+| Locked view | Camera style | choice | Stable / Bodycam | Stable | locked_view.json bodycam |
+| Locked view | View kick strength (%) | slider | 0 to 100, step 5 | 35 | locked_view.json kick_strength |
+| Locked view | View kick limit (degrees) | slider | 0 to 20, step 1 | 8 | locked_view.json kick_max_degrees |
+| Locked view | View kick when thrown (%) | slider | 0 to 100, step 5 | 70 | locked_view.json thrown_kick_strength |
+| Locked view | Camera damping (%) | slider | 0 to 100, step 5 | 60 | locked_view.json camera_damping |
+| Locked view | Animated arms | toggle |  | on | locked_view.json animated_arms |
+| Locked view | One-handed pistols | toggle |  | on | locked_view.json one_handed_pistols |
+| Locked view | Weapon put-away | toggle |  | on | locked_view.json put_away |
+| Locked view | Smooth eye | toggle |  | on | locked_view.json smooth_eye |
+
+Notes on the list:
+
+- **First Person Arms** (retail's label was the typo "Fird Person Arms"; the stored key keeps retail's name `fird_person_arms`) is shown disabled, with the line "Sleeves and hand grips are refused on this build." in the panel and one log line, when sleeves and hand grips refused at start-up (they do on current builds).
+- **Open / close placement editor** and **Edit arms and weapon placement** are disabled when NEST is not loaded (the editor needs it). The editor key's default is Page Up: F8 is HellForge's own editor, and a stored 119 is read as Page Up. The panel's key row does not take F8 for it.
+- **Camera style** is the Boolean `bodycam` of `locked_view.json` (Stable is off). While it is Stable, View kick strength, View kick limit and Camera damping are disabled (Bodycam only); the panel says so under the row, MCM at the end of the description.
+- **One-handed pistols** is stored and nothing acts on it: always disabled, with its note.
+- **Animated arms**, **Weapon put-away** and **Smooth eye** switch a feature while the game runs (`src/wire_options.c`): the change is made at the next update, and waits while a lease is held through an action. Test files beside the DLL beat the option: `arms_live.txt` / `hold_lease.txt` force on, `arms_off.txt` / `hold_off.txt` / `smooth_off.txt` force off (off wins); the `Option:` lines say which decided.
+- **Show aim markers** and **Use weapon-family placement defaults** go through the runtime (retail's aim-marker setting and `save_presentation`) at the next tick; a refusal is logged and the control is put back.
+- **This weapon: hip / normal-aim clearance** are drafts that follow the weapon in your hands; **Save clipping for this weapon** writes them to `near_clip_profiles`, **Use global clipping for this weapon** removes the weapon's row. They are disabled without a firearm.
+- **The two status lines** are text in the panel and always-disabled buttons in MCM (MCM relabels only a control it can find by id).
+- **Buttons answer in the log** (`Menu: "<label>": <why>`), not in MCM's footer: they are done at the mod's next tick.
+- **Not offered:** retail's "Free aim (30 seconds)" and "Compare native ADS camera (30 seconds)", test tools of modes this build does not wire.
+
+Keys of the two files that are no option (`tfp_wire_menu_not_offered`; the test checks that every key of both files is a control's or one of these, once):
+
+| File | Key | Why it is no option |
+|---|---|---|
+| settings.json first_person | `placement` | the global weapon placement; written by the placement editor |
+| settings.json first_person | `weapon_placements` | older per-weapon placements; read as a fallback, written by no control (the editor writes action_placements) |
+| settings.json first_person | `action_placements` | per-weapon, per-action placements; written by the placement editor |
+| settings.json first_person | `action_state_mapping` | which game state is which action (idle, aim, sprint, ...); data the runtime reads, not a choice |
+| settings.json first_person | `fird_head_camera` | the eye-camera placement; its editor (retail's Shift+F8) is not in this build |
+| settings.json first_person | `motion_enabled` | retail's runtime default for Weapon movement; the control's own value always wins, so it changes nothing |
+| settings.json first_person | `motion_scale` | retail's fallback for Weapon movement strength, used only while the stored strength is outside 0 to 200 |
+| settings.json first_person | `camera_kick_enabled` | retail's own camera kick switch; no unit of this build reads it (the locked view's kick sliders replace it) |
+| settings.json first_person | `aim_markers` | per-weapon aim-marker choices, saved by the runtime; Show aim markers is the control |
+| settings.json first_person | `near_clip_profiles` | per-weapon near clip, written by Save clipping for this weapon / Use global clipping for this weapon |
+| settings.json first_person | `grab_offset` | kept from older files; no unit of retail or of this build reads it |
+| settings.json first_person | `grab_offsets` | kept from older files; no unit of retail or of this build reads it |
+| settings.json menu | `ads_mode` | retail's control is commented out (Fird Person ADS behaviour); only its free-aim test tool, not in this build, reads it |
+
+### The panel itself
+
+- One NEST window, "True First Person", a tab per page; colours from the host's theme tokens only (`ov->theme()`, HD2-UI-Style/DESIGN.md). The first button, Enable True First Person, is the window's one main button.
+- **Keys:** the host has no key-binding widget. A key row is its label, the key as a key cap, and **Change**, which takes the next key pressed (Esc keeps the old one, Delete clears it; after ten seconds the question goes away).
+- A greyed row still shows its description as a tooltip (an unseen item of its rectangle carries it).
+- **The placement editor** closes the settings menu, panel or MCM, before it takes the cursor.
+- **Live replace:** the panel stays registered with the host, closed and drawing nothing (the host cannot take a panel out). Its id is `goose.true-first-person/settings` at every game start, so the host keeps its place and size and `hotkey.goose.true-first-person/settings` in `overlay-host.ini` moves its key; the build that replaces one registers as `goose.true-first-person/settings@<process>-<tick>` for the rest of that session (one log line).
+
+### Only the game can show
+
+1. That DBF-MCM takes the definition in the game (natively it passes MCM's own schema parser), with `"storage": true`, and that its load and save callbacks are called as its source says.
+2. That F10 reaches the mod while MCM's window is open (MCM may hold the keyboard), and that `focus_page` opens on the First person page.
+3. That the Bodycam-only sliders grey and un-grey in MCM when the camera style changes (`set_disabled` from the mod's tick).
+4. The panel on the host, as before: sizes, the three tabs, the key rows.
+5. A live replace while MCM holds the menu: the registration taken out on the game thread and made again by the new build under the same id.
 
 ## Live replace
 

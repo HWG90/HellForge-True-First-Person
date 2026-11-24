@@ -4,41 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { ROWS = 40, QUEUE = 16, TABS = 3 };
-static const char *const LOCKED_TAB = "Locked view";
-/* The options of TFP_SETTINGS_LOCKED, in its order: what the panel calls them. `note`: the option sets nothing;
- * it is drawn greyed (the host's begin_disabled) with the note under it; its description is a tooltip all the same
- * (tip_greyed). */
-static const struct { const char *label, *description, *note; } LOCKED[TFP_LOCKED_COUNT] = {
-  {"Camera lock", "Keep the view first person through every action and camera of your own character.", NULL},
-  {"Field of view lock", "Hold one field of view whatever the weapon or the camera asks for.", NULL},
-  {"Field of view (degrees)", "The field of view the lock holds. Default 80.", NULL},
-  {"Zoom when aiming", "Let aiming zoom in from the locked field of view. Off keeps the locked value while aiming too.", NULL},
-  {"Bodycam", "Off: a steady, traditional first-person camera. On: the view moves with your head, like a body camera: it takes kicks from "
-              "your body's movement and follows the head through actions.", NULL},
-  {"View kick strength (%)", "How much of your body's movement reaches the view while on foot. Default 35.", NULL},
-  {"View kick limit (degrees)", "The most the view is turned by a kick while on foot. Default 8.", NULL},
-  {"View kick when thrown (%)", "How much of your body's movement reaches the view while you are thrown or ragdolled. The Stable camera uses "
-                               "half of it, as a slow sway. Default 70.", NULL},
-  {"Camera damping (%)", "How much the view is steadied against your body's movement. 0 is the raw movement; higher is calmer and slower. "
-                        "Default 60.", NULL},
-  {"Animated arms", "The first-person arms follow your character's own animation.", NULL},
-  {"One-handed pistols", "One-handed weapons are held as your character holds them. This comes from the character's own animation while "
-                         "Animated arms is on; there is nothing to set here.",
-   "Comes from your character's own animation while Animated arms is on."},
-  {"Weapon put-away", "Keep first person while the weapon is put away for a swap, grenade or stim.", NULL},
-  {"Smooth eye", "No camera pops when the game changes its camera.", NULL},
-};
-_Static_assert(TFP_LOCKED_COUNT == 13 && TFP_LOCKED_bodycam == 4 && TFP_LOCKED_kick_strength == 5 && TFP_LOCKED_camera_damping == 8 &&
-               TFP_LOCKED_animated_arms == 9 && TFP_LOCKED_one_handed_pistols == 10 && TFP_LOCKED_put_away == 11 && TFP_LOCKED_smooth_eye == 12, "LOCKED names the options of TFP_SETTINGS_LOCKED in its order");
-
-/* The camera style (src/camera_damp.h): the three sliders only the Bodycam camera uses. While Bodycam is off they are
- * drawn greyed, as stored, each with its tooltip (tip_greyed), and BODYCAM_NOTE under the Bodycam row says why. */
-static bool bodycam_only(int id) { return id == TFP_LOCKED_kick_strength || id == TFP_LOCKED_kick_max_degrees || id == TFP_LOCKED_camera_damping; }
-static const char *const BODYCAM_NOTE = "View kick strength, View kick limit and Camera damping apply to Bodycam.";
-
+enum { ROWS = 48, QUEUE = 16 };
 typedef struct Row { TfpMenuValue value; bool disabled; char label[300]; } Row;
-typedef struct Event { int index; bool locked, activate; TfpMenuValue value, previous; } Event;
+typedef struct Event { int index; bool activate; TfpMenuValue value, previous; } Event;
 typedef struct Panel {
   TfpWire *w;
   const OvApi *ov;
@@ -46,19 +14,19 @@ typedef struct Panel {
   TfpPanelPlatform platform;
   const TfpMenuControl *controls;
   int count;
-  /* the search for the host (game thread) */
-  bool started, gave_up;
-  uint64_t first_try, next_try;
+  /* which menu, and the searches for MCM and for the host (game thread) */
+  TfpMenuChoice choice;
+  bool mcm_started, mcm_refused, started, gave_up;
+  uint64_t mcm_first, mcm_next, first_try, next_try;
+  TfpKeyEdge f10;            /* F10 while MCM holds the menu */
   /* shared, under the platform's lock */
   Row rows[ROWS];
-  TfpSettingsMenuValue locked[TFP_LOCKED_COUNT];
   Event pending[QUEUE];
   int pending_count;
   bool dropped, retired;
   /* the render thread's own */
   Row shown[ROWS];
-  TfpSettingsMenuValue shown_locked[TFP_LOCKED_COUNT];
-  int held, held_value;      /* the slider being dragged (locked options count on from `count`), -1: none; its value so far */
+  int held, held_value;      /* the slider being dragged, -1: none; its value so far */
   int asking;                /* the key control waiting for a key, -1: none */
   int refused;               /* the key control whose last key was not taken (F8 for the editor), -1: none; shown while it asks */
   double asked_at;
@@ -121,14 +89,13 @@ static void key_name(int key, char out[16]) {
   else snprintf(out, 16, "KEY %d", key);
 }
 /* What the user did, for the game thread; the shown value follows at once so the control does not jump back for a frame. */
-static void push(Panel *p, int index, bool locked, bool activate, TfpMenuValue value) {
+static void push(Panel *p, int index, bool activate, TfpMenuValue value) {
   lock(p);
   if (p->pending_count == QUEUE) p->dropped = true;
   else {
     Event *e = &p->pending[p->pending_count++];
-    *e = (Event){index, locked, activate, value, {TFP_MENU_VALUE_NONE, false, 0}};
-    if (locked) p->locked[index].boolean = value.boolean, p->locked[index].number = value.number;
-    else if (!activate) e->previous = p->rows[index].value, p->rows[index].value = value;
+    *e = (Event){index, activate, value, {TFP_MENU_VALUE_NONE, false, 0}};
+    if (!activate) e->previous = p->rows[index].value, p->rows[index].value = value;
   }
   unlock(p);
 }
@@ -167,22 +134,23 @@ static void draw_control(Panel *p, int i, const OvFrame *frame) {
   const Row *row = &p->shown[i];
   int v;
   if (c->kind == TFP_MK_STATUS) { ov->text_wrapped(row->label[0] ? row->label : c->label); return; }
+  if (row->disabled && p->held == i) p->held = -1;   /* disabled in the middle of a drag (Bodycam switched off): let go, nothing stored */
   ov->begin_disabled(row->disabled);
   switch (c->kind) {
     case TFP_MK_BUTTON:
       /* The window's one main button (DESIGN.md: at most one) is the first: Enable True First Person. */
-      if (i == 0 ? ov->button_primary(c->label) : ov->button(c->label)) push(p, i, false, true, (TfpMenuValue){TFP_MENU_VALUE_NONE, false, 0});
+      if (i == 0 ? ov->button_primary(c->label) : ov->button(c->label)) push(p, i, true, (TfpMenuValue){TFP_MENU_VALUE_NONE, false, 0});
       break;
     case TFP_MK_TOGGLE: case TFP_MK_CHECK:
       v = row->value.boolean;
-      if (ov->checkbox(c->label, &v)) push(p, i, false, false, (TfpMenuValue){TFP_MENU_VALUE_BOOL, v != 0, 0});
+      if (ov->checkbox(c->label, &v)) push(p, i, false, (TfpMenuValue){TFP_MENU_VALUE_BOOL, v != 0, 0});
       break;
     case TFP_MK_SLIDER:
-      if (slider(p, i, c->label, row->value.number, c->min, c->max, c->step, &v)) push(p, i, false, false, (TfpMenuValue){TFP_MENU_VALUE_NUMBER, false, v});
+      if (slider(p, i, c->label, row->value.number, c->min, c->max, c->step, &v)) push(p, i, false, (TfpMenuValue){TFP_MENU_VALUE_NUMBER, false, v});
       break;
     case TFP_MK_CHOICE:
       v = (int)row->value.number - 1;
-      if (ov->combo(c->label, &v, tfp_wire_menu_presets, 3) && v >= 0 && v < 3) push(p, i, false, false, (TfpMenuValue){TFP_MENU_VALUE_NUMBER, false, v + 1});
+      if (ov->combo(c->label, &v, c->choices, c->choice_count) && v >= 0 && v < c->choice_count) push(p, i, false, (TfpMenuValue){TFP_MENU_VALUE_NUMBER, false, v + 1});
       break;
     case TFP_MK_KEY: {
       /* The host has no key-binding widget: the label, the key as a key cap, and a button that asks for the next key. */
@@ -204,7 +172,7 @@ static void draw_control(Panel *p, int i, const OvFrame *frame) {
           if (pressed == TFP_PANEL_KEY || !ov->key_pressed(pressed)) continue;   /* the panel's own key closes the window */
           if (pressed == 119 && no_f8) { p->refused = i, p->asked_at = frame->time; continue; }   /* said in the row; ten more seconds */
           p->asking = -1;
-          if (pressed != 27) push(p, i, false, false, (TfpMenuValue){TFP_MENU_VALUE_NUMBER, false, pressed == 46 ? 0 : pressed});
+          if (pressed != 27) push(p, i, false, (TfpMenuValue){TFP_MENU_VALUE_NUMBER, false, pressed == 46 ? 0 : pressed});
         }
         ov->end_disabled();
         return;   /* the last item is the hint: no tooltip on it */
@@ -216,57 +184,22 @@ static void draw_control(Panel *p, int i, const OvFrame *frame) {
   ov->end_disabled();
   /* (a greyed key row ends in its small button on a line of several items: nothing is laid over that) */
   if (row->disabled && c->kind != TFP_MK_KEY) tip_greyed(p, c->description); else tip(p, c->description);
-}
-static void draw_locked(Panel *p) {
-  const OvApi *ov = p->ov;
-  ov->text_wrapped("First person through every action, one field of view, and how much your body's movement moves the view.");
-  ov->spacing();
-  const bool bodycam = p->shown_locked[TFP_LOCKED_bodycam].boolean;   /* as this frame began: a click takes effect from the next */
-  for (int i = 0; i < TFP_LOCKED_COUNT; i++) {
-    const TfpSettingsLockedInfo *info = tfp_settings_locked_info((TfpSettingsLockedId)i);
-    int v = p->shown_locked[i].boolean;
-    if (LOCKED[i].note) {
-      ov->begin_disabled(1);
-      ov->checkbox(LOCKED[i].label, &v);   /* shown as stored; the host blocks it */
-      ov->end_disabled();
-      tip_greyed(p, LOCKED[i].description);
-      ov->text_colored(ov->theme(OV_THEME_TEXT_DIM), LOCKED[i].note);
-      continue;
-    }
-    if (!info->is_bool && bodycam_only(i) && !bodycam) {
-      const double stored = p->shown_locked[i].number;
-      v = (int)(stored + (stored < 0 ? -.5 : .5));
-      if (p->held == p->count + i) p->held = -1;   /* Bodycam was switched off in the middle of a drag: let go, nothing stored */
-      ov->begin_disabled(1);
-      ov->slider_int(LOCKED[i].label, &v, (int)info->min, (int)info->max);   /* shown as stored; the host blocks it */
-      ov->end_disabled();
-      tip_greyed(p, LOCKED[i].description);
-      continue;
-    }
-    if (info->is_bool) {
-      if (ov->checkbox(LOCKED[i].label, &v)) push(p, i, true, false, (TfpMenuValue){TFP_MENU_VALUE_BOOL, v != 0, 0});
-      if (i == TFP_LOCKED_bodycam && !bodycam) {
-        tip(p, LOCKED[i].description);
-        ov->text_colored(ov->theme(OV_THEME_TEXT_DIM), BODYCAM_NOTE);
-        continue;   /* the last item is the note: no tooltip on it */
-      }
-    } else if (slider(p, p->count + i, LOCKED[i].label, p->shown_locked[i].number, info->min, info->max, info->step, &v))
-      push(p, i, true, false, (TfpMenuValue){TFP_MENU_VALUE_NUMBER, false, v});
-    tip(p, LOCKED[i].description);
-  }
+  /* the row's note, last (no tooltip on it): while the row is disabled, or while its choice shows note_when */
+  if (c->note && (c->note_when ? (int)row->value.number == c->note_when : row->disabled))
+    ov->text_colored(ov->theme(OV_THEME_TEXT_DIM), c->note);
 }
 static void draw(const OvFrame *frame, void *user) {
   Panel *p = user;
   const OvApi *ov = p->ov;
   lock(p);
   bool retired = p->retired;
-  if (!retired) memcpy(p->shown, p->rows, sizeof p->shown), memcpy(p->shown_locked, p->locked, sizeof p->shown_locked);
+  if (!retired) memcpy(p->shown, p->rows, sizeof p->shown);
   unlock(p);
   if (retired || !ov->begin_tab_bar("pages")) return;
-  for (int tab = 0; tab < TABS; tab++) {
-    if (!ov->begin_tab_item(tab < 2 ? tfp_wire_menu_pages[tab] : LOCKED_TAB)) continue;
-    if (tab == 2) draw_locked(p);
-    else for (int i = 0; i < p->count; i++) if (p->controls[i].page == tab) draw_control(p, i, frame);
+  for (int tab = 0; tab < TFP_MENU_PAGES; tab++) {
+    if (!ov->begin_tab_item(tfp_wire_menu_pages[tab])) continue;
+    if (tfp_wire_menu_page_intro[tab]) ov->text_wrapped(tfp_wire_menu_page_intro[tab]), ov->spacing();
+    for (int i = 0; i < p->count; i++) if (p->controls[i].page == tab) draw_control(p, i, frame);
     ov->end_tab_item();
   }
   ov->end_tab_bar();
@@ -274,14 +207,14 @@ static void draw(const OvFrame *frame, void *user) {
 
 /* ---- the game thread ---- */
 static void say(TfpWire *w, const char *format, unsigned number) {
-  char line[420];
+  char line[520];
   snprintf(line, sizeof line, format, number);
   tfp_wire_say(w, line);
 }
 static Panel *make(TfpWire *w) {
   Panel *p = state(w);
   if (p || !(p = calloc(1, sizeof *p))) return p;
-  p->w = w, p->held = p->asking = p->refused = -1;
+  p->w = w, p->held = p->asking = p->refused = -1, p->choice = TFP_CHOICE_DECIDING;
   w->ext[TFP_WIRE_EXT_PANEL] = p;
   return p;
 }
@@ -312,7 +245,6 @@ bool tfp_wire_panel_bind(TfpWire *w, const OvApi *ov, const TfpPanelPlatform *pl
     p->pending_count = 0, p->dropped = p->retired = false, p->held = p->asking = p->refused = -1;
     memset(p->rows, 0, sizeof p->rows);
     for (int i = 0; i < count; i++) tfp_wire_menu_default(w, &controls[i], platform->editor_key, &p->rows[i].value);
-    memcpy(p->locked, tfp_wire_settings(w)->locked, sizeof p->locked);
     const TfpMenuHost host = {p, host_get, host_set, host_set_disabled, host_set_label, "the mod's own panel", platform->editor_key};
     if (!tfp_wire_menu_bind(w, &host, unavailable, edit)) why = "the menu could not be set up";
   }
@@ -337,26 +269,70 @@ bool tfp_wire_panel_bind(TfpWire *w, const OvApi *ov, const TfpPanelPlatform *pl
     return false;
   }
   say(w, "Ready: settings panel: \"True First Person\" is registered with NEST (Goose Overlay Host, API %u). F10 opens and closes it, and it is in "
-         "the host's panel list (Page Down). Three tabs: First person, Bob and sway, Locked view. DBF-MCM is not used", (unsigned)ov->version);
+         "the host's panel list (Page Down). Three tabs: First person, Bob and sway, Locked view, every option. DBF-MCM is not used (it is not "
+         "loaded, did not take the menu, or panel_on.txt asks for this panel)", (unsigned)ov->version);
   return true;
+}
+/* One line when no menu can be had; `why` names what is missing. */
+static void no_menu(TfpWire *w, const Panel *p, const TfpPanelPlatform *platform) {
+  char line[700];
+  snprintf(line, sizeof line, "Menu: no settings menu in this session: %sNEST (Goose Overlay Host) is not loaded, or is older than API %u. "
+           "The settings can be edited by hand while the game is closed: settings.json and locked_view.json in "
+           "%%LOCALAPPDATA%%\\Goose\\HellForge\\TrueFirstPerson (docs/guides/POSER-AND-MENU.md lists every option)",
+           platform->panel_forced ? "panel_on.txt asks for the mod's own panel, and " : !platform->mcm_try ? "" :
+           p->mcm_refused ? "DBF-MCM (goose.mcm) did not take the menu (its line above says why), and " : "DBF-MCM (goose.mcm) is not loaded, and ",
+           (unsigned)TFP_PANEL_API);
+  tfp_wire_say(w, line);
+}
+/* The panel's own search for the host, as before there was a choice: a try a second for 15 s, then no more. */
+static void panel_search(TfpWire *w, Panel *p, const TfpPanelPlatform *platform, uint64_t now_ms, unsigned unavailable, TfpMenuEditFn edit) {
+  if (p->handle || p->gave_up || !platform->connect || (p->started && now_ms < p->next_try)) return;
+  if (!p->started) p->started = true, p->first_try = now_ms;
+  p->next_try = now_ms + TFP_MENU_TRY_MS;
+  const OvApi *ov = platform->connect(platform->user, TFP_PANEL_API);
+  if (!ov) {
+    if (now_ms - p->first_try < TFP_MENU_CONNECT_MS) return;   /* the host may load after this mod */
+    p->gave_up = true, p->choice = TFP_CHOICE_NONE;
+    no_menu(w, p, platform);
+    return;
+  }
+  if (!tfp_wire_panel_bind(w, ov, platform, unavailable, edit)) p->gave_up = true, p->choice = TFP_CHOICE_NONE, no_menu(w, p, platform);
 }
 void tfp_wire_panel_tick(TfpWire *w, const TfpPanelPlatform *platform, uint64_t now_ms, unsigned unavailable, TfpMenuEditFn edit) {
   if (!platform) return;
-  if (platform->mcm_wanted) { if (platform->mcm_tick) platform->mcm_tick(platform->user, w, unavailable, edit); return; }
   Panel *p = make(w);
-  if (!p || p->handle || p->gave_up || !platform->connect || (p->started && now_ms < p->next_try)) return;
-  if (!p->started) p->started = true, p->first_try = now_ms;
-  p->next_try = now_ms + 1000;
-  const OvApi *ov = platform->connect(platform->user, TFP_PANEL_API);
-  if (!ov) {
-    if (now_ms - p->first_try < 15000) return;   /* the host may load after this mod */
-    p->gave_up = true;
-    say(w, "Settings panel: NEST (Goose Overlay Host) is not loaded, or is older than API %u, so there is no settings panel; the settings in "
-           "settings.json apply", (unsigned)TFP_PANEL_API);
-    return;
+  if (!p) return;
+  if (p->choice == TFP_CHOICE_DECIDING) {
+    if (platform->panel_forced || !platform->mcm_try) {
+      p->choice = TFP_CHOICE_PANEL;
+      if (platform->panel_forced) tfp_wire_say(w, "Test: panel_on.txt: the settings menu is the mod's own panel; DBF-MCM is not tried");
+    } else {
+      if (p->mcm_started && now_ms < p->mcm_next) return;
+      if (!p->mcm_started) p->mcm_started = true, p->mcm_first = now_ms;
+      p->mcm_next = now_ms + TFP_MENU_TRY_MS;
+      const TfpMcmState state = platform->mcm_try(platform->user, w, unavailable, edit);
+      if (state == TFP_MCM_READY) p->choice = TFP_CHOICE_MCM;
+      else if (state == TFP_MCM_REFUSED) p->choice = TFP_CHOICE_PANEL, p->mcm_refused = true;   /* MCM's own line says why */
+      else if (now_ms - p->mcm_first < TFP_MENU_CONNECT_MS) return;   /* NULL until MCM's first update: it may load after this mod */
+      else {
+        p->choice = TFP_CHOICE_PANEL;
+        say(w, "Menu: DBF-MCM (goose.mcm) did not answer within %u seconds (it is not loaded); the settings menu is the mod's own panel", TFP_MENU_CONNECT_MS / 1000);
+      }
+    }
   }
-  if (!tfp_wire_panel_bind(w, ov, platform, unavailable, edit)) p->gave_up = true;
+  if (p->choice == TFP_CHOICE_MCM) {
+    /* F10: MCM's window on this mod's page, or closed; one press, one change */
+    if (platform->key_down && platform->mcm_show && tfp_wire_menu_key_edge(&p->f10, TFP_PANEL_KEY, platform->key_down(platform->user, TFP_PANEL_KEY)))
+      platform->mcm_show(platform->user);
+    if (now_ms < p->mcm_next) return;
+    p->mcm_next = now_ms + TFP_MENU_TRY_MS;
+    if (platform->mcm_try(platform->user, w, unavailable, edit) != TFP_MCM_REFUSED) return;   /* registered, or made again */
+    p->choice = TFP_CHOICE_PANEL, p->mcm_refused = true;
+    tfp_wire_say(w, "Menu: DBF-MCM no longer holds the settings menu and did not take it again; the settings menu is the mod's own panel");
+  }
+  if (p->choice == TFP_CHOICE_PANEL) panel_search(w, p, platform, now_ms, unavailable, edit);
 }
+TfpMenuChoice tfp_wire_panel_choice(TfpWire *w) { Panel *p = state(w); return p ? p->choice : TFP_CHOICE_DECIDING; }
 void tfp_wire_panel_frame(TfpWire *w) {
   Panel *p = state(w);
   Event events[QUEUE];
@@ -370,15 +346,9 @@ void tfp_wire_panel_frame(TfpWire *w) {
   if (dropped) tfp_wire_say(w, "Settings panel: more than 16 changes in one update; the rest were dropped");
   for (int i = 0; i < count; i++) {
     const Event *e = &events[i];
-    if (e->locked) tfp_wire_settings_locked_set(w, (TfpSettingsLockedId)e->index, e->value.kind == TFP_MENU_VALUE_BOOL, e->value.boolean, e->value.number);
-    else if (e->activate) tfp_wire_menu_activate(w, p->controls[e->index].id);   /* done by tfp_wire_menu_frame, which also logs a refusal */
+    if (e->activate) tfp_wire_menu_activate(w, p->controls[e->index].id);   /* done by tfp_wire_menu_frame, which also logs a refusal */
     else tfp_wire_menu_changed(w, p->controls[e->index].id, &e->value, &e->previous);
   }
-  /* The locked-view options show what the store holds (it keeps a number inside its range). Only after a change. */
-  if (!count || !tfp_wire_settings(w)) return;
-  lock(p);
-  if (!p->pending_count) memcpy(p->locked, tfp_wire_settings(w)->locked, sizeof p->locked);
-  unlock(p);
 }
 bool tfp_wire_panel_is_open(TfpWire *w) { Panel *p = state(w); return p && p->handle && p->ov->is_open(p->handle) != 0; }
 void tfp_wire_panel_close(TfpWire *w) { Panel *p = state(w); if (p && p->handle && p->ov->is_open(p->handle)) p->ov->set_open(p->handle, 0); }

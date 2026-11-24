@@ -1,18 +1,27 @@
-/* The first-person pages of retail's menu (src/first_person/menu.lua:343-418) on Goose MCM for HellForge.
+/* The settings menu: one list of every user-facing option (TfpMenuControl, three pages), the single source of both
+ * menus that show it: DBF-MCM for HellForge (src/mod_menu.c registers it as a JSON definition) and the mod's own
+ * panel through NEST (src/wire_panel.c draws it). Which of the two a session gets: src/wire_panel.h.
+ *
+ * Retail's first-person pages (src/first_person/menu.lua:343-418) are the first two pages, with retail's labels,
+ * ranges, steps and descriptions; the third, "Locked view", holds the options of locked_view.json
+ * (TFP_SETTINGS_LOCKED), which retail does not have. What differs on this build is in docs/guides/POSER-AND-MENU.md.
  *
  * No Windows and no MCM types here: src/mod_view.c wraps the loaded menu's McmApi in a TfpMenuHost and
- * forwards its callbacks. The control list, labels, ranges, steps and descriptions are retail's; what
- * differs on this build is in docs/guides/POSER-AND-MENU.md.
+ * forwards its callbacks; the panel is a TfpMenuHost of its own.
  *
- * Where a value lives: MCM keeps each control's value in its own file once the user has changed it.
- * The definition's defaults are the store's values (settings.json: the user's retail menu values on a
- * first run), and after registering every value MCM answers is put into the store, so the translated
- * units read the same value the menu shows. */
+ * Where a value lives: in this mod's files only, settings.json (the "menu" member, and first_person for the two
+ * controls retail saves there) and locked_view.json. MCM is registered with "storage": true and keeps no file of
+ * its own for this mod: its load answers "no values", so every control starts at the definition's default, which is
+ * the store's value, and its save is the store's next save frame. */
 #ifndef TFP_WIRE_MENU_H
 #define TFP_WIRE_MENU_H
 #include "wire_settings.h"
 
-#define TFP_MENU_MOD_ID "true_first_person"
+/* The MCM id. Not "goose_true_first_person" (an old Lua experiment's page, whose saved values MCM may still hold),
+ * not "true_first_person" (the id builds up to 0.6.0-feel.50 used behind mcm_on.txt, with two pages) and not
+ * "first_person" (retail's): with "storage": true MCM reads no file for it anyway, and a new id keeps any old file,
+ * and any registration still made under an old id, apart from this page. */
+#define TFP_MENU_MOD_ID "goose_tfp"
 enum { TFP_MENU_VALUE_NONE, TFP_MENU_VALUE_BOOL, TFP_MENU_VALUE_NUMBER };
 typedef struct TfpMenuValue { int kind; bool boolean; double number; } TfpMenuValue;
 typedef struct TfpMenuHost {
@@ -29,19 +38,37 @@ enum { TFP_MENU_NO_ARMS = 1u, TFP_MENU_NO_EDITOR = 2u };
 /* The editor's toggle for the "Edit arms and weapon placement" button: NULL done, else what the footer shows. */
 typedef const char *(*TfpMenuEditFn)(TfpWire *w);
 
-/* The controls themselves, for a front end that draws them itself (src/wire_panel.c). TFP_MK_CHECK is a toggle
- * shown as a checkbox; TFP_MK_STATUS a row of text whose label changes (set_label). */
+/* The controls themselves. TFP_MK_CHECK is a toggle shown as a checkbox; TFP_MK_STATUS a row of text whose label
+ * changes (set_label). Where a control's value is stored is one of three, never two: `menu` (settings.json "menu"),
+ * `locked` (locked_view.json) or `config` (settings.json "first_person", through the runtime's own save); a button
+ * and a status row store nothing. */
 typedef enum TfpMenuKind { TFP_MK_BUTTON, TFP_MK_TOGGLE, TFP_MK_CHECK, TFP_MK_SLIDER, TFP_MK_CHOICE, TFP_MK_KEY, TFP_MK_STATUS } TfpMenuKind;
+enum { TFP_MENU_PAGES = 3 };
 typedef struct TfpMenuControl {
   const char *id; TfpMenuKind kind; const char *label;
   double min, max, step;    /* TFP_MK_SLIDER */
   int menu;                 /* TfpSettingsMenuId the value is stored under, or -1 */
   const char *description;  /* NULL: none */
   int page;                 /* an index into tfp_wire_menu_pages */
+  int locked;               /* TfpSettingsLockedId the value is stored under, or -1 */
+  int config;               /* TfpSettingsField (first_person) the runtime saves it under, or -1 */
+  const char *const *choices; int choice_count; /* TFP_MK_CHOICE: the values 1 .. choice_count. Over a Boolean option: 1 off, 2 on */
+  /* A line shown under the row: while the row is disabled (note_when 0), or while a choice shows value note_when.
+   * MCM has no such line: there an inert control's note, and a choice's, ends the description. */
+  const char *note; int note_when;
+  bool bodycam_only;        /* disabled while the camera style is Stable (src/camera_damp.h) */
+  bool inert;               /* stored, and nothing on this build acts on it: always disabled, with its note */
 } TfpMenuControl;
 const TfpMenuControl *tfp_wire_menu_controls(int *count);
-extern const char *const tfp_wire_menu_pages[2];    /* "First person", "Bob and sway" */
-extern const char *const tfp_wire_menu_presets[3];  /* TFP_MK_CHOICE: the values 1, 2, 3 */
+extern const char *const tfp_wire_menu_pages[TFP_MENU_PAGES];     /* "First person", "Bob and sway", "Locked view" */
+extern const char *const tfp_wire_menu_page_ids[TFP_MENU_PAGES];  /* MCM's page ids */
+extern const char *const tfp_wire_menu_page_intro[TFP_MENU_PAGES]; /* a line at the top of the page, or NULL */
+extern const char *const tfp_wire_menu_presets[3];  /* motion_preset's choices: the values 1, 2, 3 */
+/* Every key of settings.json and locked_view.json that is no control, and why: placements the editor writes, values
+ * retail's runtime keeps, and what no unit of this build reads. Together with the controls this names every key of
+ * both files once. file: "settings.json first_person", "settings.json menu" or "locked_view.json". */
+typedef struct TfpMenuNotOffered { const char *file, *key, *why; } TfpMenuNotOffered;
+const TfpMenuNotOffered *tfp_wire_menu_not_offered(int *count);
 /* What a control shows before the user touches it, as the definition below states it: the store's value (a
  * slider's inside its range, the editor key's retail 119 as `editor_key`). false: a button or a status row,
  * or settings are not bound. */
@@ -54,11 +81,13 @@ size_t tfp_wire_menu_definition(TfpWire *w, int editor_key, char *out, size_t si
 bool tfp_wire_menu_bind(TfpWire *w, const TfpMenuHost *host, unsigned unavailable, TfpMenuEditFn edit);
 void tfp_wire_menu_unbind(TfpWire *w);   /* the registration is gone (live replace) */
 bool tfp_wire_menu_bound(TfpWire *w);
-/* MCM's callbacks, on the game thread. */
+/* MCM's callbacks, on the game thread. A stored control's value goes to its store at once (src/wire_settings.h:
+ * tfp_wire_settings_menu_set / tfp_wire_settings_locked_set); the two `config` toggles and the buttons are done at the
+ * next tfp_wire_menu_frame. */
 void tfp_wire_menu_changed(TfpWire *w, const char *id, const TfpMenuValue *value, const TfpMenuValue *previous);
 const char *tfp_wire_menu_activate(TfpWire *w, const char *id);
-/* Once per tick after the runtime's update: the status and weapon labels and the per-weapon clipping
- * drafts, each sent to MCM only when it changed. */
+/* Once per tick after the runtime's update: the status and weapon labels, the per-weapon clipping drafts and the
+ * Bodycam-only sliders' disabled state, each sent to the host only when it changed. */
 void tfp_wire_menu_frame(TfpWire *w);
 /* The two keys (virtual-key codes) as the menu holds them. */
 int tfp_wire_menu_toggle_key(TfpWire *w);
