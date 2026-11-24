@@ -24,7 +24,7 @@ int main(void) {
    * game's own doing, as it seems): one line for the change of what is owned. */
   t = tick(6, true, 0, 0, 2); t.on_new = 2; t.turned_off = 2;
   CHECK(tfp_head_log_step(&g, &t, text, sizeof text));
-  CHECK(same(text, "Head: kind=6 active: owns head 0, torso 0, shoulders 2 (5 rows; was head 0, torso 0, shoulders 0); found drawn 2 new, 0 again (0 of the "
+  CHECK(same(text, "Head: kind=6 active: owns head 0, torso 0, shoulders 2, hidden_backpack 0 (5 rows; was head 0, torso 0, shoulders 0, hidden_backpack 0); found drawn 2 new, 0 again (0 of the "
                    "head), 0 still; switched off 2, left drawn 0, gave back 0; so far drawn again on 0 ticks (0 meshes), view on without hiding on 0 ticks"
                    "; veil: 0 leaves, 0 frames, eye moved clear on 0, left behind the head on 0, largest move 0.000 m, opens at the first head-camera frame"));
   /* The same again, on the full path and on the steady path (which reads no row): nothing to say. */
@@ -35,7 +35,7 @@ int main(void) {
   /* The view leaves for the head camera and the tick finds 31 meshes drawn that it last saw hidden: the line, and the count. */
   t = tick(4, true, 9, 14, 8); t.on_again = 29; t.on_again_head = 9; t.turned_off = 29;
   CHECK(tfp_head_log_step(&g, &t, text, sizeof text));
-  CHECK(same(text, "Head: kind=4 active: owns head 9, torso 14, shoulders 8 (34 rows; was head 0, torso 0, shoulders 2); found drawn 0 new, 29 again (9 of the "
+  CHECK(same(text, "Head: kind=4 active: owns head 9, torso 14, shoulders 8, hidden_backpack 0 (34 rows; was head 0, torso 0, shoulders 2, hidden_backpack 0); found drawn 0 new, 29 again (9 of the "
                    "head), 0 still; switched off 29, left drawn 0, gave back 0; so far drawn again on 1 ticks (29 meshes), view on without hiding on 0 ticks"
                    "; veil: 0 leaves, 0 frames, eye moved clear on 0, left behind the head on 0, largest move 0.000 m, opens at the first head-camera frame"));
   CHECK(g.again_ticks == 1 && g.again_meshes == 29);
@@ -44,7 +44,7 @@ int main(void) {
   CHECK(tfp_head_log_step(&g, &t, text, sizeof text) && strstr(text, "31 again (9 of the head)") && strstr(text, "on 2 ticks (60 meshes)"));
   /* Left drawn: a line when the number changes, none while it stays, a steady tick between does not count as "none left". */
   t = tick(4, true, 0, 14, 8); t.on_again = 9; t.on_again_head = 9; t.left_on = 9;
-  CHECK(tfp_head_log_step(&g, &t, text, sizeof text) && strstr(text, "left drawn 9") && strstr(text, "owns head 0, torso 14, shoulders 8"));
+  CHECK(tfp_head_log_step(&g, &t, text, sizeof text) && strstr(text, "left drawn 9") && strstr(text, "owns head 0, torso 14, shoulders 8, hidden_backpack 0"));
   t = tick(4, true, 0, 14, 8); t.on_still = 9; t.left_on = 9;
   CHECK(!tfp_head_log_step(&g, &t, text, sizeof text));
   t.full = false; t.camera_rows = 0; t.on_still = t.left_on = 0;
@@ -54,7 +54,7 @@ int main(void) {
   /* Hiding stops while the view is on: a line, the ticks are counted, and the line that says it is back carries them. */
   t = tick(4, false, 0, 0, 0); t.put_back = 34;
   CHECK(tfp_head_log_step(&g, &t, text, sizeof text));
-  CHECK(same(text, "Head: kind=4 idle: owns head 0, torso 0, shoulders 0 (0 rows; was head 9, torso 14, shoulders 8); found drawn 0 new, 0 again (0 of the "
+  CHECK(same(text, "Head: kind=4 idle: owns head 0, torso 0, shoulders 0, hidden_backpack 0 (0 rows; was head 9, torso 14, shoulders 8, hidden_backpack 0); found drawn 0 new, 0 again (0 of the "
                    "head), 0 still; switched off 0, left drawn 0, gave back 34; so far drawn again on 3 ticks (69 meshes), view on without hiding on 1 ticks"
                    "; veil: 0 leaves, 0 frames, eye moved clear on 0, left behind the head on 0, largest move 0.000 m, opens at the first head-camera frame"));
   t = tick(4, false, 0, 0, 0);
@@ -92,8 +92,17 @@ int main(void) {
   CHECK(tfp_head_log_step(&g, &t, text, sizeof text) && strstr(text, "left behind the head on 2, largest move 0.321 m, opens at the first head-camera frame"));
   t.veil_second = true; t.veil_behind = 3;
   CHECK(tfp_head_log_step(&g, &t, text, sizeof text) && strstr(text, "left behind the head on 3, largest move 0.321 m, opens at the tick that sees the leave (veil_second.txt)"));
+  /* Round 22: the backpack's rows (hidden_backpack; the Warp Pack's glow, docs/design/specs/2026-11-24-warp-pack-glow.md):
+   * a change of that number is a line by itself, and the line names it. */
+  t = tick(4, true, 9, 14, 8); t.veil_leaves = 3; t.veil_frames = 6; t.veil_moved = 2; t.veil_behind = 3; t.veil_largest_m = .3214f; t.veil_second = true;
+  CHECK(!tfp_head_log_step(&g, &t, text, sizeof text));
+  t.backpack = 9; t.rows += 9;
+  CHECK(tfp_head_log_step(&g, &t, text, sizeof text) && strstr(text, "shoulders 8, hidden_backpack 9 (43 rows; was head 9, torso 14, shoulders 8, hidden_backpack 0)"));
+  CHECK(!tfp_head_log_step(&g, &t, text, sizeof text));
+  t.backpack = 0; t.rows -= 9;
+  CHECK(tfp_head_log_step(&g, &t, text, sizeof text) && strstr(text, "hidden_backpack 0 (34 rows; was head 9, torso 14, shoulders 8, hidden_backpack 9)"));
   /* A line never runs past its buffer, and stays under the 700 characters say() writes (src/mod_view.c). */
-  t = tick(4, true, 4000000000u, 4000000000u, 4000000000u); t.on_again = t.on_again_head = t.on_new = t.on_still = t.turned_off = t.left_on = t.put_back = 4000000000u;
+  t = tick(4, true, 4000000000u, 4000000000u, 4000000000u); t.backpack = 4000000000u; t.on_again = t.on_again_head = t.on_new = t.on_still = t.turned_off = t.left_on = t.put_back = 4000000000u;
   g.again_ticks = g.again_meshes = g.off_ticks = 18446744073709551615ull;
   t.veil_leaves = t.veil_frames = t.veil_moved = t.veil_behind = 18446744073709551615ull; t.veil_largest_m = 1e30f; t.veil_second = true;
   char small[40];

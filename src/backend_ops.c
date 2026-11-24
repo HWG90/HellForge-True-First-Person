@@ -70,7 +70,9 @@
 #define L_INVENTORY_OWNERS    64
 #define L_INVENTORY_ROWS      80
 #define L_INVENTORY_ROW       48
-#define L_INVENTORY_BACKPACK  12     /* slot 3 of the row; not yet read in the game on this build */
+#define L_INVENTORY_BACKPACK  12     /* the row's type-6 slot: the game's slot switch (game+0x797cb5, table 0x797d78) reads
+                                       * types 1-3 at +0/+4/+8, type 6 at +0xc, types 4-5 at +0x10; 26251122's (0x7a3645)
+                                       * is the same, and there +12 was the pack in the game. docs/design/specs/2026-11-24-warp-pack-glow.md */
 
 /* OPEN on build 25480438: the game's local presentation switch (retail game+0x833440), its nine
  * code pins and its mode byte (retail avatar_owner+0x546B20, stride 0x1B8). Only
@@ -845,6 +847,19 @@ TfpOpsResult tfp_ops_backpack(TfpOps *b, const TfpOpsSnapshot *s, TfpOpsBackpack
   out->entity = entity;
   memcpy(out->descriptor, d, 20);
   return TFP_OPS_TRUE;
+}
+/* Beyond retail (round 22, for the log only): the snapshot player's inventory row, words +0x0..+0x14, read the way
+ * tfp_ops_backpack finds the row. false: not read (b->why says why). */
+bool tfp_ops_inventory_row(TfpOps *b, const TfpOpsSnapshot *s, uint32_t slots[6]) {
+  uint64_t inventory = 0, owners = 0, owner = 0, rows = 0;
+  uint32_t index = 0;
+  uint8_t bytes[20];
+  if (!s || !ptr(b, s->base + B_GAME_INVENTORY, &inventory) || !map(b, inventory + L_INVENTORY_MAP, s->avatar, 4096, &index) ||
+      !ptr(b, inventory + L_INVENTORY_OWNERS, &owners) || !ptr(b, owners + (uint64_t)index * 8, &owner) || !rd(b, owner, bytes, 20))
+    return false;
+  if (memcmp(bytes, s->avatar_descriptor, 20)) return fail(b, "Backpack inventory owner changed");
+  if (!ptr(b, inventory + L_INVENTORY_ROWS, &rows)) return false;
+  return rd(b, rows + (uint64_t)index * L_INVENTORY_ROW, slots, 6 * sizeof *slots);
 }
 TfpOpsResult tfp_ops_camera_only_weapon(TfpOps *b, const TfpOpsSnapshot *s, TfpOpsText *why) {
   static const uint8_t HAMMER[8] = {83, 133, 189, 162, 189, 201, 62, 95};

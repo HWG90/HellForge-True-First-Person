@@ -1154,6 +1154,7 @@ static void pack_note(St *st, const TfpOpsSnapshot *ops, int rc, const TfpOpsBac
   uint64_t seen = UINT64_C(0xcbf29ce484222325);
   const uint32_t parts[] = {(uint32_t)(rc + 2), ops ? ops->full : 2u, rc == 1 ? pack->ref : 0, rc == 1 ? pack->entity : 0};
   for (size_t i = 0; i < sizeof parts; i++) seen = (seen ^ ((const uint8_t *)parts)[i]) * UINT64_C(0x100000001b3);
+  for (size_t i = 0; rc == 0 && pack && pack->has_slots && i < sizeof pack->slots; i++) seen = (seen ^ ((const uint8_t *)pack->slots)[i]) * UINT64_C(0x100000001b3);
   for (size_t i = 0; rc == 1 && i < 20; i++) seen = (seen ^ pack->descriptor[i]) * UINT64_C(0x100000001b3);
   for (const char *c = text; rc < 0 && c && *c; c++) seen = (seen ^ (uint8_t)*c) * UINT64_C(0x100000001b3);
   if (seen == st->pack_seen || st->pack_said >= 24) return;
@@ -1163,7 +1164,12 @@ static void pack_note(St *st, const TfpOpsSnapshot *ops, int rc, const TfpOpsBac
     for (int i = 0; i < 20; i++) snprintf(hex + 2 * i, 3, "%02x", pack->descriptor[i]);
     sayf(st, "Check: backpack: found entity=%u renderer=%u descriptor=%s (snapshot %s; body=%u viewmodel=%u weapon unit=%u)", pack->entity, pack->ref, hex,
          ops->full ? "full" : "player", ops->body, ops->viewmodel, ops->full ? ops->weapon_unit : 0);
-  } else if (rc == 0) sayf(st, "Check: backpack: none (snapshot %s)", ops->full ? "full" : "player");
+  } else if (rc == 0 && pack && pack->has_slots)
+    /* Round 22: the inventory row's equipment words (the game's own switch at game+0x797cb5 reads slot type 1, 2, 3
+     * at +0, +4, +8, type 6 at +0xc, types 4 and 5 at +0x10): a backpack anywhere but +0xc would show here. */
+    sayf(st, "Check: backpack: none (snapshot %s; inventory row +0x0..+0x14: %#x %#x %#x [+0xc backpack %#x] %#x %#x)", ops->full ? "full" : "player",
+         pack->slots[0], pack->slots[1], pack->slots[2], pack->slots[3], pack->slots[4], pack->slots[5]);
+  else if (rc == 0) sayf(st, "Check: backpack: none (snapshot %s)", ops->full ? "full" : "player");
   else sayf(st, "Check: backpack: refused: %s (snapshot %s)", text && *text ? text : "no reason given", ops ? (ops->full ? "full" : "player") : "not recalled");
 }
 static int io_backpack(void *user, const TfpVisSnapshot *s, TfpHeadBackpack *out, TfpVisText *why) {
@@ -1171,11 +1177,17 @@ static int io_backpack(void *user, const TfpVisSnapshot *s, TfpHeadBackpack *out
   const TfpOpsSnapshot *ops = recalled(st, s);
   TfpOpsBackpack pack;
   TfpOpsText text;
+  memset(&pack, 0, sizeof pack);
   text.present = false, text.text[0] = 0;
   if (!ops) { vis_text(why, "Backpack snapshot is not one of this frame's"); pack_note(st, NULL, -1, NULL, "Backpack snapshot is not one of this frame's"); return -1; }
   TfpOpsResult r = tfp_ops_backpack(&st->w->ops, ops, &pack, &text);
   if (r == TFP_OPS_RAISED) { vis_text(why, text.text); pack_note(st, ops, -1, NULL, text.text); return -1; }
-  if (r != TFP_OPS_TRUE) { pack_note(st, ops, 0, NULL, NULL); return 0; }
+  if (r != TFP_OPS_TRUE) {
+    /* Round 22: say the row's words with the "none" (a pack in another slot would show), read only when the answer may be news */
+    pack.has_slots = st->pack_said < 24 && tfp_ops_inventory_row(&st->w->ops, ops, pack.slots);
+    pack_note(st, ops, 0, &pack, NULL);
+    return 0;
+  }
   pack_note(st, ops, 1, &pack, NULL);
   /* backend.lua:314: identity = tostring(entity)..':'..descriptor */
   out->ref = pack.ref;
@@ -1650,6 +1662,7 @@ bool tfp_wire_engine_head_tick(const TfpWire *w, TfpHeadTick *out) {
   tfp_head_watch(st->head, &seen);
   out->bound = true, out->active = r.phase == TFP_HEAD_ACTIVE, out->phase = tfp_head_phase_name(r.phase), out->kind = st->head_kind;
   out->rows = (unsigned)r.hidden, out->head = (unsigned)r.hidden_head, out->torso = (unsigned)r.hidden_torso, out->shoulders = (unsigned)r.hidden_shoulders;
+  out->backpack = (unsigned)r.hidden_backpack; /* round 22 */
   out->full = seen.full, out->camera_rows = (unsigned)seen.camera_rows, out->on_new = (unsigned)seen.on_new, out->on_again = (unsigned)seen.on_again;
   out->on_again_head = (unsigned)seen.on_again_head, out->on_still = (unsigned)seen.on_still, out->turned_off = (unsigned)seen.turned_off;
   out->left_on = (unsigned)seen.left_on, out->put_back = (unsigned)seen.put_back;

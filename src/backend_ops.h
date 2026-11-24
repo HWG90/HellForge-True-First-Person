@@ -188,7 +188,12 @@ typedef struct TfpOpsConfig {  /* camera_config / fov_config / blur_config / fir
   bool has_request, has_weapon, is_camera, has_right, presentation_enabled;
   double forward, up, right, smoothing_ms, blend_ms, max_gap_ms;
 } TfpOpsConfig;
-typedef struct TfpOpsBackpack { uint32_t ref, entity; uint8_t descriptor[20]; } TfpOpsBackpack;
+typedef struct TfpOpsBackpack {
+  uint32_t ref, entity; uint8_t descriptor[20];
+  /* Beyond retail (round 22, for the log; tfp_ops_backpack leaves them): the inventory row's words +0x0..+0x14
+   * (tfp_ops_inventory_row). has_slots: they were read. */
+  bool has_slots; uint32_t slots[6];
+} TfpOpsBackpack;
 typedef struct TfpOpsBinding { const void *identity; uint64_t address; bool is_function; } TfpOpsBinding; /* an engine Lua function */
 typedef enum TfpOpsSetting { TFP_OPS_SETTING_DEFAULT, TFP_OPS_SETTING_DOF, TFP_OPS_SETTING_VIGNETTE, TFP_OPS_SETTING_OTHER } TfpOpsSetting;
 
@@ -242,6 +247,7 @@ TfpOpsResult tfp_ops_hold_snapshot(TfpOps *b, TfpOpsHold *out, TfpOpsText *why);
  * moved on), gets the game's exit on the first poll, proven by the player's snapshot, where retail waits four. */
 void tfp_ops_set_hold(TfpOps *b, bool on);
 TfpOpsResult tfp_ops_backpack(TfpOps *b, const TfpOpsSnapshot *s, TfpOpsBackpack *out, TfpOpsText *why); /* TRUE, NIL (none), RAISED */
+bool tfp_ops_inventory_row(TfpOps *b, const TfpOpsSnapshot *s, uint32_t slots[6]); /* beyond retail (round 22): the log's */
 TfpOpsResult tfp_ops_camera_only_weapon(TfpOps *b, const TfpOpsSnapshot *s, TfpOpsText *why);
 TfpOpsResult tfp_ops_action_state(TfpOps *b, const TfpOpsSnapshot *s, TfpOpsAction *out, TfpOpsText *why); /* TRUE or NIL */
 bool tfp_ops_on_foot(TfpOps *b, const TfpOpsSnapshot *s, const TfpOpsAction *action);
