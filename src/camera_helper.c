@@ -1461,10 +1461,10 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
                 if (!policy.lock_now) tfp_eye_glide_reset(&policy.eye_glide);
                 if (!keep && policy.lock_now) {
                   /* Beyond retail, round 19: the hold lapsed; the held eye is let go from rest to rest over 300 to 450 ms
-                   * (src/camera_glide.h THE RELEASE), not on retail's 80 ms fade, whose first frame was 0.15 m. */
+                   * (src/camera_glide.h THE RELEASE), not on retail's 80 ms fade, whose first frame was 0.15 m. A swap's
+                   * glide under way runs to its end first and the release begins from rest after it (THE LAPSE). */
                   static const float own[3] = {0, 0, 0};
-                  tfp_eye_glide_release(&policy.eye_glide, policy.eye_delta, own, dt);
-                  if (!tfp_eye_glide_releasing(&policy.eye_glide)) { policy.eye_delta_active = false; tfp_eye_glide_reset(&policy.eye_glide); }
+                  if (!tfp_eye_glide_lapse(&policy.eye_glide, policy.eye_delta, own, dt)) { policy.eye_delta_active = false; tfp_eye_glide_reset(&policy.eye_glide); }
                 } else if (!keep) {
                   const float fade = dt > 0 ? expf(-dt/.08f) : 1; float square = 0;
                   for (unsigned axis = 0; axis < 3; ++axis) { policy.eye_delta[axis] *= fade; square += policy.eye_delta[axis]*policy.eye_delta[axis]; }

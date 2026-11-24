@@ -97,6 +97,93 @@ static Release emote(bool lock, bool smooth, double dt, float way, int then = 0,
   g.end();
   return r;
 }
+// How far `p` is from the triangle a, b, c (from the nearest of its sides where it has no area): 0 inside it.
+static float outside_span(const float *p, const float *a, const float *b, const float *c) {
+  auto sub = [](const float *x, const float *y, float *o) { for (int k = 0; k < 3; ++k) o[k] = x[k] - y[k]; };
+  auto dot = [](const float *x, const float *y) { return x[0] * y[0] + x[1] * y[1] + x[2] * y[2]; };
+  auto to_side = [&](const float *x, const float *y) {
+    float d[3], q[3]; sub(y, x, d); sub(p, x, q); const float l = dot(d, d);
+    const float s = l > 0 ? std::min(1.0f, std::max(0.0f, dot(q, d) / l)) : 0;
+    float r[3]; for (int k = 0; k < 3; ++k) r[k] = q[k] - s * d[k];
+    return std::sqrt(dot(r, r));
+  };
+  const float sides = std::min(to_side(a, b), std::min(to_side(b, c), to_side(c, a)));
+  float u[3], v[3], w[3], n[3]; sub(b, a, u); sub(c, a, v); sub(p, a, w);
+  n[0] = u[1] * v[2] - u[2] * v[1]; n[1] = u[2] * v[0] - u[0] * v[2]; n[2] = u[0] * v[1] - u[1] * v[0];
+  const float area = dot(n, n);
+  if (!(area > 1e-10f)) return sides;
+  // the foot of `p` on the plane, inside the triangle: the distance to the plane; else the nearest side
+  const float uu = dot(u, u), uv = dot(u, v), vv = dot(v, v), wu = dot(w, u), wv = dot(w, v), den = uu * vv - uv * uv;
+  const float s = (vv * wu - uv * wv) / den, t = (uu * wv - uv * wu) / den;
+  if (s >= 0 && t >= 0 && s + t <= 1) return std::fabs(dot(w, n)) / std::sqrt(area);
+  return sides;
+}
+// A long swap whose hold lapses while the swap's glide is under way (round 19 review: BLOCKING 1, IMPORTANT 2). The
+// hands stay full (mask 2) from the view leaving the native view; the weapon identity changes `key` frames from the frame
+// in which the hold lapses (its 2500 ms; negative: before it), from the weapon in the hands to the other, whose eye is
+// remembered. `reverse` false: the rifle's eye is `way` behind the head camera's and the sidearm's (0.11 m ahead of it)
+// is the incoming one; true: the other way round, the incoming eye `way` behind. Ways of 0.44 and 0.70 m are a glide
+// of 0.55 and 0.81 m: retail's (GATE). Judged from the lapse frame on, over the next 1100 ms (the swap's glide, the
+// release and the eye's return to the incoming weapon), against the same swap with no lapse near it (`alone`, recorded
+// by `record`: the swap 10 frames into the hold; with the continuity on, a frame of the swap's glide alone can be over
+// the judge's limit, the continuity taking it up as before round 19):
+struct Lapse {
+  float at_lapse = 0;      // the change of step of the drawn eye, as a vector, in the frame the hold lapses
+  float largest = 0;       // the largest of those from that frame on
+  float over_bound = 0;    // the most any of them is over the bound (the judge's limit, retail's own slowing, or that frame
+                           // of the swap alone): <= 0 is within
+  float outside = 0;       // the most the drawn eye is ever outside the span of the held eye, the incoming eye and the head
+                           // camera's own eye (the triangle of the three), from the swap on
+};
+#define ALONE_FRAMES 160
+static void body_of(const Game &g, const float *world, float *out) {
+  for (int axis = 0; axis < 3; ++axis) { out[axis] = 0; for (int i = 0; i < 3; ++i) out[axis] += (world[i] - g.s.root[12 + i]) * g.s.root[axis * 4 + i]; }
+}
+static Lapse lapse_swap(bool smooth, double dt, float way, int key, bool reverse, const float *alone = nullptr, float *record = nullptr) {
+  fresh(true, smooth);
+  tfp_camera_set_action_tuning(0, 900, true);
+  Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+  const uint32_t rifle = 0x1111, sidearm = 0x2222, held = reverse ? sidearm : rifle, coming = reverse ? rifle : sidearm;
+  const int settle = static_cast<int>(400 / dt) + 1; const float near = g.eye[1], far = .17f - way;
+  float span[3][3];                                               // the held eye, the incoming eye, the head camera's
+  g.eye[1] = reverse ? far : near;
+  CHECK(tfp_camera_set_weapon_key(g.gen, coming) == 1);
+  standing(g, settle, dt, false); standing(g, settle, dt, true);
+  std::memcpy(span[1], g.body, 12);
+  standing(g, 3, dt, false, 2);                                   // the incoming weapon's eye is remembered as the view leaves
+  CHECK(tfp_camera_set_weapon_key(g.gen, held) == 1);
+  g.eye[1] = reverse ? near : far; standing(g, settle, dt, true);
+  std::memcpy(span[0], g.body, 12);
+  Lapse r; float last[3], step[3] = {}; std::memcpy(last, g.body, 12);
+  int lapse = 1; while (!((lapse - 1) * dt > 2500)) ++lapse;     // the hold began in the first head-camera frame
+  const int swap = record ? 10 : lapse + key, frames = (record ? swap : lapse) + static_cast<int>(1100 / dt);
+  if (record) for (int j = 0; j < ALONE_FRAMES; ++j) record[j] = 0;
+  for (int i = 1; i <= frames; ++i) {
+    if (i == swap) CHECK(tfp_camera_set_weapon_key(g.gen, coming) == 1);
+    g.hip(2); g.frame(dt);
+    if (i == 1) { float head[3]; g.head_eye(head); body_of(g, head, span[2]); }
+    float now[3], change[3];
+    for (int k = 0; k < 3; ++k) { now[k] = g.body[k] - last[k]; change[k] = now[k] - step[k]; }
+    const float changed = std::sqrt(change[0] * change[0] + change[1] * change[1] + change[2] * change[2]);
+    const float had = std::sqrt(step[0] * step[0] + step[1] * step[1] + step[2] * step[2]);
+    if (i >= swap) r.outside = std::max(r.outside, outside_span(g.body, span[0], span[1], span[2]));
+    if (record && i >= swap && i - swap < ALONE_FRAMES) { record[i - swap] = changed; r.largest = std::max(r.largest, changed); }
+    if (i == lapse) r.at_lapse = changed;
+    if (i >= lapse && !record) {
+      r.largest = std::max(r.largest, changed);
+      // the bound: the judge's limit, (the continuity off) what retail's own glide slows the eye by in the frame, or what
+      // the swap's glide alone changes it by in that frame of it
+      float bound = std::max(judge_limit(dt), smooth ? 0.0f : had * static_cast<float>(1 - std::exp(-dt / 70)) + 1e-4f);
+      if (alone && i >= swap && i - swap < ALONE_FRAMES) bound = std::max(bound, alone[i - swap] + 1e-4f);
+      r.over_bound = std::max(r.over_bound, changed - bound);
+    }
+    std::memcpy(step, now, 12); std::memcpy(last, g.body, 12);
+  }
+  if (std::getenv("TFP_LAPSE_TABLE")) std::printf("  %s swap %s way=%.2f dt=%4.1f smooth=%d key %+3d: at lapse %.4f largest %.4f over bound %+.4f outside %.4f\n",
+      record ? "alone" : "lapse", reverse ? "reverse" : "forward", way, dt, smooth, key, r.at_lapse, r.largest, r.over_bound, r.outside);
+  g.end();
+  return r;
+}
 static float apart3(const float *a, const float *b) { float d = 0; for (int k = 0; k < 3; ++k) d += (a[k] - b[k]) * (a[k] - b[k]); return std::sqrt(d); }
 // A take-over (a weapon drawn while the eye is let go, scenes 3 to 5 below) goes on at the release's rates, not the swap
 // glide's 250 ms (src/camera_glide.h THE RELEASE): no frame's step changes by more than in the release of the same way at
@@ -148,6 +235,25 @@ static void hold_release() {
       CHECK(apart3(r.from_end, sidearm) < 1e-3f);
     }
   }
+  // 7. A long swap whose hold lapses while the swap's glide is under way: the weapon identity changes in every frame from
+  // 10 before the frame the hold lapses in to 2 after it, both ways, 0.44 and 0.70 m, the continuity off and on, 8 to 50
+  // ms a frame. The swap's glide runs to its end and the release begins from rest after it (src/camera_glide.h THE
+  // LAPSE): the drawn eye never leaves the span of the held eye, the incoming eye and the head camera's own (within
+  // 1 mm, or what the continuity does with the swap alone: 1.9 and 3.2 mm for 0.70 m at 16.7 ms), and from the lapse
+  // on no frame's step changes by more than the judge allows, (the continuity off) retail's own glide slows it, or the
+  // same frame of the swap alone. (Review of round 19: a release that took over retail's glide with its speed went up
+  // to 0.29 m behind the incoming eye and 0.45 m outside the span (BLOCKING 1); one from rest stopped it dead, 0.08 m
+  // of step change at 33 ms a frame; with the continuity on the lapse frame was 0.048 m at 33 ms, main 0.009
+  // (IMPORTANT 2).)
+  for (int f = 0; f < 4; ++f) for (int smooth = 0; smooth < 2; ++smooth) for (float way : {.44f, .70f}) for (int reverse = 0; reverse < 2; ++reverse)
+    {
+      float alone[ALONE_FRAMES]; const Lapse a = lapse_swap(smooth, frames[f], way, 0, reverse, nullptr, alone);
+      for (int key = -10; key <= 2; ++key) {
+        const Lapse r = lapse_swap(smooth, frames[f], way, key, reverse, alone);
+        CHECK(r.outside <= std::max(1e-3f, a.outside + 1e-4f));
+        CHECK(r.over_bound <= 0);
+      }
+    }
   // 6. Without the lock it is retail's: faded on 80 ms, its first frame the largest (0.15 m at 33 ms a frame).
   {
     const Release r = emote(false, false, 33.3, .44f);
