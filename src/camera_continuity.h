@@ -177,6 +177,18 @@
  *    curve's own speed needs: without that, 0.007 m past at 00:25:52.043 of the feel.40 soaks). What it goes is
  *    taken off what is carried; the curve keeps its end. Only where that part's step is over the measure. The frames are asked as before: none is taken up or
  *    followed that was not, and the kept speed is the wanted eye's new one at once.
+ *    A FRAME TAKEN UP WHILE IT RUNS (a jump, a change of camera) puts the wanted eye somewhere else, and the way to it
+ *    is measured anew there: against what is carried after the jump and the curve begun in that frame, its speed and
+ *    its whole length. Where the wanted eye is then behind the presented one, or the new curve needs the way itself,
+ *    the let-down ends in that frame; where it is still ahead (a change of camera to the side) it goes on. Made up
+ *    (no log has a frame where the two differ): 8 m/s believed, a quarter of it for one frame, the rig re-seated 1.2 m
+ *    backwards in the next and standing, 33.3 ms a frame. With the room as it was before the jump the presented eye
+ *    went 0.120 m on in the frame of the re-seat, away from the wanted eye, and lost that the frame after: 0.154 m of
+ *    step change, 0.348 m past, settled in 333 ms. Now 0.069 m, 0.228 m and 266 ms. (The filter before the let-down:
+ *    0.139 m, 0.072 m, 166 ms. It throws the eye back 0.091 m in the frame that slows down, which is what the let-down
+ *    mends; the 0.160 m the let-down goes in that frame, towards the wanted eye as it then stood, is how much further
+ *    past it the re-seat leaves the presented eye, and that takes the curve 100 ms longer. The frame that slows down
+ *    does not know of a re-seat to come.)
  *    The part that points away from the wanted eye, or across, is dropped as it was. That is the larger steps of the
  *    feel.44 soak: going prone out of an emote, 7.7 m/s lent, the presented eye 0.32 m past a rig eye that all but
  *    stands and 5.3 m/s dropped at once, 0.182 m of step change for the rig eye's own 0.070 m (three times, and 0.074 m
@@ -330,6 +342,23 @@ static inline float tfp_continuity_believed(const TfpContinuity *c, unsigned axi
   if (dying) return newest;
   if (agree == 2) return fabsf(sorted[0]) < fabsf(sorted[1]) ? sorted[0] : sorted[1];
   return agree & 1 ? sorted[agree/2] : (sorted[agree/2-1]+sorted[agree/2])/2;
+}
+/* THE LET-DOWN AT A SLOWING: how far the presented eye goes on in this frame on what it still has (c->coast):
+ * pop_accel less than in the frame before, and no more than leaves it room to come to rest at the wanted eye at that
+ * rate (n frames more). `value`, `speed`: what is carried against this frame's wanted eye and the curve's speed;
+ * `curved`, `left_ms`: a curve is running, and for how long yet. The room is the way to the wanted eye less what the
+ * curve needs for the speed it has: a cubic from `d` closing at `v` with `T` to go passes its end when d is under
+ * v T / 3. */
+static inline void tfp_continuity_glide(TfpContinuity *c, const float *value, const float *speed, bool curved, float left_ms, bool quiet, float dt,
+                                        const TfpContinuityTuning *t, float *glide) {
+  const float fast = tfp_continuity_length(c->coast), down = t->pop_accel*dt*dt; float room = 0, closing = 0, most = 0;
+  if (fast > 0 && isfinite(fast) && !quiet && down > 0) {
+    for (unsigned i = 0; i < 3; ++i) { room -= value[i]*c->coast[i]/fast; closing += speed[i]*c->coast[i]/fast; }
+    if (curved && closing > 0) room -= closing*left_ms/3000;
+    if (room > 0) { const float n = floorf((sqrtf(1+8*room/down)-1)/2); most = (room+down*n*(n+1)/2)/(n+1); }
+  }
+  const float go = fminf(fast*dt-down, most);
+  for (unsigned i = 0; i < 3; ++i) { glide[i] = go > 0 ? c->coast[i]/fast*go : 0; c->coast[i] = go > 0 ? glide[i]/dt : 0; }
 }
 /* One presented frame. `wanted`: the eye the helper would present, in the body's frame. `world`, `basis`: the same
  * eye in the world and the body root's axis rows (wanted = basis times (world - root)), or both NULL where the
@@ -503,19 +532,7 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
     for (unsigned i = 0; i < 3; ++i) on -= far > 1e-6f ? (share*c->speed[i]-step[i]/dt)*value[i]/far : 0;
     if (isfinite(on) && on*dt > measure) for (unsigned i = 0; i < 3; ++i) c->coast[i] = -on*value[i]/far;
   }
-  /* How far the presented eye goes on in this frame on what it still has: pop_accel less than in the frame before,
-   * and no more than leaves it room to come to rest at the wanted eye at that rate (n frames more). The room is the
-   * way to the wanted eye less what the curve needs for the speed it has: a cubic from `d` closing at `v` with `T` to
-   * go passes its end when d is under v T / 3. */
   float glide[3] = {0, 0, 0};
-  { const float fast = tfp_continuity_length(c->coast), down = t->pop_accel*dt*dt; float room = 0, closing = 0, most = 0;
-    if (fast > 0 && isfinite(fast) && !quiet && down > 0) {
-      for (unsigned i = 0; i < 3; ++i) { room -= value[i]*c->coast[i]/fast; closing += speed[i]*c->coast[i]/fast; }
-      if (c->active && closing > 0) room -= closing*(float)(c->started+c->duration-tick)/3000;
-      if (room > 0) { const float n = floorf((sqrtf(1+8*room/down)-1)/2); most = (room+down*n*(n+1)/2)/(n+1); }
-    }
-    const float go = fminf(fast*dt-down, most);
-    for (unsigned i = 0; i < 3; ++i) { glide[i] = go > 0 ? c->coast[i]/fast*go : 0; c->coast[i] = go > 0 ? glide[i]/dt : 0; } }
   if (take) {
     float next[3], from_speed[3], rate = 0;
     /* THE LENT SPEED: the presented eye is let down from it, as far as the speed whose step in a frame is the measure. */
@@ -524,7 +541,7 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
       const float fast = tfp_continuity_length(c->speed)*c->left, slower = fmaxf(fast-t->pop_accel*dt, fminf(fast, measure/dt));
       if (fast > 0 && isfinite(fast)) c->left *= slower/fast;
     } else c->left = 1;
-    for (unsigned i = 0; i < 3; ++i) { next[i] = value[i]-difference[i]-(1-c->left)*expected[i]+glide[i]; from_speed[i] = speed[i]; }
+    for (unsigned i = 0; i < 3; ++i) { next[i] = value[i]-difference[i]-(1-c->left)*expected[i]; from_speed[i] = speed[i]; }
     float length = tfp_continuity_length(next);
     if (length > t->max_m) { for (unsigned i = 0; i < 3; ++i) next[i] *= t->max_m/length; length = t->max_m; }
     if (believe) {
@@ -544,6 +561,9 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
     const float a = fmaxf(t->ease_accel, 1e-3f);
     float duration = 1000*(4*rate+sqrtf(16*rate*rate+24*a*length))/(2*a);
     duration = fminf(fmaxf(duration, t->min_ms), t->max_ms);
+    /* THE LET-DOWN AT A SLOWING, in a frame taken up: measured anew, against the wanted eye where the jump put it. */
+    tfp_continuity_glide(c, next, from_speed, true, duration, quiet, dt, t, glide);
+    for (unsigned i = 0; i < 3; ++i) next[i] += glide[i];
     tfp_continuity_begin(c, next, from_speed, tick, duration);
     for (unsigned i = 0; i < 3; ++i) value[i] = next[i];
     if (edge) { ++c->edges; c->run = 0; } else if (believe) c->run = 0; else { ++c->jumps; if (!c->run++) c->run_started = tick; }
@@ -551,6 +571,7 @@ static inline float tfp_continuity_step_in(TfpContinuity *c, const float *wanted
     if (believe) c->fresh = true; /* believed in this frame: no frame has gone on at it yet */
     /* otherwise the wanted eye's speed is kept: after a jump it goes on as it went */
   } else {
+    tfp_continuity_glide(c, value, speed, c->active, (float)(c->started+c->duration-tick), quiet, dt, t, glide);
     if (tfp_continuity_length(glide) > 0 && c->active) { /* the curve as it was, from where the eye now is: its end is not put off */
       for (unsigned i = 0; i < 3; ++i) value[i] += glide[i];
       tfp_continuity_begin(c, value, speed, tick, (float)(c->started+c->duration-tick));
