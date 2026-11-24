@@ -729,6 +729,10 @@ static int ads_zoom_frames(const TfpOpsPoseHelper *H, const TfpOpsHelperConfig *
     CHECK(near(settled, S[from] - wanted_m, 1e-4) && near(near_clip, wanted_m, 2e-3));    /* settled: at the wanted distance */
     /* the zoom level changes: the game's sight at once, the tick's a frame later, the lens over seats[z] ms */
     float nearest = 1, cut = 0, back = 0, before = NATIVE[1] - forwarded[1];
+    /* round 20c (review 27, B1): the largest step of the sight in a frame, against the game's own (feel.51: nothing
+     * wanted, the sight goes with the depth). Toward the nearer zoom level the pull's limit used to take the new near
+     * clip at once and the gun jumped 8 to 13 cm out in one frame. In both directions now. */
+    float step_most = 0, game_step_most = 0, last_sight = S[from] - settled, last_depth = D[from];
     const uint64_t begun = now_ms;
     for (int i = 0; i < (int)(800 / steps[f]); i++) {
       const double t = (double)(now_ms + steps[f] - begun);
@@ -744,19 +748,61 @@ static int ads_zoom_frames(const TfpOpsPoseHelper *H, const TfpOpsHelperConfig *
       const float sight = S[from] + (depth - D[from]) - (NATIVE[1] - forwarded[1]);
       if (sight < nearest) nearest = sight;
       if (near_clip - sight > cut) cut = near_clip - sight;
+      if (fabsf(sight - last_sight) > step_most) step_most = fabsf(sight - last_sight);
+      if (fabsf(depth - last_depth) > game_step_most) game_step_most = fabsf(depth - last_depth);
+      last_sight = sight; last_depth = depth;
       /* to a farther zoom level the gun only comes nearer: it never jumps back out for a frame */
       if (S[to] > S[from] && before - (NATIVE[1] - forwarded[1]) > back) back = before - (NATIVE[1] - forwarded[1]);
       before = NATIVE[1] - forwarded[1];
     }
     const float pulled = S[to] - wanted_m > .25f ? .25f : S[to] - wanted_m;
     CHECK(near(NATIVE[1] - forwarded[1], pulled, 1e-4) && near(near_clip, S[to] - pulled, 2e-3));    /* settled at the new zoom level */
-    if (nearest < wanted_m - 1e-4f || cut > 1e-4f || back > 1e-4f)
-      printf("wire pose: %.0f cm wanted, %.2f -> %.2f m, the game's seat over %.0f ms, %llu ms frames, near setter %s the gun: the sight came to %.1f cm, the near clip cut %.2f mm into it, the gun went back out %.1f cm\n",
-             wanted_m * 100, S[from], S[to], seats[z], (unsigned long long)steps[f], order ? "after" : "before", nearest * 100, cut * 1000, back * 100);
+    if (nearest < wanted_m - 1e-4f || cut > 1e-4f || back > 1e-4f || step_most > game_step_most + 1e-3f)
+      printf("wire pose: %.0f cm wanted, %.2f -> %.2f m, the game's seat over %.0f ms, %llu ms frames, near setter %s the gun: the sight came to %.1f cm, the near clip cut %.2f mm into it, the gun went back out %.1f cm, "
+             "the sight's largest step %.2f cm (the game's own %.2f cm)\n",
+             wanted_m * 100, S[from], S[to], seats[z], (unsigned long long)steps[f], order ? "after" : "before", nearest * 100, cut * 1000, back * 100,
+             step_most * 100, game_step_most * 100);
     near_world_end();
     pose_world_aim(0);
     H->finish(H->user, handle, &has_stats, &stats, &why);
-    if (!getenv("TFP_ADS_ALL")) CHECK(nearest >= wanted_m - 1e-4f && cut <= 1e-4f && back <= 1e-4f);
+    if (!getenv("TFP_ADS_ALL")) CHECK(nearest >= wanted_m - 1e-4f && cut <= 1e-4f && back <= 1e-4f && step_most <= game_step_most + 1e-3f);
+  }
+  /* round 20c (review 27, B1): the game changes its near clip to the other zoom level's and its depth does not move
+   * at all (nothing has shown that it does). The gun is not moved: the pull stays where it was (it was 13 cm out and
+   * stayed there), the sight where it was, and the near clip still short of the sight's rear. */
+  for (int from = 0; from < 2; from++) for (int f = 0; f < 3; f++) {
+    const float wanted_m = .15f;
+    pose_world_third_person();
+    CHECK(H->prepare(H->user, c, &native, &why) == TFP_OPS_TRUE && H->begin(H->user, c, native, &handle, &why) == TFP_OPS_TRUE);
+    pose_world_first_person();
+    pose_world_optic();
+    ads_seat_world(D[from], 0, LENS[from], LENS[from], LENS[from]);
+    game_frame(handle, &stats, 300);
+    CHECK(near_world_begin(.05f, now_ms * 1000));
+    tfp_pose_set_ads_seat(S[from], wanted_m);
+    pose_world_aim(1);
+    float near_clip = 0;
+    for (int i = 0; i < (int)(800 / steps[f]); i++) { depth_frame(steps[f]); near_clip = near_world_frame(S[from], 1, now_ms * 1000); }
+    const float settled = NATIVE[1] - forwarded[1];
+    CHECK(near(settled, S[from] - wanted_m, 1e-4));
+    float step_most = 0, cut = 0, last = settled;
+    tfp_pose_set_ads_seat(S[1 - from], wanted_m);
+    for (int i = 0; i < (int)(800 / steps[f]); i++) {
+      depth_frame(steps[f]); near_clip = near_world_frame(S[1 - from], 1, now_ms * 1000);
+      const float pulled = NATIVE[1] - forwarded[1], sight = S[from] - pulled;
+      if (fabsf(pulled - last) > step_most) step_most = fabsf(pulled - last);
+      if (near_clip - sight > cut) cut = near_clip - sight;
+      last = pulled;
+    }
+    if (step_most > 1e-4f || cut > 1e-4f || !near(last, settled, 1e-4))
+      printf("wire pose: %.2f -> %.2f m with the game's depth standing still, %llu ms frames: the gun's largest step %.2f cm, the near clip cut %.2f mm, the pull %.3f m (was %.3f)\n",
+             S[from], S[1 - from], (unsigned long long)steps[f], step_most * 100, cut * 1000, last, settled);
+    /* either way the gun stays where it was: toward the nearer the pull is not cut (the depth did not come in), toward
+     * the farther it is not grown (the aim's pair says the sight did not go out) */
+    CHECK(cut <= 1e-4f && step_most <= 1e-4f && near(last, settled, 1e-4));
+    near_world_end();
+    pose_world_aim(0);
+    H->finish(H->user, handle, &has_stats, &stats, &why);
   }
   /* another weapon in the next aim: the sight and depth paired in the last aim (a Nova-like scope: sight 0.066 m, D
    * 0.348 m) say nothing of it (the Scythe: 0.173 m, D 0.21 m); paired anew each aim, the pull is the whole 7.3 cm from

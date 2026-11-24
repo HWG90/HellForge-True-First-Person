@@ -790,6 +790,7 @@ static _Atomic uint32_t ads_full, ads_near_bits, ads_least_bits; /* what the nea
 static TfpAdsPull ads_pull;
 static TfpAdsLead ads_lead;
 static TfpAdsSeat ads_seat;
+static TfpAdsFall ads_fall; /* round 20c: the pull lowered no faster than the depth (src/ads_seat.h tfp_ads_pull_frame) */
 static float ads_frame_depth = NAN, ads_frame_rest = NAN; /* under the policy lock: this frame's game depth and its rest */
 static _Atomic uint32_t steady_mode;
 static bool steady_frame(Policy *p, const DepthObservation *observation, uint64_t native_stack, uint64_t now, uint32_t mode, float argument, float *delta) {
@@ -1441,6 +1442,9 @@ static void position_locked(uint32_t unit, uint32_t node, const float *pose, uin
   if (steady_now && native_stack) {
     float held_delta = 0;
     if (steady_frame(&policy, &observation, native_stack, now, steady_now, native[1], &held_delta)) { depth = held_delta; steadied = true; }
+    /* Round 20c (review 27, I1): the pull follows the depth the gun is drawn at, the game's plus what the held depth
+     * added. Nothing is added in full aim unless zoom_steady.txt holds the depth there too; then the two agree. */
+    if (steadied && isfinite(ads_frame_depth)) ads_frame_depth += held_delta;
   }
   /* Not in retail (round 20, src/ads_seat.h): the sight brought closer in full aim. Toward the eye along node 5's
    * forward axis (where the game's own depth goes), by the game's sight (its near clip) less the wanted distance; the
@@ -1455,8 +1459,9 @@ static void position_locked(uint32_t unit, uint32_t node, const float *pose, uin
     const float sight = bits_float(atomic_load_explicit(&ads_sight, memory_order_relaxed)), wanted = bits_float(atomic_load_explicit(&ads_wanted, memory_order_relaxed));
     if (policy.ads_share == 0) tfp_ads_seat_reset(&ads_seat); /* at the hip: each aim pairs the sight and the depth anew */
     const float least = tfp_ads_sight_least(&ads_seat, sight, ads_frame_depth, ads_frame_rest, (double)now);
-    tfp_ads_pull_step(&ads_pull, tfp_ads_pull_for(sight, wanted), (double)now);
-    const float pull = tfp_ads_pull_limit(&ads_pull, tfp_ads_pull_most(least, wanted));
+    /* never down faster than the game's depth comes in (round 20c; review 27, B1) */
+    const float pull = tfp_ads_pull_frame(&ads_pull, &ads_fall, tfp_ads_pull_for(sight, wanted), tfp_ads_pull_most(least, wanted),
+                                          ads_frame_depth, wanted, policy.ads_share > 0, (double)now);
     if (policy.ads_share > 0 && pull > 0) shifted[1] -= pull*policy.ads_share;
     const float forward = policy.full_ads ? policy.ads_placement[1] : 0;
     atomic_store_explicit(&ads_pull_bits, float_bits(pull), memory_order_relaxed);
@@ -2166,7 +2171,7 @@ void tfp_pose_reset_for_tests(void) {
   atomic_store(&ads_sight, 0); atomic_store(&ads_wanted, 0); atomic_store(&ads_pull_bits, 0); atomic_store(&ads_share_bits, 0);
   atomic_store(&ads_closer_bits, 0); atomic_store(&ads_forward_bits, 0); atomic_store(&ads_depth_bits, UINT32_C(0x7fc00000)); atomic_store(&ads_full, 0);
   atomic_store(&ads_near_bits, 0); atomic_store(&ads_least_bits, 0);
-  tfp_ads_pull_reset(&ads_pull); memset(&ads_lead, 0, sizeof ads_lead); tfp_ads_seat_reset(&ads_seat); ads_frame_depth = ads_frame_rest = NAN;
+  tfp_ads_pull_reset(&ads_pull); tfp_ads_fall_reset(&ads_fall); memset(&ads_lead, 0, sizeof ads_lead); tfp_ads_seat_reset(&ads_seat); ads_frame_depth = ads_frame_rest = NAN;
 }
 /* Not in retail (pose_helper.h). */
 uint32_t tfp_pose_set_hold(uint32_t on) {

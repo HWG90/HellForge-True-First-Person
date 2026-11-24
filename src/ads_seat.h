@@ -61,7 +61,12 @@ static inline float tfp_ads_closer(float pull, float share, float ads_forward) {
  *   - before that (an aim coming in), the near clip less what D still lacks of its rest (a D short of its rest is the
  *     gun still nearer the eye). Not once paired: the near clip a tick old against the new zoom level's rest would
  *     count the change twice, and the gun would jump out for a frame.
- * With no depth worked out this frame (NAN), the near clip alone. Nothing known stays nothing: `sight` back. */
+ * With no depth worked out this frame (NAN), the near clip alone. Nothing known stays nothing: `sight` back.
+ * Round 20c (review 27): the pair is made once an aim (the pose helper resets it at the hip) and kept. Where the sight
+ * goes with D, a new pair says what the kept one says; where the game were to change its near clip and not its depth,
+ * a new pair 50 ms later would move the limit by the whole difference in one frame (and toward the farther level pull
+ * the gun 13 cm in, in front of a sight that had not moved). A near clip nearer than the pair still counts (the min);
+ * how fast the pull may then go down is tfp_ads_pull_frame's. */
 #define TFP_ADS_MARGIN 0.f         /* m: the sight never nearer than the wanted distance less this. 0: with 1 cm (the
                                     * review's margin) the first step of a glide toward a new zoom level could bring the
                                     * sight 1 cm inside where the near clip stood (set before the gun in that frame) */
@@ -75,7 +80,7 @@ static inline float tfp_ads_sight_least(TfpAdsSeat *a, float sight, float depth,
   const bool at_rest = fabsf(depth - rest) <= TFP_ADS_AT_REST;
   if (!at_rest || !a->seen || sight != a->seen_sight || rest != a->seen_rest || tick < a->since) {
     a->seen = true; a->seen_sight = sight; a->seen_rest = rest; a->since = tick;
-  } else if (tick - a->since >= TFP_ADS_SETTLED_MS) { a->sight = sight; a->depth = depth; a->has = true; }
+  } else if (!a->has && tick - a->since >= TFP_ADS_SETTLED_MS) { a->sight = sight; a->depth = depth; a->has = true; }
   if (!a->has) return sight + (depth < rest ? depth - rest : 0);
   const float moved = a->sight + (depth - a->depth);
   return moved < sight ? moved : sight;
@@ -90,6 +95,40 @@ static inline float tfp_ads_pull_most(float least, float wanted) {
 /* The glide held to `most`: it goes on from there, so the pull follows the game's seat while it is limited. */
 static inline float tfp_ads_pull_limit(TfpAdsPull *p, float most) {
   if (isfinite(most) && p->shown > most) p->shown = most > 0 ? most : 0;
+  return p->shown;
+}
+/* The pull lowered no faster than the game's own depth moves (round 20c; review 27, B1). The limit above takes the
+ * game's near clip the frame it changes, and the near clip of a nearer zoom level can come before the game has moved
+ * its seat there: the limit alone cut the pull at once and the gun jumped 8 to 13 cm out in one frame, then crept back
+ * in as the game's depth caught up (or stayed out, were the depth never to move). So while the pull is shown (`aiming`:
+ * the ADS share above 0) it may go down in a frame by no more than the game's depth `depth` went down since the last
+ * frame (the gun the game brings toward the eye, the pull gives back as much: the sight stays where it was). With no
+ * depth worked out this frame or the last, it glides down (TFP_ADS_GLIDE_MS) to where the target and the limit have
+ * it, never at once. The player asking for a farther sight (`wanted` grown: the menu) is no move of the game's: that
+ * glides too, until the pull is where it was going. Going up, and at the hip, as the glide and the limit have it.
+ * `depth` is the depth the gun is drawn at (the game's, plus what the held depth added: review 27's I1). The first
+ * frame, or one after a pause, is the glide's (it takes the target; the share eases it in). */
+typedef struct TfpAdsFall { float depth, wanted; double at; bool has, asked; } TfpAdsFall;
+static inline void tfp_ads_fall_reset(TfpAdsFall *f) { f->depth = f->wanted = 0; f->at = 0; f->has = f->asked = false; }
+static inline float tfp_ads_pull_frame(TfpAdsPull *p, TfpAdsFall *f, float target, float most, float depth, float wanted, bool aiming, double tick) {
+  const bool fresh = p->has && isfinite(tick) && tick >= p->at && tick - p->at <= TFP_ADS_STALE_MS;
+  const float before = p->shown;
+  const double since = fresh ? tick - p->at : 0;
+  const bool depths = isfinite(depth) && f->has && isfinite(tick) && tick >= f->at && tick - f->at <= TFP_ADS_STALE_MS;
+  const float fell = depths && f->depth > depth ? f->depth - depth : 0;
+  if (isfinite(wanted) && wanted > f->wanted && f->at > 0) f->asked = true; /* the player's own change: glided, not held */
+  f->wanted = isfinite(wanted) ? wanted : 0;
+  tfp_ads_pull_step(p, target, tick);
+  tfp_ads_pull_limit(p, most);
+  if (aiming && fresh && p->shown < before) {
+    const float to = isfinite(most) && most < target ? (most > 0 ? most : 0) : target;
+    float glided = before + (to - before)*(1 - expf(-(float)since/TFP_ADS_GLIDE_MS));
+    if (fabsf(glided - to) < TFP_ADS_SNAP) glided = to; /* ends as the glide ends */
+    const float least = depths && !f->asked ? before - fell : glided;
+    if (p->shown < least) p->shown = least;
+  }
+  if (f->asked && (!aiming || fabsf(p->shown - (isfinite(most) && most < target ? most : target)) < TFP_ADS_SNAP)) f->asked = false;
+  if (isfinite(depth) && isfinite(tick)) { f->depth = depth; f->at = tick; f->has = true; } else { f->has = false; if (isfinite(tick)) f->at = tick; }
   return p->shown;
 }
 /* What the near clip is moved in by (round 20 review, B1). The game may call its near setter before the gun's node in
