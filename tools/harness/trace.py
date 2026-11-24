@@ -56,15 +56,25 @@ def windows(lines):
         yield edge, rows
 
 
+def _clock(ms):
+    ms = int(round(ms)) % 86400000
+    return "%02d:%02d:%02d.%03d" % (ms // 3600000, ms // 60000 % 60, ms // 1000 % 60, ms % 1000)
+
+
 def frames(lines):
-    """Every traced frame of `lines` in order of time, as dicts, whatever falls between them: at (the line's stamp),
-    tick (ms), kind, eye, wanted, carried, root (None where the line has none), looked (None likewise), taken.
+    """Every traced frame of `lines` in order of time, as dicts, whatever falls between them: at (the frame's own
+    time), written (the stamp of its line), tick (ms), kind, eye, wanted, carried, root (None where the line has none), looked (None likewise), taken.
     windows() ends a window at every State line, and frames on either side of one were never measured against each
     other (the Stable soak of 2026-11-24: 0.120 m at a landing, 08:18:55.525, with "State: left the native view"
     between its frames); nor were the frames a stretch of the log begins with before its first State line. Here a
     State line only says that "t=" counts from a new edge. The time is "tick=" (the helper's clock, 0.6.0-feel.41 on);
     without it the edge is placed by the line's own stamp, as tools/harness/replay.py does, to a millisecond or two.
-    Two rows of one frame are one, the later, as in windows()."""
+    Two rows of one frame are one, the later, as in windows().
+    The stamp of a line is when it was written, not when its frame was: the frames from before an edge are written
+    with the edge, six or so under one stamp (08:10:44.575 in that soak is four frames over 130 ms). So "at" is the
+    edge's time and "t=" where that is more than SAME_FRAME_MS before the stamp, and the stamp otherwise (a frame
+    after the edge is written as it happens; the two differ by a millisecond or two and the stamp is what the log
+    can be searched for). What tells two frames apart is the tick."""
     groups, group = [], []
     for line in lines:
         if " State: " in line:
@@ -77,7 +87,7 @@ def frames(lines):
             continue
         def numbers(text):
             return [float(x) for x in text.split()] if text else None
-        row = {"at": line[:12], "stamp": ((int(m[1]) * 60 + int(m[2])) * 60 + int(m[3])) * 1000 + int(m[4]), "t": float(m[5]), "kind": int(m[6]),
+        row = {"written": line[:12], "stamp": ((int(m[1]) * 60 + int(m[2])) * 60 + int(m[3])) * 1000 + int(m[4]), "t": float(m[5]), "kind": int(m[6]),
                "eye": numbers(m[7]), "wanted": numbers(m[8]), "carried": float(m[9] or 0), "root": numbers(m[10]),
                "looked": int(m[11]) if m[11] else None, "taken": m[12] or "-", "clock": float(m[13]) if m[13] else None}
         if group and row["t"] < group[-1]["t"] - 1:   # an edge without a State line: t starts again
@@ -91,6 +101,8 @@ def frames(lines):
         edge = min(row["stamp"] - row["t"] for row in group)   # a line is written at or after its frame
         for row in group:
             row["tick"] = row["clock"] if row["clock"] is not None else edge + row["t"]
+            own = edge + row["t"]
+            row["at"] = row["written"] if own >= row["stamp"] - SAME_FRAME_MS else _clock(own)
         rows.extend(group)
     rows.sort(key=lambda row: row["tick"])
     out, first = [], None
