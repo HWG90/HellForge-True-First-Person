@@ -497,6 +497,22 @@ class Veil(unittest.TestCase):
         self.assertAlmostEqual(result["largest_jump_m"], 0.2, 3)
         self.assertGreater(result["largest_veil_m"], 0.3)
 
+    def test_a_lunge_of_the_body_under_the_veil_is_the_veils(self):
+        # the root steps 0.15 m in the frame the veil moves: what is left of the eye before the veil, less the body's
+        # lunge, is nothing, so the frame is the veil's and the eye's largest stays under the limit (the lunge path's
+        # own measure of the eye before the veil)
+        out = ["19:00:00.000 State: left the native view", HELD]
+        for i in range(16):
+            y = 1.0 + (0.15 if i >= 10 else 0.0)
+            out.append(drawn(33.3 * i, (0.0, y, 2.0), self.VIEW, veil=self.MOVE if i == 10 else None, kind=4 if i >= 8 else 6,
+                             wanted=(0.0, y, 2.0), root=(0.0, y - 1.0, 0.0), looked=0))
+        result = matrix.judge(out)
+        self.assertTrue(result["pops"])
+        self.assertTrue(all(p["whose"] in ("veil", "body") for p in result["pops"]), [(p["whose"], round(p["beyond"], 3)) for p in result["pops"]])
+        self.assertIn("veil", {p["whose"] for p in result["pops"]})
+        self.assertLess(result["largest_jump_m"], matrix.POP_M)
+        self.assertTrue(result["pass"])
+
     def test_a_leave_with_nothing_veiled_says_no_veil(self):
         result = matrix.judge(self.leave(33.3, veiled=()))
         self.assertEqual(result["largest_veil_m"], 0.0)
