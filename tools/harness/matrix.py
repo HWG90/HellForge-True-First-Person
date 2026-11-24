@@ -10,6 +10,14 @@ of the phase), the largest camera jump it logged is under LIMIT_M, and nothing w
 and written to OUT_DIR/matrix.json; one capture per phase goes beside it. A pass says the camera stayed first
 person and did not jump; it does not say the picture looks right: look at the captures.
 
+Round 24: a phase also fails on a float, the presented eye held more than trace.FLOAT_M off the raw target (the wanted
+eye less the damping) for trace.FLOAT_MS (trace.held_offsets): the step judge does not see an eye that drifts 0.6 m off
+and back at 0.04 m a frame, which is how the clambers of the user's log of 2026-11-24 floated while "jump-vault" passed.
+The phases clamber-low and clamber-high need the body standing facing a ledge (a low wall for the first, one at
+head height or more for the second, about 1.5 m ahead: tools/harness/walk.py to it first); the input is the same, the
+ledge decides which the game does, and the result says which mask the log shows (0x20 a vault held in the native view,
+0x22 a clamber in the head camera). Run them once in each camera style: the style is the log's, not a phase's.
+
 The camera style the run was in (Bodycam or Stable) is read from the log's own "Camera style:" lines and printed at
 the top, where it changes, and in the summary; each phase's result carries it. It is never taken from an argument or a
 file name: the two feel.49 soaks of 2026-11-24 were named the wrong way round.
@@ -57,6 +65,8 @@ PHASES = {
     "stratagem-menu": ("key ctrl; wait 1.5; key ctrl", 3.0),   # a tap opens the list and a second tap closes it; holding does neither
     "emote": ("key b", 4.0),
     "jump-vault": ("hold w 0.4; key space; wait 0.2; hold w 0.6", 2.5),
+    "clamber-low": ("down w; wait 0.4; key space; wait 1.0; up w", 2.5),    # facing a low wall: a vault, mask 0x20 (round 24)
+    "clamber-high": ("down w; wait 0.4; key space; wait 1.4; up w", 3.0),   # facing a ledge at head height: a clamber, mask 0x22 then 0x20
     "toggle-off-on": ("key f11; wait 1.0; key f11", 1.5),
     "toggle-fast": ("key f11; wait 0.08; key f11; wait 0.08; key f11; wait 0.08; key f11", 2.0),   # the key is polled once a frame: 0.11 s up, so no press falls between two polls at 30 frames a second
     "ragdoll": ("look 0 900; wait 0.2; key g; wait 0.4; look 0 -900; hold s 0.4", 6.0),
@@ -64,6 +74,7 @@ PHASES = {
 }
 LOCK = re.compile(r"Lock: \+(\d+) frames held \(\+(\d+) in another camera, kind now (\d+)\), \+(\d+) missed \(kind (\d+), helper error (\d+)\), largest kick ([\d.]+)")
 CUT = re.compile(r"Cut: largest camera jump ([\d.]+) m")
+MASK = re.compile(r" (?:Hold|Return|Drop|Wait): .*?\bmask=([0-9a-fA-F]+)")
 STYLE = re.compile(r"^(\d+:\d+:\d+\.\d+) Camera style: (\w+)")
 POP_M = 0.06   # the presented eye's step may change by this much between two frames (30 a second in the harness)
 
@@ -274,7 +285,10 @@ def describe(result):
         text += f" (body {result['body_m']:.3f})"
     if result.get("largest_veil_m"):
         text += f" (veil {result['largest_veil_m']:.3f} not counted)"
-    return text + f" [by lengths {result['by_lengths_m']:.3f}]"
+    text += f" [by lengths {result['by_lengths_m']:.3f}]"
+    if result.get("largest_float_m"):
+        text += f" float {result['largest_float_m']:.3f} m ({result['float_at']})"
+    return text
 
 
 def pop_lines(result, indent="       "):
@@ -299,6 +313,7 @@ def pop_lines(result, indent="       "):
 
 def judge(lines, toggles=False):
     held = other = missed = 0
+    masks = set()
     kick = jump = 0.0
     kinds, notes = set(), []
     for line in lines:
@@ -310,6 +325,9 @@ def judge(lines, toggles=False):
         m = CUT.search(line)
         if m:
             jump = max(jump, float(m[1]))
+        m = MASK.search(line)
+        if m:
+            masks.add(int(m[1], 16))
         if "Refused" in line or "State: left" in line or "waiting:" in line:
             notes.append(line.split(" ", 1)[-1].strip()[:140])
     refused = any("Refused" in n for n in notes)
@@ -326,11 +344,13 @@ def judge(lines, toggles=False):
         # Round 19: the eye's own largest, without the veil's move; the veil's frames have their own largest and do
         # not fail a phase (a soak has some 70 leaves, each with a frame or two the veil moved up to 0.32 m).
         jump = max([0.0] + [f["bare"] for f in found])
-    ok = held > 0 and missed == 0 and (jump < (POP_M if traced else LIMIT_M) or toggles) and not refused   # F11 itself is a cut by design
+    floated, float_row = trace_reader.largest_float(rows) if traced else (0.0, None)   # round 24
+    ok = held > 0 and missed == 0 and (jump < (POP_M if traced else LIMIT_M) or toggles) and not refused and (floated <= trace_reader.FLOAT_M or toggles)   # F11 itself is a cut by design
     return {"pass": ok, "frames": held, "other_camera_frames": other, "missed": missed, "kinds": sorted(kinds),
             "largest_jump_m": jump, "largest_veil_m": veil_m, "from_trace": traced, "judged": len(found),
             "by_lengths_m": max([0.0] + [f["lengths"] for f in found]), "body_m": max([0.0] + [f["body"] for f in found]),
-            "pops": [f for f in found if f["whose"]], "largest_kick_deg": kick, "notes": sorted(set(notes))[:6]}
+            "pops": [f for f in found if f["whose"]], "largest_kick_deg": kick, "notes": sorted(set(notes))[:6],
+            "largest_float_m": floated, "float_at": float_row["at"] if float_row else None, "masks": sorted(masks)}
 
 
 def main(argv):

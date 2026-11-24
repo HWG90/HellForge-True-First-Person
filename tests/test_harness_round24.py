@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools/harness"))
+sys.path.insert(0, str(ROOT / "tests"))
 import replay  # noqa: E402
 import trace  # noqa: E402
 
@@ -40,6 +41,30 @@ class Float(unittest.TestCase):
     def test_a_pause_starts_the_time_again(self):
         rows = self.rows([0.5] * 10) + [dict(r, tick=r["tick"] + 1000) for r in self.rows([0.5] * 10)]
         self.assertEqual(trace.largest_float(rows)[0], 0.0)
+
+
+class MatrixFloat(unittest.TestCase):
+    """A phase fails on a float though no step reaches POP_M (round 24: the vault passed the feel.51 matrix)."""
+
+    def judge(self, eyes):
+        import matrix
+        from test_harness_trace import full, HELD
+        lines = ["19:00:00.000 State: swap", HELD]
+        for i, z in enumerate(eyes):
+            lines.append(full(20.0 * i, (0.0, 1.0, 2.0 + z), (0.0, 1.0, 2.0), (0.0, 0.0, 0.0), z, tick=True))
+        return matrix.judge(lines)
+
+    def test_a_float_fails_the_phase(self):
+        up = [min(0.6, 0.04 * i) for i in range(16)]
+        result = self.judge(up + [0.6] * 16 + [max(0.0, 0.6 - 0.04 * i) for i in range(16)])
+        self.assertLess(result["largest_jump_m"], 0.06)
+        self.assertAlmostEqual(result["largest_float_m"], 0.6, places=3)
+        self.assertFalse(result["pass"])
+
+    def test_no_float_passes(self):
+        result = self.judge([0.0] * 30)
+        self.assertEqual(result["largest_float_m"], 0.0)
+        self.assertTrue(result["pass"])
 
 
 def trace_line(stamp, t, kind, looked=1, source="head", tick=None):
