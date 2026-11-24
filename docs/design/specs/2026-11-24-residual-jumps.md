@@ -567,8 +567,8 @@ By whose: the body's 13 frames, the eye's own 19 (B, C, D, G), the filter's 10 (
 
 **Did put-back make anything worse?** Not that the two logs show.
 
-- Where both runs have a figure for the same action (147 of the 337): 51 came under by more than 0.01 m from over the
-  limit. 3 went over the limit from under it: w+dive+swap 179 (0.038 to 0.074: classes A and E), prone 229 (0.052 to
+- Where both runs have a figure for the same action (147 of the 337): 51 were over the limit and shrank by more than
+  0.01 m; 35 of them came under 0.06 m and 16 are still over it. 3 went over the limit from under it: w+dive+swap 179 (0.038 to 0.074: classes A and E), prone 229 (0.052 to
   0.070: D), grenade+swap 248 (0.051 to 0.069: E). All three are classes both runs have, at 0.06 to 0.07 m.
 - Of the 14 actions flagged only with put-back, 9 had no traced frame in soak 25 (reload 3, jump-vault 3, sprint,
   dive, prone), so nothing was judged there; for the reloads the `View:` lines show the same step. 2 are the missed

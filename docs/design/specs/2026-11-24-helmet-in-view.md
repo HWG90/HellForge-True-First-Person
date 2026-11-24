@@ -62,8 +62,10 @@ nothing at the tick.
 
 What that number does say, in both sessions and in the four soaks:
 
-- Head visibility never stopped with a reason and never went unavailable: no `FPV head visibility:` line in any of the
-  six logs. Its in-game checks passed at 11:26:48.747, five seconds before the swap. It is not that the module was
+- Head visibility never stopped with a reason and never went unavailable: no `FPV head visibility:` line in either
+  capture session. (Soak 24 has one, at 08:47:07.999, "Head SDK world changed", at the first native entry after a
+  world change; there the module owned 34 rows within the first second, so a new body is not always like the first
+  F11.) Its in-game checks passed at 11:26:48.747, five seconds before the swap. It is not that the module was
   not ready yet.
 - With the Scythe up it owns 59 rows until the first time the view leaves the native view, and 90 every time after.
   With the Talon 71. With no gun on the rig 3 before that first time (11:26:53.721, 11:23:59.682, soak 26 at
@@ -200,3 +202,10 @@ What each reading would ask for, none of it built:
 - The "Head:" line is written by the tick. It cannot say whether a frame was drawn between the game's switching on
   and the module's switching off; the capture says that.
 - Nothing was looked at in the game.
+
+
+## Reading the `Head:` lines (added after the review)
+
+Read them from "holding the native view through an action" on, not only from "left the native view": the swap
+begins about 0.37 s before the leave, and a body drawn during that hold is a fourth reading the capture cannot rule
+out.

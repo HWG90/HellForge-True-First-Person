@@ -775,6 +775,7 @@ bool tfp_arm_drive_render(uint64_t world, bool game_thread) {
     }
     if (native_view) refused(reason);
     else d.stats.idle++;
+    d.stats.draw.sock_m = 0; /* not driven: no socket was written, so the Trace row's sock= reads 0 with arms=0 */
   }
   /* Not driven: nothing of the binding is kept, and what is written goes back to the game's values. */
   d.bound = false;
