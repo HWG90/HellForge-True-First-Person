@@ -443,6 +443,16 @@ static int aim_part(void) {
   CHECK(tfp_settings_set_locked(&s, TFP_LOCKED_fov_aim, false, false, 3));
   CHECK(!tfp_settings_locked_flag(&s, TFP_LOCKED_fov_zoom_when_aiming));
   CHECK(tfp_settings_set_locked(&s, TFP_LOCKED_fov_aim, false, false, 9) && tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim) == 3); /* kept in range */
+  /* a choice is a whole number (review N1): 2.4 is "your locked view", 2.6 "a chosen value", set or read from a file */
+  CHECK(tfp_settings_set_locked(&s, TFP_LOCKED_fov_aim, false, false, 2.4) && tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim) == 2);
+  CHECK(!tfp_settings_locked_flag(&s, TFP_LOCKED_fov_zoom_when_aiming));
+  CHECK(tfp_settings_set_locked(&s, TFP_LOCKED_fov_aim, false, false, 2.6) && tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim) == 3);
+  {
+    static const char half[] = "{\"format\":1,\"locked_view\":{\"fov_aim\":1.4}}";
+    TfpSettings h;
+    CHECK(tfp_settings_defaults(&h) && tfp_settings_load_locked(&h, half, strlen(half), why, sizeof why) && tfp_settings_locked_number(&h, TFP_LOCKED_fov_aim) == 1);
+    CHECK(tfp_settings_locked_flag(&h, TFP_LOCKED_fov_zoom_when_aiming));
+  }
   /* and the other way: the toggle set by an old path moves the choice between its two answers, a chosen value stays */
   CHECK(tfp_settings_set_locked(&s, TFP_LOCKED_fov_zoom_when_aiming, true, true, 0) && tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim) == 3);
   CHECK(tfp_settings_set_locked(&s, TFP_LOCKED_fov_aim, false, false, 2) && tfp_settings_set_locked(&s, TFP_LOCKED_fov_zoom_when_aiming, true, true, 0));
