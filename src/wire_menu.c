@@ -253,8 +253,8 @@ size_t tfp_wire_menu_definition(TfpWire *w, int editor_key, char *out, size_t si
         snprintf(number, sizeof number, ",\"min\":%g,\"max\":%g,\"step\":%g", c->min, c->max, c->step), at = put(out, size, at, number);
         snprintf(number, sizeof number, ",\"default\":%.17g", value.number), at = put(out, size, at, number);
       }
-      if (c->kind == TFP_MK_CHOICE) {
-        at = put(out, size, at, ",\"presentation\":\"dropdown\",\"choices\":[");
+      if (c->kind == TFP_MK_CHOICE) {   /* MCM's one-click < choice >, not its two-click drop-down; Left/Right step it */
+        at = put(out, size, at, ",\"presentation\":\"selector\",\"choices\":[");
         for (int choice = 0; choice < c->choice_count; choice++) at = put(out, size, at, choice ? "," : ""), at = put_text(out, size, at, c->choices[choice]);
         snprintf(number, sizeof number, "],\"default\":%d", (int)value.number), at = put(out, size, at, number);
       }

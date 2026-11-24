@@ -1613,7 +1613,10 @@ int main(int argc, char **argv) {
     CHECK(strstr(definition, "\"id\":\"fird_person_arms\",\"type\":\"toggle\",\"label\":\"First Person Arms\""));
     CHECK(strstr(definition, "{\"id\":\"locked_view\",\"name\":\"Locked view\""));
     CHECK(strstr(definition, "\"id\":\"fov_degrees\",\"type\":\"slider\",\"label\":\"Field of view (degrees)\",\"min\":50,\"max\":120,\"step\":1,\"default\":80"));
-    CHECK(strstr(definition, "\"id\":\"camera_style\",\"type\":\"choice\",\"label\":\"Camera style\",\"presentation\":\"dropdown\",\"choices\":[\"Stable\",\"Bodycam\"],\"default\":1"));
+    CHECK(strstr(definition, "\"id\":\"camera_style\",\"type\":\"choice\",\"label\":\"Camera style\",\"presentation\":\"selector\",\"choices\":[\"Stable\",\"Bodycam\"],\"default\":1"));
+    /* No choice is a drop-down: MCM's drop-down takes two clicks and a popup, and Enter does nothing on it (feel.51:
+     * "cannot change camera modes"). Its "selector" is one click, < Stable >, and Left/Right step it. */
+    CHECK(!strstr(definition, "dropdown") && strstr(definition, "\"id\":\"motion_preset\",\"type\":\"choice\",\"label\":\"Motion preset\",\"presentation\":\"selector\""));
     CHECK(strstr(definition, "\"id\":\"camera_damping\",\"type\":\"slider\""));
     {
       int count = 0;
@@ -1641,6 +1644,12 @@ int main(int argc, char **argv) {
         CHECK(at >= 0 && def->controls[at].page == (uint32_t)controls[i].page);
         if (controls[i].kind == TFP_MK_SLIDER) CHECK(def->controls[at].type == MCM_SLIDER && def->controls[at].min == controls[i].min && def->controls[at].max == controls[i].max);
         if (controls[i].kind == TFP_MK_CHOICE) CHECK(def->controls[at].type == MCM_CHOICE && def->controls[at].choice_count == (uint32_t)controls[i].choice_count);
+        /* MCM keeps the presentation as given and draws "selector" as < choice > (its ui.c Row); anything else, or none,
+         * is its drop-down */
+        if (controls[i].kind == TFP_MK_CHOICE && !(def->controls[at].presentation && !strcmp(def->controls[at].presentation, "selector")))
+          printf("wire settings: MCM draws the choice %s as a drop-down (presentation %s)\n", controls[i].id,
+                 def->controls[at].presentation ? def->controls[at].presentation : "none");
+        if (controls[i].kind == TFP_MK_CHOICE) CHECK(def->controls[at].presentation && !strcmp(def->controls[at].presentation, "selector"));
       }
       const int style = schema_find(def, "camera_style"), fov = schema_find(def, "fov_degrees");
       CHECK(style >= 0 && def->controls[style].def.number == 1 && fov >= 0 && def->controls[fov].def.number == 80);

@@ -24,7 +24,7 @@ Three things retail has that the first HellForge builds lacked. All three are bu
 
 ## The settings menu: DBF-MCM first, the mod's own panel without it (round 15)
 
-Built after 0.6.0-feel.50, not yet run in the game. One list of every option, `src/wire_menu.c` (`TfpMenuControl`), is the single source of both menus, so both show the same three pages with the same options: **First person**, **Bob and sway** and **Locked view**. Tests: `tests/run-wire-settings.sh` (the list, the MCM definition through MCM's own schema parser) and `tests/run-wire-panel.sh` (the panel, and which menu a session gets).
+Built after 0.6.0-feel.50, not yet run in the game. One list of every option, `src/wire_menu.c` (`TfpMenuControl`), is the single source of both menus, so both show the same three pages with the same options: **First person**, **Bob and sway** and **Locked view**. Tests: `tests/run-wire-settings.sh` (the list, the MCM definition through MCM's own schema parser) `tests/run-wire-panel.sh` (the panel, and which menu a session gets) and `tests/run-mod-menu.sh` (the glue to MCM: while it holds the menu, the once-a-second re-ask and the per-update menu frame call nothing in MCM).
 
 ### Which menu you get
 
@@ -37,7 +37,8 @@ Built after 0.6.0-feel.50, not yet run in the game. One list of every option, `s
 
 - The search: DBF-MCM is asked once a second (its API answers only after its first update, so it may come after this mod). Without an answer after 15 s, one line (`Menu: DBF-MCM (goose.mcm) did not answer within 15 seconds ...`) and the panel's search begins. An MCM that comes later than that changes nothing for the session.
 - `mcm_on.txt`, the switch of builds up to 0.6.0-feel.50, is still read and changes nothing (one `Test:` line): MCM is the default now.
-- While MCM holds the menu it is asked again once a second; that is what makes a registration released for a refused live replace come back. If MCM then refuses it, the panel takes over.
+- While MCM holds the menu it is asked again once a second; that is what makes a registration released for a refused live replace come back. If MCM then refuses it, the panel takes over. While the registration stands, the re-ask is answered inside the mod (`tfp_mod_menu_try` returns at once): MCM is not called, so its page, focus and scroll stay as the player left them.
+- In MCM every choice (Camera style, Motion preset) is a selector, `< Stable >`: one click on an arrow, or Left/Right on the focused row, changes it. There is no drop-down.
 
 ### Where a value lives
 
