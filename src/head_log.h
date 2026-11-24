@@ -11,6 +11,12 @@
  *   - meshes it leaves drawn (retail's rule: an outside change is left alone until the view, weapon or aim changes);
  *   - the module stopping or starting while the view is on, and rows it gave back (said once while the number
  *     stays: rows that cannot be given back are tried again every tick).
+ * Round 14 (soak 27 settled it: the game switches the body on at every leave of the native view, in its own update
+ * after the mod's tick, and the module switches it off on the next tick: one frame with the body drawn) adds the
+ * veil's counts (src/camera_helper.h tfp_camera_set_veil): leaves it opened at, frames it covered (two a leave: the
+ * first head-camera frame, drawn before the tick that sees the leave, and the frame with the body), frames whose eye
+ * it moved in front of the head, and frames other than the native view it left behind the head (0 on foot; native
+ * frames drawn while it is open are not counted there). A rise of that number is a line by itself.
  *
  * The binder fills a TfpHeadTick after every update and writes the text where tfp_head_log_step says so. */
 #ifndef TFP_HEAD_LOG_H
@@ -30,10 +36,13 @@ typedef struct TfpHeadTick {
   /* The last update's TfpHeadWatch (src/head_visibility.h). */
   bool full;
   unsigned camera_rows, on_new, on_again, on_again_head, on_still, turned_off, left_on, put_back;
+  /* The veil's counts since the start (TfpCameraVeilStats): leaves, frames, moved, behind. */
+  uint64_t veil_leaves, veil_frames, veil_moved, veil_behind;
 } TfpHeadTick;
 typedef struct TfpHeadLog {
   bool known, was_view, was_active;
   unsigned head, torso, shoulders, left_on, put_back;
+  uint64_t veil_behind;
   uint64_t again_ticks, again_meshes, off_ticks;   /* since the start: ticks with meshes drawn again, those meshes, ticks of the view without hiding */
 } TfpHeadLog;
 
@@ -46,15 +55,17 @@ static inline bool tfp_head_log_step(TfpHeadLog *g, const TfpHeadTick *t, char *
   /* A steady tick reads no row: it says nothing about what is left drawn, and what was left stands. */
   const unsigned left = t->full || !t->active ? t->left_on : g->left_on;
   const bool worth = t->on_again || (t->put_back && t->put_back != g->put_back) || left != g->left_on || t->head != was_head || t->torso != was_torso || t->shoulders != was_shoulders
-    || (g->known && t->active != g->was_active && (t->view || g->was_view));
+    || (g->known && t->active != g->was_active && (t->view || g->was_view)) || t->veil_behind != g->veil_behind;
   g->known = true; g->was_view = t->view; g->was_active = t->active;
-  g->head = t->head; g->torso = t->torso; g->shoulders = t->shoulders; g->left_on = left; g->put_back = t->put_back;
+  g->head = t->head; g->torso = t->torso; g->shoulders = t->shoulders; g->left_on = left; g->put_back = t->put_back; g->veil_behind = t->veil_behind;
   if (!worth || !size) return false;
   snprintf(text, size, "Head: kind=%u %s: owns head %u, torso %u, shoulders %u (%u rows; was head %u, torso %u, shoulders %u); found drawn %u new, %u again (%u of "
-           "the head), %u still; switched off %u, left drawn %u, gave back %u; so far drawn again on %llu ticks (%llu meshes), view on without hiding on %llu ticks",
+           "the head), %u still; switched off %u, left drawn %u, gave back %u; so far drawn again on %llu ticks (%llu meshes), view on without hiding on %llu ticks; veil: %llu leaves, %llu frames, eye moved clear on %llu, "
+           "left behind the head on %llu",
            t->kind, t->phase ? t->phase : "-", t->head, t->torso, t->shoulders, t->rows, was_head, was_torso, was_shoulders, t->on_new, t->on_again, t->on_again_head,
            t->on_still, t->turned_off, t->left_on, t->put_back, (unsigned long long)g->again_ticks, (unsigned long long)g->again_meshes,
-           (unsigned long long)g->off_ticks);
+           (unsigned long long)g->off_ticks, (unsigned long long)t->veil_leaves, (unsigned long long)t->veil_frames, (unsigned long long)t->veil_moved,
+           (unsigned long long)t->veil_behind);
   return true;
 }
 #endif

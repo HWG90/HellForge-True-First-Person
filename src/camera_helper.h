@@ -215,6 +215,44 @@ void tfp_camera_set_orphan(bool on);
  * was, along the level view direction. */
 typedef struct TfpCameraOrphanStats { uint64_t frames, refused; float behind_m; } TfpCameraOrphanStats;
 void tfp_camera_orphan_stats(TfpCameraOrphanStats *out);
+/* Beyond retail, round 14 (docs/design/specs/2026-11-24-helmet-in-view.md), and only in frames the camera lock holds:
+ * the veil. At every leave of the native view the game switches the body's meshes back on in its own update, after
+ * this mod's tick (HellForge's tick runs before the game's update), and head visibility switches them off on the next
+ * tick: the frame between is drawn with the body in it (soak 27: 137 of 138 leaves). Its eye is the one the swap holds
+ * (the outgoing weapon's), 0.22 m behind the head with the LAS-5 Scythe: the helmet fills the view. The veil opens at
+ * the first frame of the lock that is not the native view after one that was, and closes at the tick whose head
+ * visibility update found the body drawn again and switched all of it off (or at the second tick, or when switched
+ * off). That is two frames a leave, about 66 ms: in every leave soak 27 traced (131) the first head-camera frame is
+ * drawn before the tick that sees the leave, the body still hidden, and the frame with the body comes after that
+ * tick. The first is veiled too: from the hook it cannot be told from the first frame of a leave whose tick came
+ * first, which would be the frame with the body. While it is open, a head-camera frame of a body on foot whose eye
+ * is less than TFP_CAMERA_VEIL_CLEAR in front of the head, along the level view direction, is drawn with the eye
+ * moved forward to that distance; height, side and rotation stay. Only the position handed to the game in that frame
+ * changes: the eye the swap holds and glides, the continuity, the damping and the trace row are those of the eye
+ * before it.
+ * set_veil: each tick: the view is on and head visibility active, whatever rows of the head it owns: until the first
+ * leave of a session it owns none, and that leave draws the head as every other does (soak 27, 12:41:45.163 and
+ * 12:41:50.071). false: no veil opens, an open one closes.
+ * veil_tick: each tick, after head visibility's update: `hidden` = it found meshes drawn again and left none drawn.
+ * The helper's begin and end forget the last frame's kind and close the veil: a native frame of the old world and the
+ * new one's first head-camera frame are no leave.
+ * Off (the default) and without the lock: nothing is reached or read. */
+#define TFP_CAMERA_VEIL_CLEAR .10f
+void tfp_camera_set_veil(bool armed);
+void tfp_camera_veil_tick(bool hidden);
+/* Counts since the start: leaves the veil opened at; frames drawn while it was open; of them, frames whose eye it moved;
+ * behind: of them, frames other than the native view whose eye was not proven TFP_CAMERA_VEIL_CLEAR in front of the
+ * head (a body off foot, a frame the helper did not present, an eye it would not move): the body may have been in
+ * the view. Native frames drawn while it is open (a leave that goes straight back within a tick) are counted in
+ * `frames` only: they are the game's own camera, which the veil never moves. On foot `behind` stays 0. largest_m: the
+ * largest move since the start. */
+typedef struct TfpCameraVeilStats { uint64_t leaves, frames, moved, behind; float largest_m; } TfpCameraVeilStats;
+void tfp_camera_veil_stats(TfpCameraVeilStats *out);
+/* The tick's whole part in the veil (src/mod_view.c head_note calls it after head visibility's update, `tick` filled as
+ * the "Head:" line has it, view included). NULL, no tick read: switched off. Otherwise tfp_camera_veil_tick with
+ * `hidden` = the update found meshes drawn again and left none drawn, then tfp_camera_set_veil. */
+struct TfpHeadTick;
+void tfp_camera_veil_from_head(const struct TfpHeadTick *tick);
 typedef struct TfpCameraContinuityStats { uint64_t jumps, edges, restarts; float largest_m; uint64_t reseats; } TfpCameraContinuityStats;
 /* Counts since the start; the largest correction carried since the last call. reseats: frames in which the body
  * root alone was re-seated (a jump in the root's frame with the eye going on evenly in the world; nothing taken up). */
