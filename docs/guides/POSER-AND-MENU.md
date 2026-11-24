@@ -87,7 +87,7 @@ Defaults are the store's defaults (retail's, and the locked view's); on a first 
 | Locked view | Field of view (degrees) | slider | 50 to 120, step 1 | 80 | locked_view.json fov_degrees |
 | Locked view | Aim field of view | choice | The game's zoom / Your locked view / A chosen value | The game's zoom | locked_view.json fov_aim (1, 2, 3); fov_zoom_when_aiming is kept in step for older builds |
 | Locked view | Aim field of view (degrees) | slider | 20 to 90, step 1 | 50 | locked_view.json fov_aim_degrees; greyed unless A chosen value |
-| Locked view | Sight distance in aim (cm) | slider | 0 to 30, step 1 | 10 | locked_view.json ads_sight_cm; 0 is the game's own seat |
+| Locked view | Sight distance in aim (cm) | slider | 0 to 30, step 1 | 15 | locked_view.json ads_sight_cm; 0 is the game's own seat |
 | Locked view | Camera style | choice | Stable / Bodycam | Stable | locked_view.json bodycam |
 | Locked view | View kick strength (%) | slider | 0 to 100, step 5 | 35 | locked_view.json kick_strength |
 | Locked view | View kick limit (degrees) | slider | 0 to 20, step 1 | 8 | locked_view.json kick_max_degrees |

@@ -115,7 +115,7 @@ static int store_part(void) {
   /* the sixteen options and their defaults (round 20: Aim field of view, its chosen degrees, the sight distance in aim) */
   CHECK(TFP_LOCKED_COUNT == 16);
   CHECK(tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim) == 1 && tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim_degrees) == 50 &&
-        tfp_settings_locked_number(&s, TFP_LOCKED_ads_sight_cm) == 10);
+        tfp_settings_locked_number(&s, TFP_LOCKED_ads_sight_cm) == 15);
   CHECK(tfp_settings_locked_flag(&s, TFP_LOCKED_camera_lock) && tfp_settings_locked_flag(&s, TFP_LOCKED_fov_lock) &&
         tfp_settings_locked_number(&s, TFP_LOCKED_fov_degrees) == 80 && tfp_settings_locked_flag(&s, TFP_LOCKED_fov_zoom_when_aiming) &&
         tfp_settings_locked_number(&s, TFP_LOCKED_kick_strength) == 35 && tfp_settings_locked_number(&s, TFP_LOCKED_kick_max_degrees) == 8 &&
@@ -161,7 +161,7 @@ static int store_part(void) {
   CHECK(n && n < sizeof text && tfp_settings_write_locked(&s, NULL, 0) == n && strstr(text, "{\n \"format\": 1,\n \"locked_view\": {") == text &&
         strstr(text, "\"camera_lock\": false") && strstr(text, "\"fov_degrees\": 120") &&
         strstr(text, "\"kick_max_degrees\": 0") && strstr(text, "\"put_away\": true") && strstr(text, "\"thrown_kick_strength\": 70") &&
-        strstr(text, " \"locked_view\": {\n  \"ads_sight_cm\": 10,\n  \"animated_arms\": true,\n  \"bodycam\": false,\n  \"camera_damping\": 60,\n  \"camera_lock\": false,") &&
+        strstr(text, " \"locked_view\": {\n  \"ads_sight_cm\": 15,\n  \"animated_arms\": true,\n  \"bodycam\": false,\n  \"camera_damping\": 60,\n  \"camera_lock\": false,") &&
         strstr(text, "\"animated_arms\": true") && strstr(text, "\"smooth_eye\": true") && !strstr(text, "holster_animation"));
   TfpSettings back;
   memset(&back, 0, sizeof back);
@@ -611,7 +611,7 @@ static int panel_part(void) {
   CHECK(drawn("slider:This weapon: hip clearance (cm)=15[5..40] (disabled)") && drawn("button:Save clipping for this weapon (disabled)"));
   CHECK(drawn("check:Camera lock=on") && drawn("check:Field of view lock=on") && drawn("slider:Field of view (degrees)=80[50..120]") &&
         drawn("combo:Aim field of view=The game's zoom") && drawn("slider:Aim field of view (degrees)=50[20..90] (disabled)") &&
-        drawn("text:Used when Aim field of view is A chosen value.") && drawn("slider:Sight distance in aim (cm)=10[0..30]") &&
+        drawn("text:Used when Aim field of view is A chosen value.") && drawn("slider:Sight distance in aim (cm)=15[0..30]") &&
         !drawn_part("Zoom when aiming") && drawn("slider:View kick strength (%)=35[0..100] (disabled)") && drawn("slider:View kick limit (degrees)=8[0..20] (disabled)") &&
         drawn("slider:View kick when thrown (%)=70[0..100]") && drawn("slider:Camera damping (%)=60[0..100] (disabled)") && drawn("check:Animated arms=on") && drawn("check:Weapon put-away=on") && drawn("check:Smooth eye=on"));
   /* The camera style. Bodycam is off (the Stable camera): its row is directly above the kick sliders, with what the
@@ -621,7 +621,7 @@ static int panel_part(void) {
     const char *row = drawn("combo:Camera style=Stable"), *tip_line = drawn("tip:Stable: a steady, traditional first-person camera. Bodycam: the view moves with "
       "your head, like a body camera: it takes kicks from your body's movement and follows the head through actions.");
     const char *note = drawn("text:View kick strength, View kick limit and Camera damping apply to Bodycam.");
-    const char *first = drawn("slider:View kick strength (%)=35[0..100] (disabled)"), *above = drawn("slider:Sight distance in aim (cm)=10[0..30]");
+    const char *first = drawn("slider:View kick strength (%)=35[0..100] (disabled)"), *above = drawn("slider:Sight distance in aim (cm)=15[0..30]");
     CHECK(row && tip_line && note && first && above && above < row && row < tip_line && tip_line < note && note < first && first - note == (ptrdiff_t)sizeof ov.drawn[0]);
     CHECK(!drawn("slider:View kick strength (%)=35[0..100]") && !drawn("slider:View kick limit (degrees)=8[0..20]") && !drawn("slider:Camera damping (%)=60[0..100]") &&
           !drawn("slider:View kick when thrown (%)=70[0..100] (disabled)"));
