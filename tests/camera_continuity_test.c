@@ -509,6 +509,43 @@ static Slowed slowed(float v, float slow, bool ahead, float dt) {
   }
   return s;
 }
+/* THE LET-DOWN AT A SLOWING and the frames after it, made up: the body stands, the native view, jumps looked for. The
+ * rig eye rests and then goes forwards at `v` m/s; each frame is a jump for the time of a run, then that speed is
+ * believed. The next frame goes `part` of it (slowing down: the let-down begins where the step dropped is over the
+ * measure). Then `scene`: 0, the rig is re-seated 1.2 m backwards in one frame and stands (a jump, taken up, and the
+ * wanted eye is then behind the presented one); 1, the rig eye goes back at `v` (a run of jumps, a speed believed);
+ * 2, it stands (a stop, followed); 3, the camera changes, the new eye 0.4 m to the side, and stands. From the frame
+ * that slows down on: `change`, the most the presented eye's step changes from frame to frame (as a vector); `past`,
+ * how far the presented eye comes in front of the wanted one along the way; `settled`, ms to the last frame more
+ * than 0.005 m is carried. `jumped`: how much further in front of the wanted eye the presented one is after the
+ * frame of the re-seat than the re-seat itself put it (scene 0). `let`: how far the let-down could go in the frame
+ * that slows down (the step dropped less pop_accel, where it is over the measure). */
+typedef struct Taken { float change, past, settled, jumped, let; } Taken;
+static Taken taken(float v, float part, int scene, float dt) {
+  static const float basis[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+  TfpContinuity c; memset(&c, 0, sizeof c);
+  Taken s = {0, -9, 0, 0, 0}; const float step = v*dt/1000, measure = fmaxf(T.pop_m, T.pop_accel*dt*dt/1e6f);
+  float eye[3] = {.1f, .6f, 1.5f}, one[3] = {0}, two[3] = {0}, off = 0; int believed = -1;
+  const int warm = (int)(1500/dt)+3, frames = 2*warm+(int)(2500/dt);
+  if ((1-part)*step > measure) s.let = (1-part)*step-T.pop_accel*dt*dt/1e6f;
+  for (int n = 0; n < frames; ++n) {
+    float out[3]; const uint64_t jumps = c.jumps; const int m = believed < 0 ? 0 : n-believed; uint32_t source = NATIVE;
+    if (n > 12) eye[1] += m <= 0 ? step : m == 1 ? part*step : scene == 1 ? -step : scene == 0 && m == 2 ? -1.2f : 0;
+    if (scene == 3 && m == 2) eye[0] += .4f;
+    if (scene == 3 && m >= 2) source = HEAD;
+    const float carried = tfp_continuity_step_in(&c, eye, eye, basis, source, true, false, 1000.0+(double)n*(double)dt, 250, &T, out);
+    if (believed < 0 && n > 13 && c.jumps == jumps && tfp_continuity_length(c.speed) > v/2) believed = n;
+    if (believed >= 0 && n > believed) { float d = 0;
+      for (int k = 0; k < 3; ++k) { const float e = out[k]-2*one[k]+two[k]; d += e*e; }
+      if (sqrtf(d) > s.change) s.change = sqrtf(d);
+      if (out[1]-eye[1] > s.past) s.past = out[1]-eye[1];
+      if (carried > .005f) s.settled = (float)(n-believed)*dt;
+      if (scene == 0 && n == believed+2) s.jumped = out[1]-eye[1]-(off+1.2f); }
+    off = out[1]-eye[1];
+    memcpy(two, one, sizeof two); memcpy(one, out, sizeof one);
+  }
+  return s;
+}
 #define ROWS(a) a, (int)(sizeof a/sizeof *a)
 int main(void) {
   Run r;
@@ -1532,6 +1569,69 @@ int main(void) {
       CHECK(g.change <= w[0]+.0005f && g.away <= w[2]+.0005f && g.carried <= w[3]+.0005f && g.settled <= w[4]+1);
       CHECK(g.past < .005f);
       if (dropped > measure+.009f) CHECK(g.change < w[0]-.007f && g.away < w[2]-.009f && g.carried < w[3]-.009f);
+    }
+  }
+  /* THE LET-DOWN AT A SLOWING, and a frame TAKEN UP while it runs (made up; no log has it). The let-down's room was
+   * measured against the wanted eye as it stood before the jump and what it went was added to the new correction: with
+   * the rig re-seated 1.2 m backwards in the frame after the one that slows down, the presented eye went one frame more
+   * away from a wanted eye that was now behind it, and that speed was dropped whole the frame after. 8 m/s believed, a
+   * quarter of it for one frame, 33.3 ms a frame: the presented steps 0.048, 0.069, 0.120, -0.034 m, 0.154 m of step
+   * change, 0.348 m past the wanted eye, settled in 333 ms (the filter of 0.6.0-feel.45, which throws the eye back in
+   * the frame that slows down: 0.048, -0.091, 0.004, -0.023 m; 0.139 m, 0.072 m, 166 ms). Now the room is measured
+   * anew in a frame taken up, against the wanted eye where the jump put it and the curve begun there: the let-down ends
+   * where that eye is behind, and goes on where it is still ahead (a change of camera to the side).
+   * `main`: the filter of 0.6.0-feel.45, measured: step change, m past the wanted eye, ms to settle, and how much
+   * further past the wanted eye the frame of the re-seat left the presented one than the re-seat itself put it.
+   * Held to: no more step change than that filter and the frame of the re-seat as it was there; no further past the
+   * wanted eye than that filter by more than the let-down went in the frame that slows down (that way is the mend of
+   * 09:06:29.235 itself, and the re-seat comes a frame after it); the time to settle as measured (what is further
+   * past takes longer: 8 m/s at 16.7 to 50 ms 50 to 150 ms more than that filter, 5 m/s at 33.3 and 50 ms 33 and 50 ms). */
+  {
+    static const float times[] = {8, 16.7f, 33.3f, 50};
+    static const float main_was[2][4][4] = {
+      {{0.0447f, 0.5230f, 328, -0.0304f}, {0.0857f, 0.3207f, 217, -0.0408f}, {0.1391f, 0.0722f, 166, 0.0039f}, {0.2029f, 0.0359f, 150, 0.1137f}},
+      {{0.0339f, 0.8206f, 384, 0.0087f}, {0.0538f, 0.6786f, 401, -0.0212f}, {0.0892f, 0.5360f, 400, 0.0077f}, {0.1179f, 0.5238f, 400, 0.0744f}}};
+    static const float settles[2][4] = {{328, 267, 266, 300}, {384, 401, 433, 450}};
+    for (int fast = 0; fast < 2; ++fast) for (unsigned d = 0; d < 4; ++d) {
+      const float v = fast ? 5 : 8, *w = main_was[fast][d];
+      const Taken g = taken(v, .25f, 0, times[d]);
+      printf("  %g m/s believed, a quarter for one frame, the rig re-seated 1.2 m back and standing, %g ms a frame: step change %.4f m (0.6.0-feel.45: "
+             "%.4f m), %.4f m past the wanted eye (%.4f m; the let-down went %.4f m before the re-seat), %.4f m further past it in the frame of the "
+             "re-seat (%.4f m), settled in %.0f ms (%.0f ms)\n", (double)v, (double)times[d], (double)g.change, (double)w[0], (double)g.past, (double)w[1],
+             (double)g.let, (double)g.jumped, (double)w[3], (double)g.settled, (double)w[2]);
+      CHECK(g.change <= w[0]+.0005f);
+      CHECK(g.jumped <= w[3]+.0005f);
+      CHECK(g.past <= w[1]+g.let+.001f);
+      CHECK(g.settled <= settles[fast][d]+1);
+    }
+  }
+  /* The same let-down and what else can follow it. A change of camera in the frame after, the new eye 0.4 m to the side
+   * and standing: taken up, and the wanted eye is still ahead along the let-down's way, so it goes on (ended there, the
+   * step change at 8 m/s was 0.040, 0.066, 0.095 and 0.064 m). The rig eye going back at the speed it came at (5 m/s,
+   * half of it for one frame): a run of jumps and that speed believed, the presented eye goes on forwards at the kept
+   * speed through the run and is 0.56 to 0.75 m past the wanted eye on the filter of 0.6.0-feel.45; the let-down's own
+   * frame is 0.043 m at 33.3 ms, and the eye is that much further on: 0.677 to 0.717 m (16.7 ms: 0.557 to 0.603 m;
+   * 50 ms: 0.746 to 0.780 m), the step change 0.080 to 0.082 m and 0.165 to 0.170 m. A rig eye that stands after one
+   * frame at half of 7 m/s (a dive's landing; a stop, followed, no frame taken up): 0.046 to 0.048 m, 0.069 to 0.076 m
+   * and, at 50 ms, 0.128 to 0.121 m. Those two are the let-down's first frame, not a frame taken up, and are held to
+   * what they are. */
+  {
+    static const float times[] = {8, 16.7f, 33.3f, 50};
+    static const struct { const char *name; float v, part; int scene; float is[4][3]; } scenes[] = {
+      {"8 m/s believed, a quarter for one frame, a change of camera 0.4 m to the side", 8, .25f, 3,
+       {{0.0132f, 0.0000f, 400}, {0.0235f, 0.0000f, 418}, {0.0318f, 0.0000f, 433}, {0.0913f, 0.0000f, 450}}},
+      {"5 m/s believed, a quarter for one frame, a change of camera 0.4 m to the side", 5, .25f, 3,
+       {{0.0324f, 0.0000f, 368}, {0.0193f, 0.0000f, 401}, {0.0453f, 0.0000f, 433}, {0.0441f, 0.0000f, 450}}},
+      {"5 m/s believed, half for one frame, then back at 5 m/s", 5, .5f, 1,
+       {{0.0203f, 0.7307f, 472}, {0.0211f, 0.6034f, 501}, {0.0823f, 0.7165f, 533}, {0.1698f, 0.7799f, 550}}},
+      {"7 m/s believed, half for one frame, then standing", 7, .5f, 2,
+       {{0.0251f, 0.0000f, 384}, {0.0477f, 0.0000f, 384}, {0.0761f, 0.0000f, 366}, {0.1210f, 0.0000f, 350}}}};
+    for (unsigned l = 0; l < sizeof scenes/sizeof *scenes; ++l) for (unsigned d = 0; d < 4; ++d) {
+      const float *w = scenes[l].is[d];
+      const Taken g = taken(scenes[l].v, scenes[l].part, scenes[l].scene, times[d]);
+      printf("  %s, %g ms a frame: step change %.4f m (%.4f m), %.4f m past the wanted eye (%.4f m), settled in %.0f ms (%.0f ms)\n", scenes[l].name,
+             (double)times[d], (double)g.change, (double)w[0], (double)g.past, (double)w[1], (double)g.settled, (double)w[2]);
+      CHECK(g.change <= w[0]+.0005f && g.past <= w[1]+.0005f && g.settled <= w[2]+1);
     }
   }
   printf("camera continuity: %d checks, %d failed\n", checks, failed);
