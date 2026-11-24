@@ -782,6 +782,10 @@ static void start(void) {
     tfp_wire_options_start(&wire, &options);
     arms_start();
     hold_start();
+    /* The game's unzoom gate, watched for the log (src/gate_log.h). */
+    tfp_pose_set_gate_reads(1);
+    say("Ready: unzoom gate watched: a \"Gate:\" line in a second in which a gate byte changes or the zoom depth is added in some frames and "
+        "passed in others, and once at each native entry; the avatar's main row is read for it (two guarded reads a frame); nothing is changed by it");
     if (!lock_wanted) say("Smooth: eye continuity stays off whatever the option says: the camera lock is off (lock_off.txt)");
     else say(smooth_wanted ? "Smooth: on: while the lock holds the view, a change of camera (head camera, native view) and a one-frame move of the "
                              "first-person rig are carried as a correction of at most 1 m and eased out over 100 to 400 ms; farther than 1.5 m is "
@@ -933,6 +937,22 @@ static void lock_note(void) { /* once a second while the view is on: frames by c
         (unsigned long long)(a.fire - told_alternation.fire), a.kind);
   told_alternation = a;
 }
+#ifdef TFP_FEEL
+static void gate_note(void) { /* once a second: what the pose helper counted of the game's unzoom gate, where it is worth a line (src/gate_log.h) */
+  static uint64_t next, told_generation;
+  const uint64_t now = GetTickCount64();
+  if (now < next) return;
+  next = now + 1000;
+  TfpGateSecond g;
+  if (!tfp_pose_gate_take(&g) || !g.frames) return;
+  const bool entry = g.generation != told_generation; /* the first frames of a new lease: written whatever they hold */
+  told_generation = g.generation;
+  if (!entry && !tfp_gate_worth(&g)) return;
+  char line[640];
+  tfp_gate_line(&g, entry, line, sizeof line);
+  say("%s", line);
+}
+#endif
 static void fov_note(void) { /* once a second, on its own: the field-of-view lock also runs with the camera lock off, when lock_note has nothing to say */
   static uint64_t next, told_fov;
   const uint64_t now = GetTickCount64();
@@ -944,6 +964,9 @@ static void fov_note(void) { /* once a second, on its own: the field-of-view loc
   told_fov = f.applied;
 }
 static void tick_body(void) {
+#ifdef TFP_FEEL
+  if (stage == RUNNING) gate_note();
+#endif
   if (stage == RUNNING) { quit_guard(); fov_lock_tick(); lock_note(); fov_note(); }   /* not earlier: the game module and the guarded reader are set up in WAIT_MODULES */
   if (stage == REFUSED) return;
   tick_thread = GetCurrentThreadId();
