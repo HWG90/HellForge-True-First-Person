@@ -218,6 +218,24 @@
  *    caller does not give the head), the held eye let go (0.15 to 0.18 m), a flick of the mouse (the node does not
  *    move), the root moving by itself with the head still in the world (the re-seat's to read), and every native
  *    frame. (Round 19 review: with the eye given, flicks of 95 and 180 degrees and the root alone 0.5 m were cuts.) */
+/*  - THE CLIMB (round 24, `traversal`, told by the caller: a frame under a clamber's or a vault's mask,
+ *    src/camera_traversal.h): a run of jumps whose time is over in such a frame hands no speed to the curve; the
+ *    presented eye takes the wanted eye's new speed in that frame. In the user's log of 2026-11-24 the run was the
+ *    head's crouch onto a ledge read against a root rising 1.8 m in 0.3 s, and the speed handed on (the head going up
+ *    with the root) carried the eye 0.6 m above the head.
+ *  - THE SETTLE (round 24, `settle_ok`, told by the caller: the native view on mask 0, src/camera_helper.c). Back from
+ *    a backpack pick-up (the user's log of 2026-11-24, 20:27:07, 20:32:10, 20:34:19) the rig's eye is 0.22 to 0.25 m
+ *    under the head camera's and re-seats itself against the root for about 300 ms (forward 0.32 -> 0 m, up 1.53 ->
+ *    1.76 m) while the body turns 0.1 rad a frame: the change of camera was taken up, two or three re-seats more, and
+ *    then what was carried grew again with nothing taken up (0.068 -> 0.235 m), a drift of 0.2 to 0.5 m. So a change
+ *    of camera of TFP_CONTINUITY_SETTLE_M or more where the caller allows it holds the eye it presents fixed against
+ *    the root until the new camera's eye has been steady against the root for TFP_CONTINUITY_SETTLE_FRAMES frames in a
+ *    row (its step there no jump against the step before: it stands or goes on evenly; the re-seat's own frames are
+ *    jumps), or for TFP_CONTINUITY_SETTLE_MS at most, and then eases to it once, from rest, on the curve whose length
+ *    follows from the distance, and follows its own even motion from there. Another camera, full aim or a frame the
+ *    caller no longer allows it ends the hold with that frame's own answer. (Tried first: steady as under 0.5 m/s
+ *    against the root. The rig's slow climb at 20:32:10 never was, the hold ran its 350 ms, and the one ease was
+ *    0.28 m, more than the drift it replaced.) */
 #ifndef TFP_CAMERA_CONTINUITY_H
 #define TFP_CAMERA_CONTINUITY_H
 #include "camera_math.h"
@@ -232,6 +250,9 @@ typedef struct TfpContinuityTuning { float pop_m, pop_accel, ease_accel, min_ms,
 #define TFP_CONTINUITY_CUT_M .25f      /* THE CUT: the head's move against the root in one frame, at least */
 #define TFP_CONTINUITY_CUT_ACCEL 150.0f /* ... or this (m/s^2) times the frame's time squared, whichever is more */
 #define TFP_CONTINUITY_CUT_REST 1.0f   /* ... from a head that went slower than this (m/s) against the root the frame before */
+#define TFP_CONTINUITY_SETTLE_M .10f    /* THE SETTLE: a change of camera of at least this, where the caller allows it */
+#define TFP_CONTINUITY_SETTLE_FRAMES 3u /* ... the new camera's eye steady against the root this many frames in a row, */
+#define TFP_CONTINUITY_SETTLE_MS 350.0  /* ... or this long at most */
 
 typedef struct TfpContinuity {
   bool known, active, moving; /* moving: the wanted eye's speed is known (a step has been seen since the start) */
@@ -267,11 +288,14 @@ typedef struct TfpContinuity {
   uint64_t cuts;                         /* frames taken up as a cut */
   float largest;                         /* the largest correction carried since the reader last cleared it */
   bool traversal;                        /* round 24, set by the caller before each frame: a clamber's or a vault's (THE CLIMB) */
+  bool settle_ok;                        /* round 24, set by the caller before each frame: THE SETTLE may begin or go on in it */
+  bool settling; uint32_t settle_source, steady; double settle_since; float settle[3], settle_step[3]; /* THE SETTLE: the eye held, in the root's frame; the new camera's last step there */
+  uint64_t settles;                      /* settles begun */
 } TfpContinuity;
 
 static inline void tfp_continuity_reset(TfpContinuity *c) {
-  const uint64_t jumps = c->jumps, edges = c->edges, restarts = c->restarts, reseats = c->reseats, cuts = c->cuts; const float largest = c->largest;
-  memset(c, 0, sizeof *c); c->jumps = jumps; c->edges = edges; c->restarts = restarts; c->reseats = reseats; c->cuts = cuts; c->largest = largest;
+  const uint64_t jumps = c->jumps, edges = c->edges, restarts = c->restarts, reseats = c->reseats, cuts = c->cuts, settles = c->settles; const float largest = c->largest;
+  memset(c, 0, sizeof *c); c->jumps = jumps; c->edges = edges; c->restarts = restarts; c->reseats = reseats; c->cuts = cuts; c->largest = largest; c->settles = settles;
 }
 static inline float tfp_continuity_length(const float *v) { return sqrtf(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]); }
 /* `v` (along the root's old axes) along its new ones: `turn` is new axes times old axes transposed. */
@@ -714,6 +738,38 @@ static inline float tfp_continuity_step_cut(TfpContinuity *c, const float *wante
       for (unsigned i = 0; i < 3; ++i) { speed_to[i] += ((root[i]-c->root[i])/dt-speed_to[i])*k; along_to[i] += (along[i]-along_to[i])*k;
         (reseated ? c->tried_spin : c->spin)[i] = spin[i]; }
       c->tried = reseated; c->coursed = true;
+    }
+  }
+  /* THE SETTLE (round 24): see the header. Over what the frame did above: every decision there is made as before and
+   * the state goes on (the eye's speed, the root's course); only the curve is put where the held eye is. */
+  if (c->settling || (edge && take && !cut && c->settle_ok && !quiet && tfp_continuity_length(value) >= TFP_CONTINUITY_SETTLE_M)) {
+    const float zero[3] = {0, 0, 0}; float held[3];
+    if (!c->settling) { /* begun: the eye as this change of camera presents it, from here on fixed against the root */
+      c->settling = true; c->settle_source = source; c->steady = 0; c->settle_since = tick; ++c->settles;
+      for (unsigned i = 0; i < 3; ++i) { c->settle[i] = wanted[i]+value[i]; c->settle_step[i] = 0; }
+    } else { /* steady: its step against the root is no jump against the step before it (it goes on evenly, or stands) */
+      float moved[3], change[3];
+      for (unsigned i = 0; i < 3; ++i) { moved[i] = wanted[i]-c->wanted[i]; change[i] = moved[i]-c->settle_step[i]; c->settle_step[i] = moved[i]; }
+      c->steady = tfp_continuity_length(change) < measure ? c->steady+1 : 0;
+    }
+    for (unsigned i = 0; i < 3; ++i) held[i] = c->settle[i]-wanted[i];
+    if (!c->settle_ok || source != c->settle_source || quiet || !tfp_finite3(held)) c->settling = false; /* the frame's own answer stands */
+    else {
+      const bool over = c->steady >= TFP_CONTINUITY_SETTLE_FRAMES || tick-c->settle_since >= TFP_CONTINUITY_SETTLE_MS;
+      float duration = t->max_ms, from_speed[3] = {0, 0, 0};
+      if (over) { /* one ease from the held eye to the settled one: the held eye at rest against the root, so the curve
+                   * starts against the new camera's own even motion and gathers it (at 50 ms a frame, from rest the
+                   * curve's start was a step change of that motion, 0.074 m for 0.046 m) */
+        for (unsigned i = 0; i < 3; ++i) from_speed[i] = dt > 0 ? -c->settle_step[i]/dt : 0;
+        const float a = fmaxf(t->ease_accel, 1e-3f), rate = tfp_continuity_length(from_speed);
+        if (!tfp_finite3(from_speed) || rate > 8) for (unsigned i = 0; i < 3; ++i) from_speed[i] = 0;
+        const float r = tfp_continuity_length(from_speed);
+        duration = fminf(fmaxf(1000*(4*r+sqrtf(16*r*r+24*a*tfp_continuity_length(held)))/(2*a), t->min_ms), t->max_ms);
+        c->settling = false;
+      }
+      tfp_continuity_begin(c, held, over ? from_speed : zero, tick, duration); c->rest_end = false;
+      for (unsigned i = 0; i < 3; ++i) { value[i] = held[i]; c->coast[i] = 0; }
+      c->lent = false;
     }
   }
   tfp_continuity_place(c, wanted, world, basis);

@@ -1059,6 +1059,9 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
       head[axis] += (node[component]-root[component])*root_basis[axis*3+component];
     /* The eye in the world goes with it: the root re-seated by itself is not the eye jumping (camera_continuity.h). */
     smooth.traversal = tfp_traversal(p->control_mask); /* round 24: a run ending in a clamber hands no speed on */
+    /* round 24, THE SETTLE: the native view coming back on mask 0 (after a backpack is picked up, the gun drawn again)
+     * holds the eye until the rig is steady against the root, then eases once */
+    smooth.settle_ok = source != SMOOTH_HEAD && p->control_mask == 0 && !p->full_ads;
     correction = tfp_continuity_step_cut(&smooth, wanted_relative, wanted, root_basis, head_given ? head : NULL, source == SMOOTH_REPEAT ? SMOOTH_NATIVE : source,
                                          detect, p->full_ads, tick, p->c.max_gap_ms, &smooth_tuning, relative);
     if (correction > 1e-6f && tfp_finite3(relative)) for (unsigned component = 0; component < 3; ++component) { shown[component] = root[component];

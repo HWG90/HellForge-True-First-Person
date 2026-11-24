@@ -93,5 +93,15 @@ class UserLog(unittest.TestCase):
             self.assertLessEqual(present["held"], trace.FLOAT_M, start)
 
 
+    def test_the_backpacks(self):
+        # the drift after the native view came back: what is carried grows again with nothing taken up (0.154 m at
+        # 20:32:10 in the log); THE SETTLE holds the eye through the rig's re-seat and eases once
+        for start, end in (("20:27:07.0", "20:27:07.7"), ("20:32:10.2", "20:32:10.8"), ("20:34:19.6", "20:34:20.4")):
+            present = self.window(start, end, "new_eye", "new_carried", "new_taken")
+            self.assertLessEqual(present["regrown"], 0.10, start)
+        logged = self.window("20:32:10.2", "20:32:10.8", "old_eye", "old_carried", "old_taken")
+        self.assertGreater(logged["regrown"], 0.15)
+
+
 if __name__ == "__main__":
     unittest.main()

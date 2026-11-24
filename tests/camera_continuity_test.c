@@ -2011,6 +2011,50 @@ int main(void) {
     CHECK(above[1] <= above[0]+1e-4f && still[1] <= still[0]+1e-4f);
     CHECK(still[1] < still[0]-.1f); /* the frames of a run still go on at the kept speed (they are taken up): only the hand-off goes */
   }
+  /* THE SETTLE (round 24): back from a backpack pick-up (20:32:10 of the user's log of 2026-11-24): the head camera's
+   * eye, then the native view with the rig 0.33 m off it, re-seated twice in two frames (0.11 m on, 0.33 m back),
+   * then climbing evenly against the root for 250 ms (forward 0.1 -> 0, up 1.53 -> 1.76), the body turning at 4 rad/s
+   * throughout. At 8, 16.7, 33.3 and 50 ms a frame, without THE SETTLE and with it: how far what is carried grows again
+   * with nothing taken up (and not held), the most a frame's step changes in the world, and when it is all let go. */
+  for (unsigned d = 0; d < 4; ++d) {
+    static const float times[] = {8, 16.7f, 33.3f, 50};
+    float regrown[2] = {0, 0}, change[2] = {0, 0}, gone[2] = {0, 0}; unsigned settles[2] = {0, 0};
+    for (int settle = 0; settle < 2; ++settle) {
+      TfpContinuity c; memset(&c, 0, sizeof c); float low = 1e9f, shown[3][3] = {{0}}; int n = 0;
+      const float dt = times[d]/1000;
+      for (double t = 0; t < 1.5; t += dt, ++n) {
+        const float yaw = 4*(float)t, co = cosf(yaw), si = sinf(yaw), basis[9] = {co, si, 0, -si, co, 0, 0, 0, 1};
+        const float root[3] = {.5f*(float)t, 0, 0};
+        float rel[3]; uint32_t source = NATIVE;
+        if (t < .5) { rel[0] = 0; rel[1] = .15f; rel[2] = 1.75f; source = HEAD; }
+        else {
+          const double s = t-.5;
+          if (s < dt) { rel[0] = .32f; rel[1] = 0; rel[2] = 1.53f; }
+          else if (s < 2*dt) { rel[0] = .43f; rel[1] = 0; rel[2] = 1.53f; }
+          else { const float k = (float)fmin(1.0, (s-2*dt)/.25); rel[0] = .1f*(1-k); rel[1] = 0; rel[2] = 1.53f+.23f*k; }
+        }
+        float world[3], out[3], w[3];
+        for (int k = 0; k < 3; ++k) { world[k] = root[k]; for (int a = 0; a < 3; ++a) world[k] += rel[a]*basis[a*3+k]; }
+        const uint64_t taken = c.jumps+c.edges; const bool held = c.settling;
+        c.settle_ok = settle && source == NATIVE;
+        const float carried = tfp_continuity_step_in(&c, rel, world, basis, source, t >= .5 && t < 1.1, false, 1000+t*1000, 250, &T, out);
+        for (int k = 0; k < 3; ++k) { w[k] = root[k]; for (int a = 0; a < 3; ++a) w[k] += out[a]*basis[a*3+k]; }
+        if (c.jumps+c.edges != taken || c.settling || held) low = carried; else { if (carried < low) low = carried; if (carried-low > regrown[settle]) regrown[settle] = carried-low; }
+        if (carried > .01f) gone[settle] = (float)(t-.5);
+        for (int k = 0; k < 3; ++k) { shown[0][k] = shown[1][k]; shown[1][k] = shown[2][k]; shown[2][k] = w[k]-root[k]; }
+        if (n >= 2 && t > .5+dt/2) { float e = 0; for (int k = 0; k < 3; ++k) { const float v = shown[2][k]-2*shown[1][k]+shown[0][k]; e += v*v; }
+          if (sqrtf(e) > change[settle]) change[settle] = sqrtf(e); }
+      }
+      settles[settle] = (unsigned)c.settles;
+    }
+    printf("  back from a backpack, %g ms a frame: carried grows again by %.3f m (%.3f m without THE SETTLE), step change %.3f m at most (%.3f m), "
+           "all let go %.0f ms after (%.0f ms)\n", (double)times[d], (double)regrown[1], (double)regrown[0], (double)change[1], (double)change[0],
+           (double)gone[1]*1000, (double)gone[0]*1000);
+    CHECK(settles[1] == 1 && settles[0] == 0);
+    CHECK(regrown[1] <= .02f);
+    CHECK(change[1] <= change[0]+.02f);
+    CHECK(gone[1] < .8f);
+  }
   printf("camera continuity: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }
