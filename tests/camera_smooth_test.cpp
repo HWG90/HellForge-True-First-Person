@@ -766,11 +766,13 @@ int main() {
     }
     // The damped eye is handed on as it was shown: the way into the native view starts from it. The head has
     // dropped 0.5 m (the eye is 0.10 m behind) when the native view begins; with the lag handed on the first native
-    // frame is the eye where it was, without it the eye would be shown 0.10 m off for that frame.
+    // frame is the eye where it was, without it the eye would be shown 0.10 m off for that frame. (Round 19: in two
+    // frames, 0.24 m and 0.26 m; 0.5 m in one frame from rest is a pose cut, THE CUT, which the smooth eye takes up.)
     for (int smooth = 0; smooth < 2; ++smooth) {
       fresh(true, smooth != 0, false, 300);
       Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
       standing(g, 12, dt, false); standing(g, 40, dt, true); standing(g, 300, dt, false);
+      g.pose(1, 2, 0, .2f, 1.26f); g.hip(); g.frame(dt);
       g.pose(1, 2, 0, .2f, 1.0f); g.hip(); g.frame(dt);
       CHECK(std::fabs(g.from_head_eye() - .16f) < .005f); // 0.10 m of damping and the 0.06 m of the head camera's own smoothing
       g.pose(1, 2, 0, .2f, 1.0f); g.hip(); g.frame(dt);
@@ -872,7 +874,8 @@ int main() {
   // frames a second; at 30 it moves what the camera left in Stable moves in its own first frame from 0.25 m
   // (0.0227 m), and no more. It is within Bodycam's 0.10 m 300 ms after the change. With Bodycam's camera damping
   // at 0 no damping is left: the lag is let go by 0.55 m a second at most (0.02 m in no frame), and is gone in 600 ms.
-  // Runs: [0] no damping, [1] the change, [2] Stable kept. ----
+  // Runs: [0] no damping, [1] the change, [2] Stable kept. (Round 19: the drop is two frames, 0.24 m and 0.26 m; 0.5 m
+  // in one frame from rest is a pose cut, THE CUT, which the smooth eye takes up whatever the damping did.) ----
   for (int rate = 0; rate < 3; ++rate) for (int smooth = 0; smooth < 2; ++smooth) for (int to = 0; to < 2; ++to) {
     static const double rates[] = {30, 60, 144};
     const double dt = 1000.0 / rates[rate];
@@ -884,6 +887,7 @@ int main() {
       Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
       auto keep = [&]() { std::memcpy(out[run][frames[run]++], sent.position, 16); };
       for (int i = 0; i < still; ++i) { g.hip(); g.frame(dt); keep(); }
+      g.pose(1, 2, 0, .2f, 1.26f); g.hip(); g.frame(dt); keep();
       g.pose(1, 2, 0, .2f, 1.0f);
       g.hip(); g.frame(dt); keep();
       if (run == 1) tfp_camera_set_lock(true, 0, 0, 300, 0, 0, to ? 0.0f : 180.0f, true); // what lock_note does when the option changes
@@ -891,7 +895,7 @@ int main() {
       CHECK(tfp_camera_error() == 0);
       g.end();
     }
-    const int at = still + 1; // the first frame of the new style
+    const int at = still + 2; // the first frame of the new style
     auto lag = [&](int i) { float d = 0; for (int k = 0; k < 3; ++k) d += (out[1][i][k] - out[0][i][k]) * (out[1][i][k] - out[0][i][k]); return std::sqrt(d); };
     auto moved = [&](int run, int i) { // how far the eye moved against the undamped one in frame i
       float d = 0;
@@ -1026,6 +1030,50 @@ int main() {
     CHECK(count == 5 && rows[0].arms == 0 && rows[0].sock == 0 && rows[1].arms == 0);
     CHECK(rows[2].arms == 1 && rows[2].sock == .25f && rows[3].arms == 3 && rows[3].sock == -.125f && rows[4].arms == 0 && rows[4].sock == 0);
     g.end();
+  }
+  // ---- 25. THE CUT (round 19). An emote: the head camera holds the view, nothing has changed for 1.3 s, so nothing
+  // is looked for. The diver dives out of it: in one frame the game cuts the pose, the head 0.4 m lower against a root
+  // that lunges 0.08 m and turns its yaw by 2.8 rad (a dive-back), then the root goes on at 5 m/s. On foot the cut is
+  // taken up as a change of camera and eased (the trace says cut); off foot (thrown) the head is shown as it is, as
+  // in scenario 13. At 8, 16.7, 33.3 and 50 ms a frame, Bodycam (no damping) and Stable (350 ms, 0.25 m). ----
+  {
+    static const double times[] = {8, 16.7, 33.3, 50};
+    for (int stable = 0; stable < 2; ++stable) for (int thrown = 0; thrown < 2; ++thrown) for (double dt : times) {
+      fresh(true, true, true, 0.0f, !stable);
+      Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+      TfpCameraTraceRow rows[128];
+      standing(g, (int)(1300 / dt), dt, false);
+      tfp_camera_trace_read(rows, 128);
+      CHECK(g.from_head_eye() < 1e-3f);
+      g.measure_from_here();
+      if (thrown) g.s.state = 50; // off foot
+      // the presented eye against the root's place in the world (a root that turns does not move it), its step's change as a vector
+      float against[3][3] = {};
+      auto note = [&]() {
+        for (int n = 0; n < 2; ++n) std::memcpy(against[n], against[n + 1], 12);
+        for (int k = 0; k < 3; ++k) against[2][k] = g.shown[k] - g.s.root[12 + k];
+      };
+      auto changed = [&]() { float d = 0; for (int k = 0; k < 3; ++k) { const float e = against[2][k] - 2 * against[1][k] + against[0][k]; d += e * e; } return std::sqrt(d); };
+      g.hip(); g.frame(dt); note(); g.hip(); g.frame(dt); note();
+      float x = 1.08f; g.pose(x, 2, 0, .2f + 2.8f, 1.1f); g.hip(); g.frame(dt); note();
+      tfp_camera_trace_edge();
+      uint32_t count = tfp_camera_trace_read(rows, 128);
+      const bool said = count >= 1 && (rows[count - 1].what & TFP_CAMERA_TRACE_CUT) != 0;
+      const float in_cut = changed(); // in the frame of the cut
+      float worst = 0;
+      for (int i = 0; i < (int)(800 / dt); ++i) { x += 5 * (float)dt / 1000; g.pose(x, 2, 0, .2f + 2.8f, 1.1f); g.hip(); g.frame(dt); worst = std::fmax(worst, g.from_head_eye()); }
+      std::printf("a pose cut out of an emote, %s, %s, %g ms a frame: the step against the root's place changes by %.3f m in its frame%s, the eye %.3f m from the "
+                  "head's at most and %.4f m after 0.8 s\n", stable ? "Stable" : "Bodycam", thrown ? "thrown off foot" : "on foot", dt, in_cut,
+                  said ? " (cut)" : "", worst, g.from_head_eye());
+      if (thrown) CHECK(!said && in_cut > .35f && worst < .065f); // the body's own motion, shown as it is
+      else {
+        CHECK(said);
+        CHECK(in_cut < .04f);                       // not shown in its frame
+        CHECK(worst > .2f);                         // eased: the eye comes after the head
+        CHECK(g.from_head_eye() < (stable ? .045f : 1e-3f)); // and is there by 0.8 s (Stable: what its own damping leaves, 0.037 to 0.041 m without the cut too)
+      }
+      g.end();
+    }
   }
   std::printf("camera smooth: %d checks, %d failed\n", checks, failed);
   return failed != 0;

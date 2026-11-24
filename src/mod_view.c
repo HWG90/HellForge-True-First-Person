@@ -444,9 +444,9 @@ static void trace_note(void) {
      * the starts, and with places to 0.1 mm, 29 of 3447 frames could not be replayed: two decisions that fell
      * within the rounding). */
     char taken[48] = "";
-    snprintf(taken, sizeof taken, "%s%s%s%s%s", r->what & TFP_CAMERA_TRACE_JUMP ? "+jump" : "", r->what & TFP_CAMERA_TRACE_EDGE ? "+edge" : "",
+    snprintf(taken, sizeof taken, "%s%s%s%s%s%s", r->what & TFP_CAMERA_TRACE_JUMP ? "+jump" : "", r->what & TFP_CAMERA_TRACE_EDGE ? "+edge" : "",
              r->what & TFP_CAMERA_TRACE_ROOT ? "+root" : "", r->what & TFP_CAMERA_TRACE_RESTART ? "+restart" : "",
-             r->what & TFP_CAMERA_TRACE_START ? "+start" : "");
+             r->what & TFP_CAMERA_TRACE_START ? "+start" : "", r->what & TFP_CAMERA_TRACE_CUT ? "+cut" : "");
     say("Trace: t=%.1f kind=%u eye_world=(%.5f %.5f %.5f) step=%.4f wanted=(%.5f %.5f %.5f) correction=%.4f lease=0x%llx pose_armed=%d entry_ease=%.2f source=%s"
         " root=(%.5f %.5f %.5f) axes=(%.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f) looked=%d taken=%s quiet=%d tick=%.3f"
         " off_foot=%d damped=%d damp=(%.5f %.5f %.5f) view=(%.5f %.5f %.5f) sock=%.5f arms=%u eye_edge=%d",
@@ -1016,13 +1016,14 @@ static void lock_note(void) { /* once a second while the view is on: frames by c
     told_down = d.frames; told_refused = d.refused;
   }
   if (smooth_wanted) {
-    static uint64_t told_jumps, told_edges, told_reseats;
+    static uint64_t told_jumps, told_edges, told_reseats, told_cuts;
     TfpCameraContinuityStats c; tfp_camera_continuity_stats(&c);
-    if (c.jumps != told_jumps || c.edges != told_edges || c.reseats != told_reseats)
-      say("Smooth: +%llu changes of camera and +%llu rig moves taken up, +%llu moves of the body root alone set aside, largest correction %.3f m (%llu restarts so far)",
+    if (c.jumps != told_jumps || c.edges != told_edges || c.reseats != told_reseats || c.cuts != told_cuts)
+      say("Smooth: +%llu changes of camera and +%llu rig moves taken up, +%llu moves of the body root alone set aside, +%llu head-camera pose cuts taken up, "
+          "largest correction %.3f m (%llu restarts so far)",
           (unsigned long long)(c.edges - told_edges), (unsigned long long)(c.jumps - told_jumps), (unsigned long long)(c.reseats - told_reseats),
-          (double)c.largest_m, (unsigned long long)c.restarts);
-    told_jumps = c.jumps; told_edges = c.edges; told_reseats = c.reseats;
+          (unsigned long long)(c.cuts - told_cuts), (double)c.largest_m, (unsigned long long)c.restarts);
+    told_jumps = c.jumps; told_edges = c.edges; told_reseats = c.reseats; told_cuts = c.cuts;
   }
   /* The eye going back and forth (src/camera_alternation.h): counted, nothing is done. A second without it writes nothing. */
   static TfpCameraAlternationStats told_alternation; TfpCameraAlternationStats a; tfp_camera_alternation_stats(&a);

@@ -1030,17 +1030,24 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
      * left the eye behind the head for up to half a second. On foot the head-frame jump of a swap is still taken up,
      * and native frames are as before. smooth_detect is called first: it keeps the watch on every frame. */
     const bool detect = smooth_detect(p, kind, source, tick) && !p->lock_down && !(source == SMOOTH_HEAD && p->lock_off_foot);
-    const uint64_t jumps = smooth.jumps, edges = smooth.edges, reseats = smooth.reseats, restarts = smooth.restarts; const bool began = !smooth.known;
+    const uint64_t jumps = smooth.jumps, edges = smooth.edges, reseats = smooth.reseats, restarts = smooth.restarts, cuts = smooth.cuts; const bool began = !smooth.known;
     looked = detect;
+    /* THE CUT (round 19, camera_continuity.h): in a head-camera frame of a body on foot the filter is also given the
+     * head the eye is built on, before the eye damping (what lock_damp_eye added this frame taken off again), so a pose
+     * cut out of an emote is taken up as a change of camera. Not off foot or down (a throw is the body's own motion, as
+     * above), not in full aim or its gap (the sights stay on the eye), not in the orphaned native view (kind 6). */
+    float head[3] = {0}; const bool head_given = source == SMOOTH_HEAD && kind == 4 && !p->lock_down && !p->lock_off_foot && !p->full_ads && !p->ads_gap_active;
+    if (head_given) for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
+      head[axis] += (wanted[component]-trace_damp.added[component]-root[component])*root_basis[axis*3+component];
     /* The eye in the world goes with it: the root re-seated by itself is not the eye jumping (camera_continuity.h). */
-    correction = tfp_continuity_step_in(&smooth, wanted_relative, wanted, root_basis, source == SMOOTH_REPEAT ? SMOOTH_NATIVE : source, detect, p->full_ads, tick,
-                                        p->c.max_gap_ms, &smooth_tuning, relative);
+    correction = tfp_continuity_step_cut(&smooth, wanted_relative, wanted, root_basis, head_given ? head : NULL, source == SMOOTH_REPEAT ? SMOOTH_NATIVE : source,
+                                         detect, p->full_ads, tick, p->c.max_gap_ms, &smooth_tuning, relative);
     if (correction > 1e-6f && tfp_finite3(relative)) for (unsigned component = 0; component < 3; ++component) { shown[component] = root[component];
       for (unsigned axis = 0; axis < 3; ++axis) shown[component] += relative[axis]*root_basis[axis*3+component]; }
     else correction = 0;
     what = (detect ? TFP_CAMERA_TRACE_LOOKED : 0u) | (smooth.jumps != jumps ? TFP_CAMERA_TRACE_JUMP : 0u) | (smooth.edges != edges ? TFP_CAMERA_TRACE_EDGE : 0u)
         | (smooth.reseats != reseats ? TFP_CAMERA_TRACE_ROOT : 0u) | (smooth.restarts != restarts ? TFP_CAMERA_TRACE_RESTART : 0u)
-        | (began ? TFP_CAMERA_TRACE_START : 0u) | (p->full_ads ? TFP_CAMERA_TRACE_QUIET : 0u);
+        | (began ? TFP_CAMERA_TRACE_START : 0u) | (p->full_ads ? TFP_CAMERA_TRACE_QUIET : 0u) | (smooth.cuts != cuts ? TFP_CAMERA_TRACE_CUT : 0u);
   }
   /* Counted only: the eye the filter was given, whether or not the continuity is on. */
   if (tfp_alternation_step(&alternation, wanted_relative, source == SMOOTH_REPEAT ? SMOOTH_NATIVE : source, p->full_ads, tick, p->c.max_gap_ms, &moved)) {
@@ -1829,7 +1836,7 @@ void tfp_camera_continuity_stats(TfpCameraContinuityStats *out) {
   if (!host.lock_exclusive) return; /* before the host is supplied there is nothing to report */
   policy_acquire();
   out->jumps = smooth.jumps; out->edges = smooth.edges; out->restarts = smooth.restarts; out->largest_m = smooth.largest; smooth.largest = 0;
-  out->reseats = smooth.reseats;
+  out->reseats = smooth.reseats; out->cuts = smooth.cuts;
   policy_release();
 }
 void tfp_camera_alternation_stats(TfpCameraAlternationStats *out) {
