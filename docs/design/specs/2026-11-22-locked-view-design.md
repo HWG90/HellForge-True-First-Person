@@ -2279,18 +2279,24 @@ mouse). The new `Aim:` line says, per aim, whether the editor was open in it.
    build reads the nearest answer, and a file that has only the toggle reads as 1 or 2. `src/fov_lock.h`
    (`tfp_fov_lock_step_aim`; the old call is the first two answers, checked frame for frame), `src/fov_helper.c`
    (`tfp_fov_set_lock_aim`, one value a frame as round 15 has it).
-2. **Sight distance in aim (cm)** (Locked view page; 0 to 30, default 10; 0 is the game's own seat). In full aim the
+2. **Sight distance in aim (cm)** (Locked view page; 0 to 30, default 15 since the review, 10 before; 0 is the game's own seat). In full aim the
    gun is moved toward the eye along node 5's forward axis until the sight the game sets the near clip to is that far
    away (`src/ads_seat.h`): pull = sight - wanted, at most 0.25 m, nothing for a sight already closer or for the
    game's 0.05 (no sight). The root is not moved: the eye stays where the game puts it. The pull follows the hip
-   placement's blend into and out of full aim and glides (80 ms) between zoom levels. **The near clip moves in with
-   the gun** by the same amount, never under 0.05, so the same parts of the weapon are cut as the game cuts them. Off
+   placement's blend into and out of full aim and glides (80 ms) between zoom levels, held each frame so the sight is
+   never nearer than the wanted distance while the game reseats a zoom level (the review's B2, below). **The near
+   clip moves in with the gun** by the same amount, in the same frame (B1), never under 0.05, so the same parts of the
+   weapon are cut as the game cuts them. Off
    until the binder hands a distance (the helpers start as retail's; both differential tests pass unchanged).
    Per weapon: the placement editor's ADS action, whose forward is added on top (forward is away from the eye; the
    wheel), saved per weapon in `action_placements` as before.
-   - Why 10 cm: the game's own sight distances are 0.066 to 0.35 m (above); 10 cm brings the Scythe's sight 1.7 times
-     larger and a 0.22/0.35 m scope 2.2/3.5 times, the same distance at every zoom level, and leaves the Nova's scope,
-     already at 0.066 m, alone. The Hyena's own numbers are not in the repo; its line will be in the next log.
+   - Why 15 cm (the review; 10 cm before): the game's own sight distances are 0.066 to 0.35 m (above). 15 cm draws a
+     0.22/0.35 m scope 1.5/2.3 times as large, the same distance at every zoom level, which answers "too far at every
+     zoom" plainly, and leaves the Nova's scope (0.066 m) alone. It is the cautious default because what it rests on is
+     what only the game can show: that the game's near clip is the sight's rear, how the game's depth moves, and
+     whether arms or body show with the gun pulled in. At 15 cm the most pulled is 0.20 m (a 0.35 m scope; 0.25 m at
+     10 cm), the Scythe's sight moves 2.3 cm (7.3 cm at 10), and the depth limit of the review's B2 bites less. 10 cm
+     stays on the slider. The Hyena's own numbers are not in the repo; its line will be in the next log.
 3. **The editor in full aim:** opened in full aim (Page Up or the menu button) it begins on its ADS action and says so
    (`Placement editor: opened in full aim: editing the ADS placement ...`); while the ADS action is edited the motion
    runtime hands the draft to the pose helper's ADS placement every frame (`editor_preview_ads`, `src/editor_motion.h`),
@@ -2314,12 +2320,12 @@ How wide the sight is drawn, as 1 / (distance x tan(field of view / 2)), against
 the game's distance). The scope rows assume a lens of 25.7 degrees (the Nova's, the only scope lens in the logs) at the
 two scope distances the live notes give; the Hyena's are not known.
 
-| weapon | feel.51 default | feel.50, zoom on, 116 fps | zoom off, locked 105 | round 20 default (game's zoom, 10 cm) | locked 105, 10 cm | chosen 50, 10 cm |
-| --- | --- | --- | --- | --- | --- | --- |
-| Scythe sight, 0.173 m, 61.5 deg | 1.00 | 0.88 | 0.46 | 1.73 | 0.79 | 2.21 |
-| scope, 0.22 m | 1.00 | 0.66 | 0.18 | 2.20 | 0.39 | 1.08 |
-| scope, 0.35 m | 1.00 | 0.66 | 0.18 | 3.50 | 0.61 | 1.71 |
-| Nova scope, 0.066 m | 1.00 | 0.66 | 0.18 | 1.00 | 0.18 | 0.49 |
+| weapon | feel.51 default | feel.50, zoom on, 116 fps | zoom off, locked 105 | default (game's zoom, 15 cm) | game's zoom, 10 cm | locked 105, 15 cm | chosen 50, 15 cm |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Scythe sight, 0.173 m, 61.5 deg | 1.00 | 0.88 | 0.46 | 1.15 | 1.73 | 0.53 | 1.47 |
+| scope, 0.22 m | 1.00 | 0.66 | 0.18 | 1.47 | 2.20 | 0.26 | 0.72 |
+| scope, 0.35 m | 1.00 | 0.66 | 0.18 | 2.33 | 3.50 | 0.41 | 1.14 |
+| Nova scope, 0.066 m | 1.00 | 0.66 | 0.18 | 1.00 | 1.00 | 0.18 | 0.49 |
 
 That measure is the sight's body. Through a scope's lens what is magnified is set by the field of view alone; the
 distance only changes how much of the screen the scope fills.
@@ -2328,17 +2334,17 @@ distance only changes how much of the screen the scope fills.
 
 - `tests/run-fov-lock.sh` (96 checks; 80 on main): the three answers, the chosen value with the lock off (glided in and
   out, then let go), the old call equal to the new one frame for frame.
-- `tests/run-fov-lock-helper.sh` (173; 165 on main): a chosen value through the real helper, two calls a frame, one value a
+- `tests/run-fov-lock-helper.sh` (174 after the review; 165 on main): a chosen value through the real helper, two calls a frame, one value a
   frame, lock on and off.
-- `tests/run-ads-seat.sh` (113, new): the pull, its glide, the near clip, the `Aim:` line.
-- `tests/run-wire-pose.sh` (490; 397 on main): the real pose helper in full aim: the gun 7.3 cm closer for the Scythe,
+- `tests/run-ads-seat.sh` (136 after the review; new): the pull, its glide, its depth limit, the near clip and its lead, the `Aim:` line.
+- `tests/run-wire-pose.sh` (1082 after the review, with the frame-by-frame aims and zoom changes against the real near helper; 397 on main): the real pose helper in full aim: the gun 7.3 cm closer for the Scythe,
   eased in and out, the ADS placement on top, another zoom level glided, 0 cm the game's seat; the root never written.
-- `tests/run-near-ads.sh` (69, new): the real near helper: the sight published, the near clip in with the gun, never
+- `tests/run-near-ads.sh` (76 after the review; new): the real near helper: the sight published, the near clip in with the gun, never
   under 0.05, iron sights untouched, the game's value with nothing closer.
-- `tests/run-editor-ads.sh` (60, new): the report reproduced (opened on idle, a drag moves only the hip placement,
+- `tests/run-editor-ads.sh` (64 after the review; new): the report reproduced (opened on idle, a drag moves only the hip placement,
   nothing drawn in full aim moves), then opened in full aim on ADS: drag, wheel, save and cancel move what full aim
   draws, live; the hip placement untouched. Without `editor_preview_ads` it fails ("full_aim_right() > .04").
-- `tests/run-wire-settings.sh` (6977; 6829 on main), `run-wire-panel.sh` (460; 450), `run-wire-feel.sh` (95; 94): the store, the migration from the toggle, both
+- `tests/run-wire-settings.sh` (6982; 6829 on main), `run-wire-panel.sh` (460; 450), `run-wire-feel.sh` (96; 94): the store, the migration from the toggle, both
   menus' rows, the greyed slider, the weapon name.
 - Unchanged against retail: `run-diff-pose.sh`, `run-diff-near.sh`, `run-vectors-placement-editor.sh`,
   `run-vectors-motion-runtime.sh`.
@@ -2346,23 +2352,79 @@ distance only changes how much of the screen the scope fills.
 ### What only the game can show
 
 - Whether the game's near clip in full aim is the sight's rear (the pull is read off it). If it is not, the sight ends
-  nearer or farther than 10 cm; the `Aim:` line's "sight at" and the picture will say.
+  nearer or farther than 15 cm; the `Aim:` line's "sight at" and the picture will say.
 - What the Hyena's sight distance, lens per zoom level and depth are, and whether its two zoom levels change the near
   clip (the `Aim: changed:` line).
-- Whether the arms or the body come into view with the gun up to 25 cm closer (the near clip moves in with it).
+- Whether the arms or the body come into view with the gun up to 20 cm closer (25 cm at 10 cm; the near clip moves in
+  with it).
+- How the game's depth D moves in full aim: on the way in, at a zoom change, and whether the unzoom gate flips it.
+  The pull follows D where D is short of its rest (the review's B2), so a D that jumps about would move the gun with
+  it; the `Aim:` line's depth and the picture will say.
 - Whether the game keeps the aim while the editor has the cursor. If it drops it, use the game's toggle-aim setting
   or open the editor, then aim.
 - Whether the game's own aim transition and the 150 ms blend of the pull look as one movement.
 
 ### What to try in the game
 
-1. Defaults (Aim field of view: the game's zoom; Sight distance in aim 10 cm). Take the Scythe, a scoped rifle (the
+1. Defaults (Aim field of view: the game's zoom; Sight distance in aim 15 cm). Take the Scythe, a scoped rifle (the
    Hyena if you have it; else the R-63 Diligence or the Nova) and a pistol. Aim at each zoom level for a few seconds.
    `grep -n "Aim:" <modlog>`: one `in`, a `changed` per zoom level, one `out` per aim. The sight should be clearly
    closer than on feel.51, the pistol's iron sights unchanged (no sight seen, nothing pulled).
-2. Sight distance 0, then 20, then 5: 0 must look as feel.51; 5 closest. Note what clips (arms, scope rim).
+2. Sight distance 0, then 10, then 20, then 5: 0 must look as feel.51; 5 closest. Note what clips (arms, scope rim),
+   and whether a zoom-level change in aim ever puts the sight against the eye or cuts into it.
 3. Aim field of view: Your locked view (the scope as small as at the hip), then A chosen value at 40 and at 60.
 4. Aim, press Page Up: the editor should say "opened in full aim: editing the ADS placement"; drag left/right and
    scroll the wheel: the sight must move while you drag. Save weapon, close, aim again: it stays. Do it once with the
    editor opened at the hip and ">" to ADS, then aim. Note whether the aim drops when the editor opens.
 5. Send the mod log and `locked_view.json`. Ask the tester (Mr.Roarke) for his `locked_view.json` and whether "Zoom when aiming" was on.
+
+### The review's findings, fixed (2026-11-24)
+
+The review (verdict: do not merge) found two blocking faults in the model of the pull and its near clip, three tests
+that let mutations through, and binder paths no test ran.
+
+- **B1, the near clip trailed the gun.** The gun moves in a frame (`src/pose_helper.c`); the near clip followed a tick
+  later (`ads_seat_tick` handed the closer over) and then eased in over 45 ms, so on every aim-in it stood behind the
+  sight's rear and cut into it. Now the near helper asks the pose helper itself in each of its calls
+  (`tfp_near_set_ads_source(tfp_pose_ads_near)`, bound in `src/wire_win_pose.c`); while the gun comes in the near clip
+  leads it by three times the last frame's step and the glide's snap (`tfp_ads_lead`: the game may set the near clip
+  before the gun's node in a frame), and a change toward the eye is taken at once (going out it eases, as retail).
+  `tests/wire_pose_test.c` `ads_frames` steps both real helpers, each on its own fake game memory
+  (`tests/near_world_shim.cpp`), at 60, 116 and 144 fps with the near setter before and after the gun: 1.5 to 8.7 cm
+  cut with the old handoff, none now.
+- **B2, a zoom-level change could put the sight at or behind the eye.** The pull's target jumps with the game's near
+  clip (a tick late) and glided 80 ms while the game reseats at its own pace. Now the pull is held each frame
+  (`tfp_ads_sight_least`, `tfp_ads_pull_most`) by where the sight can be: the game's depth D of this very frame
+  (`steady_frame`, which now runs before the pull) against its rest (request+0x90), and the last sight and D that
+  stood still together for 50 ms, moved by as much as D moved since. The sight never comes nearer than the wanted
+  distance (no margin: with the review's 1 cm the first step of a glide could bring the sight inside the near clip set
+  before it in that frame). The near clip goes in from that distance when it is nearer than the game's value. Each aim
+  pairs anew (another weapon's pair would hold the pull at nothing). `ads_zoom_frames`: 0.35 to 0.22 m and back,
+  the game reseating over 0, 80, 150 and 250 ms, at 10 and 15 cm wanted: the sight came to -3.0 cm and the near clip
+  cut up to 9.9 cm before; now the sight stays at the wanted distance, nothing is cut, and the gun never jumps back
+  out (a first version of the limit counted the change twice and did, by 12 cm for a frame; that check found it).
+  A wanted distance under the game's own 0.05 pulls no nearer than 0.05.
+- **I1.** The three surviving mutations are killed: the share raised at the hip (a lease that blends in from weight 0;
+  `wire-pose`), the near clip moved at the hip (`near-ads`: at the hip the pose helper is not even asked), and the
+  authored flag dropped (`editor-ads` now right-drags in full aim; its old check was an OR with a disjunct always true).
+- **I2.** `src/wire_editor.c` `open_editor` and `src/wire_motion.c` `host_editor_preview_ads` are one call each into
+  `src/editor_motion.h` (`tfp_editor_motion_open`, `tfp_editor_motion_preview_ads`), which `editor-ads` drives;
+  `wire-feel` calls the bound `editor_preview_ads`. Still not run by a test: the full-aim read through the player
+  snapshot, and `ads_seat_tick` (now only the sight and wanted distance for the pose helper and the `Aim:` line).
+- **N1.** `fov_aim` is rounded when set or read (2.5 was the game's zoom). **N3.** The `Aim:` line's game field of
+  view is the armed camera's only. **N2** is not fixed: an older build that saves the file drops `fov_aim`, and the
+  toggle it keeps cannot say "a chosen value"; coming back, that reads as "your locked view".
+- **The default is 15 cm** (above, "Why 15 cm").
+
+Models (the review's `model_near.py` and `model_zoom.py`, and the same with this branch's rules, wanted 10 and 15 cm):
+
+| | before | after |
+| --- | --- | --- |
+| aim-in, sight 0.173 / 0.22 / 0.35 m, 60-144 fps, near before or after the gun | cut 1.5-3.4 / 2.7-5.8 / 5.7-12.2 cm | 0 |
+| zoom 0.35 to 0.22 m, the game reseating at once | sight at -0.6 to -1.9 cm | at the wanted distance |
+| zoom 0.22 to 0.35 m, reseating over 250 ms | cut up to 12.0 cm | 0 |
+
+What this adds to what only the game can show: how D moves in full aim (on the way in, at a zoom change, and whether
+the unzoom gate flips it there). The pull follows D where D is short of its rest, so a D that jumps about would move
+the gun with it.
+
