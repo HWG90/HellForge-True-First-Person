@@ -196,21 +196,24 @@ static float apart3(const float *a, const float *b) { float d = 0; for (int k = 
 // alone (`alone`, recorded by `record`: the same emote, nothing drawn).
 struct TakeOver { float outside = 0, past_head = -1, over_bound = -1, largest = 0, highest = -9, from_end = 0; double start = -1, end = -1; };
 #define TAKE_FRAMES 800
-static TakeOver take_over_emote(bool smooth, double dt, float way, bool reverse, double draw_ms, double start = 0, const float *alone = nullptr, float *record = nullptr) {
+static TakeOver take_over_emote(bool smooth, double dt, float way, bool reverse, double draw_ms, double start = 0, const float *alone = nullptr, float *record = nullptr,
+                                const float *sidearm_eye = nullptr) {
   fresh(true, smooth);
   tfp_camera_set_action_tuning(0, 900, true);
   Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
   const uint32_t rifle = 0x1111, sidearm = 0x2222, held = reverse ? sidearm : rifle, coming = reverse ? rifle : sidearm;
   // (settled for 800 ms: the continuity at 16.7 ms a frame needs more than 400 for 0.70 m)
   const int settle = static_cast<int>(800 / dt) + 1; const float near = g.eye[1], far = .17f - way;
-  float span[3][3];                                               // the held eye, the incoming eye, the head camera's
+  float span[3][3], rig[3];                                       // the held eye, the incoming eye, the head camera's
+  std::memcpy(rig, g.eye, 12);
   g.eye[1] = reverse ? far : near;
+  if (sidearm_eye && !reverse) std::memcpy(g.eye, sidearm_eye, 12); // `sidearm_eye`: the sidearm's rig eye from the head
   CHECK(tfp_camera_set_weapon_key(g.gen, coming) == 1);
   standing(g, settle, dt, false); standing(g, settle, dt, true);
   std::memcpy(span[1], g.body, 12);
   standing(g, 3, dt, false, 2);                                   // the incoming weapon's eye is remembered as the view leaves
   CHECK(tfp_camera_set_weapon_key(g.gen, held) == 1);
-  g.eye[1] = reverse ? near : far; standing(g, settle, dt, true);
+  std::memcpy(g.eye, rig, 12); g.eye[1] = reverse ? near : far; standing(g, settle, dt, true);
   std::memcpy(span[0], g.body, 12);
   TakeOver r; float last[3], step[3] = {}, back[3]; std::memcpy(last, g.body, 12);
   const int frames = std::min(TAKE_FRAMES, static_cast<int>(2600 / dt));
@@ -338,6 +341,31 @@ static void hold_release() {
     CHECK(worst.past_head <= 1e-3f);
     CHECK(worst.over_bound <= 0);
     CHECK(worst.from_end < 1e-3f);
+  }
+  // 9. The sidearm's eye AHEAD of the head camera's own (the head camera's eye is the rig eye 0.17 m ahead of the head),
+  // on the release's line and off it: drawn every 10 ms into the release of the rifle's eye, 0.44 and 0.70 m behind.
+  // The release's speed is carried only onto an eye no further on than where it was going; otherwise it is eased away
+  // first, so the drawn eye stays inside the span (within 1 mm, as above), no frame over the bound, and it ends at the
+  // sidearm's eye. (Round 19, second review: carried onto the sidearm's eye 2 cm ahead and 3 cm aside, the path
+  // bulged 0.0147 to 0.0156 m out of the span at every frame time.)
+  {
+    const float eyes[4][3] = {{.03f, .19f, .05f}, {0, .20f, .05f}, {-.03f, .22f, .07f}, {.06f, .25f, .03f}};
+    for (int f = 0; f < 4; ++f) for (int smooth = 0; smooth < 2; ++smooth) for (float way : {.44f, .70f}) for (int e = 0; e < 4; ++e) {
+      float alone[TAKE_FRAMES]; const TakeOver a = take_over_emote(smooth, frames[f], way, false, 0, 0, nullptr, alone, eyes[e]);
+      TakeOver worst; worst.from_end = 0; int runs = 0;
+      for (double draw = 0; draw <= 450.001 && a.start + draw + frames[f] < a.end; draw += 10) {
+        ++runs;
+        const TakeOver r = take_over_emote(smooth, frames[f], way, false, draw, a.start, alone, nullptr, eyes[e]);
+        worst.outside = std::max(worst.outside, r.outside); worst.over_bound = std::max(worst.over_bound, r.over_bound);
+        worst.from_end = std::max(worst.from_end, r.from_end);
+      }
+      if (std::getenv("TFP_TAKEOVER_TABLE")) std::printf("  take-over ahead eye %d way=%.2f dt=%4.1f smooth=%d: %d draws, outside %.5f (alone %.5f) over bound %+.5f from end %.5f\n",
+          e, way, frames[f], smooth, runs, worst.outside, a.outside, worst.over_bound, worst.from_end);
+      CHECK(runs >= 30);
+      CHECK(worst.outside <= std::max(1e-3f, a.outside + 1e-4f));
+      CHECK(worst.over_bound <= 0);
+      CHECK(worst.from_end < 1e-3f);
+    }
   }
   // 6. Without the lock it is retail's: faded on 80 ms, its first frame the largest (0.15 m at 33 ms a frame).
   {
