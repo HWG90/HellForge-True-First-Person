@@ -439,6 +439,25 @@ static void release(void) {
     }
     CHECK(largest <= judge_limit(FRAMES[f]) && same(eye, zero));
   }
+  /* A retail glide under the lock (GATE: a way of more than TFP_EYE_GLIDE_FAR_M) under way when the hold lapses: the
+   * release goes on from the speed that glide has, (target - eye) / 70 ms, so its first frame changes the step by about
+   * what retail's glide would have slowed it in that frame; it does not stop dead (review of round 19, "B lapse"). */
+  for (unsigned f = 0; f < 4; ++f) for (unsigned way = 0; way < 2; ++way) for (int frames_in = 1; frames_in <= 3; ++frames_in) {
+    const double dt = FRAMES[f]/1000;
+    TfpEyeGlide g; tfp_eye_glide_reset(&g); float eye[3], end[3], before[3], last[3], now[3], change[3];
+    end_of(way ? .81f : .55f, end); memcpy(eye, START, 12);
+    for (int i = 0; i < frames_in; ++i) { memcpy(before, eye, 12); tfp_eye_glide_lock_step(&g, eye, end, (float)dt); }
+    CHECK(g.retail);
+    for (unsigned k = 0; k < 3; ++k) last[k] = eye[k]-before[k];
+    const float zero[3] = {0, 0, 0}; const float had = sqrtf(last[0]*last[0]+last[1]*last[1]+last[2]*last[2]);
+    memcpy(before, eye, 12); tfp_eye_glide_release(&g, eye, zero, (float)dt);
+    for (unsigned k = 0; k < 3; ++k) { now[k] = eye[k]-before[k]; change[k] = now[k]-last[k]; }
+    /* (the release's own slowing down can add to that at long frames late in the glide: 17 % at 50 ms a frame, three
+     * frames in; stopping dead is the whole step, 1/(1-exp(-dt/70 ms)) times as much: 1.96 at 50 ms, 9.3 at 8) */
+    CHECK(sqrtf(change[0]*change[0]+change[1]*change[1]+change[2]*change[2]) <= 1.2f*had*(1-expf(-(float)dt/.07f)));
+    for (int i = 0; i*FRAMES[f] < 700; ++i) tfp_eye_glide_release(&g, eye, zero, (float)dt);
+    CHECK(same(eye, zero));
+  }
   /* A new target while the release is under way (a hold that comes while letting go): from where the eye is with the
    * speed it has, on the release's rates, to the new target itself. */
   for (unsigned f = 0; f < 4; ++f) {
