@@ -204,3 +204,8 @@ Every tick on the game thread, after head visibility's update (src/mod_view.c `w
 
 If the glow stays while the `Warp:` line says nothing of the table plays, the effect is not in the table. The fallback is
 the rig's `World.link_particles` hook, filtered on the pack's unit; this round does not build it.
+
+## 6. The first game run
+
+Nothing above has run in the game. `docs/guides/WARP-PACK-TEST.md` says what to do, what each line should read, and when
+the stop can be switched on by default.
