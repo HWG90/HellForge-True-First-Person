@@ -235,6 +235,10 @@ static _Atomic uint32_t smooth_event;
  * the eye presented is the head camera's own point, handed to the continuity as the head source, and converted to
  * the rig eye's frame for the game's parent-local argument. Off (the default): nothing here is reached. */
 static _Atomic uint32_t orphan_on, orphan_behind; /* orphan_behind: a float's bits */
+/* Beyond retail, round 14: the veil (camera_helper.h tfp_camera_set_veil). The hook writes under the policy lock, the
+ * tick writes veil_armed, veil_open and veil_ticks; both are the game thread (the "Hook:" line names the thread). */
+static _Atomic uint32_t veil_armed, veil_open, veil_ticks, veil_last_kind, veil_largest; /* veil_largest: a float's bits */
+static _Atomic uint64_t veil_leaves, veil_frames, veil_moved, veil_behind;
 static _Atomic uint64_t orphan_frames, orphan_refused;
 static struct { bool known; uint32_t mask, kind, weapon, key; double until; } smooth_watch;
 #define TRACE_RING 128u
@@ -1172,6 +1176,22 @@ static bool orphan_head(Policy *p, const float *given, uint32_t kind, double tic
   return true;
 }
 
+/* Beyond retail, round 14 (tfp_camera_set_veil). */
+/* The eye of a head-camera frame while the veil is open: at least TFP_CAMERA_VEIL_CLEAR in front of the head along
+ * `horizontal` (the level view direction, unit length, z 0). `move`: a body on foot; otherwise only looked at.
+ * true: the eye is that far in front (moved there, or already). */
+static bool veil_apply(const float *head, const float *horizontal, bool move, float *eye) {
+  const float ahead = (eye[0]-head[0])*horizontal[0]+(eye[1]-head[1])*horizontal[1];
+  if (!isfinite(ahead) || !finite3(eye)) return false;
+  if (ahead >= TFP_CAMERA_VEIL_CLEAR) return true;
+  if (!move) return false;
+  const float step = TFP_CAMERA_VEIL_CLEAR-ahead, moved[3] = {eye[0]+horizontal[0]*step, eye[1]+horizontal[1]*step, eye[2]};
+  if (!finite3(moved) || !(step <= 1.0f)) return false; /* more than a metre is not this view */
+  memcpy(eye, moved, 12);
+  atomic_fetch_add_explicit(&veil_moved, 1, memory_order_relaxed);
+  if (step > bits_float(atomic_load_explicit(&veil_largest, memory_order_relaxed))) atomic_store_explicit(&veil_largest, float_bits(step), memory_order_relaxed);
+  return true;
+}
 /* The original setter, called as retail calls it (cpp:751, 1020). */
 static void call_original(void *camera, uint32_t unit, const float *output) {
   const uintptr_t target = atomic_load_explicit(&original, memory_order_acquire);
@@ -1188,6 +1208,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
   }
   policy_acquire();
   const float *output = native; _Alignas(16) float adjusted[4] = {0}; bool diagnostics_changed = false, lock_shown = false, lock_asked = false, eye_damped = false; uint32_t lock_kind = 0;
+  bool veil_frame = false, veil_clear = false; /* beyond retail, round 14: this frame is drawn while the veil is open; its eye is in front of the head */
   double frame_tick = 0; policy.why = TFP_CAMERA_WHY_NONE; policy.lock_down = false; policy.head_far = false; policy.lock_ragdoll = false;
   if (entered_generation && entered_generation == atomic_load_explicit(&callback_generation, memory_order_acquire)
       && atomic_load_explicit(&armed, memory_order_acquire) && (uint64_t)(uintptr_t)camera == policy.c.camera && unit == policy.c.camera_unit) {
@@ -1198,6 +1219,12 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
     policy.lock_now = known_kind && policy.presentation_enabled && atomic_load_explicit(&lock_on, memory_order_relaxed);
     if (policy.lock_now && lock_entry_ms > 0 && policy.handoff_entry_ms <= 0) policy.handoff_entry_ms = lock_entry_ms;
     lock_asked = policy.presentation_enabled && atomic_load_explicit(&lock_on, memory_order_relaxed); lock_kind = known_kind ? kind : 0xffff;
+    /* Beyond retail, round 14: the first frame of the lock that is not the native view after one that was opens the veil. */
+    if (atomic_exchange_explicit(&veil_last_kind, lock_kind, memory_order_relaxed) == 6 && known_kind && kind != 6 && policy.lock_now
+        && atomic_load_explicit(&veil_armed, memory_order_relaxed) && !atomic_exchange_explicit(&veil_open, 1, memory_order_relaxed)) {
+      atomic_store_explicit(&veil_ticks, 0, memory_order_relaxed); atomic_fetch_add_explicit(&veil_leaves, 1, memory_order_relaxed);
+    }
+    veil_frame = atomic_load_explicit(&veil_open, memory_order_relaxed) != 0;
     if (!lock_asked && smooth.known) smooth_forget();
     const bool supported = known_kind && (kind == 4 || kind == 6 || policy.lock_now);
     if (supported && policy.presentation_enabled) atomic_fetch_add_explicit(&view_frames, 1, memory_order_relaxed);
@@ -1479,6 +1506,10 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
                 if (finite3(forward)) memcpy(trace_damp.view, forward, 12);
                 if (smooth_present(&policy, kind, SMOOTH_HEAD, root, root_basis, adjusted, tick, shown)) memcpy(adjusted, shown, 12); }
               memcpy(policy.last_head_world, adjusted, 12);
+              /* Beyond retail, round 14: after everything that keeps the eye (the swap's hold and glide, the continuity, the
+               * damping, the trace), so only what this frame hands the game changes. */
+              if (veil_frame && policy.lock_now && kind == 4)
+                veil_clear = veil_apply(head, horizontal, !policy.lock_down && !policy.lock_off_foot, adjusted);
               if (policy.fallback_safe) policy.last_view_tick = tick; else ++policy.guard_grace_frames;
               if (held_view) {
                 /* Follow the game's direction from the head, gliding there from the view the
@@ -1511,6 +1542,10 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
       atomic_store_explicit(&lock_down_error, atomic_load_explicit(&last_error, memory_order_relaxed), memory_order_relaxed);
       atomic_store_explicit(&lock_down_why, policy.why, memory_order_relaxed);
     }
+  }
+  if (veil_frame) { /* beyond retail, round 14 */
+    atomic_fetch_add_explicit(&veil_frames, 1, memory_order_relaxed);
+    if (!veil_clear || output != adjusted) atomic_fetch_add_explicit(&veil_behind, 1, memory_order_relaxed);
   }
   atomic_fetch_add_explicit(&forwarded, 1, memory_order_relaxed); call_original(camera, unit, output);
   if (diagnostics_changed) publish_diagnostics(&policy);
@@ -1758,6 +1793,18 @@ uint64_t tfp_camera_view_frames(void) { return atomic_load(&view_frames); }
 void tfp_camera_set_continuity(bool on, bool trace_frames) { atomic_store(&smooth_on, on ? 1u : 0u); atomic_store(&trace_on, trace_frames ? 1u : 0u); }
 void tfp_camera_continuity_event(void) { atomic_store(&smooth_event, 1u); }
 void tfp_camera_set_orphan(bool on) { atomic_store(&orphan_on, on ? 1u : 0u); }
+void tfp_camera_set_veil(bool on) {
+  atomic_store(&veil_armed, on ? 1u : 0u);
+  if (!on) atomic_store(&veil_open, 0);
+}
+void tfp_camera_veil_tick(bool hidden) {
+  if (!atomic_load(&veil_open)) return;
+  if (hidden || atomic_fetch_add(&veil_ticks, 1) + 1 >= 2) atomic_store(&veil_open, 0);
+}
+void tfp_camera_veil_stats(TfpCameraVeilStats *out) {
+  out->leaves = atomic_load(&veil_leaves); out->frames = atomic_load(&veil_frames); out->moved = atomic_load(&veil_moved);
+  out->behind = atomic_load(&veil_behind); out->largest_m = bits_float(atomic_load(&veil_largest));
+}
 void tfp_camera_orphan_stats(TfpCameraOrphanStats *out) {
   if (!out) return;
   out->frames = atomic_load(&orphan_frames); out->refused = atomic_load(&orphan_refused); out->behind_m = bits_float(atomic_load(&orphan_behind));
@@ -1851,6 +1898,8 @@ const char *tfp_camera_why_text(uint32_t why) {
 void tfp_camera_reset_for_tests(void) {
   atomic_store(&lock_on, 0); atomic_store(&smooth_on, 0); atomic_store(&trace_on, 0);
   atomic_store(&orphan_on, 0); atomic_store(&orphan_behind, 0); atomic_store(&orphan_frames, 0); atomic_store(&orphan_refused, 0);
+  atomic_store(&veil_armed, 0); atomic_store(&veil_open, 0); atomic_store(&veil_ticks, 0); atomic_store(&veil_last_kind, 0); atomic_store(&veil_largest, 0);
+  atomic_store(&veil_leaves, 0); atomic_store(&veil_frames, 0); atomic_store(&veil_moved, 0); atomic_store(&veil_behind, 0);
   atomic_store(&lock_frames, 0); atomic_store(&view_frames, 0); atomic_store(&lock_foreign_frames, 0); atomic_store(&lock_missed, 0); atomic_store(&lock_missed_kind, 0); atomic_store(&lock_missed_error, 0);
   atomic_store(&lock_missed_apart, 0);
   atomic_store(&lock_missed_why, 0); atomic_store(&lock_down_frames, 0); atomic_store(&lock_down_refused, 0); atomic_store(&lock_down_kind, 0);

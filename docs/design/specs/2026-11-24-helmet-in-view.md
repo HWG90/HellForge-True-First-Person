@@ -209,3 +209,108 @@ What each reading would ask for, none of it built:
 Read them from "holding the native view through an action" on, not only from "left the native view": the swap
 begins about 0.37 s before the leave, and a body drawn during that hold is a fourth reading the capture cannot rule
 out.
+
+## Round 14: what soak 27 settled, and the veil
+
+### What the log of feel.50 says
+
+One game session (`~/.cache/tfp-soak-27.modlog`, `--logged b70333e`): ten captures from 12:41:45 to 12:42:14
+(`~/.cache/tfp-feel50/`), a Stable soak (seed 15, to 12:56:28) and a Bodycam soak (seed 14). The captures' file times
+are five hours behind the log's.
+
+- 138 leaves of the native view (6 in the captures, 61 in the first soak, 71 in the second). 147 `Head:` lines.
+- **At 137 of them the game switched the body back on, every time the same 31 meshes, 5 of them the head's**, and the
+  module found them on its next tick and switched all 31 off: the `Head:` line of the tick after "left the native view",
+  0.027 to 0.035 s later (one tick; `View:` says 30 frames a second in 1707 of 1728 seconds, so one tick is one frame).
+  The one leave without it (12:45:24.412, "Native camera request or firearm changed") was back in the native view on
+  the next tick.
+- It is every leave, not the first one only: "so far drawn again" counts 146 ticks and 4265 meshes at the end
+  (137 × 31, and 9 ticks of 2 meshes that are not the head's: 8 of them at the start of a hold in the native view).
+- `still` and `left drawn` are 0 on all 147 lines, and `gave back` too. Retail's 0.25 s rule never came into it: a
+  leave changes the camera kind, so the module's next update is inside the 0.25 s of a new state and hides at once.
+- No tick re-showed the body a second time inside one head-camera stretch: after the hide, nothing until the next
+  leave. A grenade is like a swap.
+- The order inside the leave tick: the controller's update asks the game for the native camera's exit ("Owned native
+  camera exit acknowledged"), and head visibility's update, later in the same tick, still finds all 31 hidden. The
+  game switches them on in its own update after the tick (HellForge's `on_game_thread` runs "before the game's
+  update", `hellforge_mod.h`). The frame of that update is drawn with the body; the next tick hides it.
+- Where the eye was in that frame (the `Trace:` row of the leave tick, in the body root's frame): 37 of the 146 upright
+  and behind the root (as far as 0.39 m), which is 0.10 m or more behind the standing head; 2 just in front of the
+  root, inside the head; 60 more than 0.10 m in front of the root (the helmet behind the camera or around it); 40 with
+  the eye lower than 1.5 m (crouched, prone, diving), where the standing head says nothing; 7 without a row.
+
+**Reading 1 holds: one frame at every leave.** The helmet shows in it when the eye the swap holds is behind the head:
+every leave with the LAS-5 Scythe up while standing.
+
+Capture 10 (`10-grenade.png`, the helmet from behind, the rifle at the lower left) is that frame. The grenade key went
+at about 12:42:13.67 ("holding the native view through an action"); the gun left the hands and the view left the native
+view at 14.042; the capture was asked for 0.4 s after the key and its file closed at 14.134; the `Head:` line of 14.076
+found 31 meshes (5 of the head) drawn again and switched them off. The eye of the 14.042 frame was the Scythe's
+(0.003, -0.121, 1.720): 0.22 m behind the head and 0.13 m above it. The four swap captures missed the frame by timing:
+02 was taken while the native view still held (file closed 59 ms after the leave), 03 and 04 well after it (146 and
+148 ms), 05 at the leave of a swap away from the sidearm, whose eye is in front of the head.
+
+### Why the body is not hidden in that frame instead
+
+The mend asked for first is to switch the body off in the frame the game switches it on. The game does it in its update,
+after this mod's tick; between it and the drawing of the frame there is one place this mod runs on the game thread: the
+primary draw (`src/render_slot.c`), where the arm drive writes the rig's joints. Head visibility's writes go through
+the engine's Lua functions (`Unit.set_mesh_visibility` through `src/engine.c`), and `src/engine.h` says of every such
+call: from the game thread "while the engine's own script is not running (HellForge's on_game_thread tick)". Nothing
+proves that of the primary draw; the arm drive there calls native functions and no Lua. Calling the pass-mask setter
+directly (the retired controller did, from the same hook) is not head visibility's checked path. So it is not done.
+Re-applying on every tick does not reach the frame either: the hide already comes on the very next tick.
+
+### The veil (`src/camera_helper.c`, beyond retail)
+
+The frame cannot be kept from having the body in it, so its eye is kept from being behind the head. From the first
+frame of the lock that is not the native view after one that was, until the tick whose head visibility update found the
+body drawn again and switched all of it off (at most two ticks; at once when head visibility stops), a head-camera frame
+of a body on foot whose eye is less than 0.10 m (`TFP_CAMERA_VEIL_CLEAR`) in front of the head node, along the level
+view direction, is handed to the game with the eye moved forward to 0.10 m. Height, side and rotation stay. With the
+Scythe that is 0.32 m forward for one frame, then the swap's held eye again: everything far away moves by a few
+per cent of its size for 33 ms instead of the helmet covering half the screen. Eyes already in front (the Talon's)
+are not moved.
+
+Only the position handed to the game in that frame changes. The eye the swap holds and glides (`eye_delta`, the glide),
+the continuity, the damping and the trace row are the eye's before the veil, so the next frame goes on from them as
+it did; `tests/run-camera-glide.sh` and the other camera scripts pass unchanged. The trace rows therefore show the
+held eye in the veiled frame; the `Head:` line counts what the veil did.
+
+Why it is safe: no engine call is added, nothing is written to any mesh, unit or game memory. The camera helper already
+replaces this argument of the game's camera setter in every frame the lock holds; the veil changes three floats of it
+before the same call, inside the same policy lock. The hook and the tick are both the game thread ("Hook: camera first
+fired on thread 660 ... (the tick is thread 660)"). It needs the lock (no veil in the game's own view), head visibility
+active and owning head rows (armed by the tick), and a finite eye no more than a metre from where it was.
+
+The tick (`src/mod_view.c` `head_note`): after the runtime's update, `tfp_camera_veil_tick` (closes it when the update
+found meshes drawn again and left none drawn) and `tfp_camera_set_veil` (armed while the view is on and the module is
+active and owns rows of the head). Tests: `tests/camera_veil_helper_test.cpp` (`tests/run-camera-veil.sh`, the 53rd
+script) on the fake game memory of `tests/camera_smooth_test.cpp`: not armed, nothing changes; the Scythe's eye moved
+to 0.10 m in front and back to the held eye after the closing tick; a frame before its own tick; no re-show (closed
+after two ticks); an eye in front already; switched off while open; a native frame while open (counted behind); no
+lock, no veil.
+
+### The `Head:` line now ends with the veil's counts
+
+```
+...; view on without hiding on 0 ticks; veil: 3 leaves, 4 frames, eye moved clear on 2, left behind the head on 0
+```
+
+- `leaves`: leaves of the native view the veil opened at; `frames`: frames drawn while it was open (the body drawn
+  until the next tick); `eye moved clear`: of them, frames whose eye it moved.
+- `left behind the head`: frames drawn while it was open whose eye was not proven 0.10 m in front of the head (a native
+  frame, a body off foot, a frame the helper did not present). **It must read 0.** A rise of it is a line by itself.
+
+### What only the game can show
+
+- That a game session's `Head:` lines read `left behind the head on 0` with `leaves` close to the number of
+  "left the native view" lines, and `frames` about one a leave (two where the leave's frame came before its tick).
+- That the helmet is gone from the frame of a leave: the capture script of feel.50 again, the grenade (shot 10) at
+  0.40 s, and swaps away from the Scythe with a burst of captures around the leave (`tools/harness/burst.py`).
+- How the one-frame step forward looks and feels next to the helmet it replaces. If it shows, the distance (0.10 m) is
+  one constant; the head camera's own eye is 0.18 m in front of the head.
+- Whether looking steeply down in that frame shows the chest (the veil only moves the eye forward of the head; the
+  body is drawn below it all the same). The old frame showed the helmet there too.
+- Crouched and prone leaves (40 of 146): the head node is the body's own, so the rule is the same, but no capture
+  has looked at one.
