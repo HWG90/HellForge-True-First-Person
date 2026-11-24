@@ -48,4 +48,7 @@ const char *tfp_wire_editor_toggle(TfpWire *w);
 bool tfp_wire_editor_active(const TfpWire *w);       /* open, opening or closing */
 bool tfp_wire_editor_holds_draft(const TfpWire *w);  /* an edit that is neither saved nor put back */
 const char *tfp_wire_editor_status(const TfpWire *w);
+/* The bound editor, for the motion runtime (src/editor_motion.h): it draws the editor's yaw, pitch and roll.
+ * NULL: none is bound yet. */
+const TfpEditor *tfp_wire_editor_of(const TfpWire *w);
 #endif

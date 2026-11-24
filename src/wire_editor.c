@@ -276,6 +276,7 @@ void tfp_wire_editor_unbind(TfpWire *w) {
 }
 bool tfp_wire_editor_active(const TfpWire *w) { Ed *st = state(w); return st && st->editor && tfp_editor_is_active(st->editor); }
 bool tfp_wire_editor_holds_draft(const TfpWire *w) { Ed *st = state(w); return st && st->editor && tfp_editor_holds_draft(st->editor); }
+const TfpEditor *tfp_wire_editor_of(const TfpWire *w) { Ed *st = state(w); return st ? st->editor : NULL; }
 const char *tfp_wire_editor_status(const TfpWire *w) { Ed *st = state(w); return st && st->editor ? tfp_editor_status(st->editor) : "Placement editor is unavailable"; }
 const char *tfp_wire_editor_toggle(TfpWire *w) {
   Ed *st = state(w);
