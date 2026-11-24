@@ -1,4 +1,4 @@
-# True First Person for HellForge: test build 0.6.0-feel.45
+# True First Person for HellForge: test build 0.6.0-feel.48
 
 For HellForge on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
@@ -45,6 +45,27 @@ keep their values. "View kick when thrown" works in both.
 To get the old behaviour back: tick **Bodycam**. Your slider values are still there.
 
 Tested in the game: ten actions in each style (Stable: no kick at all; Bodycam: 2.4 to 5.8 degrees); I have not played it yet.
+
+## Fixed in 0.6.0-feel.48
+
+- **The view no longer shakes back and forth while standing.** After a swap, a sprint stop or an action the
+  view could shake about 0.2 m forward and back on every frame, for up to three seconds. The game's own
+  unzoom gate flips on alternate frames and moves the first-person rig with it. The mod now holds the rig at
+  its settled distance. This was in every build back to feel.37.
+- If an action landed in the middle of such a shake the view was thrown up to 0.4 m. That is gone too
+  (feel.47).
+- **Checked in the game (2026-11-24, solo mission):** the same 20-minute run of random actions on feel.47 and
+  feel.48. feel.47 had three long shakes; feel.48 had none. No crash.
+- **Not fixed:** single small jumps of the view remain in a jump or vault (up to 0.14 m; 0.17 m in Bodycam),
+  a dive (0.06 to 0.10 m; a backward dive in Bodycam 0.29 m), a weapon swap while sprinting (0.11 m), going
+  prone and using a stim (0.16 m), and just over the limit I test against (0.06 m) in quick swaps and the
+  stratagem menu. They are next.
+- For testing: a file named `depth_steady_off.txt` beside the DLL switches the new hold off.
+
+## Fixed in 0.6.0-feel.46
+
+- When the view was catching up after an action and the body then slowed, the view could carry on at the
+  old speed for a moment. It is now let down gently.
 
 ## Fixed in 0.6.0-feel.45
 
