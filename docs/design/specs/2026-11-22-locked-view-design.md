@@ -2279,7 +2279,7 @@ mouse). The new `Aim:` line says, per aim, whether the editor was open in it.
    build reads the nearest answer, and a file that has only the toggle reads as 1 or 2. `src/fov_lock.h`
    (`tfp_fov_lock_step_aim`; the old call is the first two answers, checked frame for frame), `src/fov_helper.c`
    (`tfp_fov_set_lock_aim`, one value a frame as round 15 has it).
-2. **Sight distance in aim (cm)** (Locked view page; 0 to 30, default 15 since the review, 10 before; 0 is the game's own seat). In full aim the
+2. **Sight distance in aim (cm)** (Locked view page; 0 to 30, default 15 since the review, 10 before, **0 since round 20c**, below; 0 is the game's own seat). In full aim the
    gun is moved toward the eye along node 5's forward axis until the sight the game sets the near clip to is that far
    away (`src/ads_seat.h`): pull = sight - wanted, at most 0.25 m, nothing for a sight already closer or for the
    game's 0.05 (no sight). The root is not moved: the eye stays where the game puts it. The pull follows the hip
@@ -2428,3 +2428,107 @@ What this adds to what only the game can show: how D moves in full aim (on the w
 the unzoom gate flips it there). The pull follows D where D is short of its rest, so a D that jumps about would move
 the gun with it.
 
+## Round 20c (2026-11-24): ship what is safe and what measures (branch `round20c-aim`; offline, not yet in a build)
+
+Two branches answered the two aiming reports and neither passed its third review (review 27,
+`~/.cache/tfp-round20/b-result-2.md` and `b-result-3.md`): `round20-ads-distance` popped the gun 8 to 13 cm out in one
+frame at a zoom change toward the nearer sight (B1), and `round20-zoom-shake` popped the view 37.7 % in one frame at a
+zoom-level change while the gate flips and sharpened a real unzoom at a wall. Both causes rest on game behaviour no log
+has: the Hyena, a scope at 50 or 100 m, the unzoom gate in full aim. The decision: stop guessing, ship what is safe and
+what measures, then fix from game data. `round20c-aim` is cut from main (3664712) with:
+
+| What | From | State in round 20c |
+| --- | --- | --- |
+| Aim field of view (the game's zoom / your locked view / a chosen value, `fov_aim` rounded) | ads-distance (merged as reviewed) | on; default the game's zoom, as feel.51 |
+| Placement editor in full aim: opens on ADS, live preview, save, cancel | ads-distance | on |
+| Sight distance in aim (`ads_sight_cm`) | ads-distance, with B1 fixed here | **default 0: off, the game's own seat** |
+| Zoom-shake logging: gate frames and changes, the optic's lens target and magnification, lens, the game's value, shown value, largest magnification change between frames, the factor (game value over lens), the rig's depth | zoom-shake (copied) | on, in the one `Aim:` line |
+| Field of view held at the optic's own zoom while the gate flips (`tfp_aim_lens_goal`) | zoom-shake | **behind `zoom_steady.txt`, off** |
+| Held depth at full strength in full aim, and the carry through passed frames (`tfp_steady_aim`, `tfp_steady_carry`) | zoom-shake | **behind `zoom_steady.txt`, off** |
+| One `Aim:` line | both (union) | on |
+
+With neither the file nor a sight distance set, full aim draws exactly what main draws: the pull is 0 (wanted 0), the
+field of view's goal is the game's value (`steady` false in `lock_field`; the lens goal's ease is held at nothing so
+switching it on begins from nothing), and the held depth is weighted by the hip share as in round 9
+(`in.share = p->weight`, no carry). What runs in addition is counting only: the pose helper hands each frame's lens to
+the field-of-view helper (`host.note_lens`), which counts it in full aim. Both retail comparisons (`diff-fov`,
+`diff-pose`) pass: counting is off until the binder calls `tfp_fov_set_aim_watch(true, …)`, and no clock is read for it
+without the lock or a frame of full aim.
+
+### The sight distance's pull, B1 fixed (src/ads_seat.h)
+
+- **The pull goes down no faster than the game's depth comes in** (`tfp_ads_pull_frame`). While the pull is shown (ADS
+  share above 0) it may fall in a frame by at most what the depth the gun is drawn at fell since the last frame: the
+  gun the game brings toward the eye, the pull gives back as much, and the sight stays where it was. The limit
+  (`tfp_ads_pull_most`) still takes the near clip the frame it changes; only how fast the pull follows it is bounded.
+  With no depth worked out it glides (80 ms), never at once. The player asking for a farther sight in the menu is no
+  move of the game's: that glides too. Going up, and at the hip, it is as before.
+- **The aim's sight/depth pair is kept** for the aim (`tfp_ads_sight_least`). A new pair 50 ms after a zoom change
+  said the same where the sight goes with the depth; where the game changes its near clip and not its depth it moved
+  the limit by the whole difference in one frame, and toward the farther level pulled the gun 13 cm in front of a
+  sight that had not moved (the new test below caught it: the near clip cut 130 mm).
+- **I1 (the clash with the held depth):** the pull's depth is the one the gun is drawn at, the game's plus what the
+  held depth added (`ads_frame_depth += held_delta` in `position_locked`). With `zoom_steady.txt` absent nothing is
+  added in full aim and the two are the same, so the clash is moot by default; with it, the pull follows the held depth
+  and a gate flip does not move it (`wire-pose`: 12.8 to 14.1 cm of pull movement with the guard removed, none with it).
+- **Tests:** `ads_zoom_frames` now checks the sight's largest step in a frame against the game's own (feel.51, nothing
+  wanted) in both zoom directions, at 10 and 15 cm, reseats over 0 to 250 ms, 60/116/144 fps, near setter before and
+  after (the old code fails it: 8.42 cm against the game's 3.85 at 80 ms, 60 fps). A new case has the game change its
+  near clip with its depth standing still: the gun must not move either way, nor the near clip cut. `ads-seat` has the
+  arithmetic of each rule.
+
+### Zoom-shake behind the switch (src/fov_lock.h, src/fov_helper.c, src/depth_steady.h, src/pose_helper.c)
+
+The branch's code is copied whole; what changed is when it acts. `zoom_steady.txt` beside the DLL, read once at the
+start (`src/mod_view.c`, a `Test:` line when present), calls `tfp_pose_set_aim_steady(true)` and
+`tfp_fov_set_aim_watch(true, true)`. Review 27's finding 3 is fixed (the carry checks `in->on`: never carried with the
+switch off or the root's stop). Findings 1 and 2 (the 37.7 % pop at a zoom-level change while the gate flips; the
+sharper unzoom at a wall) are **not** fixed: they are behind the switch, and whether they matter depends on whether the
+gate flips in full aim at all. The tests that pin the corrections run with the switch set (`fov-lock-helper` parts 10
+and 11, `wire-pose`'s scaled-frame carry); new ones pin the switch off (`fov-lock-helper` part 12: the game's value
+through the lock's glide, the pulse there, nothing corrected, every count made; `wire-pose`: the scaled frame is the
+game's own). `aim-zoom` and `fov-lock` test the arithmetic, which does not depend on the switch.
+
+### The one `Aim:` line (src/aim_log.h)
+
+Written by `ads_seat_tick` (`src/mod_view.c`) from the sample of the tick and the frames since the line before: the
+field-of-view helper's counts, taken every tick, and the rig's depth in full aim from each `Steady:` second. Kinds:
+`in` (the aim settled, 300 ms), `changed` (zoom level, sight, editor, ADS placement or option changed and settled),
+`second` (once a second while aiming), `out` (the end). Under 700 characters (`say()`); the test's longest is 627.
+
+```
+Aim: in: "LAS-5 Scythe"; fov 61.5 shown 61.5 (Aim field of view: the game's zoom); sight 0.173 m (near clip), wanted 0.000: pull 0.000, closer 0.000 (ADS fwd +0.000), near clip 0.173 m; depth 0.210 m; editor closed | 18 frames: gate set 0 of 18 noted, changed 0 times; optic target 60.00-60.00 deg (x1.50-x1.50 of 90.0); lens 60.00-61.20; game 61.50-62.70, shown 61.50-62.70 (corrected 0); step 0.410 %; game/lens x1.0272-x1.0272 (18); rig depth 0.2102-0.2400 m (18), step 0.0030 m
+Aim: second: ... | 116 frames: gate set 58 of 116 noted, changed 114 times; optic target 7.50-7.50 deg (x12.00-x12.00 of 90.0); ...
+Aim: out after 16.2 s; zoom levels (game fov: sight m, depth m, optic): 30.8: sight 0.220, depth 0.270, optic 30.00 deg x3.00; 15.6: sight 0.350, depth 0.400, optic 15.00 deg x6.00 | ...
+```
+
+(Made up, from the tests' numbers.) Before the `|`: the sample now (the game's field of view and the one shown, the
+option, the game's sight distance as its near clip, the wanted distance, the pull and how much closer the gun is drawn,
+the ADS placement's forward, the near clip handed on, the game's depth, the editor). After it: the frames since the
+line before. "gate set N of M noted, changed K times": in how many frames the unzoom gate was set while aiming, and how
+often it changed. "optic target": the optic's own lens target (the gate clear) and its magnification of the
+third-person field of view: the zoom level. "game/lens": the hooked value over the evaluator's lens, in the tangent.
+"corrected": frames the zoom-shake goal was shown (0 without the file). "step": the largest change of magnification
+between two frames shown. "rig depth": the depth along the view in full aim, the game's plus what was held, and its
+largest frame step.
+
+### What the game run must show (docs/guides/AIM-TEST.md has the steps)
+
+1. **Does the gate flip in full aim?** `gate set` above 0 with `changed` many times in a `second` line taken standing
+   in the open says yes; 0 at every zoom level says the shake is something else, and the zoom-shake corrections are
+   not the answer. At a ledge or wall, a long set stretch is the game's own unzoom (expected).
+2. **The optic's zoom levels:** the `out` line's levels, each with its field of view, the optic's magnification, the
+   game's sight distance (near clip) and depth. That is the data the sight distance's pull rests on: whether the near
+   clip changes with the level, and whether the depth moves with it (and how fast: `second` lines during a change).
+3. **Does the hooked value lag the lens?** `game/lens` one value (to 4 places) while the lens moves (aim-in, a zoom
+   change) says no; a spread that comes with gate changes says it lags a frame.
+4. **The sight distance at 15 cm:** the gun closer at every zoom level, no jump at a zoom change, nothing cut.
+   `closer` 0.15 m less than `sight` per level.
+5. **The editor in aim:** `editor open on "ads"` while aiming, the sight moving with the drag, the aim kept.
+6. **With `zoom_steady.txt`:** `corrected` above 0 only while the gate flips, `step` under the run without the file
+   at the same level, and whether the view looks steadier, or pops at a zoom change.
+
+What decides the next round: if the gate never flips in full aim, the zoom-shake corrections are dropped and the shake
+is looked for elsewhere (the `step` with the gate clear, the lock's glide). If it does, the corrections are fixed for
+review 27's two findings against the logged pattern. The sight distance's default is chosen from the per-level sight
+and depth.

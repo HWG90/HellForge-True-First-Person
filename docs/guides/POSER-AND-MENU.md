@@ -88,7 +88,7 @@ Defaults are the store's defaults (retail's, and the locked view's); on a first 
 | Locked view | Field of view (degrees) | slider | 50 to 120, step 1 | 80 | locked_view.json fov_degrees |
 | Locked view | Aim field of view | choice | The game's zoom / Your locked view / A chosen value | The game's zoom | locked_view.json fov_aim (1, 2, 3); fov_zoom_when_aiming is kept in step for older builds |
 | Locked view | Aim field of view (degrees) | slider | 20 to 90, step 1 | 50 | locked_view.json fov_aim_degrees; greyed unless A chosen value |
-| Locked view | Sight distance in aim (cm) | slider | 0 to 30, step 1 | 15 | locked_view.json ads_sight_cm; 0 is the game's own seat |
+| Locked view | Sight distance in aim (cm) | slider | 0 to 30, step 1 | 0 | locked_view.json ads_sight_cm; 0 (the default since round 20c) is the game's own seat, as feel.51 |
 | Locked view | Camera style | choice | Stable / Bodycam | Stable | locked_view.json bodycam |
 | Locked view | View kick strength (%) | slider | 0 to 100, step 5 | 35 | locked_view.json kick_strength |
 | Locked view | View kick limit (degrees) | slider | 0 to 20, step 1 | 8 | locked_view.json kick_max_degrees |
@@ -160,11 +160,24 @@ Retail's editor (`src/first_person/placement_editor.lua`) translated to C and co
 **What it edits:** the placement of weapon and arms for the weapon in your hands and one action at a time.
 
 **In full aim (round 20):** opened while aiming, the editor begins on the ADS action and the log says so. What you drag
-and scroll then moves what full aim draws, live: the ADS placement, on top of the Sight distance in aim (the wheel
-moves the sight toward you or away). Saving keeps it for this weapon's ADS action. Before round 20 the editor opened on
-idle and its preview went to the hip placement, which full aim does not draw, so nothing moved while aiming. Whether
-the game keeps the aim while the editor has the cursor is not yet known; the `Aim:` line says whether the editor was
-open in an aim. See `docs/design/specs/2026-11-22-locked-view-design.md` "Round 20".
+and scroll then moves what full aim draws, live: the ADS placement, on top of the Sight distance in aim if one is set
+(the wheel moves the sight toward you or away). Saving keeps it for this weapon's ADS action; cancel puts the saved
+one back at once; the hip placement is left alone. Before round 20 the editor opened on idle and its preview went to
+the hip placement, which full aim does not draw, so nothing moved while aiming. Whether the game keeps the aim while
+the editor has the cursor is not yet known; the `Aim:` line says whether the editor was open in an aim
+(`editor open on "ads"`). See `docs/design/specs/2026-11-22-locked-view-design.md` "Round 20" and "Round 20c", and
+`docs/guides/AIM-TEST.md` for the game run that is to settle it.
+
+**Sight distance in aim (round 20c):** 0 by default, which is the game's own seat (feel.51). Set it (10 to 15 cm is
+the range tried offline) and full aim pulls the gun toward the eye until the sight the game sets the near clip to is
+that far away; the near clip moves in with it. At a zoom-level change the pull gives way only as fast as the game's
+own depth moves, so the gun does not jump. How the game moves its sight between zoom levels has not been logged yet,
+which is why it is off.
+
+**Test file `zoom_steady.txt` (round 20c):** beside the DLL, read at the start. It switches on the zoom-shake
+corrections in full aim: the rig's depth held at full strength, and with Aim field of view "The game's zoom" and the
+lock on, the field of view held at the optic's own zoom while the unzoom gate flips. Without it full aim is feel.51's.
+A `Test:` line says when it is on. The `Aim:` line is the same either way.
 
 | Input | Effect |
 |---|---|
