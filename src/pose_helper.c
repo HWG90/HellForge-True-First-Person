@@ -776,17 +776,22 @@ static float depth_delta(Policy *p, const DepthObservation *observation, uint64_
 /* Not in retail: the rig's depth held steady against the game's unzoom gate (src/depth_steady.h,
  * docs/design/specs/2026-11-23-gate-flip.md "Round 9"). Under the policy lock. steady_mode: 0 the helper as retail has
  * it (none of this is reached); 1 on; 2 switched off (depth_steady_off.txt): the game's depth is still worked out and
- * counted for the "Steady:" line, nothing is added.
+ * counted for the "Steady:" line, nothing is added. steady_pair: whether the root has followed node 5 in this lease.
  * One frame of the rig's node 5. It reads what the zoom depth term reads and no more: the lens locals the position
  * getter took in this same evaluation and the request's state again (one guarded read), with the term's own proofs
  * that both belong to this call. True: `*delta` is to go out in place of the term's own number (it can be nothing).
  * `argument` is the game's own forward value for the node, for the line only. */
-static TfpSteady steady; static TfpSteadyLog steady_log;
+static TfpSteady steady; static TfpSteadyLog steady_log; static TfpSteadyPair steady_pair;
 static _Atomic uint32_t steady_mode;
 static bool steady_frame(Policy *p, const DepthObservation *observation, uint64_t native_stack, uint64_t now, uint32_t mode, float argument, float *delta) {
   const uint64_t generation = atomic_load_explicit(&active_generation, memory_order_relaxed);
-  uint8_t request[0x24] = {0}; float depth = 0, held = 0; uint32_t reason = TFP_STEADY_NO_LENS; bool bit = false;
+  uint8_t request[0x24] = {0}; float depth = 0, held = 0; uint32_t reason = TFP_STEADY_NO_LENS; bool bit = false, stopped_now = false;
   *delta = 0;
+  /* The root's half is a second call with proofs of its own (carrier_position_locked). Where node 5 was moved in
+   * TFP_STEADY_ALONE frames running and the root's half was not done, nothing more is held in this lease: the game's
+   * depth is still worked out and counted, as with the switch. */
+  const bool stopped = tfp_steady_pair_frame(&steady_pair, generation, &stopped_now);
+  if (stopped_now) tfp_steady_stopped(&steady_log, generation);
   if (observation->ready && observation->native_stack == native_stack && observation->request == p->c.request && observation->generation == generation
       && observation->thread == host.thread(host.user) && read(p->c.request + L_REQUEST_STATE, request, sizeof request)
       && !memcmp(request, observation->request_state, 8) && !memcmp(request + 0xC, observation->request_state + 0xC, sizeof request - 0xC)
@@ -796,7 +801,7 @@ static bool steady_frame(Policy *p, const DepthObservation *observation, uint64_
     in.current = field_f32(request, 0x10); in.previous = field_f32(request, 0x1C);
     in.bit = observation->frame[0] != 0; in.blend = request[0xD]; in.ability = request[0xF];
     in.mix_before = field_f32(observation->request_state, 8); in.mix_after = field_f32(request, 8);
-    in.share = p->weight; in.on = mode == 1;
+    in.share = p->weight; in.on = mode == 1 && !stopped;
     /* Where to rest: the selected optic's own distance, or the mod's reference for it where the zoom depth term has
      * one for exactly these distances (then the two agree at rest, and the term's blend over the lens is left out). */
     in.settled = in.current;
@@ -805,6 +810,7 @@ static bool steady_frame(Policy *p, const DepthObservation *observation, uint64_
     if (!p->zoom_policy_active && !atomic_load_explicit(&depth_off, memory_order_relaxed) && s->valid && s->signature_set
         && !memcmp(signature, s->signature, sizeof signature)) in.settled = s->current_reference;
     reason = tfp_steady_frame(&steady, &in, generation, (double)now, delta, &depth, &held);
+    if (reason == TFP_STEADY_OFF && mode == 1) reason = TFP_STEADY_NO_ROOT;
     bit = in.bit;
   }
   steady_log.now.lease = generation;
@@ -1294,7 +1300,7 @@ static void carrier_position_locked(uint64_t caller, uint32_t unit, uint32_t nod
   if (!finite_pose(shifted)) { forward_position(unit, node, pose); return; }
   memcpy(policy.carrier_baseline, source + 4, 16); memcpy(policy.carrier_written, shifted, 12);
   policy.carrier_poses = poses; policy.carrier_shifted = memcmp(shifted, source + 4, 12) != 0;
-  if (pending.steady) tfp_steady_root(&steady_log); /* the root's half is done, to the float (a shift node 5's float took can be under the root's) */
+  if (pending.steady) { tfp_steady_root(&steady_log); tfp_steady_pair_root(&steady_pair); } /* the root's half is done, to the float (a shift node 5's float took can be under the root's) */
   if (policy.carrier_shifted) forward_position(unit, node, shifted); else forward_position(unit, node, pose);
 }
 /* cpp:957-1011 */
@@ -1433,7 +1439,7 @@ static void position_locked(uint32_t unit, uint32_t node, const float *pose, uin
   memcpy(policy.baseline, native, 16);
   if (applied_depth != 0) { policy.carrier.observation = observation; policy.carrier.delta = applied_depth; policy.carrier.steady = steadied; policy.carrier.ready = true; }
   /* Counted where node 5's float took something of the held depth: the same frames the root's half is asked for. */
-  if (applied_depth != 0 && steadied) tfp_steady_moved(&steady_log, applied_depth);
+  if (applied_depth != 0 && steadied) { tfp_steady_moved(&steady_log, applied_depth); tfp_steady_pair_moved(&steady_pair); }
   policy.rig_shifted = memcmp(shifted, native, 16) != 0;
   if (!policy.entry_position_seen && !policy.full_ads && policy.weight == 1) {
     policy.entry_position_seen = true; entry_position_remember(policy.c.viewmodel, policy.c.weapon, shifted);
@@ -2114,7 +2120,7 @@ void tfp_pose_reset_for_tests(void) {
   atomic_store(&entry_position_enabled, 1);
   atomic_store(&hold_mode, 0); atomic_store(&hold_probe, 0); atomic_store(&hold_node5_calls, 0);
   memset(&gate, 0, sizeof gate); atomic_store(&gate_reads, 0); atomic_store(&depth_off, 0);
-  memset(&steady, 0, sizeof steady); memset(&steady_log, 0, sizeof steady_log); atomic_store(&steady_mode, 0);
+  memset(&steady, 0, sizeof steady); memset(&steady_log, 0, sizeof steady_log); memset(&steady_pair, 0, sizeof steady_pair); atomic_store(&steady_mode, 0);
 }
 /* Not in retail (pose_helper.h). */
 uint32_t tfp_pose_set_hold(uint32_t on) {

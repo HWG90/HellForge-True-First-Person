@@ -828,6 +828,40 @@ static int real(void) {
     tfp_steady_line(&held, line, sizeof line);
     CHECK(strstr(line, "Steady: 6 frames of the rig, the game's depth worked out in 6: ") && strstr(line, "nothing held; the rig moved to it in 0 frames, its root with it in 0; ")
           && strstr(line, "passed in 6 (depth_steady_off.txt 6); depth_steady_off.txt: nothing is held"));
+    /* node 5 never keeps moving without its root. The evaluator's root write not coming (depth_frame is the node 5
+     * half alone): once is borne, twice running stops the held depth for the lease */
+    CHECK(tfp_pose_set_depth_steady(1) == 1);
+    pose_world_gate(0, 0);
+    for (int i = 0; i < 60; i++) root_frame(16);
+    CHECK(applied_is(.11, .02 + (double)depth, -.12) && tfp_pose_steady_take(&held) == 1 && held.stops == 0);
+    {
+      const double added = (double)current + (double)depth - (double)gated_depth; /* what the hold adds on a gated frame; the zoom depth term adds nothing on one */
+      pose_world_gate(1, 0);
+      depth_frame(16);
+      CHECK(applied_is(.11, .02 + added, -.12));                                       /* alone, once */
+      root_frame(16);
+      CHECK(applied_is(.11, .02 + added, -.12) && near(root_forwarded[1], -added, 2e-6)); /* followed again */
+      depth_frame(16);
+      CHECK(applied_is(.11, .02 + added, -.12));
+      depth_frame(16);
+      CHECK(applied_is(.11, .02 + added, -.12));                                       /* alone, twice running */
+      depth_frame(16);
+      CHECK(applied_is(.11, .02, -.12));                                               /* stopped: node 5 is left where the game put it */
+      root_frame(16);
+      CHECK(applied_is(.11, .02, -.12) && root_forwarded[1] == 0);                     /* a root that comes now starts nothing */
+      CHECK(tfp_pose_steady_take(&held) == 1 && held.frames == 6 && held.worked == 6 && held.shifted == 4 && held.roots == 1);
+      CHECK(held.stops == 1 && held.stop_lease == 1 && held.passed[TFP_STEADY_NO_ROOT] == 2 && tfp_steady_passed(&held) == 2 && tfp_steady_worth(&held));
+      CHECK(tfp_steady_stop_line(&held, line, sizeof line) && strstr(line, "Steady: stopped for lease 1: the rig was moved in 2 frames running and its root did not follow"));
+      tfp_steady_line(&held, line, sizeof line);
+      CHECK(strstr(line, "the rig moved to it in 4 frames, its root with it in 1, by ") && strstr(line, "passed in 2 (the root did not follow 2)"));
+      for (int i = 0; i < 6; i++) { /* for the rest of the lease: as with the switch, the zoom depth term on and off with the gate */
+        pose_world_gate(i % 2 == 0, 0);
+        root_frame(16);
+        CHECK(i % 2 == 0 ? applied_is(.11, .02, -.12) : applied_is(.11, .02 + (double)depth, -.12));
+      }
+      CHECK(tfp_pose_steady_take(&held) == 1 && held.frames == 6 && held.shifted == 0 && held.stops == 0 && held.passed[TFP_STEADY_NO_ROOT] == 6);
+      CHECK(tfp_steady_worth(&held) && !tfp_steady_stop_line(&held, line, sizeof line)); /* the game's depth still moves and is still counted; the stop is said once */
+    }
     CHECK(tfp_pose_set_depth_steady(0) == 1);
     pose_world_gate(0, 0);
     depth_frame(16);
@@ -870,6 +904,46 @@ static int real(void) {
   CHECK(H->finish(H->user, handle, &has_stats, &stats, &why) == TFP_OPS_TRUE);
   for (int i = 0; i < 5; i++) CHECK(slot_now(i) == world.native[i]);
   CHECK(lock_faults == 0 && input_only_calls == 0);
+
+  /* ---- the held depth in later leases: a new lease begins it again after the stop above; and with one of the zoom
+   * depth's code pins not this build's, the evaluator's locals are not read as a lens at all ---- */
+  for (int pinned = 1; pinned >= 1; pinned--) {
+    TfpSteadySecond held;
+    char line[640];
+    pose_world_depth_pin(pinned);
+    pose_world_third_person();
+    CHECK(H->prepare(H->user, &c, &native, &why) == TFP_OPS_TRUE && H->begin(H->user, &c, native, &handle, &why) == TFP_OPS_TRUE);
+    pose_world_first_person();
+    CHECK(tfp_pose_set_depth_steady(1) == 1 && tfp_pose_steady_take(&held) == 1);
+    game_frame(handle, &stats, 300);
+    pose_world_optic();
+    for (int i = 0; i < 61; i++) root_frame(16);
+    const double rest = (double)forwarded[1] - (double)NATIVE[1]; /* at rest: the mod's reference for the optic, where the code is pinned */
+    CHECK(near(forwarded[0] - NATIVE[0], .15, 2e-6) && near(forwarded[2] - NATIVE[2], -.12, 2e-6) && (pinned ? fabs(rest) > .01 && fabs(rest) < 1 : rest == 0));
+    for (int i = 0; i < 6; i++) {
+      pose_world_gate(i % 2 == 0, 0);
+      root_frame(16);
+      const double now_added = (double)forwarded[1] - (double)NATIVE[1];
+      if (pinned) CHECK(i % 2 == 0 ? now_added > rest + .01 && near(root_forwarded[1], -now_added, 2e-6) : near(now_added, rest, 2e-6)); /* held: more on a gated frame, by what the game took */
+      else CHECK(now_added == 0 && root_forwarded[1] == 0);                                                                              /* nothing, on node 5 or the root */
+    }
+    CHECK(tfp_pose_steady_take(&held) == 1 && held.frames == 68 && held.stops == 0 && held.passed[TFP_STEADY_NO_ROOT] == 0);
+    if (pinned) CHECK(held.worked == 67 && held.shifted >= 65 && held.roots == held.shifted && held.passed[TFP_STEADY_NO_CODE] == 0);
+    else {
+      CHECK(held.worked == 0 && held.shifted == 0 && held.roots == 0 && held.passed[TFP_STEADY_NO_CODE] == 68 && tfp_steady_passed(&held) == 68 && tfp_steady_worth(&held));
+      tfp_steady_line(&held, line, sizeof line);
+      CHECK(strstr(line, "Steady: 68 frames of the rig, the game's depth worked out in 0: ") && strstr(line, "passed in 68 (the evaluator's code is not the pinned one 68)"));
+    }
+    pose_world_gate(0, 0);
+    CHECK(tfp_pose_set_depth_steady(0) == 1);
+    CHECK(H->finish(H->user, handle, &has_stats, &stats, &why) == TFP_OPS_TRUE);
+  }
+  pose_world_depth_pin(1);
+  pose_world_third_person();
+  {
+    TfpGateSecond g;
+    tfp_pose_gate_take(&g);
+  }
 
   /* ---- the action hold (not in retail). Off: the first frame of an action ends the placement, as retail ---- */
   TfpPoseHoldProbe probe;
