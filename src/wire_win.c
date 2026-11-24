@@ -302,6 +302,9 @@ static __declspec(noinline) void native_raw(TfpOpsNative which, uint64_t address
     case TFP_OPS_BODY_EXISTS: *result = (uint64_t)((int (*)(uint32_t, uint32_t))f)((uint32_t)a[0], (uint32_t)a[1]); break;
     case TFP_OPS_BODY_TRIGGER: ((void (*)(uint32_t, uint32_t))f)((uint32_t)a[0], (uint32_t)a[1]); break;
     case TFP_OPS_DETACH: ((void (*)(void *, uint32_t))f)((void *)(uintptr_t)a[0], (uint32_t)a[1]); break;
+    case TFP_OPS_EFFECT_STOP: /* round 22: filter, replicate and flag are always 0, as game+0x88c683..0x88c696 pass them */
+      ((void (*)(void *, uint32_t, uint32_t, uint32_t, uint32_t, uint8_t))f)((void *)(uintptr_t)a[0], (uint32_t)a[1], (uint32_t)a[2], 0, 0, 0);
+      break;
     default: break;
   }
 }

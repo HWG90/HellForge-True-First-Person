@@ -143,4 +143,64 @@ The mod reads each of these from the running game.dll before its first call, and
 | settings_type | 0x50f4b0 | `4885c9744c488b05dccaf502448bc14183e0014533c94c8b90082df1000f1f00418bc048c1e0044903c2488b10483bd174224885d2741a418bc0418d50014533c041ffc183f801440f45c24183f90272cf33c0c34885c074f88b40084869c878020000498d42204803c1c3` | the type table `[[game+0x346bf98]+0xf12d08]`, two buckets, rows +0x20, stride 0x278 |
 
 The plan named 0x8abb20, 0x88c637 and 0x88c824; 0x88c824 lies inside `mode_cache`. Each byte string above was cut from the
-image with `d[rva:rva+n].hex()`.
+image with `d[rva:rva+n].hex()`. The module checks three more:
+- `playing_scan` at 0x8abfda (the query's slot scan: resource +0x38, stride 0x50, 32 slots, runtime `[E+0x48] + row*0x218`);
+- `resource` at 0x4fc3a0 and `resource_rows` at 0x4fc419. These are the effect resource lookup: `[[game+0x346bf98]+0xf127b8]`,
+  0x560 buckets of `{u64 type, u32 index}` probed from `type % 0x560`, with resources at `+0x5600 + index*0xf48`.
+
+The module reads what is playing from memory, as 0x8abf40 does, so it needs these three as well. It never calls 0x8abf40.
+
+## 5. What the mod does (src/warp_glow.c, src/wire_warp.c)
+
+Every tick on the game thread, after head visibility's update (src/mod_view.c `warp_note`):
+
+1. **Take a player snapshot and read the backpack** (`tfp_ops_backpack`).
+2. **If the pack's type** (descriptor +0) is B49756795D9B0E68, read:
+   - its displacement row in M, which must hold the same entity and the same type;
+   - the settings and the mode table;
+   - bit 48, the ADS cache byte, the cached mode word and the charge;
+   - which ids of the table are playing. This is read from memory the way 0x8abf40 answers: the first slot of the pack's
+     effect resource with that id, and that slot's runtime id is nonzero.
+
+   The `Warp:` line says all of this on every change and once a second. A second line gives the mode table when it is
+   first read or changes.
+3. **The stops.** All of these must hold:
+   - `warp_hide.txt` is present;
+   - every fingerprint matches;
+   - TFP owns the view: it is switched on and head visibility is active;
+   - bit 48 is clear;
+   - the effect manager holds the pack.
+
+   Then, for each id of the three stop lists that plays, call `game+0x8abb20(E, pack, id, 0, 0, 0)` (`TFP_OPS_EFFECT_STOP`,
+   SEH-guarded in src/wire_win.c). This is the same set and the same arguments as the game's full-ADS loop at 0x88c64d.
+
+   This repeats in every tick in which one of them plays. That covers the three cases where the game plays them again: a
+   mode change (0x88c824), a bit-48 falling edge (`r12b = 1` at 0x88c6f8) and a re-entry of the view.
+4. **The restore.** It runs once stops have been sent for a pack and then one of these happens:
+   - the view leaves TFP;
+   - the switch is off;
+   - the backpack is no longer that Warp Pack (dropped or changed);
+   - the mod is taken out live.
+
+   It finds the same pack again: M is unchanged, the map gives the same row, the descriptor and type are the same. It then
+   writes 0xffffffff to the cached mode word through HellForge's write. The game's next update (in the same frame, since
+   HellForge ticks first) sees a different mode and plays the current one. If the manager no longer holds the pack, nothing
+   is written and nothing is owed.
+5. **Never touched:** bit 48 and the ADS cache byte are never written. While bit 48 is set, nothing is called: the game
+   does the stops itself in full ADS.
+
+`tests/run-warp-glow.sh` runs the module on mocked memory laid out as above, with a stop that zeroes the runtime id as
+0x8abb20 does. It checks:
+- the stops on entry, on a mode change, on an aim release and on a re-entry;
+- the restore on exit, on a drop, when the switch goes and at the mod's stop;
+- that nothing runs without the Warp Pack, without a backpack read, with a fingerprint that differs, with code that cannot
+  be read, or with a pack the effect manager does not hold;
+- that a stop which raises is refused;
+- a 4000-tick random run, after which every write is the mode word's 0xffffffff and bit 48 never changed.
+
+**Not covered**, as in native ADS:
+- one-shot warp effects outside the 3 x 5 table;
+- the second path (`0x88be00`, row +0x2c/+0x30).
+
+If the glow stays while the `Warp:` line says nothing of the table plays, the effect is not in the table. The fallback is
+the rig's `World.link_particles` hook, filtered on the pack's unit; this round does not build it.

@@ -117,7 +117,11 @@ typedef enum TfpOpsNative {
   TFP_OPS_PRESENTATION,  /* void (*)(void *avatar_owner, uint32_t avatar, uint8_t, uint8_t)   */
   TFP_OPS_BODY_EXISTS,   /* int (*)(uint32_t body, uint32_t event)                            */
   TFP_OPS_BODY_TRIGGER,  /* void (*)(uint32_t body, uint32_t event)                           */
-  TFP_OPS_DETACH         /* void (*)(void *world, uint32_t camera_unit)                       */
+  TFP_OPS_DETACH,        /* void (*)(void *world, uint32_t camera_unit)                       */
+  /* Beyond retail (round 22, src/warp_glow.c): game+0x8abb20, the effect manager's stop, as the displacement updater
+   * calls it (game+0x88c69e): void (*)(void *effects, uint32_t entity, uint32_t event, uint32_t filter, uint32_t
+   * replicate, uint8_t flag); the host passes args[0..2] and 0, 0, 0 for the last three (no network message). */
+  TFP_OPS_EFFECT_STOP
 } TfpOpsNative;
 typedef struct TfpOpsRegion { bool answered; uint32_t state, kind, protect; uint64_t allocation; } TfpOpsRegion; /* VirtualQuery */
 typedef enum TfpOpsForeign { TFP_OPS_FOREIGN_FALSE, TFP_OPS_FOREIGN_TRUE, TFP_OPS_FOREIGN_OTHER, TFP_OPS_FOREIGN_RAISED } TfpOpsForeign;

@@ -165,10 +165,15 @@ static bool host_write(void *u, uint64_t address, const void *bytes, size_t n) {
   memcpy(p, bytes, n);
   return true;
 }
+static bool stop_raises;
 static bool host_call(void *u, TfpOpsNative which, uint64_t address, const uint64_t args[4], uint64_t *result, TfpOpsText *raised) {
-  (void)u; (void)raised; calls++;
+  (void)u; calls++;
   if (called_count < 256) called[called_count++] = (Call){(int)which, address, args[0], args[1], args[2]};
   if (result) *result = 0;
+  if (stop_raises) { raised->present = true; snprintf(raised->text, sizeof raised->text, "Native call faulted"); return false; }
+  /* game+0x8abb20: zero the runtime id of each slot of the pack's resource with that event */
+  if (which == TFP_OPS_EFFECT_STOP && address == GAME + TFP_WARP_F_STOP && args[0] == E && args[1] == PACK)
+    for (int s = 0; s < 6; s++) if (SLOT_EVENTS[s] == (uint32_t)args[2]) put32(E_RUNTIME + EIDX * 0x218 + s * 4, 0);
   return true;
 }
 static TfpOpsHost host;
@@ -232,10 +237,159 @@ static void test_log(void) {
   CHECK(writes == 0 && calls == 0);
 }
 
+static bool only_mode_word_written(void) {
+  for (int i = 0; i < written_count; i++) if (written[i].at != MODE_WORD || written[i].size != 4 || written[i].value != 0xffffffff) return false;
+  return true;
+}
+static bool stops_are(const uint32_t *ids, int n) {
+  if (called_count != n) { printf("  %d calls, wanted %d\n", called_count, n); return false; }
+  for (int i = 0; i < n; i++)
+    if (called[i].which != TFP_OPS_EFFECT_STOP || called[i].address != GAME + 0x8abb20 || called[i].a0 != E || called[i].a1 != PACK || called[i].a2 != ids[i]) {
+      printf("  call %d: which %d at %#llx (%#llx, %llu, %08llx)\n", i, called[i].which, (unsigned long long)called[i].address,
+             (unsigned long long)called[i].a0, (unsigned long long)called[i].a1, (unsigned long long)called[i].a2);
+      return false;
+    }
+  return true;
+}
+static void test_stops(void) {
+  TfpWarp w; tfp_warp_init(&w);
+  fixture();
+  writes = calls = 0;
+  /* Switch off: the line says what plays, nothing is stopped or written however long it runs. */
+  TfpWarpIn in = in_pack(true, false, 100);
+  for (int i = 0; i < 5; i++) { in.now += .02; tfp_warp_tick(&w, &host, &in, text, sizeof text); }
+  CHECK(calls == 0 && writes == 0 && w.did == TFP_WARP_WATCHING);
+  /* Switch on, view not TFP's: nothing. */
+  in = in_pack(false, true, 101);
+  CHECK(tfp_warp_tick(&w, &host, &in, text, sizeof text) && has("did: not owned") && calls == 0);
+  /* Entry: the view becomes TFP's. Mode 1 plays its two events; both are in the stop lists: two stops, the game's
+   * arguments, and the line says so. */
+  in = in_pack(true, true, 102);
+  CHECK(tfp_warp_tick(&w, &host, &in, text, sizeof text));
+  { const uint32_t want[] = {0x11110001, 0x11110002}; CHECK(stops_are(want, 2)); }
+  CHECK(has("view owned, switch on; did: stopped 2 [11110001 11110002]; so far 2 stops on 1 ticks, 0 restores") && w.owed);
+  /* The next tick: nothing plays, nothing is called. */
+  called_count = 0; in.now = 102.02;
+  CHECK(tfp_warp_tick(&w, &host, &in, text, sizeof text) && has("playing [] of 4 ids") && has("did: quiet") && called_count == 0);
+  /* Mode change (the charge crosses a threshold): the game plays mode 2's event; it is stopped on the next tick. */
+  called_count = 0; in.now = 102.04; play_mode(2);
+  CHECK(tfp_warp_tick(&w, &host, &in, text, sizeof text));
+  { const uint32_t want[] = {0x22220001}; CHECK(stops_are(want, 1)); }
+  /* Full ADS: bit 48 set (the game stops them itself, and TFP gives the view up): no call, no write, even with the
+   * effects playing. */
+  called_count = 0; in.now = 102.06; put8(BIT48, 1); play_mode(2);
+  CHECK(tfp_warp_tick(&w, &host, &in, text, sizeof text) && has("did: the game's full ADS") && called_count == 0);
+  /* Aim released: the game's falling edge replays the current mode (0x88c6f8); TFP takes the view again; stopped. */
+  called_count = 0; in.now = 102.08; put8(BIT48, 0); play_mode(2);
+  CHECK(tfp_warp_tick(&w, &host, &in, text, sizeof text));
+  { const uint32_t want[] = {0x22220001}; CHECK(stops_are(want, 1)); }
+  /* An event that plays but is not in the stop lists is left alone (slot 4 plays all along). */
+  CHECK(get32(E_RUNTIME + EIDX * 0x218 + 4 * 4) == 504);
+  /* Exit: the view leaves TFP. The restore: 0xffffffff into the cached mode word, once. */
+  CHECK(writes == 0);
+  called_count = 0; in.now = 102.1; in.owns = false;
+  CHECK(tfp_warp_tick(&w, &host, &in, text, sizeof text) && has("did: restored") && has("1 restores"));
+  CHECK(written_count == 1 && only_mode_word_written() && get32(MODE_WORD) == 0xffffffff && !w.owed && called_count == 0);
+  in.now = 102.12;
+  tfp_warp_tick(&w, &host, &in, text, sizeof text);
+  CHECK(written_count == 1);
+  /* Re-entry: the game replayed (the mode word no longer matched); stopped again. */
+  play_mode(2); in.owns = true; in.now = 102.14; called_count = 0;
+  CHECK(tfp_warp_tick(&w, &host, &in, text, sizeof text));
+  { const uint32_t want[] = {0x22220001}; CHECK(stops_are(want, 1)); }
+  /* The pack is dropped (the backpack reads none; the pack is still in M, on the ground): restored. */
+  in.backpack = 0; in.now = 102.16;
+  CHECK(tfp_warp_tick(&w, &host, &in, text, sizeof text) && has("Warp: pack 938: restored") && has("Warp: no Warp Pack (backpack none)"));
+  CHECK(written_count == 2 && only_mode_word_written());
+  /* Death or a pack the manager no longer holds: nothing to write, and nothing owed after. */
+  in = in_pack(true, true, 102.18); play_mode(1); called_count = 0;
+  CHECK(tfp_warp_tick(&w, &host, &in, text, sizeof text) && called_count == 2 && w.owed);
+  map_clear(M_BUCKETS); in.backpack = 0; in.now = 102.2;
+  tfp_warp_tick(&w, &host, &in, text, sizeof text);
+  CHECK(written_count == 2 && !w.owed);
+  /* The mod stops with a restore owed: tfp_warp_release writes it. */
+  fixture(); tfp_warp_init(&w); in = in_pack(true, true, 200);
+  CHECK(tfp_warp_tick(&w, &host, &in, text, sizeof text) && called_count == 2 && w.owed);
+  CHECK(tfp_warp_release(&w, &host) && written_count == 1 && only_mode_word_written() && !w.owed);
+  CHECK(!tfp_warp_release(&w, &host) && written_count == 1);
+  /* The switch file gone (or the mod told so) while owed: restored as on exit. */
+  fixture(); tfp_warp_init(&w); in = in_pack(true, true, 300);
+  tfp_warp_tick(&w, &host, &in, text, sizeof text);
+  in.armed = false; in.now = 300.1;
+  CHECK(tfp_warp_tick(&w, &host, &in, text, sizeof text) && has("did: restored") && written_count == 1);
+}
+static void test_gates(void) {
+  TfpWarp w;
+  TfpWarpIn in;
+  const uint64_t calls_before = calls, writes_before = writes;
+  /* No backpack, a backpack read that raised, another backpack, no player: nothing runs. */
+  fixture(); tfp_warp_init(&w);
+  in = in_pack(true, true, 1); in.backpack = 0;
+  tfp_warp_tick(&w, &host, &in, text, sizeof text);
+  in.backpack = -1; in.now = 2;
+  tfp_warp_tick(&w, &host, &in, text, sizeof text);
+  in = in_pack(true, true, 3); in.pack_type[7] ^= 0x80;
+  tfp_warp_tick(&w, &host, &in, text, sizeof text);
+  in = in_pack(true, true, 4); in.player = false;
+  tfp_warp_tick(&w, &host, &in, text, sizeof text);
+  CHECK(calls == calls_before && writes == writes_before);
+  /* The backpack says the Warp Pack, but the manager's row for that entity is another type: refused. */
+  fixture(); tfp_warp_init(&w); put64(DESCRIPTOR, UINT64_C(0x1111111111111111));
+  in = in_pack(true, true, 5);
+  CHECK(tfp_warp_tick(&w, &host, &in, text, sizeof text) && has("did: refused: the displacement row 3 is not the pack's"));
+  CHECK(calls == calls_before && writes == writes_before);
+  /* A fingerprint differs: refused, every tick, whatever plays. */
+  fixture(); tfp_warp_init(&w); pin_bytes(false);
+  in = in_pack(true, true, 6);
+  CHECK(tfp_warp_tick(&w, &host, &in, text, sizeof text) && has("did: refused: code: ads_cache at game+0x88c637 differs"));
+  for (int i = 0; i < 3; i++) { in.now += 1.5; tfp_warp_tick(&w, &host, &in, text, sizeof text); }
+  CHECK(calls == calls_before && writes == writes_before);
+  /* The code cannot be read: refused likewise. */
+  fixture(); tfp_warp_init(&w); unreadable_pins = true;
+  in = in_pack(true, true, 7);
+  CHECK(tfp_warp_tick(&w, &host, &in, text, sizeof text) && has("is unreadable") && calls == calls_before);
+  /* The effect manager does not hold the pack: never a stop (game+0x8abb20 would index row 0xffffffff). */
+  fixture(); tfp_warp_init(&w); map_clear(E_BUCKETS);
+  in = in_pack(true, true, 8);
+  CHECK(tfp_warp_tick(&w, &host, &in, text, sizeof text) && has("effects=none") && calls == calls_before);
+  /* A stop that raises: refused and said; nothing owed for it. */
+  fixture(); tfp_warp_init(&w); stop_raises = true;
+  in = in_pack(true, true, 9);
+  CHECK(tfp_warp_tick(&w, &host, &in, text, sizeof text) && has("did: refused: the stop of 11110001 raised: Native call faulted") && !w.owed);
+  stop_raises = false;
+  /* Bit 48 and the ADS cache are never written, by anything above or below. */
+  CHECK(get32(ADS_CACHE) == 0);
+}
+static void test_bit48_never_written(void) {
+  /* A long mixed run: entries, exits, aim, mode changes, drops; afterwards every write is the mode word's 0xffffffff. */
+  TfpWarp w; tfp_warp_init(&w);
+  fixture();
+  TfpWarpIn in = in_pack(true, true, 1000);
+  unsigned seed = 12345;
+  for (int i = 0; i < 4000; i++) {
+    seed = seed * 1103515245u + 12345u;
+    unsigned r = (seed >> 16) % 100;
+    if (r < 5) in.owns = !in.owns;
+    else if (r < 9) put8(BIT48, (uint8_t)(1 - (get32(BIT48) & 1)));
+    else if (r < 14) play_mode((int)((seed >> 8) % 3));
+    else if (r < 16) in.backpack = in.backpack == 1 ? 0 : 1;
+    in.now += .016;
+    uint8_t bit = (uint8_t)(get32(BIT48) & 0xff);
+    tfp_warp_tick(&w, &host, &in, text, sizeof text);
+    CHECK((uint8_t)(get32(BIT48) & 0xff) == bit);
+  }
+  CHECK(only_mode_word_written() && get32(ADS_CACHE) == 0);
+  CHECK(w.stops > 50 && w.restores > 10 && written_count > 10); /* the run did stop and restore */
+  for (int i = 0; i < called_count; i++) CHECK(called[i].which == TFP_OPS_EFFECT_STOP && called[i].a1 == PACK);
+}
+
 int main(void) {
   host.module = host_module, host.read = host_read, host.write = host_write, host.call = host_call;
   test_log();
+  test_stops();
+  test_gates();
+  test_bit48_never_written();
   if (failed) { printf("warp glow: %d of %d checks failed\n", failed, checks); return 1; }
-  printf("warp glow: %d checks: the Warp: line on mocked memory (the pack's row, settings, mode table, playing events, code)\n", checks);
+  printf("warp glow: %d checks: the Warp: line, the stops (entry, mode change, aim release, re-entry), the restore (exit, drop, switch, stop), the gates (pack, backpack, code, effect manager), bit 48 never written\n", checks);
   return 0;
 }

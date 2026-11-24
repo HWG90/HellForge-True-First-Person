@@ -207,6 +207,7 @@ static bool read_pack(Ctx *c, const TfpWarpIn *in, uint64_t type, TfpWarpRead *r
   if (!settings_of(c, r->manager, r->descriptor, entity, key, r)) return false;
   if (!rd(c, r->settings + SETTINGS_MODES, r->modes, sizeof r->modes, "mode table")) return false;
   for (int m = 0; m < 3; m++) for (int k = 0; k < 5; k++) add_id(r, r->modes[m].stop[k]);
+  r->stop_id_count = r->id_count;
   for (int m = 0; m < 3; m++) for (int k = 0; k < 5; k++) add_id(r, r->modes[m].play[k]);
   uint8_t flags;
   if (in->avatar_index >= 8 || !rd(c, in->avatar_owner + TFP_WARP_AVATAR_BIT48 + (uint64_t)in->avatar_index * TFP_WARP_AVATAR_STRIDE, &flags, 1, "avatar flags"))
@@ -236,7 +237,7 @@ static uint64_t mix(uint64_t h, const void *p, size_t n) {
   return h;
 }
 static const char *did_name(TfpWarpDid d) {
-  static const char *const names[] = {"nothing", "watching (nothing is stopped)", "not owned (the view is not TFP's: nothing is stopped)",
+  static const char *const names[] = {"nothing", "watching (warp_hide.txt absent: nothing is stopped)", "not owned (the view is not TFP's: nothing is stopped)",
                                       "the game's full ADS (bit 48 set: the game stops them itself)", "quiet (nothing of the stop lists plays)",
                                       "stopped", "restored", "refused"};
   return names[d];
@@ -250,6 +251,59 @@ static void append(char *text, size_t size, size_t *used, const char *format, ..
   if (k > 0) *used += (size_t)k < size - *used ? (size_t)k : size - *used - 1;
 }
 
+/* ---- the restore: the cached mode word of the pack stops were sent for ------------------------------------------- */
+/* 1 written, 0 nothing to write (the pack left the manager, or its row is another's now), -1 unreadable or not written. */
+static int restore(Ctx *c) {
+  TfpWarp *w = c->w;
+  uint64_t manager, descriptors, descriptor, rows, key;
+  uint32_t index, entity;
+  if (!w->owed) return 0;
+  if (!c->game || !ptr(c, c->game + TFP_WARP_G_MANAGER, &manager, "displacement manager")) return -1;
+  if (manager != w->owed_manager) return w->owed = false, 0;
+  int found = lookup(c, manager + M_MAP, w->owed_pack, &index, "displacement map");
+  if (found < 0) return -1;
+  if (!found || index != w->owed_index) return w->owed = false, 0;
+  if (!ptr(c, manager + M_DESCRIPTORS, &descriptors, "displacement descriptors") || !ptr(c, descriptors + (uint64_t)index * 8, &descriptor, "displacement descriptor") ||
+      !rd(c, descriptor, &key, 8, "displacement descriptor") || !rd(c, descriptor + 8, &entity, 4, "displacement descriptor"))
+    return -1;
+  if (descriptor != w->owed_descriptor || entity != w->owed_pack || key != TFP_WARP_TYPE) return w->owed = false, 0;
+  if (!ptr(c, manager + M_MODE_ROWS, &rows, "mode rows")) return -1;
+  const uint32_t replay = UINT32_MAX;
+  if (!c->h->write || !c->h->write(c->h->user, rows + (uint64_t)index * M_MODE_STRIDE + M_MODE_WORD, &replay, 4))
+    return why(w, "the cached mode word could not be written"), -1;
+  w->owed = false, w->restores++;
+  return 1;
+}
+bool tfp_warp_release(TfpWarp *w, const TfpOpsHost *host) {
+  Ctx c = {w, host, host->module ? host->module(host->user, TFP_OPS_GAME) : 0};
+  return restore(&c) == 1;
+}
+/* The stops: each id of the three stop lists that plays (what the game's full-ADS loop at game+0x88c64d stops), with
+ * the game's stop and its arguments. Only for a pack the effect manager holds this tick (game+0x8abb20 must not be
+ * called for one it does not: its lookup would index row 0xffffffff). */
+static void stop_playing(Ctx *c, const TfpWarpIn *in) {
+  TfpWarp *w = c->w;
+  TfpWarpRead *r = &w->read;
+  for (unsigned i = 0; i < r->playing_count; i++) {
+    bool listed = false;
+    for (unsigned k = 0; k < r->stop_id_count && !listed; k++) listed = r->ids[k] == r->playing[i];
+    if (!listed) continue;
+    const uint64_t args[4] = {r->effects, in->pack, r->playing[i], 0};
+    uint64_t ignored = 0;
+    TfpOpsText raised;
+    raised.present = false, raised.text[0] = 0;
+    if (!c->h->call || !c->h->call(c->h->user, TFP_OPS_EFFECT_STOP, c->game + TFP_WARP_F_STOP, args, &ignored, &raised)) {
+      why(w, "the stop of %08x raised: %s", r->playing[i], raised.present ? raised.text : "no call");
+      w->did = TFP_WARP_REFUSED;
+      break;
+    }
+    if (!w->owed) w->owed = true, w->owed_pack = in->pack, w->owed_index = r->index, w->owed_manager = r->manager, w->owed_descriptor = r->descriptor;
+    if (w->stopped_count < 15) w->stopped[w->stopped_count++] = r->playing[i];
+    w->did_stops++, w->stops++;
+  }
+  if (w->did_stops) w->stop_ticks++;
+}
+
 void tfp_warp_init(TfpWarp *w) { memset(w, 0, sizeof *w); w->last_line = -1e300; }
 
 bool tfp_warp_tick(TfpWarp *w, const TfpOpsHost *host, const TfpWarpIn *in, char *text, size_t size) {
@@ -261,12 +315,20 @@ bool tfp_warp_tick(TfpWarp *w, const TfpOpsHost *host, const TfpWarpIn *in, char
   bool warp = in->player && in->backpack == 1;
   if (warp) memcpy(&type, in->pack_type, 8);
   warp = warp && type == TFP_WARP_TYPE;
+  /* The restore first: the view left TFP, the switch went, or the pack stops were sent for is not the one on now. */
+  int restored = 0;
+  if (w->owed && (!in->owns || !in->armed || !warp || in->pack != w->owed_pack)) restored = restore(&c);
   if (!warp) {
     memset(&w->read, 0, sizeof w->read);
+    if (restored == 1) {
+      append(text, size, &used, "Warp: pack %u: restored: its cached mode word set to 0xffffffff, the game plays its effects again (%llu restores)\n",
+             w->owed_pack, (unsigned long long)w->restores);
+      w->said_none = false;
+    }
     /* No Warp Pack on: one line when that becomes so, none after. */
     uint64_t key = mix(UINT64_C(0xcbf29ce484222325), &in->backpack, sizeof in->backpack);
     key = mix(key, &type, sizeof type);
-    if (w->said_none && key == w->last_key) return false;
+    if (w->said_none && key == w->last_key) return used > 0;
     w->said_none = true, w->last_key = key;
     if (!in->player) append(text, size, &used, "Warp: no player snapshot\n");
     else if (in->backpack == 1) append(text, size, &used, "Warp: the backpack is not a Warp Pack (entity %u, type %016llx)\n", in->pack, (unsigned long long)type);
@@ -280,6 +342,19 @@ bool tfp_warp_tick(TfpWarp *w, const TfpOpsHost *host, const TfpWarpIn *in, char
   if (!read) w->did = TFP_WARP_REFUSED;
   else w->did = TFP_WARP_WATCHING;
   const bool code = c.game && pins(&c); /* the game's code the module relies on (the spec, section 4); read once per game base */
+  if (read) {
+    /* The gates, in the order the line names them. Bit 48 is only read: in full ADS the game's own loop stops them. */
+    if (!in->armed) w->did = restored == 1 ? TFP_WARP_RESTORED : TFP_WARP_WATCHING;
+    else if (!code) w->did = TFP_WARP_REFUSED, why(w, "code: %s", w->pin_failed[0] ? w->pin_failed : "unread");
+    else if (!in->owns) w->did = restored == 1 ? TFP_WARP_RESTORED : TFP_WARP_NOT_OWNED;
+    else if (r->bit48) w->did = TFP_WARP_GAME_ADS;
+    else if (!r->in_effects) w->did = TFP_WARP_QUIET;
+    else {
+      w->did = TFP_WARP_QUIET;
+      stop_playing(&c, in);
+      if (w->did_stops && w->did != TFP_WARP_REFUSED) w->did = TFP_WARP_STOPPED;
+    }
+  } else if (restored == 1) w->did = TFP_WARP_RESTORED;
 
   /* The settings line: when the pack's table is first read, or changes. */
   if (read) {
@@ -300,7 +375,7 @@ bool tfp_warp_tick(TfpWarp *w, const TfpOpsHost *host, const TfpWarpIn *in, char
   /* The "Warp:" line: on every change, and once a second while the pack is on. */
   uint64_t key = mix(UINT64_C(0x84222325cbf29ce4), &in->pack, 4);
   key = mix(key, &w->did, sizeof w->did), key = mix(key, w->why, strlen(w->why));
-  key = mix(key, &in->owns, 1), key = mix(key, &in->armed, 1), key = mix(key, &code, 1);
+  key = mix(key, &in->owns, 1), key = mix(key, &in->armed, 1), key = mix(key, &code, 1), key = mix(key, w->stopped, w->stopped_count * sizeof *w->stopped);
   if (read) {
     key = mix(key, &r->bit48, 1), key = mix(key, &r->ads_cache, 1), key = mix(key, &r->mode_word, 4), key = mix(key, &r->in_effects, 1);
     key = mix(key, r->playing, r->playing_count * sizeof *r->playing);
@@ -317,11 +392,15 @@ bool tfp_warp_tick(TfpWarp *w, const TfpOpsHost *host, const TfpWarpIn *in, char
   append(text, size, &used, "; code %s; view %s, switch %s; did: %s", code ? "ok" : w->pin_failed[0] ? w->pin_failed : "unread", in->owns ? "owned" : "not owned",
          in->armed ? "on" : "off", did_name(w->did));
   if (w->did == TFP_WARP_REFUSED) append(text, size, &used, ": %s", w->why);
+  if (w->did == TFP_WARP_STOPPED) {
+    char list[150];
+    ids_text(list, sizeof list, w->stopped, w->stopped_count);
+    append(text, size, &used, " %u [%s]", w->did_stops, list);
+  }
+  if (w->did == TFP_WARP_RESTORED) append(text, size, &used, ": the cached mode word set to 0xffffffff, the game plays its effects again");
+  append(text, size, &used, "; so far %llu stops on %llu ticks, %llu restores", (unsigned long long)w->stops, (unsigned long long)w->stop_ticks,
+         (unsigned long long)w->restores);
   append(text, size, &used, "\n");
   return used > 0;
 }
 
-bool tfp_warp_release(TfpWarp *w, const TfpOpsHost *host) {
-  (void)w, (void)host;
-  return false;
-}

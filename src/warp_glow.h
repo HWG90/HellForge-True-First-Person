@@ -64,6 +64,7 @@ typedef struct TfpWarpRead {   /* what one tick read of the pack */
   TfpWarpModeRow modes[3];
   bool in_effects;             /* E holds the pack */
   uint32_t ids[30]; unsigned id_count;     /* the table's distinct nonzero ids: stop lists first, then play lists */
+  unsigned stop_id_count;                  /* ids[0 .. stop_id_count) are the stop lists' (what full ADS stops) */
   uint32_t playing[30]; unsigned playing_count;
 } TfpWarpRead;
 
