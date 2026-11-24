@@ -793,9 +793,12 @@ static TfpAdsSeat ads_seat;
 static TfpAdsFall ads_fall; /* round 20c: the pull lowered no faster than the depth (src/ads_seat.h tfp_ads_pull_frame) */
 static float ads_frame_depth = NAN, ads_frame_rest = NAN; /* under the policy lock: this frame's game depth and its rest */
 static _Atomic uint32_t steady_mode;
+/* Not in retail (round 20c): zoom_steady.txt, the zoom-shake branch's held depth in full aim (tfp_steady_aim at full
+ * strength, tfp_steady_carry). 0, the start-up value: full aim as feel.51 (the hip share), only counted for "Aim:". */
+static _Atomic uint32_t aim_steady;
 static bool steady_frame(Policy *p, const DepthObservation *observation, uint64_t native_stack, uint64_t now, uint32_t mode, float argument, float *delta) {
   const uint64_t generation = atomic_load_explicit(&active_generation, memory_order_relaxed);
-  uint8_t request[0x24] = {0}; float depth = 0, held = 0; uint32_t reason = TFP_STEADY_NO_LENS; bool bit = false, stopped_now = false;
+  uint8_t request[0x24] = {0}; float depth = 0, held = 0; uint32_t reason = TFP_STEADY_NO_LENS; bool bit = false, stopped_now = false, carried = false;
   *delta = 0;
   /* The root's half is a second call with proofs of its own (carrier_position_locked). Where node 5 was moved in
    * TFP_STEADY_ALONE frames running and the root's half was not done, or in TFP_STEADY_ALONE_LEASE frames of the
@@ -816,22 +819,34 @@ static bool steady_frame(Policy *p, const DepthObservation *observation, uint64_
     in.current = field_f32(request, 0x10); in.previous = field_f32(request, 0x1C);
     in.bit = observation->frame[0] != 0; in.blend = request[0xD]; in.ability = request[0xF];
     in.mix_before = field_f32(observation->request_state, 8); in.mix_after = field_f32(request, 8);
-    in.share = p->weight; in.on = mode == 1 && !stopped;
-    /* Where to rest: the selected optic's own distance, or the mod's reference for it where the zoom depth term has
-     * one for exactly these distances (then the two agree at rest, and the term's blend over the lens is left out). */
-    in.settled = in.current;
+    in.on = mode == 1 && !stopped;
+    /* Where to rest at the hip: the selected optic's own distance, or the mod's reference for it where the zoom depth
+     * term has one for exactly these distances (then the two agree at rest, and the term's blend over the lens is left
+     * out). Round 20: held in full aim too, resting there at the game's own distance (tfp_steady_aim), with
+     * zoom_steady.txt only (round 20c); without it the hip share weights it, as feel.51. */
+    float hip_settled = in.current;
     const uint32_t signature[4] = {field_u32(request, 0x10), field_u32(request, 0x1C), field_u32(request, 0x20), 0};
     if (!p->zoom_policy_active && !atomic_load_explicit(&depth_off, memory_order_relaxed) && s->valid && s->signature_set
-        && !memcmp(signature, s->signature, sizeof signature)) in.settled = s->current_reference;
+        && !memcmp(signature, s->signature, sizeof signature)) hip_settled = s->current_reference;
+    const bool aim_held = atomic_load_explicit(&aim_steady, memory_order_relaxed) != 0;
+    if (aim_held) tfp_steady_aim(&in, p->weight, hip_settled);
+    else { in.share = p->weight; in.settled = hip_settled; }
+    /* Round 20: the frame's lens to the field-of-view helper: counted for the "Aim:" line, and with zoom_steady.txt
+     * full aim's zoom glides to the optic's own. */
+    if (host.note_lens) host.note_lens(host.user, in.bit || in.ability, in.target, in.lens);
     reason = tfp_steady_frame(&steady, &in, generation, (double)now, delta, &depth, &held);
     if (reason != TFP_STEADY_RANGE) { ads_frame_depth = depth; ads_frame_rest = in.current; } /* round 20: the pull's limit */
     if (p->full_ads && reason != TFP_STEADY_RANGE) atomic_store_explicit(&ads_depth_bits, float_bits(depth), memory_order_relaxed); /* the "Aim:" line */
     if (reason == TFP_STEADY_OFF && mode == 1) reason = TFP_STEADY_NO_ROOT;
+    /* Round 20, review 24: a frame passed in full aim keeps the held distance instead of stepping (tfp_steady_carry) */
+    if (reason != TFP_STEADY_WORKED && aim_held) carried = tfp_steady_carry(&steady, &in, reason, p->full_ads, generation, (double)now, depth, delta);
     bit = in.bit;
+    tfp_steady_aim_note(&steady_log, p->full_ads, reason == TFP_STEADY_WORKED || reason == TFP_STEADY_OFF || reason == TFP_STEADY_NO_ROOT
+                        || (carried && reason == TFP_STEADY_SCALED), depth+*delta);
   }
   steady_log.now.lease = generation;
   tfp_steady_note(&steady_log, reason, bit, depth, held, *delta, argument);
-  return reason == TFP_STEADY_WORKED;
+  return reason == TFP_STEADY_WORKED || carried;
 }
 /* cpp:555-576. Optional native input policy. The only engine datum it
  * changes is DWORD80 of the exact owned camera6 request. All backing records
@@ -2167,7 +2182,7 @@ void tfp_pose_reset_for_tests(void) {
   atomic_store(&entry_position_enabled, 1);
   atomic_store(&hold_mode, 0); atomic_store(&hold_probe, 0); atomic_store(&hold_node5_calls, 0);
   memset(&gate, 0, sizeof gate); atomic_store(&gate_reads, 0); atomic_store(&depth_off, 0);
-  memset(&steady, 0, sizeof steady); memset(&steady_log, 0, sizeof steady_log); memset(&steady_pair, 0, sizeof steady_pair); atomic_store(&steady_mode, 0);
+  memset(&steady, 0, sizeof steady); memset(&steady_log, 0, sizeof steady_log); memset(&steady_pair, 0, sizeof steady_pair); atomic_store(&steady_mode, 0); atomic_store(&aim_steady, 0);
   atomic_store(&ads_sight, 0); atomic_store(&ads_wanted, 0); atomic_store(&ads_pull_bits, 0); atomic_store(&ads_share_bits, 0);
   atomic_store(&ads_closer_bits, 0); atomic_store(&ads_forward_bits, 0); atomic_store(&ads_depth_bits, UINT32_C(0x7fc00000)); atomic_store(&ads_full, 0);
   atomic_store(&ads_near_bits, 0); atomic_store(&ads_least_bits, 0);
@@ -2186,6 +2201,8 @@ uint32_t tfp_pose_hold_probe(TfpPoseHoldProbe *out) {
   out->node5_calls = atomic_load_explicit(&hold_node5_calls, memory_order_relaxed);
   return 1;
 }
+/* Not in retail (round 20c, pose_helper.h). */
+void tfp_pose_set_aim_steady(bool on) { atomic_store_explicit(&aim_steady, on ? 1u : 0u, memory_order_relaxed); }
 /* Not in retail (round 20, pose_helper.h). */
 void tfp_pose_set_ads_seat(float sight, float wanted) {
   atomic_store_explicit(&ads_sight, float_bits(isfinite(sight) ? sight : 0), memory_order_relaxed);

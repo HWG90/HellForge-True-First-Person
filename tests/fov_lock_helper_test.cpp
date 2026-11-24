@@ -380,6 +380,160 @@ int main() {
       tfp_fov_end(gen);
     }
   }
+  // ---- 10. Round 20: full aim with 'zoom when aiming', an optic zoomed in and the unzoom gate flipping (the tester's
+  // report on feel.50: the screen shakes while aiming, more at a 50 or 100 m scope range). The game's side as the
+  // listing has it (game+0x1286a46..0x1286d09): the lens target is the third-person field of view over the zoom level's
+  // magnification, the wide one while the gate is set; the lens goes toward it at clamp(10 |way|, 0.1, 2) rad/s, times
+  // the magnification while the gate is clear. The pose helper notes each evaluation before the frame's hooked call.
+  // Both calls of a frame must hand the setter one value, and it must hold the optic's own zoom.
+  // Round 20c: the hold is the test switch zoom_steady.txt (tfp_fov_set_aim_watch); part 12 has it off. ----
+  for (const double fps : {60.0, 116.0, 144.0}) for (const float mag : {1.5f, 6.0f, 12.0f}) {
+    fresh(); F.gap = 1.3; jitter_seed = 21; tfp_fov_set_aim_watch(true, true);
+    const double period = 1000.0 / fps;
+    auto ms = [&] { return period * (0.85 + 0.3 * jitter()); };
+    auto gap = [&] { return 0.6 + 1.4 * jitter(); };
+    const float wide = 90 * RAD, optic = wide / mag, k = std::tan(61.5f * RAD * .5f) / std::tan(60 * RAD * .5f);
+    float lens = optic;
+    auto evaluate = [&](bool gated, double dt) {
+      const float target = gated ? wide : optic, way = target - lens;
+      float rate = 10 * std::fabs(way); rate = rate < .1f ? .1f : rate > 2 ? 2 : rate; if (!gated) rate *= mag;
+      const float step = (way < 0 ? -1.0f : 1.0f) * rate * static_cast<float>(dt * .001);
+      lens = std::fabs(step) >= std::fabs(way) ? target : lens + step;
+      tfp_fov_note_lens(gated, target, lens);
+      return 2 * std::atan(std::tan(lens * .5f) * k);
+    };
+    const float rest = 2 * std::atan(std::tan(optic * .5f) * k);
+    tfp_fov_set_lock(LOCKED, true, 5000);
+    for (int i = 0; i < fps; ++i) frame2(ms(), gap());
+    aim(true);
+    TfpFovAimSecond took{}; tfp_fov_aim_take(&took);
+    float a = 0, b = 0, last = 0, most = 0, least = 10, step = 0; bool same = true;
+    for (int i = 0; i < 3 * fps; ++i) {
+      const double d = ms();
+      const float game = evaluate(i & 1, d);
+      b = frame2(d, gap(), &a, game);
+      if (a != b) same = false;
+      if (i == static_cast<int>(fps)) tfp_fov_aim_take(&took); // the line's second from here: the aim in is over
+      if (i > fps) {
+        if (b > most) most = b;
+        if (b < least) least = b;
+        const float change = std::fabs(std::tan(last * .5f) / std::tan(b * .5f) - 1);
+        if (change > step) step = change;
+      }
+      last = b;
+    }
+    std::printf("    %3.0f fps x%-4.1f gate flipping in full aim: shown %.3f..%.3f degrees (the optic at rest %.3f), largest change of magnification %.4f %%\n",
+                fps, mag, least / RAD, most / RAD, rest / RAD, step * 100);
+    CHECK(same && step < .005f && std::fabs(most - rest) < .01f * RAD && std::fabs(least - rest) < .01f * RAD);
+    tfp_fov_aim_take(&took);
+    CHECK(took.frames + 2 > 2 * fps && took.noted == took.frames && took.gated > took.frames / 3 && took.changes > took.frames / 2 && took.corrected > took.frames / 2);
+    CHECK(std::fabs(took.clear_least - optic) < 1e-6f && std::fabs(took.clear_most - optic) < 1e-6f && took.lens_most > optic && took.game_most > rest);
+    CHECK(took.shown_least > 0 && took.shown_most < rest + .2f * RAD && took.step_most < .005f);
+    // The gate set and kept (a wall right in front): after TFP_FOV_LOCK_STALE_MS the game's own unzoom shows, gliding.
+    float widest = 0, biggest = 0; last = b;
+    for (int i = 0; i < fps; ++i) {
+      const double d = ms();
+      b = frame2(d, gap(), &a, evaluate(true, d));
+      if (b > widest) widest = b;
+      if (std::fabs(b - last) > biggest) biggest = std::fabs(b - last);
+      last = b;
+    }
+    CHECK(widest > rest + 10 * RAD && biggest < (wide - optic) * .3f);
+    // Clear again and steady: back on the optic, then the game's own value to the bit (no gate for 250 ms).
+    for (int i = 0; i < fps; ++i) { const double d = ms(); b = frame2(d, gap(), &a, evaluate(false, d)); }
+    CHECK(std::fabs(b - rest) < 1e-4f);
+    // No note in a frame: the game's value, as before.
+    const float plain = frame2(ms(), gap(), &a, rest + .1f * RAD);
+    CHECK(std::fabs(plain - (rest + .1f * RAD)) < .1f * RAD);
+    aim(false);
+    tfp_fov_end(gen);
+  }
+  // ---- 11. Round 20, review 24: the hold is full aim's with 'zoom when aiming' only; it begins eased whatever the
+  // gate did before; a third call of a frame keeps to the frame's goal; the "Aim:" line's factor. ----
+  {
+    const double fps = 60; const float mag = 12;
+    const float wide = 90 * RAD, optic = wide / mag, k = std::tan(61.5f * RAD * .5f) / std::tan(60 * RAD * .5f);
+    const float rest = 2 * std::atan(std::tan(optic * .5f) * k);
+    float lens = optic;
+    auto evaluate = [&](bool gated, double dt) {
+      const float target = gated ? wide : optic, way = target - lens;
+      float rate = 10 * std::fabs(way); rate = rate < .1f ? .1f : rate > 2 ? 2 : rate; if (!gated) rate *= mag;
+      const float step = (way < 0 ? -1.0f : 1.0f) * rate * static_cast<float>(dt * .001);
+      lens = std::fabs(step) >= std::fabs(way) ? target : lens + step;
+      tfp_fov_note_lens(gated, target, lens);
+      return 2 * std::atan(std::tan(lens * .5f) * k);
+    };
+    for (int where = 0; where < 2; ++where) { // 0: flipping at the hip, then aim; 1: flipping in aim with the option off, then on
+      fresh(); F.gap = 1.3; lens = optic; tfp_fov_set_aim_watch(true, true); // round 20c: the switch on (zoom_steady.txt)
+      tfp_fov_set_lock(LOCKED, where == 0, 5000);
+      if (where == 1) aim(true);
+      TfpFovAimSecond took{};
+      for (int i = 0; i < fps; ++i) { const double d = 1000 / fps; frame2(d, 1.3, nullptr, evaluate(i & 1, d)); }
+      tfp_fov_aim_take(&took);
+      // nothing held outside full aim with the option; round 20c: full aim is counted whatever the option (the line's)
+      CHECK(took.frames == (where == 1 ? static_cast<uint32_t>(fps) : 0u) && took.corrected == 0);
+      if (where == 0) aim(true); else tfp_fov_set_lock(LOCKED, true, 6000);
+      { const double d = 1000 / fps; frame2(d, 1.3, nullptr, evaluate(false, d)); }
+      tfp_fov_aim_take(&took);
+      CHECK(took.frames == 1 && took.corrected == 0); // the hold begins at nothing: it was not kept where it was not asked for
+      for (int i = 0; i < fps; ++i) { const double d = 1000 / fps; frame2(d, 1.3, nullptr, evaluate(i & 1, d)); }
+      tfp_fov_aim_take(&took);
+      CHECK(took.corrected > took.frames / 2);
+      // A third call in a frame (no hooked call before it): it steps toward the hooked call's goal, the optic's own.
+      float a = 0, b = 0;
+      for (int i = 0; i < 10; ++i) { const double d = 1000 / fps; b = frame2(d, 1.3, &a, evaluate(i & 1, d)); }
+      const float third = second(1.3, wide);
+      CHECK(std::fabs(b - rest) < .01f * RAD && std::fabs(third - rest) < .05f * RAD);
+      // The line's factor: the game's value over the lens, in the tangent, constant here (the value is this frame's).
+      tfp_fov_aim_take(&took);
+      CHECK(took.factor_least > 0 && std::fabs(took.factor_least - k) < 1e-4f && std::fabs(took.factor_most - k) < 1e-4f);
+      aim(false);
+      tfp_fov_end(gen);
+    }
+  }
+  // ---- 12. Round 20c: zoom_steady.txt absent (the start-up value). Full aim with the game's zoom shows the game's value
+  // through the lock's glide as feel.51 did (nothing held while the gate flips: the pulse is there), and the "Aim:"
+  // line still counts the gate, the optic's own target, the lens and the factor. With the lock off it counts too. ----
+  for (int locked = 1; locked >= 0; --locked) {
+    const double fps = 60; const float mag = 12;
+    const float wide = 90 * RAD, optic = wide / mag, k = std::tan(61.5f * RAD * .5f) / std::tan(60 * RAD * .5f);
+    float lens = optic;
+    auto evaluate = [&](bool gated, double dt) {
+      const float target = gated ? wide : optic, way = target - lens;
+      float rate = 10 * std::fabs(way); rate = rate < .1f ? .1f : rate > 2 ? 2 : rate; if (!gated) rate *= mag;
+      const float step = (way < 0 ? -1.0f : 1.0f) * rate * static_cast<float>(dt * .001);
+      lens = std::fabs(step) >= std::fabs(way) ? target : lens + step;
+      tfp_fov_note_lens(gated, target, lens);
+      return 2 * std::atan(std::tan(lens * .5f) * k);
+    };
+    fresh(); F.gap = 1.3; tfp_fov_set_aim_watch(true, false);
+    tfp_fov_set_lock(locked ? LOCKED : 0, true, 5000);
+    aim(true);
+    TfpFovAimSecond took{};
+    for (int i = 0; i < fps; ++i) { const double d = 1000 / fps; frame2(d, 1.3, nullptr, evaluate(false, d)); }
+    tfp_fov_aim_take(&took);
+    float a = 0, b = 0, last = 0, step = 0, game = 0, game_last = 0, game_step = 0;
+    for (int i = 0; i < 2 * fps; ++i) {
+      const double d = 1000 / fps;
+      game = evaluate(i & 1, d);
+      b = frame2(d, 1.3, &a, game);
+      if (i > 0) {
+        const float change = std::fabs(std::tan(last * .5f) / std::tan(b * .5f) - 1), game_change = std::fabs(std::tan(game_last * .5f) / std::tan(game * .5f) - 1);
+        if (change > step) step = change;
+        if (game_change > game_step) game_step = game_change;
+      }
+      last = b; game_last = game;
+    }
+    tfp_fov_aim_take(&took);
+    std::printf("    zoom_steady.txt absent, lock %s: x12 gate flipping in full aim, largest change of magnification %.3f %% (the game's own %.3f %%)\n",
+                locked ? "on" : "off", step * 100, game_step * 100);
+    if (locked) CHECK(step > .005f && step <= game_step + 1e-6f); // the lock's glide of the game's value: the pulse shows, softened
+    else CHECK(b == game);                                        // the lock off: the game's own value, untouched
+    CHECK(took.frames == static_cast<uint32_t>(2 * fps) && took.corrected == 0 && took.noted == took.frames && took.gated == took.frames / 2);
+    CHECK(took.changes + 1 >= took.frames && std::fabs(took.clear_least - optic) < 1e-6f && took.factored > 0 && std::fabs(took.factor_least - k) < 1e-3f);
+    aim(false);
+    tfp_fov_end(gen);
+  }
   std::printf("fov lock helper: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

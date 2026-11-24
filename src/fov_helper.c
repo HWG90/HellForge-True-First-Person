@@ -636,6 +636,47 @@ void tfp_fov_lock_stats(TfpFovLockStats *out) {
 static volatile double lock_frame_at, lock_tail_at;      /* host milliseconds of the last hooked / forwarded call */
 static volatile float lock_frame_value, lock_frame_applied, lock_tail_native;
 static volatile uint32_t lock_frame_open, lock_frame_aim; /* open: the hooked call's value not yet repeated */
+/* Round 20 (docs/design/specs/2026-11-23-gate-flip.md "Round 20"): the evaluator's lens of the frame, noted by the
+ * pose helper before the hooked call, and the "Aim:" line's second. Game thread, as the setter calls. */
+static TfpAimLens aim_lens; static TfpFovAimSecond aim_second; static bool aim_gate_known, aim_gate_last; static float aim_shown_last;
+static volatile double aim_call_at;     /* round 20c: the last hooked call, aiming or not, lock on or off */
+static volatile uint32_t aim_watch, aim_steady; /* round 20c (tfp_fov_set_aim_watch): count full aim for "Aim:"; zoom_steady.txt. 0, 0: retail's */
+void tfp_fov_set_aim_watch(bool count, bool steady) { aim_watch = count ? 1u : 0u; aim_steady = count && steady ? 1u : 0u; }
+static double lock_tick(void) { double tick = 0; if (host.seconds && seconds(&tick)) return tick*1000; return lock_clock; }
+void tfp_fov_note_lens(bool gated, float target, float lens) { tfp_aim_lens_note(&aim_lens, gated, target, lens, lock_tick()); }
+static void aim_range(float *least, float *most, uint32_t count, float v) {
+  if (!isfinite(v)) return;
+  if (count == 0 || v < *least) *least = v;
+  if (count == 0 || v > *most) *most = v;
+}
+void tfp_fov_aim_take(TfpFovAimSecond *out) {
+  if (!out) return;
+  aim_second.third_person = policy.source_degrees;
+  *out = aim_second; memset(&aim_second, 0, sizeof aim_second);
+}
+/* One hooked frame in full aim, the lock on or off: what the line counts. `fresh`: the evaluator's numbers are this frame's. */
+static void aim_count(bool fresh, float applied, float shown, bool corrected) {
+  TfpFovAimSecond *a = &aim_second;
+  if (fresh) {
+    if (!a->gated && !a->noted) aim_gate_known = false;
+    if (aim_gate_known && aim_lens.gated != aim_gate_last) ++a->changes;
+    aim_gate_known = true; aim_gate_last = aim_lens.gated;
+    if (aim_lens.gated) ++a->gated;
+    else { aim_range(&a->clear_least, &a->clear_most, a->noted-a->gated, aim_lens.clear); }
+    aim_range(&a->lens_least, &a->lens_most, a->noted, aim_lens.lens);
+    ++a->noted;
+  }
+  if (aim_lens.factor > 0) { aim_range(&a->factor_least, &a->factor_most, a->factored, aim_lens.factor); ++a->factored; }
+  aim_range(&a->game_least, &a->game_most, a->frames, applied);
+  aim_range(&a->shown_least, &a->shown_most, a->frames, shown);
+  if (aim_shown_last > 0 && shown > 0) { /* round 20c: across takes too (the binder takes every tick); 0 after a frame not aiming */
+    const float step = fabsf(tanf(aim_shown_last*.5f)/tanf(shown*.5f)-1);
+    if (step > a->step_most) a->step_most = step;
+  }
+  aim_shown_last = shown;
+  if (corrected) ++a->corrected;
+  ++a->frames;
+}
 static bool lock_recent(double at, double tick) { return at > 0 && tick >= at && tick - at <= TFP_FOV_LOCK_STALE_MS; }
 static float lock_field(void *camera, float native, float applied, bool aiming, bool decides) {
   const float wanted = lock_radians;
@@ -646,9 +687,23 @@ static float lock_field(void *camera, float native, float applied, bool aiming, 
   const float aim_field = lock_aim;
   /* A chosen field of view in aim holds with the lock off too: this frame's aim, or the hooked call's, decides. */
   const bool chosen_aim = aim_field > 0 && (decides ? aiming : lock_frame_aim != 0);
-  if (!(wanted > 0) && !chosen_aim && !tfp_fov_lock_active(&lock_state)) { lock_shown = 0; lock_frame_open = 0; lock_tail_at = 0; return applied; }
-  double tick = 0;
-  if (host.seconds && seconds(&tick)) tick *= 1000; else tick = lock_clock;
+  /* Round 20c: the "Aim:" line counts every hooked frame of full aim, the lock on or off (src/aim_log.h). With neither
+   * the lock nor a frame of full aim to count, nothing more is done here and no clock is read (as before). */
+  const bool counting = decides && aiming && aim_watch, lock_on = wanted > 0 || chosen_aim || tfp_fov_lock_active(&lock_state);
+  if (decides && !aiming) aim_shown_last = 0;
+  if (!lock_on && !counting) { lock_shown = 0; lock_frame_open = 0; lock_tail_at = 0; return applied; }
+  const double tick = lock_tick();
+  /* The evaluator's numbers are this frame's when noted since the hooked call before. */
+  const bool fresh = counting && aim_lens.note_at > aim_call_at && tick >= aim_lens.note_at && tick-aim_lens.note_at <= TFP_AIM_LENS_FRESH_MS;
+  /* Round 20 (zoom-shake), behind zoom_steady.txt since round 20c: full aim's zoom glides to the optic's own while the
+   * unzoom gate flips, not the gate's (src/fov_lock.h). Off: the game's value, as feel.51; the goal is still worked out
+   * for the line's factor, and its ease kept at nothing, so switching it on begins it from nothing. */
+  const bool steady = counting && aim_steady && aim_field == TFP_FOV_AIM_ZOOM && wanted > 0;
+  float aim_goal = applied; bool corrected = false;
+  if (counting) aim_goal = tfp_aim_lens_goal(&aim_lens, applied, tick, aim_call_at, &corrected);
+  if (counting && !steady) { aim_lens.ease = 0; aim_lens.ease_at = 0; corrected = false; }
+  if (decides) aim_call_at = tick;
+  if (!lock_on) { aim_count(fresh, applied, applied, false); lock_shown = 0; lock_frame_open = 0; lock_tail_at = 0; return applied; }
   if (!decides) {
     lock_tail_native = native; lock_tail_at = tick;
     if (lock_frame_open) { /* the frame's second call: the hooked call's value, no second step */
@@ -657,7 +712,7 @@ static float lock_field(void *camera, float native, float applied, bool aiming, 
     }
   }
   const bool kept = lock_recent(lock_frame_at, tick);
-  float goal = applied; bool aim = aiming;
+  float goal = steady ? aim_goal : applied; bool aim = aiming;
   if (!decides) { aim = kept && lock_frame_aim; if (kept) goal = lock_frame_applied; }
   if (!(wanted > 0) && lock_recent(lock_tail_at, tick)) goal = lock_tail_native; /* gliding out: to what stays on screen */
   float shown = tfp_fov_lock_step_aim(&lock_state, wanted, aim_field, aim, goal, tick);
@@ -665,7 +720,8 @@ static float lock_field(void *camera, float native, float applied, bool aiming, 
   if (!active) shown = applied; /* let go (or never taken): the caller's own value, untouched */
   lock_shown = active ? shown : 0;
   if ((wanted > 0 || chosen_aim) && active) atomic_fetch_add_explicit(&lock_applied, 1, memory_order_relaxed);
-  if (decides) { lock_frame_aim = aiming ? 1u : 0u; lock_frame_applied = applied; lock_frame_at = tick; lock_frame_value = shown; lock_frame_open = active ? 1u : 0u; }
+  if (counting) aim_count(fresh, applied, shown, corrected);
+  if (decides) { lock_frame_aim = aiming ? 1u : 0u; lock_frame_applied = goal; lock_frame_at = tick; lock_frame_value = shown; lock_frame_open = active ? 1u : 0u; }
   return shown;
 }
 void tfp_fov_setter_from(uint64_t caller, void *camera, float native) {
@@ -940,6 +996,7 @@ void tfp_fov_reset_for_tests(void) {
   policy_init(&policy);
   lock_radians = 0; lock_seen_native = 0; lock_shown = 0; lock_aim = TFP_FOV_AIM_ZOOM; lock_clock = 0; tfp_fov_lock_reset(&lock_state);
   lock_frame_at = 0; lock_tail_at = 0; lock_frame_value = 0; lock_frame_applied = 0; lock_tail_native = 0; lock_frame_open = 0; lock_frame_aim = 0;
+  tfp_aim_lens_reset(&aim_lens); memset(&aim_second, 0, sizeof aim_second); aim_gate_known = false; aim_gate_last = false; aim_shown_last = 0; aim_call_at = 0; aim_watch = 0; aim_steady = 0;
   atomic_store(&lock_camera, 0); atomic_store(&lock_applied, 0);
   display_cache.native = 0; display_cache.applied = 0; display_cache.degrees = 0;
   atomic_store(&display_sequence, 0); atomic_store(&display_native, 0); atomic_store(&display_applied, 0); atomic_store(&display_degrees, 0);

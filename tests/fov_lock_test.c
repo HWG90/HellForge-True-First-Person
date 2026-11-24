@@ -98,6 +98,134 @@ int main(void) {
   CHECK(!strcmp(tfp_fov_aim_said(TFP_FOV_AIM_ZOOM, said, sizeof said), "the game's zoom"));
   CHECK(!strcmp(tfp_fov_aim_said(TFP_FOV_AIM_LOCKED, said, sizeof said), "your locked view"));
   CHECK(!strcmp(tfp_fov_aim_said(DEG(45), said, sizeof said), "a chosen 45.0 degrees"));
+
+  /* Round 20: full aim's goal, the optic's own zoom rather than the unzoom gate's, and only while the gate flips
+   * (review 24: a lone clear frame inside a long set stretch must not snap to full zoom; a value that lags the lens
+   * by a frame must not make it worse). A model of the evaluator (game+0x1286a46..0x1286d09) at 60 frames a second,
+   * a x12 optic under a 90 degree wide target, the setter's value composed from the lens by a factor in the tangent. */
+  {
+    const float wide = DEG(90), optic = DEG(7.5f), k = tanf(DEG(61.5f)*.5f)/tanf(DEG(60)*.5f);
+    const float rest = 2*atanf(k*tanf(optic*.5f));
+    /* pattern: 0 every frame, 1 set 36 frames (600 ms) / clear 1 frame, 2 set 16 (260 ms) / clear 1, 3 8 set / 2 clear,
+     * 4 clear, 5 set 16 / clear 2 (the lens back at rest on the optic in each clear stretch) */
+    for (int pattern = 0; pattern < 6; ++pattern) for (int lag = 0; lag < 3; ++lag) {
+      TfpAimLens a; tfp_aim_lens_reset(&a); double at = 5000, call = 0; float lens = optic, before = optic, ratio_most = 0, last = 0, game_most = 0, game_last = 0;
+      unsigned corrected = 0, frames = 0; bool exact = true;
+      for (int i = 0; i < 300; ++i) {
+        const double dt = 1000.0/60*(i % 3 == 0 ? .9 : i % 3 == 1 ? 1.1 : 1.0); at += dt;
+        const double ms = at-5000;
+        const bool gated = pattern == 0 ? (i & 1) : pattern == 1 ? i % 37 != 0 : pattern == 2 ? i % 17 != 0 : pattern == 3 ? i % 10 < 8 : pattern == 5 ? i % 18 > 1 : false;
+        const float target = gated ? wide : optic, way = target-lens;
+        float rate = 10*fabsf(way); rate = rate < .1f ? .1f : rate > 2 ? 2 : rate; if (!gated) rate *= 12;
+        const float step = (way < 0 ? -1.0f : 1.0f)*rate*(float)(dt*.001);
+        const float previous = before; before = lens;
+        lens = fabsf(step) >= fabsf(way) ? target : lens+step;
+        /* lag 0: the value and the note both this frame's; 1: the value built from the lens of the frame before;
+         * 2: the note a frame late (what the pose helper read was the frame before's) */
+        static bool g1; static float t1;
+        if (lag == 2) { if (i) tfp_aim_lens_note(&a, g1, t1, before, at); g1 = gated; t1 = target; }
+        else tfp_aim_lens_note(&a, gated, target, lens, at);
+        (void)previous;
+        const float applied = 2*atanf(k*tanf((lag == 1 ? before : lens)*.5f));
+        bool clear = false;
+        const float goal = tfp_aim_lens_goal(&a, applied, at+.5, call, &clear);
+        call = at+.5;
+        if (!clear && goal != applied) exact = false;
+        if (ms > 1000) {
+          ++frames; corrected += clear;
+          const float r = fabsf(tanf(last*.5f)/tanf(goal*.5f)-1), g = fabsf(tanf(game_last*.5f)/tanf(applied*.5f)-1);
+          if (r > ratio_most) ratio_most = r;
+          if (g > game_most) game_most = g;
+        }
+        last = goal; game_last = applied;
+      }
+      printf("    pattern %d lag %d: largest change of magnification of the goal %.3f %% (the game's own %.3f %%), corrected in %u of %u\n",
+             pattern, lag, (double)ratio_most*100, (double)game_most*100, corrected, frames);
+      CHECK(exact); /* not correcting: the game's value, to the bit */
+      if (pattern == 0) CHECK(corrected == frames && ratio_most < .002f);                       /* flips every frame: held on the optic, a lag or not */
+      if (pattern == 1 || pattern == 2) CHECK(corrected == 0 && ratio_most == game_most);       /* a long set stretch with a lone clear frame: the game's own */
+      if (pattern == 3) CHECK(corrected == frames && ratio_most < .01f);                         /* 8 set / 2 clear at 60 fps: a flip, held */
+      if (pattern == 4) CHECK(corrected == 0 && ratio_most == 0);
+      if (pattern == 5) CHECK(corrected > 0 && ratio_most < game_most); /* held from rest for a while, then eased toward the game's own unzoom: under its own swing */
+      (void)rest;
+    }
+    /* At rest while held: the optic's own value as the game composes it. */
+    {
+      TfpAimLens a; tfp_aim_lens_reset(&a); double at = 5000, call = 0; bool clear = false; float goal = 0;
+      for (int i = 0; i < 60; ++i) { at += 16; tfp_aim_lens_note(&a, false, optic, optic, at); goal = tfp_aim_lens_goal(&a, rest, at+.5, call, &clear); call = at+.5; }
+      CHECK(goal == rest && !clear); /* the gate clear: nothing done */
+      float lens = optic;
+      for (int i = 0; i < 60; ++i) {
+        at += 16; const bool gated = i & 1;
+        lens = gated ? lens+.032f : optic+(lens-optic)*.2f;
+        tfp_aim_lens_note(&a, gated, gated ? wide : optic, lens, at);
+        goal = tfp_aim_lens_goal(&a, 2*atanf(k*tanf(lens*.5f)), at+.5, call, &clear); call = at+.5;
+      }
+      CHECK(clear && fabsf(goal-rest) < DEG(.001f));
+      /* The ease: the gate kept set from here (a wall right in front). Held while the stretch is short, then let go
+       * over TFP_AIM_EASE_MS: no frame changes the magnification by more than a quarter, and it ends on the game's. */
+      float worst = 0, before = goal, applied = 0, own = 0, game_before = goal;
+      for (int i = 0; i < 40; ++i) {
+        at += 16; lens += .032f; if (lens > wide) lens = wide;
+        tfp_aim_lens_note(&a, true, wide, lens, at);
+        applied = 2*atanf(k*tanf(lens*.5f));
+        goal = tfp_aim_lens_goal(&a, applied, at+.5, call, &clear); call = at+.5;
+        const float r = fabsf(tanf(before*.5f)/tanf(goal*.5f)-1), g = fabsf(tanf(game_before*.5f)/tanf(applied*.5f)-1);
+        if (r > worst) worst = r;
+        if (g > own) own = g;
+        before = goal; game_before = applied;
+      }
+      printf("    the gate kept set after flipping: largest change of magnification of the goal %.2f %% a frame (the game's own %.2f %%)\n", (double)worst*100, (double)own*100);
+      CHECK(!clear && goal == applied && worst < own*1.1f);
+      /* No note for longer than TFP_AIM_LENS_FRESH_MS while held: let go, eased, ending on the game's value. */
+      for (int i = 0; i < 60; ++i) {
+        at += 16; const bool gated = i & 1;
+        lens = gated ? lens+.032f : optic+(lens-optic)*.2f;
+        tfp_aim_lens_note(&a, gated, gated ? wide : optic, lens, at);
+        goal = tfp_aim_lens_goal(&a, 2*atanf(k*tanf(lens*.5f)), at+.5, call, &clear); call = at+.5;
+      }
+      CHECK(clear);
+      for (int i = 0; i < 30; ++i) { at += 16; goal = tfp_aim_lens_goal(&a, DEG(20), at+.5, call, &clear); call = at+.5; }
+      CHECK(!clear && goal == DEG(20));
+      /* Values that are not a lens: forgotten, the game's value. */
+      tfp_aim_lens_note(&a, false, NAN, DEG(20), at += 8);
+      CHECK(tfp_aim_lens_goal(&a, DEG(20.5f), at+.5, at-8, &clear) == DEG(20.5f) && !clear);
+      CHECK(isnan(tfp_aim_lens_goal(&a, NAN, at+.5, at-8, &clear)) && !clear);
+    }
+    /* Correction comes in eased: the first frames of a flipping gate do not jump to the optic's value. */
+    {
+      TfpAimLens a; tfp_aim_lens_reset(&a); double at = 5000, call = 0; bool clear = false; float lens = optic, goal = 0, first = 0;
+      for (int i = 0; i < 30; ++i) { at += 16; tfp_aim_lens_note(&a, false, optic, optic, at); tfp_aim_lens_goal(&a, rest, at+.5, call, &clear); call = at+.5; }
+      int on = -1; float worst = 0, before = rest;
+      for (int i = 0; i < 30; ++i) {
+        at += 16; const bool gated = !(i & 1);
+        lens = gated ? lens+.032f : optic+(lens-optic)*.2f;
+        tfp_aim_lens_note(&a, gated, gated ? wide : optic, lens, at);
+        const float applied = 2*atanf(k*tanf(lens*.5f));
+        goal = tfp_aim_lens_goal(&a, applied, at+.5, call, &clear); call = at+.5;
+        if (clear && on < 0) { on = i; first = fabsf(tanf(before*.5f)/tanf(goal*.5f)-1); }
+        const float r = fabsf(tanf(before*.5f)/tanf(goal*.5f)-1); if (r > worst) worst = r;
+        before = goal;
+      }
+      /* from rest on the optic the first set frame is held at once: no change at all on screen */
+      CHECK(on == 0 && first < 1e-5f && worst < 1e-5f && clear && fabsf(goal-rest) < DEG(.001f));
+      /* from a lens not at rest (a clear frame pulled it back only partly): after the first short set stretch, eased in */
+      tfp_aim_lens_reset(&a); on = -1; worst = 0; lens = optic+.05f; before = 2*atanf(k*tanf(lens*.5f)); float game_worst = 0, game_before = before;
+      for (int i = 0; i < 40; ++i) {
+        at += 16; const bool gated = !(i & 1);
+        lens = gated ? lens+.032f : optic+(lens-optic)*.5f;
+        tfp_aim_lens_note(&a, gated, gated ? wide : optic, lens, at);
+        const float applied = 2*atanf(k*tanf(lens*.5f));
+        goal = tfp_aim_lens_goal(&a, applied, at+.5, call, &clear); call = at+.5;
+        if (clear && on < 0) on = i;
+        const float r = fabsf(tanf(before*.5f)/tanf(goal*.5f)-1), g = fabsf(tanf(game_before*.5f)/tanf(applied*.5f)-1);
+        if (r > worst) worst = r;
+        if (g > game_worst) game_worst = g;
+        before = goal; game_before = applied;
+      }
+      CHECK(on >= 1 && on <= 3 && worst <= game_worst && clear && fabsf(goal-rest) < DEG(.001f));
+    }
+  }
   printf("fov lock: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

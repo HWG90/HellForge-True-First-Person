@@ -103,6 +103,13 @@ static bool depth_off;
  * unzoom gate (src/depth_steady.h); it is still worked out and counted, so the "Steady:" line says what would have
  * been held. For comparing a game run with and without. */
 static bool depth_steady_off;
+/* Test switch zoom_steady.txt, read once at the start (round 20c, docs/guides/AIM-TEST.md): round20-zoom-shake's two
+ * corrections in full aim, the field of view held at the optic's own zoom while the unzoom gate flips
+ * (src/fov_lock.h tfp_aim_lens_goal) and the rig's depth held at full strength (src/depth_steady.h tfp_steady_aim and
+ * tfp_steady_carry). Without it full aim is feel.51's; the "Aim:" line counts the same either way. */
+#ifdef TFP_FEEL
+static bool zoom_steady;
+#endif
 /* The action hold (docs/design/ACTION-CAMERA.md "Action hold") is on: the Weapon put-away option, or its files.
  * While it is off none of the hold's code is reached. */
 static bool hold_lease;
@@ -815,6 +822,10 @@ static void start(void) {
         FILE *steady_file = fopen(parts_path, "r");
         if (steady_file) fclose(steady_file);
         depth_steady_off = steady_file != NULL;
+        strcpy(slash + 1, "zoom_steady.txt");
+        FILE *zoom_file = fopen(parts_path, "r");
+        if (zoom_file) fclose(zoom_file);
+        zoom_steady = zoom_file != NULL;
         /* Round 19: the helmet veil opens at the tick that sees a leave of the native view, not at the first head-camera
          * frame (src/camera_helper.h tfp_camera_set_veil_second). The "Head:" line says which way it opens. */
         strcpy(slash + 1, "veil_second.txt");
@@ -904,6 +915,10 @@ static void start(void) {
                               "says what would have been held");
     else say("Ready: rig depth held steady: in the hip view the first-person rig and its root rest at the selected optic's distance instead of following "
              "the lens target the unzoom gate switches; a \"Steady:\" line in a second in which something was moved (depth_steady_off.txt switches it off)");
+    /* Round 20c: the zoom-shake corrections in full aim, only with zoom_steady.txt */
+    tfp_pose_set_aim_steady(zoom_steady); tfp_fov_set_aim_watch(true, zoom_steady);
+    if (zoom_steady) say("Test: zoom_steady.txt: in full aim the rig's depth is held at full strength, and with Aim field of view the game's zoom the "
+                         "field of view is held at the optic's own zoom while the unzoom gate flips (round 20 zoom-shake corrections)");
     if (!lock_wanted) say("Smooth: eye continuity stays off whatever the option says: the camera lock is off (lock_off.txt)");
     else say(smooth_wanted ? "Smooth: on: while the lock holds the view, a change of camera (head camera, native view) and a one-frame move of the "
                              "first-person rig are carried as a correction of at most 1 m and eased out over 100 to 400 ms; farther than 1.5 m is "
@@ -1059,6 +1074,8 @@ static void lock_note(void) { /* once a second while the view is on: frames by c
   told_alternation = a;
 }
 #ifdef TFP_FEEL
+/* Round 20c: the "Aim:" line (src/aim_log.h), fed by steady_note and ads_seat_tick. */
+static TfpAimLog aim_log;
 static void gate_note(void) { /* once a second: what the pose helper counted of the game's unzoom gate, where it is worth a line (src/gate_log.h) */
   static uint64_t next, told_generation;
   const uint64_t now = GetTickCount64();
@@ -1081,6 +1098,7 @@ static void steady_note(void) { /* once a second: the rig's depth held steady (s
   TfpSteadySecond held;
   char line[640];
   if (!tfp_pose_steady_take(&held)) return;
+  tfp_aim_log_add_rig(&aim_log, &held); /* round 20c: the rig's depth in full aim, for the "Aim:" line */
   if (tfp_steady_stop_line(&held, line, sizeof line)) say("%s", line); /* the root did not follow: said once, in the second it stopped */
   if (!tfp_steady_worth(&held)) return;
   tfp_steady_line(&held, line, sizeof line);
@@ -1091,7 +1109,6 @@ static void steady_note(void) { /* once a second: the rig's depth held steady (s
  * in full aim. How much closer the gun was drawn the near helper reads from the pose helper itself, in its own calls
  * (src/wire_win_pose.c), not through this tick, which would leave the near clip a tick behind the gun. */
 static void ads_seat_tick(void) {
-  static TfpAimLog aim_log;
   float sight = 0, native = 0, applied = 0;
   const bool near_on = tfp_near_ads_probe(&sight, &native, &applied);
   tfp_pose_set_ads_seat(near_on ? sight : 0, (float)(tfp_locked_view_ads_sight_cm(&wire)/100));
@@ -1106,7 +1123,8 @@ static void ads_seat_tick(void) {
     .wanted = (float)(tfp_locked_view_ads_sight_cm(&wire)/100), .pull = ads.pull, .closer = ads.closer, .ads_forward = ads.ads_forward,
     .near_clip = near_on ? applied : NAN, .depth = ads.depth, .editor = editor && tfp_editor_is_active(editor),
     .editor_action = editor ? tfp_editor_preview_action(editor) : NULL, .now_ms = (double)GetTickCount64()};
-  char line[720];
+  TfpFovAimSecond frames; tfp_fov_aim_take(&frames); tfp_aim_log_add_fov(&aim_log, &frames); /* round 20c: the frames since the last tick */
+  char line[TFP_AIM_LINE];
   if (tfp_aim_log_step(&aim_log, &sample, line, sizeof line)) say("%s", line);
 }
 #endif

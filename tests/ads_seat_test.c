@@ -125,25 +125,46 @@ int main(void) {
   CHECK(!tfp_aim_log_step(&log, &s, line, sizeof line));                                       /* in, settling: not yet */
   for (int i = 0; i < 30; i++) { s.now_ms += 16; s.pull = .073f; s.closer = .073f; s.shown_fov = DEG(61.5); s.near_clip = .10f; s.depth = .2102f;
     if (tfp_aim_log_step(&log, &s, line, sizeof line)) break; }
-  CHECK(strstr(line, "Aim: in: \"LAS-5 Scythe\"; field of view 61.5 degrees (Aim field of view: the game's zoom; the game asked for 61.5)") == line);
-  CHECK(strstr(line, "the game's sight at 0.173 m (its near clip), sight distance in aim 0.100 m: the gun 0.073 m closer (pull 0.073 m, ADS placement forward +0.000 m), near clip 0.100 m"));
-  CHECK(strstr(line, "the game's depth 0.210 m; placement editor closed"));
+  CHECK(strstr(line, "Aim: in: \"LAS-5 Scythe\"; fov 61.5 shown 61.5 (Aim field of view: the game's zoom); "
+                     "sight 0.173 m (near clip), wanted 0.100: pull 0.073, closer 0.073 (ADS fwd +0.000), near clip 0.100 m; depth 0.210 m; editor closed | "
+                     "0 frames counted; game/lens not seen; rig depth not worked out") == line);
   for (int i = 0; i < 20; i++) { s.now_ms += 16; CHECK(!tfp_aim_log_step(&log, &s, line, sizeof line)); }   /* steady: nothing more */
   /* a zoom level: the game's lens and sight change; said once it has settled */
   s.game_fov = DEG(25.7); s.sight = .35f;
   bool said = false;
   for (int i = 0; i < 60 && !said; i++) { s.now_ms += 16; s.pull = .25f; s.closer = .25f; s.near_clip = .10f; said = tfp_aim_log_step(&log, &s, line, sizeof line); }
-  CHECK(said && strstr(line, "Aim: changed: \"LAS-5 Scythe\"; field of view 61.5 degrees (Aim field of view: the game's zoom; the game asked for 25.7)"));
-  CHECK(strstr(line, "the game's sight at 0.350 m"));
+  CHECK(said && strstr(line, "Aim: changed: \"LAS-5 Scythe\"; fov 25.7 shown 61.5 (Aim field of view: the game's zoom)") == line);
+  CHECK(strstr(line, "sight 0.350 m (near clip)"));
   /* the editor opened while aiming: said, with its action */
   s.editor = true; s.editor_action = "ads"; s.ads_forward = -.02f; s.closer = .27f;
   said = false;
   for (int i = 0; i < 60 && !said; i++) { s.now_ms += 16; said = tfp_aim_log_step(&log, &s, line, sizeof line); }
-  CHECK(said && strstr(line, "ADS placement forward -0.020 m") && strstr(line, "placement editor open on \"ads\""));
-  /* out: how long, and the zoom levels seen */
+  CHECK(said && strstr(line, "(ADS fwd -0.020)") && strstr(line, "editor open on \"ads\""));
+  /* round 20c: once a second while aiming, with the frames of that second (the field-of-view helper's and the rig's) */
+  {
+    TfpFovAimSecond f; memset(&f, 0, sizeof f);
+    f.frames = 58; f.noted = 58; f.gated = 29; f.changes = 57; f.third_person = 90;
+    f.clear_least = f.clear_most = DEG(30); f.lens_least = DEG(30); f.lens_most = DEG(31); f.game_least = DEG(30.8); f.game_most = DEG(31.8);
+    f.shown_least = DEG(30.8); f.shown_most = DEG(31.8); f.step_most = .012f; f.factor_least = 1.02f; f.factor_most = 1.03f; f.factored = 58;
+    TfpSteadySecond rig; memset(&rig, 0, sizeof rig); rig.aim_frames = 58; rig.aim_depth.least = .21f; rig.aim_depth.most = .45f; rig.aim_step = .24f;
+    said = false; int ticks = 0;
+    for (; ticks < 80 && !said; ticks++) {
+      s.now_ms += 16;
+      if (ticks == 3) { tfp_aim_log_add_fov(&log, &f); tfp_aim_log_add_fov(&log, &f); tfp_aim_log_add_rig(&log, &rig); } /* two takes add up */
+      said = tfp_aim_log_step(&log, &s, line, sizeof line);
+    }
+    printf("  %s\n", line);
+    CHECK(said && ticks > 55 && strstr(line, "Aim: second: \"LAS-5 Scythe\"; fov 25.7") == line);
+    CHECK(strstr(line, "| 116 frames: gate set 58 of 116 noted, changed 114 times; optic target 30.00-30.00 deg (x3.00-x3.00 of 90.0); lens 30.00-31.00; "
+                       "game 30.80-31.80, shown 30.80-31.80 (corrected 0); step 1.200 %; game/lens x1.0200-x1.0300 (116); rig depth 0.2100-0.4500 m (58), step 0.2400 m"));
+    for (int i = 0; i < 20; i++) { s.now_ms += 16; CHECK(!tfp_aim_log_step(&log, &s, line, sizeof line)); }   /* the frames were said: the next second's are its own */
+  }
+  /* out: how long, and each zoom level seen: the game's sight and depth there, and the optic's own magnification */
   s.full_ads = false; s.now_ms += 16;
   CHECK(tfp_aim_log_step(&log, &s, line, sizeof line));
-  CHECK(strstr(line, "Aim: out after 1.") == line && strstr(line, "s; zoom levels seen (the game's field of view): 61.5, 25.7 degrees"));
+  printf("  %s\n", line);
+  CHECK(strstr(line, "Aim: out after 2.") == line && strstr(line, "s; zoom levels (game fov: sight m, depth m, optic): 61.5: sight 0.173, depth 0.210; "
+                                                                   "25.7: sight 0.350, depth 0.210, optic 30.00 deg x3.00 | 0 frames counted"));
   /* a tap under the settling time: one line at the out, with what was seen */
   s.full_ads = true; s.now_ms += 16; CHECK(!tfp_aim_log_step(&log, &s, line, sizeof line));
   s.full_ads = false; s.now_ms += 16; CHECK(tfp_aim_log_step(&log, &s, line, sizeof line) && strstr(line, "Aim: out after 0.0") && strstr(line, "(a tap: not settled)"));
@@ -151,8 +172,33 @@ int main(void) {
   tfp_aim_log_reset(&log); memset(&s, 0, sizeof s); s.sight = NAN; s.depth = NAN; s.game_fov = NAN; s.shown_fov = NAN; s.near_clip = NAN; s.now_ms = 100; s.aim_field = DEG(50);
   s.full_ads = true;
   for (int i = 0; i < 40 && !tfp_aim_log_step(&log, &s, line, sizeof line); i++) s.now_ms += 16;
-  CHECK(strstr(line, "Aim: in: no weapon known; field of view not read (Aim field of view: a chosen 50.0 degrees; the game asked for not read)"));
-  CHECK(strstr(line, "the game's sight not known (no near clip of a sight seen)") && strstr(line, "the game's depth not read"));
+  CHECK(strstr(line, "Aim: in: no weapon known; fov not read shown not read (Aim field of view: a chosen 50.0 degrees)") == line);
+  CHECK(strstr(line, "sight not known, wanted 0.000") && strstr(line, "depth not read"));
+  /* the longest line: under 700 characters (src/mod_view.c say()) */
+  {
+    TfpAimLog big; tfp_aim_log_reset(&big);
+    TfpAimSample w; memset(&w, 0, sizeof w);
+    w.weapon = "A weapon name of sixty characters, the most the line takes...xxxxxxxxxx"; w.game_fov = DEG(123.4); w.shown_fov = DEG(111.1);
+    w.aim_field = DEG(88.8); w.sight = .999f; w.wanted = .30f; w.pull = -.25f; w.closer = .25f; w.ads_forward = -1.234f; w.near_clip = 1.234f;
+    w.depth = -3.999f; w.editor = true; w.editor_action = "an action name long"; w.full_ads = true; w.now_ms = 100;
+    TfpFovAimSecond f; memset(&f, 0, sizeof f);
+    f.frames = 4000000000u; f.noted = 4000000000u; f.gated = 1; f.changes = 4000000000u; f.corrected = 4000000000u; f.third_person = 179.9f;
+    f.clear_least = DEG(.1); f.clear_most = DEG(179.9); f.lens_least = DEG(.1); f.lens_most = DEG(179.9); f.game_least = DEG(.1); f.game_most = DEG(179.9);
+    f.shown_least = DEG(.1); f.shown_most = DEG(179.9); f.step_most = 99.99f; f.factor_least = .5f; f.factor_most = 1.99f; f.factored = 4000000000u;
+    TfpSteadySecond rig; memset(&rig, 0, sizeof rig); rig.aim_frames = 4000000000u; rig.aim_depth.least = -3.9999f; rig.aim_depth.most = -3.9998f; rig.aim_step = 7.9999f;
+    char longest[2048]; size_t most = 0;
+    for (int i = 0; i < 300; i++) {
+      w.now_ms += 16; if (i % 25 == 0) w.game_fov += DEG(1.1); /* new zoom levels: the out line's list */
+      tfp_aim_log_add_fov(&big, &f); big.fov.frames = f.frames; big.fov.noted = f.noted; big.fov.changes = f.changes; big.fov.corrected = f.corrected; big.fov.factored = f.factored;
+      tfp_aim_log_add_rig(&big, &rig); big.rig.frames = rig.aim_frames;
+      if (tfp_aim_log_step(&big, &w, longest, sizeof longest) && strlen(longest) > most) most = strlen(longest);
+    }
+    w.full_ads = false; w.now_ms += 16;
+    tfp_aim_log_add_fov(&big, &f); tfp_aim_log_add_rig(&big, &rig);
+    if (tfp_aim_log_step(&big, &w, longest, sizeof longest) && strlen(longest) > most) most = strlen(longest);
+    printf("  the longest \"Aim:\" line: %zu characters\n", most);
+    CHECK(most > 400 && most < TFP_AIM_LINE);
+  }
   printf("ads seat: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

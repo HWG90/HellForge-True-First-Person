@@ -547,6 +547,8 @@ static bool w_read(void *u, uint64_t at, void *out, size_t length) {
   return process_vm_readv(getpid(), &local, 1, &remote, 1, 0) == (ssize_t)length;
 }
 static uint64_t w_tick(void *u) { (void)u; return now_ms; }
+static struct { unsigned calls, gated; float target, lens; } lens_notes; /* round 20: what the pose helper hands the field-of-view helper */
+static void w_note_lens(void *u, bool gated, float target, float lens) { (void)u; ++lens_notes.calls; lens_notes.gated += gated; lens_notes.target = target; lens_notes.lens = lens; }
 static uint32_t w_thread(void *u) { (void)u; return 1; }
 static bool w_writable_slot(void *u, uint64_t at, uint64_t exe) { (void)u; return exe == world.exe && at >= world.api_begin && at + 8 <= world.api_end; }
 static bool w_executable(void *u, uint64_t at) { (void)u; return at >= 65536; }
@@ -853,7 +855,7 @@ static int real(void) {
   host.cas = w_cas, host.write = w_write, host.pin = w_pin;
   host.lock_exclusive = w_lock, host.unlock_exclusive = w_unlock, host.lock_shared = w_lock, host.unlock_shared = w_unlock;
   host.writable32 = w_writable32, host.cas32 = w_cas32, host.region = w_region, host.allocate = w_allocate, host.native_exp = w_exp;
-  host.forward_setter = w_forward_setter, host.forward_getter = w_forward_getter;
+  host.forward_setter = w_forward_setter, host.forward_getter = w_forward_getter, host.note_lens = w_note_lens;
   tfp_pose_set_host(&host);
   tfp_pose_reset_for_tests();
 
@@ -994,15 +996,19 @@ static int real(void) {
     CHECK(applied_is(.11, .02 + (double)depth, -.12) && near(root_forwarded[1], -(double)depth, 2e-6) && root_forwarded[0] == 0 && root_forwarded[2] == 0);
     CHECK(tfp_pose_steady_take(&held) == 1 && held.frames == 61 && held.worked == 61 && held.roots == held.shifted && held.shifted >= 59 && tfp_steady_passed(&held) == 0);
     CHECK(tfp_pose_gate_take(&g) == 1 && g.applied == 0 && g.passed[TFP_GATE_STEADY] == 61);
+    memset(&lens_notes, 0, sizeof lens_notes);
     for (int i = 0; i < 6; i++) {
       pose_world_gate(i % 2 == 0, 0);
       root_frame(16);
+      /* round 20: each of these frames' lens goes to the field-of-view helper, the gate as the evaluator took it */
+      CHECK(lens_notes.calls == (unsigned)i + 1 && lens_notes.gated == (unsigned)i / 2 + 1 && near(lens_notes.target * 57.29578, i % 2 == 0 ? 90 : 36, .01) && lens_notes.lens > 0);
       const double added = i % 2 == 0 ? (double)current + (double)depth - (double)gated_depth : (double)depth;
       CHECK(applied_is(.11, .02 + added, -.12) && near(root_forwarded[1], -added, 2e-6));
       /* what the player sees of it: the game's depth plus the shift is the same distance on every frame */
       CHECK(near((i % 2 == 0 ? (double)gated_depth : (double)current) + added, (double)current + (double)depth, 2e-6));
     }
     CHECK(tfp_pose_steady_take(&held) == 1 && held.frames == 6 && held.gated.count == 3 && held.clear.count == 3 && held.shifted == 6 && held.roots == 6);
+    CHECK(held.aim_frames == 0); /* round 20: the hip, not full aim: nothing for the "Aim:" line */
     CHECK(near(held.gated.least, gated_depth, 1e-6) && near(held.clear.most, current, 0) && held.held.least == held.held.most && near(held.held.most, current + depth, 1e-6));
     CHECK(tfp_steady_worth(&held) && held.off == 0 && held.lease == 1 && near(held.argument_gated.least, NATIVE[1], 0));
     CHECK(tfp_pose_gate_take(&g) == 1 && g.avatar_changes == 6 && g.applied == 0 && g.passed[TFP_GATE_STEADY] == 3 && g.passed[TFP_GATE_GATED] == 3);
@@ -1012,8 +1018,10 @@ static int real(void) {
     pose_world_gate(0, 1);
     pose_world_request_field(0x8C, 0x01000100); /* +0x8d set, +0x8f set */
     pose_world_request_field(0x88, 0x3f800000); /* the weight at 1 */
+    memset(&lens_notes, 0, sizeof lens_notes);
     root_frame(16);
     CHECK(applied_is(.11, .02, -.12));
+    CHECK(lens_notes.calls == 1 && lens_notes.gated == 1); /* round 20: request+0x8f alone is the gate too, as the evaluator takes it */
     pose_world_request_field(0x8C, 0);
     pose_world_gate(0, 0);
     root_frame(16);
@@ -1022,6 +1030,60 @@ static int real(void) {
     game_frame(handle, &stats, 16);
     CHECK(applied_is(.11, .02, -.12));
     CHECK(tfp_pose_steady_take(&held) == 1 && held.frames == 3 && held.passed[TFP_STEADY_NO_LENS] == 1);
+    /* round 20, review 24 IMPORTANT 3: full aim, the hold at full strength there. A frame the game scales (the
+     * reload blend running, the gate bit set) is passed by the hold; in full aim the held distance is kept through
+     * it, node 5 and the root together, instead of the eye going back to the game's own depth for the frame.
+     * Round 20c: only with zoom_steady.txt (tfp_pose_set_aim_steady). Without it, as feel.51: nothing is held in full
+     * aim, the scaled frame is the game's own, and the depth in full aim is still counted for the "Aim:" line. */
+    for (int steady_aim = 1; steady_aim >= 0; --steady_aim) {
+      tfp_pose_set_aim_steady(steady_aim);
+      pose_world_aim(1);
+      for (int i = 0; i < 60; i++) root_frame(16);
+      CHECK(tfp_pose_steady_take(&held) == 1 && held.aim_frames > 50 && held.worked == 60 && tfp_steady_passed(&held) == 0);
+      const float before = forwarded[1], root_before = root_forwarded[1];
+      pose_world_gate(1, 0);
+      pose_world_request_field(0x8C, 0x00000100); /* +0x8d set */
+      pose_world_request_field(0x88, 0x3f000000); /* the weight at .5: the blend runs, and with the bit set the game scales the rig */
+      root_frame(16);
+      const double kept = steady_aim ? .5 * ((double)current - (double)gated_depth) : 0; /* the blend's share of it, unscaled; off: nothing */
+      CHECK(near(forwarded[1] - before, kept, 2e-6) && near(root_forwarded[1] - root_before, -kept, 2e-6));
+      CHECK(tfp_pose_steady_take(&held) == 1 && held.frames == 1 && held.passed[TFP_STEADY_SCALED] == 1 && held.shifted == (unsigned)steady_aim && held.roots == (unsigned)steady_aim);
+      pose_world_request_field(0x8C, 0); pose_world_request_field(0x88, 0x3f800000);
+      pose_world_gate(0, 0);
+      pose_world_aim(0);
+      for (int i = 0; i < 60; i++) root_frame(16);
+      CHECK(applied_is(.11, .02 + (double)depth, -.12));
+      tfp_pose_steady_take(&held);
+    }
+    tfp_pose_set_aim_steady(0);
+    /* round 20c (review 27, I1): with zoom_steady.txt the gun is drawn at the held depth in full aim, so the sight
+     * distance's pull follows that depth, not the game's own: the gate flipping (the game's depth thrown back and
+     * forth, the drawn one still) leaves the pull where it is. Taken from the game's own depth it would give back what
+     * the gate throws, on a gun that did not move. */
+    {
+      TfpPoseAdsProbe ads;
+      tfp_pose_set_aim_steady(1);
+      pose_world_aim(1);
+      tfp_pose_set_ads_seat(.35f, .15f);
+      for (int i = 0; i < 60; i++) root_frame(16);
+      CHECK(tfp_pose_ads_probe(&ads) && ads.full_ads && near(ads.pull, .20, 1e-4));
+      float least = 1, most = 0;
+      for (int i = 0; i < 8; i++) {
+        pose_world_gate(i % 2 == 0, 0);
+        root_frame(16);
+        CHECK(tfp_pose_ads_probe(&ads));
+        if (ads.pull < least) least = ads.pull;
+        if (ads.pull > most) most = ads.pull;
+      }
+      if (most - least > 1e-4f) printf("wire pose: zoom_steady.txt, the gate flipping in full aim: the pull went %.4f to %.4f m\n", least, most);
+      CHECK(most - least <= 1e-4f && near(most, .20, 1e-4));
+      pose_world_gate(0, 0);
+      tfp_pose_set_ads_seat(0, 0);
+      pose_world_aim(0);
+      for (int i = 0; i < 60; i++) root_frame(16);
+      tfp_pose_set_aim_steady(0);
+      tfp_pose_steady_take(&held);
+    }
     /* a shift too small for node 5's float (the lens one step short of its target): nothing is moved, nothing is
      * asked of the root, and neither is counted; it is not a root that failed to follow */
     CHECK(tfp_pose_set_depth_off(1) == 1); /* the hold then rests on the optic's own distance, where the game's depth is */

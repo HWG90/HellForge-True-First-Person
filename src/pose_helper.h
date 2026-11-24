@@ -140,6 +140,12 @@ typedef struct TfpPoseHost {
    * 0..3 of the pose slots, 4 for UnitAPI+0x90. */
   void (*forward_setter)(void *user, unsigned which, uint64_t original, uint32_t unit, uint32_t node, const float *pose);
   const float *(*forward_getter)(void *user, unsigned which, uint64_t original, uint32_t unit, uint32_t node);
+  /* Optional, not retail's (round 20, docs/design/specs/2026-11-23-gate-flip.md "Round 20"). NULL: nothing. Set:
+   * called on each frame of the rig's node 5 whose kind-6 lens the held depth read with its proofs (the same
+   * evaluation; the evaluator runs before the frame's hooked field-of-view call): the unzoom gate as the evaluator
+   * took it (the avatar's packed bit 0, or request+0x8f), the lens target it chose, the lens after its step. The feel
+   * build hands it to the field-of-view helper (tfp_fov_note_lens). */
+  void (*note_lens)(void *user, bool gated, float target, float lens);
 } TfpPoseHost;
 
 /* Supply the host once, before any other call. The struct is copied. */
@@ -239,6 +245,11 @@ uint32_t tfp_pose_hold_probe(TfpPoseHoldProbe *out); /* 1; reads only */
  * seat, the start-up value, so the helper is retail's until the binder calls this). Any thread; read in each frame.
  * tfp_pose_ads_probe: what the last frame of node 5 did with it, for the "Aim:" line and the near clip (closer). */
 void tfp_pose_set_ads_seat(float sight, float wanted);
+/* Not in retail (round 20c; docs/guides/AIM-TEST.md): the test switch zoom_steady.txt. true: the held depth works at
+ * full strength in full aim too (src/depth_steady.h tfp_steady_aim) and a frame it passes there keeps the held distance
+ * (tfp_steady_carry). false, the start-up value: the hip share weights it, nothing in full aim (feel.51). Either way
+ * the frame's lens goes to host.note_lens and the depth in full aim is counted for the "Aim:" line. */
+void tfp_pose_set_aim_steady(bool on);
 typedef struct TfpPoseAdsProbe {
   bool armed, full_ads;
   float share;        /* the ADS share: 0 at the hip, 1 in full aim */

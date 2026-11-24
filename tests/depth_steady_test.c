@@ -429,6 +429,53 @@ int main(void) {
     tfp_steady_line(&s, text, 32); CHECK(strlen(text) < 32);
     tfp_steady_take(&log, &s); CHECK(!tfp_steady_worth(&s));
   }
+  /* ---- round 20: where to rest in and out of full aim (tfp_steady_aim), and a frame the hold passes in full aim
+   * (review 24, IMPORTANT 3): the shift of the last frame worked out is carried, not dropped ---- */
+  {
+    TfpSteadyInput in; memset(&in, 0, sizeof in); in.current = .30f;
+    tfp_steady_aim(&in, 1, .15f); CHECK(in.share == 1 && in.settled == .15f);                 /* the hip: the hip's resting distance */
+    tfp_steady_aim(&in, 0, .15f); CHECK(in.share == 1 && in.settled == .30f);                 /* full aim: the game's own */
+    tfp_steady_aim(&in, .5f, .15f); CHECK(in.share == 1 && near(in.settled, .225, 1e-7));     /* between: eased with the hip share */
+    tfp_steady_aim(&in, .25f, .15f); CHECK(near(in.settled, .2625, 1e-7));
+    tfp_steady_aim(&in, NAN, .15f); CHECK(in.settled == .15f);                                /* no number: the hip */
+    tfp_steady_aim(&in, 3, .15f); CHECK(in.settled == .15f);
+    tfp_steady_aim(&in, -1, .15f); CHECK(in.settled == .30f);
+
+    Game g = scythe(); TfpSteady state; memset(&state, 0, sizeof state); float delta = 0, depth = 0, held = 0, carried = 7;
+    TfpSteadyInput f = game_frame(&g, false, 16); g.current = .30f; f.current = .30f; f.settled = .24f;
+    tfp_steady_frame(&state, &f, 4, 1000, &delta, &depth, &held);
+    f = game_frame(&g, true, 16); f.settled = .24f;
+    CHECK(tfp_steady_frame(&state, &f, 4, 1016, &delta, &depth, &held) == TFP_STEADY_WORKED && delta != 0);
+    const float last = delta; const TfpSteady kept = state;
+    /* the game scaling the rig: the held distance kept, with the blend's share (here a weight of .75 kept) */
+    TfpSteadyInput sc = game_frame(&g, true, 16); sc.settled = .24f; sc.blend = 1; sc.bit = 1; sc.mix_before = .5f; sc.mix_after = .75f;
+    CHECK(tfp_steady_frame(&state, &sc, 4, 1032, &delta, &depth, &held) == TFP_STEADY_SCALED && delta == 0 && state.held != depth);
+    CHECK(tfp_steady_carry(&state, &sc, TFP_STEADY_SCALED, true, 4, 1032, depth, &carried) && near(carried, .75*((double)state.held-(double)depth), 1e-7));
+    sc.ability = 1; CHECK(tfp_steady_carry(&state, &sc, TFP_STEADY_SCALED, true, 4, 1032, depth, &carried) && near(carried, .25*((double)state.held-(double)depth), 1e-7));
+    sc.ability = 0; carried = 7; CHECK(!tfp_steady_carry(&state, &sc, TFP_STEADY_SCALED, true, 4, 1032, NAN, &carried) && carried == 0);
+    /* a value out of range: the last frame's shift, as it was */
+    carried = 7; CHECK(tfp_steady_carry(&state, &sc, TFP_STEADY_RANGE, true, 4, 1048, 0, &carried) && carried == last);
+    CHECK(!memcmp(&kept, &state, sizeof state));                                              /* nothing kept by it */
+    /* not at the hip (round 9 as it was), not for another lease, not after a gap, not for the other reasons: there is
+     * no proof the request is this frame's (no lens), it is switched off, the evaluator's code is not the pinned one,
+     * or the root does not follow node 5 (moving node 5 alone puts the gun against the eye) */
+    carried = 7; CHECK(!tfp_steady_carry(&state, &sc, TFP_STEADY_RANGE, false, 4, 1032, 0, &carried) && carried == 0);
+    carried = 7; CHECK(!tfp_steady_carry(&state, &sc, TFP_STEADY_RANGE, true, 5, 1032, 0, &carried) && carried == 0);
+    carried = 7; CHECK(!tfp_steady_carry(&state, &sc, TFP_STEADY_RANGE, true, 4, 1016+TFP_STEADY_GAP_MS+1, 0, &carried) && carried == 0);
+    carried = 7; CHECK(!tfp_steady_carry(&state, &sc, TFP_STEADY_RANGE, true, 4, 1000, 0, &carried) && carried == 0);
+    const uint32_t never[5] = {TFP_STEADY_WORKED, TFP_STEADY_OFF, TFP_STEADY_NO_LENS, TFP_STEADY_NO_CODE, TFP_STEADY_NO_ROOT};
+    for (int i = 0; i < 5; ++i) { carried = 7; CHECK(!tfp_steady_carry(&state, &sc, never[i], true, 4, 1032, depth, &carried) && carried == 0); }
+    /* round 20c (review 27, 3): a range frame with the switch off (or the root's stop) is never carried, though the
+     * reason it gives is "range" (tfp_steady_frame says range before it looks at the switch) */
+    { TfpSteadyInput off = sc; off.on = false; carried = 7;
+      CHECK(tfp_steady_carry(&state, &sc, TFP_STEADY_RANGE, true, 4, 1048, 0, &carried) && !tfp_steady_carry(&state, &off, TFP_STEADY_RANGE, true, 4, 1048, 0, &carried) && carried == 0); }
+    TfpSteady unknown; memset(&unknown, 0, sizeof unknown);
+    carried = 7; CHECK(!tfp_steady_carry(&unknown, &sc, TFP_STEADY_RANGE, true, 0, 1032, 0, &carried) && carried == 0);
+    /* a frame worked out with nothing to add carries nothing */
+    f = game_frame(&g, false, 16); f.settled = f.current;
+    memset(&state, 0, sizeof state); tfp_steady_frame(&state, &f, 4, 2000, &delta, &depth, &held);
+    carried = 7; CHECK(tfp_steady_carry(&state, &sc, TFP_STEADY_RANGE, true, 4, 2016, 0, &carried) && carried == 0);
+  }
   printf("Depth steady: %d checks, %d failed\n", checks, failed);
   return failed ? 1 : 0;
 }
