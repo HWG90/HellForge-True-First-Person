@@ -268,9 +268,17 @@ frame of the lock that is not the native view after one that was, until the tick
 body drawn again and switched all of it off (at most two ticks; at once when head visibility stops), a head-camera frame
 of a body on foot whose eye is less than 0.10 m (`TFP_CAMERA_VEIL_CLEAR`) in front of the head node, along the level
 view direction, is handed to the game with the eye moved forward to 0.10 m. Height, side and rotation stay. With the
-Scythe that is 0.32 m forward for one frame, then the swap's held eye again: everything far away moves by a few
-per cent of its size for 33 ms instead of the helmet covering half the screen. Eyes already in front (the Talon's)
+Scythe that is 0.32 m forward for two frames, then the swap's held eye again: everything far away moves by a few
+per cent of its size for about 66 ms instead of the helmet covering half the screen. Eyes already in front (the Talon's)
 are not moved.
+
+Two frames, not one (the review of round 14): in all 131 leaves of soak 27 with a `Trace:` row, the first head-camera
+frame comes before the tick that logs "left the native view". That frame is drawn with the body still hidden; the
+tick finds nothing drawn again and the veil stays open; the game switches the body on in its update after that tick,
+the next frame is the one with the body, and the tick after it closes the veil. So the first veiled frame does not
+need the move. It is moved all the same: from the camera hook it looks like the first frame of a leave whose tick came
+first (the other order, `tests/camera_veil_helper_test.cpp` test 3), and there that frame is the one with the body.
+Nothing the hook reads tells the two apart, and guessing wrong brings the helmet back.
 
 Only the position handed to the game in that frame changes. The eye the swap holds and glides (`eye_delta`, the glide),
 the continuity, the damping and the trace row are the eye's before the veil, so the next frame goes on from them as
@@ -290,7 +298,8 @@ calls `tfp_camera_veil_tick` (closes it when the update found meshes drawn again
 off). The first build armed it only while the module owned rows of the head, which left out the first leave of every
 session (the review of round 14). Tests: `tests/camera_veil_helper_test.cpp` (`tests/run-camera-veil.sh`, the 53rd
 script) on the fake game memory of `tests/camera_smooth_test.cpp`: not armed, nothing changes; the Scythe's eye moved
-to 0.10 m in front and back to the held eye after the closing tick; a frame before its own tick; no re-show (closed
+to 0.10 m in front for both frames of a leave in the order soak 27 has (the first frame before its tick) and back to
+the held eye after the closing tick; the other order (one frame); no re-show (closed
 after two ticks); an eye in front already; switched off while open; a native frame while open (counted behind); no
 lock, no veil; what the tick hands it (armed on a kind-6 tick that owns no head row, closed by the tick that found
 the body and left none of it drawn, not by one that left some drawn, not armed with the view off, the module not
@@ -302,15 +311,16 @@ active or no tick).
 ...; view on without hiding on 0 ticks; veil: 3 leaves, 4 frames, eye moved clear on 2, left behind the head on 0
 ```
 
-- `leaves`: leaves of the native view the veil opened at; `frames`: frames drawn while it was open (the body drawn
-  until the next tick); `eye moved clear`: of them, frames whose eye it moved.
+- `leaves`: leaves of the native view the veil opened at; `frames`: frames drawn while it was open (two a leave: the
+  first head-camera frame, before the tick that sees the leave, and the frame with the body); `eye moved clear`: of them, frames whose eye it moved.
 - `left behind the head`: frames drawn while it was open whose eye was not proven 0.10 m in front of the head (a native
   frame, a body off foot, a frame the helper did not present). **It must read 0.** A rise of it is a line by itself.
 
 ### What only the game can show
 
 - That a game session's `Head:` lines read `left behind the head on 0` with `leaves` close to the number of
-  "left the native view" lines, and `frames` about one a leave (two where the leave's frame came before its tick).
+  "left the native view" lines, and `frames` about two a leave (the first head-camera frame comes before the tick that sees the leave; one where
+  it does not).
 - That the helmet is gone from the frame of a leave: the capture script of feel.50 again, the grenade (shot 10) at
   0.40 s, and swaps away from the Scythe with a burst of captures around the leave (`tools/harness/burst.py`).
 - How the one-frame step forward looks and feels next to the helmet it replaces. If it shows, the distance (0.10 m) is

@@ -222,7 +222,10 @@ void tfp_camera_orphan_stats(TfpCameraOrphanStats *out);
  * (the outgoing weapon's), 0.22 m behind the head with the LAS-5 Scythe: the helmet fills the view. The veil opens at
  * the first frame of the lock that is not the native view after one that was, and closes at the tick whose head
  * visibility update found the body drawn again and switched all of it off (or at the second tick, or when switched
- * off). While it is open, a head-camera frame of a body on foot whose eye is less than TFP_CAMERA_VEIL_CLEAR in front
+ * off). That is two frames a leave, about 66 ms: in every leave soak 27 traced (131) the first head-camera frame is
+ * drawn before the tick that sees the leave, the body still hidden, and the frame with the body comes after that
+ * tick. The first is veiled too: from the hook it cannot be told from the first frame of a leave whose tick came
+ * first, which would be the frame with the body. While it is open, a head-camera frame of a body on foot whose eye is less than TFP_CAMERA_VEIL_CLEAR in front
  * of the head, along the level view direction, is drawn with the eye moved forward to that distance; height, side and
  * rotation stay. Only the position handed to the game in that frame changes: the eye the swap holds and glides, the
  * continuity, the damping and the trace row are those of the eye before it.

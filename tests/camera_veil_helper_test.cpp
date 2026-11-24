@@ -48,9 +48,26 @@ int main() {
     CHECK(s.leaves == 0 && s.frames == 0 && s.moved == 0 && s.behind == 0);
     g.end();
   }
-  // ---- 2. Armed, the Scythe's eye: the first head-camera frame shows the eye TFP_CAMERA_VEIL_CLEAR in front of the
-  // head, at the same height; the tick after head visibility switched the body off closes the veil, and the next frame
-  // is the held eye again (what the swap glides from is untouched). ----
+  // ---- 2. Armed, the Scythe's eye, in the order of every leave soak 27 traced (131 of 131): the first head-camera
+  // frame is drawn before the tick that sees the leave, the body still hidden, and shows the eye TFP_CAMERA_VEIL_CLEAR
+  // in front of the head at the same height; that tick finds nothing drawn yet and the veil stays open; the game draws
+  // the body in the next frame, which is veiled too; the tick after it, with the body switched off, closes the veil and
+  // the next frame is the held eye again (what the swap glides from is untouched). Two frames a leave, about 66 ms. ----
+  {
+    Game g; leave(g, true, true, -.22f, &first);
+    CHECK(std::fabs(first - TFP_CAMERA_VEIL_CLEAR) < .002f && std::fabs(up_of_head(g) - held_up) < .002f);
+    tfp_camera_veil_tick(false);           // the tick that sees the leave: nothing drawn again yet
+    g.hip(2); g.frame(33.3);
+    CHECK(std::fabs(ahead_of_head(g) - TFP_CAMERA_VEIL_CLEAR) < .002f);
+    tfp_camera_veil_tick(true);            // the next tick: the body found drawn again and switched off
+    g.hip(2); g.frame(33.3);
+    CHECK(std::fabs(ahead_of_head(g) - held_ahead) < .002f);
+    const TfpCameraVeilStats s = veil();
+    CHECK(s.leaves == 1 && s.frames == 2 && s.moved == 2 && s.behind == 0 && std::fabs(s.largest_m - (TFP_CAMERA_VEIL_CLEAR - held_ahead)) < .002f);
+    g.end();
+  }
+  // ---- 3. The other order (not seen in soak 27): the tick that sees the leave runs before the first head-camera
+  // frame, so that frame is the one with the body in it; the tick after it closes the veil: one frame. ----
   {
     Game g; leave(g, true, true, -.22f, &first);
     CHECK(std::fabs(first - TFP_CAMERA_VEIL_CLEAR) < .002f && std::fabs(up_of_head(g) - held_up) < .002f);
@@ -61,21 +78,6 @@ int main() {
     CHECK(std::fabs(ahead_of_head(g) - held_ahead) < .002f);
     s = veil();
     CHECK(s.leaves == 1 && s.frames == 1 && s.moved == 1 && s.behind == 0);
-    g.end();
-  }
-  // ---- 3. The frame of the leave came before the tick that made it (the order the game can have it in): that tick
-  // finds nothing drawn yet and the veil stays open; the next tick, with the body switched off, closes it. ----
-  {
-    Game g; leave(g, true, true, -.22f, &first);
-    CHECK(std::fabs(first - TFP_CAMERA_VEIL_CLEAR) < .002f);
-    tfp_camera_veil_tick(false);
-    g.hip(2); g.frame(33.3);
-    CHECK(std::fabs(ahead_of_head(g) - TFP_CAMERA_VEIL_CLEAR) < .002f);
-    tfp_camera_veil_tick(true);
-    g.hip(2); g.frame(33.3);
-    CHECK(std::fabs(ahead_of_head(g) - held_ahead) < .002f);
-    const TfpCameraVeilStats s = veil();
-    CHECK(s.leaves == 1 && s.frames == 2 && s.moved == 2 && s.behind == 0);
     g.end();
   }
   // ---- 4. Nothing was drawn again (one leave of soak 27's 138 had no re-show): the veil closes after two ticks
