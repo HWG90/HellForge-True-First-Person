@@ -10,6 +10,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "gate_log.h"
+#include "depth_steady.h"
 
 /* ---- native_ads_editor.h: the structures, same fields, order and sizes ---- */
 typedef struct TfpPoseConfig {
@@ -211,6 +212,18 @@ uint32_t tfp_pose_set_hold(uint32_t on);
 uint32_t tfp_pose_gate_take(TfpGateSecond *out);
 uint32_t tfp_pose_set_gate_reads(uint32_t on);
 uint32_t tfp_pose_set_depth_off(uint32_t on);
+/* ---- the rig's depth held steady (not in retail; src/depth_steady.h, the same spec, "Round 9") ----
+ * tfp_pose_set_depth_steady(mode): 0, the start: the helper as retail has it. 1: on every frame of the rig's node 5
+ * with an evaluator frame, the game's own depth blend is worked out from the lens locals and the request's state the
+ * zoom depth term already reads (one more guarded read of the request's 0x24 state bytes), and node 5 and the rig's
+ * root are moved as a pair, through the term's own guarded writes, so that the depth is the settled distance of the
+ * selected optic instead of following the lens target the game's unzoom gate switches. Where it has a number it goes
+ * out in place of the zoom depth term's. Weighted by the hip share: nothing in full aim. 2 (depth_steady_off.txt):
+ * worked out and counted, nothing added. Returns 1, or 0 for another mode.
+ * tfp_pose_steady_take: what was counted of it since the last call, for the "Steady:" line; the count begins again.
+ * Returns 1, or 0 before the host is set. */
+uint32_t tfp_pose_set_depth_steady(uint32_t mode);
+uint32_t tfp_pose_steady_take(TfpSteadySecond *out);
 typedef struct TfpPoseHoldProbe {
   uint32_t hold, armed, error;   /* the mode; whether a lease is armed; tfp_pose_error() */
   uint64_t node5_calls;          /* position-setter calls for node 5 of the watched rig, counted from the first tfp_pose_set_hold on */

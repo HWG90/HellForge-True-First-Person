@@ -284,7 +284,7 @@ typedef struct DepthObservation {
   uint8_t frame[0x20];
   uint8_t request_state[0x24];
 } DepthObservation;
-typedef struct CarrierPending { DepthObservation observation; float delta; bool ready; } CarrierPending;
+typedef struct CarrierPending { DepthObservation observation; float delta; bool ready, steady; /* steady: the delta is the held depth's (src/depth_steady.h), not retail's */ } CarrierPending;
 /* cpp:106-127 */
 typedef struct Policy {
   TfpPoseConfig c; uint64_t camera, controller, descriptor, object, weapon_object, deadline;
@@ -682,7 +682,7 @@ static TfpGateLog gate;
 static _Atomic uint32_t gate_reads, depth_off;
 /* One frame in which the rig root is written, after the depth term is settled. `added`: what it added. The gate
  * bytes and the lens are the ones read with the evaluator's locals in this frame, whatever the term did with them. */
-static void gate_frame(const DepthObservation *observation, uint64_t native_stack, float added) {
+static void gate_frame(const DepthObservation *observation, uint64_t native_stack, float added, bool steadied) {
   TfpGateFrame f; memset(&f, 0, sizeof f);
   f.lens_read = native_stack && observation->ready && observation->native_stack == native_stack;
   if (f.lens_read) {
@@ -691,6 +691,7 @@ static void gate_frame(const DepthObservation *observation, uint64_t native_stac
     f.target = field_f32(observation->frame, 0x18); f.lens = field_f32(observation->frame, 0x1C);
   }
   f.reason = native_stack ? policy.depth.observed.reason : (uint32_t)TFP_GATE_NO_FRAME; f.correction = added;
+  if (steadied && f.reason == TFP_GATE_WORKED) f.reason = TFP_GATE_STEADY; /* the term had a number; the held depth went out in its place */
   if (atomic_load_explicit(&gate_reads, memory_order_relaxed)) {
     const uint64_t row = policy.c.avatar_owner + B_AVATAR_MAIN + (uint64_t)policy.c.avatar_index*B_AVATAR_MAIN_STRIDE;
     uint8_t head[0x3e] = {0}; float scalar = 0;
@@ -771,6 +772,44 @@ static float depth_delta(Policy *p, const DepthObservation *observation, uint64_
   s->observed.reference_distance = reference; s->observed.correction = delta;
   s->observed.target_fov = target; s->observed.current_fov = lens; s->observed.gain = gain;
   return delta;
+}
+/* Not in retail: the rig's depth held steady against the game's unzoom gate (src/depth_steady.h,
+ * docs/design/specs/2026-11-23-gate-flip.md "Round 9"). Under the policy lock. steady_mode: 0 the helper as retail has
+ * it (none of this is reached); 1 on; 2 switched off (depth_steady_off.txt): the game's depth is still worked out and
+ * counted for the "Steady:" line, nothing is added.
+ * One frame of the rig's node 5. It reads what the zoom depth term reads and no more: the lens locals the position
+ * getter took in this same evaluation and the request's state again (one guarded read), with the term's own proofs
+ * that both belong to this call. True: `*delta` is to go out in place of the term's own number (it can be nothing).
+ * `argument` is the game's own forward value for the node, for the line only. */
+static TfpSteady steady; static TfpSteadyLog steady_log;
+static _Atomic uint32_t steady_mode;
+static bool steady_frame(Policy *p, const DepthObservation *observation, uint64_t native_stack, uint64_t now, uint32_t mode, float argument, float *delta) {
+  const uint64_t generation = atomic_load_explicit(&active_generation, memory_order_relaxed);
+  uint8_t request[0x24] = {0}; float depth = 0, held = 0; uint32_t reason = TFP_STEADY_NO_LENS; bool bit = false;
+  *delta = 0;
+  if (observation->ready && observation->native_stack == native_stack && observation->request == p->c.request && observation->generation == generation
+      && observation->thread == host.thread(host.user) && read(p->c.request + L_REQUEST_STATE, request, sizeof request)
+      && !memcmp(request, observation->request_state, 8) && !memcmp(request + 0xC, observation->request_state + 0xC, sizeof request - 0xC)
+      && field_u32(request, 4) == field_u32(observation->frame, 0x1C)) {
+    TfpSteadyInput in; memset(&in, 0, sizeof in);
+    in.target = field_f32(observation->frame, 0x18); in.lens = field_f32(observation->frame, 0x1C); in.prior = field_f32(request, 0x20);
+    in.current = field_f32(request, 0x10); in.previous = field_f32(request, 0x1C);
+    in.bit = observation->frame[0] != 0; in.blend = request[0xD]; in.ability = request[0xF];
+    in.mix_before = field_f32(observation->request_state, 8); in.mix_after = field_f32(request, 8);
+    in.share = p->weight; in.on = mode == 1;
+    /* Where to rest: the selected optic's own distance, or the mod's reference for it where the zoom depth term has
+     * one for exactly these distances (then the two agree at rest, and the term's blend over the lens is left out). */
+    in.settled = in.current;
+    const DepthState *s = &p->depth;
+    const uint32_t signature[4] = {field_u32(request, 0x10), field_u32(request, 0x1C), field_u32(request, 0x20), 0};
+    if (!p->zoom_policy_active && !atomic_load_explicit(&depth_off, memory_order_relaxed) && s->valid && s->signature_set
+        && !memcmp(signature, s->signature, sizeof signature)) in.settled = s->current_reference;
+    reason = tfp_steady_frame(&steady, &in, generation, (double)now, delta, &depth, &held);
+    bit = in.bit;
+  }
+  steady_log.now.lease = generation;
+  tfp_steady_note(&steady_log, reason, bit, depth, held, *delta, argument);
+  return reason == TFP_STEADY_WORKED;
 }
 /* cpp:555-576. Optional native input policy. The only engine datum it
  * changes is DWORD80 of the exact owned camera6 request. All backing records
@@ -1233,7 +1272,9 @@ static void carrier_position_locked(uint64_t caller, uint32_t unit, uint32_t nod
     forward_position(unit, node, pose); return;
   }
   uint8_t request[0x24] = {0};
-  if (policy.full_ads || !read(policy.c.request + L_REQUEST_STATE, request, sizeof request)
+  /* Not in retail: the held depth's pair is also moved on the way into and out of full aim (its node 5 half is
+   * weighted by the hip share and is nothing in full aim); retail's own depth pair never is. */
+  if ((policy.full_ads && !pending.steady) || !read(policy.c.request + L_REQUEST_STATE, request, sizeof request)
       || memcmp(request, observation->request_state, 8)
       || memcmp(request + 0xC, observation->request_state + 0xC, sizeof request - 0xC)) {
     forward_position(unit, node, pose); return;
@@ -1253,6 +1294,7 @@ static void carrier_position_locked(uint64_t caller, uint32_t unit, uint32_t nod
   if (!finite_pose(shifted)) { forward_position(unit, node, pose); return; }
   memcpy(policy.carrier_baseline, source + 4, 16); memcpy(policy.carrier_written, shifted, 12);
   policy.carrier_poses = poses; policy.carrier_shifted = memcmp(shifted, source + 4, 12) != 0;
+  if (policy.carrier_shifted && pending.steady) tfp_steady_root(&steady_log);
   if (policy.carrier_shifted) forward_position(unit, node, shifted); else forward_position(unit, node, pose);
 }
 /* cpp:957-1011 */
@@ -1369,18 +1411,27 @@ static void position_locked(uint32_t unit, uint32_t node, const float *pose, uin
     }
     if (policy.full_ads) { depth = 0; depth_pass(&policy.depth, 1); }
   }
+  /* Not in retail: the depth held steady. Where it has a number for the frame, that goes out in place of the zoom
+   * depth term's (which goes on and off with the game's unzoom gate), through the same pair: node 5 here, the root
+   * in carrier_position_locked. */
+  bool steadied = false;
+  const uint32_t steady_now = atomic_load_explicit(&steady_mode, memory_order_relaxed);
+  if (steady_now && native_stack) {
+    float held_delta = 0;
+    if (steady_frame(&policy, &observation, native_stack, now, steady_now, native[1], &held_delta)) { depth = held_delta; steadied = true; }
+  }
   float applied_depth = 0;
   if (depth != 0) {
     const float before = shifted[1]; shifted[1] += depth;
-    if (shifted[1] != before) { ++policy.depth.observed.applied; applied_depth = shifted[1] - before; }
+    if (shifted[1] != before) { if (!steadied) ++policy.depth.observed.applied; applied_depth = shifted[1] - before; }
   }
-  gate_frame(&observation, native_stack, applied_depth); /* counted for the log; nothing is changed by it */
+  gate_frame(&observation, native_stack, steadied ? 0 : applied_depth, steadied); /* counted for the log; nothing is changed by it */
   if (!finite_pose(shifted)) {
     policy.rig_shifted = false; atomic_store_explicit(&armed, 0, memory_order_release); error(POSE_INVALID);
     forward_position(unit, node, pose); return;
   }
   memcpy(policy.baseline, native, 16);
-  if (applied_depth != 0) { policy.carrier.observation = observation; policy.carrier.delta = applied_depth; policy.carrier.ready = true; }
+  if (applied_depth != 0) { policy.carrier.observation = observation; policy.carrier.delta = applied_depth; policy.carrier.steady = steadied; policy.carrier.ready = true; }
   policy.rig_shifted = memcmp(shifted, native, 16) != 0;
   if (!policy.entry_position_seen && !policy.full_ads && policy.weight == 1) {
     policy.entry_position_seen = true; entry_position_remember(policy.c.viewmodel, policy.c.weapon, shifted);
@@ -2025,6 +2076,18 @@ uint32_t tfp_pose_gate_take(TfpGateSecond *out) {
 }
 uint32_t tfp_pose_set_gate_reads(uint32_t on) { atomic_store_explicit(&gate_reads, on ? 1 : 0, memory_order_relaxed); return 1; }
 uint32_t tfp_pose_set_depth_off(uint32_t on) { atomic_store_explicit(&depth_off, on ? 1 : 0, memory_order_relaxed); return 1; }
+uint32_t tfp_pose_set_depth_steady(uint32_t mode) {
+  if (mode > 2) return 0;
+  atomic_store_explicit(&steady_mode, mode, memory_order_relaxed); return 1;
+}
+uint32_t tfp_pose_steady_take(TfpSteadySecond *out) {
+  if (!out || !host.lock_exclusive) return 0;
+  policy_acquire();
+  tfp_steady_take(&steady_log, out);
+  policy_release();
+  out->off = atomic_load_explicit(&steady_mode, memory_order_relaxed) == 2;
+  return 1;
+}
 void tfp_pose_set_host(const TfpPoseHost *h) { host = *h; }
 void tfp_pose_reset_for_tests(void) {
   for (unsigned i = 0; i < SLOT_COUNT; ++i) { atomic_store(&originals[i], 0); slots[i] = 0; possible[i] = false; }
@@ -2049,6 +2112,7 @@ void tfp_pose_reset_for_tests(void) {
   atomic_store(&entry_position_enabled, 1);
   atomic_store(&hold_mode, 0); atomic_store(&hold_probe, 0); atomic_store(&hold_node5_calls, 0);
   memset(&gate, 0, sizeof gate); atomic_store(&gate_reads, 0); atomic_store(&depth_off, 0);
+  memset(&steady, 0, sizeof steady); memset(&steady_log, 0, sizeof steady_log); atomic_store(&steady_mode, 0);
 }
 /* Not in retail (pose_helper.h). */
 uint32_t tfp_pose_set_hold(uint32_t on) {

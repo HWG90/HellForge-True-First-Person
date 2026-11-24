@@ -18,7 +18,7 @@ using namespace dp;
 extern "C" {
 struct PoseWorld {
   uint64_t game, exe, context, request, avatar_owner, weapon_descriptor, stack, api, slot[5], native[5];
-  uint64_t rig_return, input_return, getter_return, api_begin, api_end;
+  uint64_t rig_return, input_return, getter_return, carrier_return, api_begin, api_end;
   uint32_t avatar, weapon, body, viewmodel, weapon_unit;
 };
 static World W;
@@ -105,7 +105,7 @@ void pose_world_build(PoseWorld *out) {
   out->avatar_owner = W.a[A_OWNER]; out->weapon_descriptor = W.a[A_WDESC]; out->stack = W.stack(); out->api = W.a[A_API];
   for (int i = 0; i < 5; ++i) { out->slot[i] = W.slot(i); out->native[i] = W.native[i]; }
   out->rig_return = W.a[A_GAME] + HERE.rig_call + 4; out->input_return = W.a[A_GAME] + HERE.input_return;
-  out->getter_return = W.a[A_GAME] + HERE.observe_call + 3;
+  out->getter_return = W.a[A_GAME] + HERE.observe_call + 3; out->carrier_return = W.a[A_GAME] + HERE.carrier_call + 4;
   out->api_begin = W.a[A_API]; out->api_end = W.a[A_API] + 0x1000;
   out->avatar = AVATAR; out->weapon = WEAPON; out->body = BODY; out->viewmodel = VIEWMODEL; out->weapon_unit = WEAPON_UNIT;
 }
@@ -500,7 +500,7 @@ static int scripted(void) {
 /* ---- the real adapter and helper on fake game memory ------------------------------------------------ */
 typedef struct PoseWorld {
   uint64_t game, exe, context, request, avatar_owner, weapon_descriptor, stack, api, slot[5], native[5];
-  uint64_t rig_return, input_return, getter_return, api_begin, api_end;
+  uint64_t rig_return, input_return, getter_return, carrier_return, api_begin, api_end;
   uint32_t avatar, weapon, body, viewmodel, weapon_unit;
 } PoseWorld;
 void pose_world_build(PoseWorld *out);
@@ -517,7 +517,8 @@ void pose_world_request_field(unsigned at, uint32_t value);
 static PoseWorld world;
 static int lock_depth[2], lock_faults;
 static unsigned forwarded_calls, getter_calls, cas_calls, input_only_calls;
-static float forwarded[4];
+static float forwarded[4], root_forwarded[4];
+static unsigned root_calls;
 static float getter_answer[4] = {.125f, -.25f, .5f, 0};
 static bool w_read(void *u, uint64_t at, void *out, size_t length) {
   struct iovec local = {out, length}, remote = {(void *)(uintptr_t)at, length};
@@ -550,9 +551,10 @@ static bool w_region(void *u, uint64_t at, uint64_t *base, uint64_t *size, bool 
 static uint64_t w_allocate(void *u, uint64_t at, uint64_t size) { (void)u; (void)at; (void)size; input_only_calls++; return 0; }
 static double w_exp(void *u, uint64_t address, double x) { (void)u; (void)address; input_only_calls++; return exp(x); }
 static void w_forward_setter(void *u, unsigned which, uint64_t original, uint32_t unit, uint32_t node, const float *pose_value) {
-  (void)u; (void)unit; (void)node;
+  (void)u; (void)unit;
   if (original != world.native[which]) lock_faults++;
-  if (which == 0) { forwarded_calls++; memcpy(forwarded, pose_value, 16); }
+  if (which == 0 && node == 0) { root_calls++; memcpy(root_forwarded, pose_value, 16); } /* the rig's root: only the held-depth scene writes it */
+  else if (which == 0) { forwarded_calls++; memcpy(forwarded, pose_value, 16); }
 }
 static const float *w_forward_getter(void *u, unsigned which, uint64_t original, uint32_t unit, uint32_t node) {
   (void)u; (void)unit; (void)node;
@@ -578,6 +580,11 @@ static void depth_frame(uint64_t step_ms) {
   now_ms += step_ms;
   tfp_pose_position_getter_from(world.getter_return, world.viewmodel, 50, world.stack, world.request);
   tfp_pose_position_from(world.rig_return, world.viewmodel, 5, (const float *)(uintptr_t)(world.request + 0x48), world.stack);
+}
+/* The same, and then the evaluator's write of the rig's root (from its pinned call site, its own stack pose). */
+static void root_frame(uint64_t step_ms) {
+  depth_frame(step_ms);
+  tfp_pose_position_from(world.carrier_return, world.viewmodel, 0, (const float *)(uintptr_t)(world.stack + 0x240), world.stack);
 }
 static bool applied_is(double x, double y, double z) {
   return near(forwarded[0] - NATIVE[0], x, 2e-6) && near(forwarded[1] - NATIVE[1], y, 2e-6) && near(forwarded[2] - NATIVE[2], z, 2e-6);
@@ -732,6 +739,66 @@ static int real(void) {
     depth_frame(16);
     CHECK(applied_is(.11, .02 + (double)depth, -.12)); /* and back */
     CHECK(tfp_pose_gate_take(&g) == 1 && g.frames == 1 && g.applied == 1 && g.depth_off == 0 && g.avatar_changes == 1);
+
+    /* ---- the depth held steady (src/depth_steady.h; not retail's): the gate flips, the rig and its root do not ---- */
+    TfpSteadySecond held;
+    float current = 0;
+    memcpy(&current, (void *)(uintptr_t)(world.request + 0x90), 4);
+    const float gated_depth = (1 - (1.5707964f - 1.18052f) / (1.5707964f - 36 * .01745329238474369f)) * current; /* the game's own blend on a gated frame of this world: the distance before is 0 */
+    CHECK(tfp_pose_steady_take(&held) == 1 && held.frames == 0);                     /* not reached until it is switched on */
+    CHECK(tfp_pose_set_depth_steady(3) == 0 && tfp_pose_set_depth_steady(1) == 1);
+    root_frame(16);
+    CHECK(applied_is(.11, .02, -.12) && root_calls == 1 && root_forwarded[1] == 0);    /* begun at the game's own depth: nothing added in the first frame */
+    for (int i = 0; i < 60; i++) root_frame(16);                                      /* and eased to the mod's reference for the optic, where the zoom depth term had it */
+    CHECK(applied_is(.11, .02 + (double)depth, -.12) && near(root_forwarded[1], -(double)depth, 2e-6) && root_forwarded[0] == 0 && root_forwarded[2] == 0);
+    CHECK(tfp_pose_steady_take(&held) == 1 && held.frames == 61 && held.worked == 61 && held.roots == held.shifted && held.shifted >= 59 && tfp_steady_passed(&held) == 0);
+    CHECK(tfp_pose_gate_take(&g) == 1 && g.applied == 0 && g.passed[TFP_GATE_STEADY] == 61);
+    for (int i = 0; i < 6; i++) {
+      pose_world_gate(i % 2 == 0, 0);
+      root_frame(16);
+      const double added = i % 2 == 0 ? (double)current + (double)depth - (double)gated_depth : (double)depth;
+      CHECK(applied_is(.11, .02 + added, -.12) && near(root_forwarded[1], -added, 2e-6));
+      /* what the player sees of it: the game's depth plus the shift is the same distance on every frame */
+      CHECK(near((i % 2 == 0 ? (double)gated_depth : (double)current) + added, (double)current + (double)depth, 2e-6));
+    }
+    CHECK(tfp_pose_steady_take(&held) == 1 && held.frames == 6 && held.gated.count == 3 && held.clear.count == 3 && held.shifted == 6 && held.roots == 6);
+    CHECK(near(held.gated.least, gated_depth, 1e-6) && near(held.clear.most, current, 0) && held.held.least == held.held.most && near(held.held.most, current + depth, 1e-6));
+    CHECK(tfp_steady_worth(&held) && held.off == 0 && held.lease == 1 && near(held.argument_gated.least, NATIVE[1], 0));
+    CHECK(tfp_pose_gate_take(&g) == 1 && g.avatar_changes == 6 && g.applied == 0 && g.passed[TFP_GATE_STEADY] == 3 && g.passed[TFP_GATE_GATED] == 3);
+    tfp_gate_line(&g, false, line, sizeof line);
+    CHECK(strstr(line, "passed in 6 (unzoom gate or request state 3, the depth held steady instead 3)"));
+    /* request+0x8f with the reload blend settled: the game leaves the depth out of the rig's vector, and so does the hold */
+    pose_world_gate(0, 1);
+    pose_world_request_field(0x8C, 0x01000100); /* +0x8d set, +0x8f set */
+    pose_world_request_field(0x88, 0x3f800000); /* the weight at 1 */
+    root_frame(16);
+    CHECK(applied_is(.11, .02, -.12));
+    pose_world_request_field(0x8C, 0);
+    pose_world_gate(0, 0);
+    root_frame(16);
+    CHECK(applied_is(.11, .02 + (double)depth, -.12));
+    /* a frame without the evaluator's lens: passed, nothing added, and the zoom depth term's own answer (nothing) stands */
+    game_frame(handle, &stats, 16);
+    CHECK(applied_is(.11, .02, -.12));
+    CHECK(tfp_pose_steady_take(&held) == 1 && held.frames == 3 && held.passed[TFP_STEADY_NO_LENS] == 1);
+    /* depth_steady_off.txt: counted, nothing held; the zoom depth term goes on and off with the gate as before */
+    CHECK(tfp_pose_set_depth_steady(2) == 1);
+    const unsigned roots_before = root_calls;
+    for (int i = 0; i < 6; i++) {
+      pose_world_gate(i % 2 == 0, 0);
+      root_frame(16);
+      CHECK(i % 2 == 0 ? applied_is(.11, .02, -.12) : applied_is(.11, .02 + (double)depth, -.12));
+    }
+    CHECK(root_calls == roots_before + 6);
+    CHECK(tfp_pose_steady_take(&held) == 1 && held.frames == 6 && held.off == 1 && held.shifted == 0 && held.roots == 0 && held.passed[TFP_STEADY_OFF] == 6 && tfp_steady_worth(&held));
+    tfp_steady_line(&held, line, sizeof line);
+    CHECK(strstr(line, "Steady: 6 frames of the rig, the game's depth worked out in 6: ") && strstr(line, "nothing held; the rig moved to it in 0 frames, its root with it in 0; ")
+          && strstr(line, "passed in 6 (depth_steady_off.txt 6); depth_steady_off.txt: nothing is held"));
+    CHECK(tfp_pose_set_depth_steady(0) == 1);
+    pose_world_gate(0, 0);
+    depth_frame(16);
+    CHECK(applied_is(.11, .02 + (double)depth, -.12) && tfp_pose_steady_take(&held) == 1 && held.frames == 0);
+    tfp_pose_gate_take(&g);
   }
 
   /* ---- finish: every slot holds the game's function again ---- */
