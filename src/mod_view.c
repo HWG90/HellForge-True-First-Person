@@ -982,8 +982,10 @@ static void steady_note(void) { /* once a second: the rig's depth held steady (s
   if (now < next) return;
   next = now + 1000;
   TfpSteadySecond held;
-  if (!tfp_pose_steady_take(&held) || !tfp_steady_worth(&held)) return;
   char line[640];
+  if (!tfp_pose_steady_take(&held)) return;
+  if (tfp_steady_stop_line(&held, line, sizeof line)) say("%s", line); /* the root did not follow: said once, in the second it stopped */
+  if (!tfp_steady_worth(&held)) return;
   tfp_steady_line(&held, line, sizeof line);
   say("%s", line);
 }
