@@ -233,7 +233,11 @@
  *    row (its step there no jump against the step before: it stands or goes on evenly; the re-seat's own frames are
  *    jumps), or for TFP_CONTINUITY_SETTLE_MS at most, and then eases to it once, from rest, on the curve whose length
  *    follows from the distance, and follows its own even motion from there. Another camera, full aim or a frame the
- *    caller no longer allows it ends the hold with that frame's own answer. (Tried first: steady as under 0.5 m/s
+ *    caller no longer allows it ends the hold with that frame's own answer. The caller allows it only for the first
+ *    entry after the native view was left because its request or firearm changed (the binder's
+ *    tfp_camera_settle_arm): allowed at every entry on mask 0, soaks 8 to 31 replayed had 554 frames worse by more
+ *    than 0.02 m of step change and floats up to 1.05 m (a rig that moves evenly and fast against the root, a sprint's
+ *    entry, held as if it were settling). (Tried first: steady as under 0.5 m/s
  *    against the root. The rig's slow climb at 20:32:10 never was, the hold ran its 350 ms, and the one ease was
  *    0.28 m, more than the drift it replaced.) */
 #ifndef TFP_CAMERA_CONTINUITY_H

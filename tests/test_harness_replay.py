@@ -160,7 +160,7 @@ class Cut(unittest.TestCase):
         row = self.row(damp=(0.1, -0.2, 0.05))
         row["fit"] = list(self.AXES)
         fields = replay.row_text(row, "fit").split()
-        self.assertEqual(len(fields), 14 + 9 + 4 + 9)   # round 24: mask kind damped off_foot damp stable rearm_only
+        self.assertEqual(len(fields), 14 + 9 + 4 + 10)   # round 24: mask kind damped off_foot damp stable rearm_only settle_arm
         self.assertEqual(fields[23], "1")
         for got, want in zip([float(x) for x in fields[24:27]], [0.9, 2.02, 2.91]):
             self.assertAlmostEqual(got, want, places=6)

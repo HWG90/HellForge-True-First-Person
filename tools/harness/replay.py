@@ -96,6 +96,7 @@ TAKEN = ((1, "jump"), (2, "edge"), (4, "root"), (8, "restart"), (16, "cut"), (32
 MASK = re.compile(r"^(\d+):(\d+):(\d+)\.(\d+) (?:Hold|Return|Drop|Wait): .*?\bmask=([0-9a-fA-F]+)")
 STYLE = re.compile(r"^(\d+):(\d+):(\d+)\.(\d+) Camera style: (\w+)")
 WINDOW_MS = 600.0  # src/camera_helper.c SMOOTH_EVENT_MS
+SETTLE_ARM_MS = 2000.0  # src/camera_helper.c SETTLE_ARM_MS
 TRAVERSAL = 0x20   # src/camera_traversal.h
 
 
@@ -109,9 +110,10 @@ def context(lines, rows):
     1.5 s; -1 not known), "stable" (1 Stable, 0 Bodycam, -1 not known; the last "Camera style:" line) and "rearm_only"
     (1: jumps were looked for in the row only because a change of mask into or out of a traversal mask opened the window
     again, which camera_helper.c no longer does; found from the State lines, the changes of kind and the masks, so it is
-    the window as near as the log tells it). A row's frame is placed on the log's clock by the median of stamp less
+    the window as near as the log tells it) and "settle_arm" (the stamp of the last "left the native view: Native camera
+    request or firearm changed" within 2 s, which arms THE SETTLE; -1 none). A row's frame is placed on the log's clock by the median of stamp less
     tick over the rows written as they happened."""
-    masks, styles, states = [], [], []
+    masks, styles, states, arms = [], [], [], []
     for line in lines:
         m = MASK.match(line)
         if m:
@@ -124,6 +126,8 @@ def context(lines, rows):
         if " State: " in line and line[:2].isdigit():
             try:
                 states.append(_stamp(re.match(r"^(\d+):(\d+):(\d+)\.(\d+)", line)))
+                if "left the native view: Native camera request or firearm changed" in line:  # mod_view.c tfp_camera_settle_arm
+                    arms.append(states[-1])
             except TypeError:
                 pass
     live = sorted(row["stamp"] - row["tick"] for row in rows if row.get("clock") is not None and row["t"] >= 0)
@@ -142,7 +146,8 @@ def context(lines, rows):
             events.append((at, "other"))
         kind = row["kind"]
     events.sort()
-    mi = si = ei = 0
+    mi = si = ei = ai = 0
+    arm = None
     mask = style = None
     last = {"other": -1e18, "trav": -1e18}
     for row in sorted(rows, key=lambda r: r["at_ms"]):
@@ -153,11 +158,15 @@ def context(lines, rows):
         while si < len(styles) and styles[si][0] <= at + 2:
             style = styles[si][1]
             si += 1
+        while ai < len(arms) and arms[ai] <= at + 2:
+            arm = arms[ai]
+            ai += 1
         while ei < len(events) and events[ei][0] <= at + 2:
             last[events[ei][1]] = events[ei][0]
             ei += 1
         row["mask"] = mask[1] if mask and at - mask[0] <= 1500 else -1
         row["stable"] = -1 if style is None else style
+        row["settle_arm"] = int(arm) if arm is not None and at - arm <= SETTLE_ARM_MS else -1
         row["rearm_only"] = int(bool(row["looked"]) and at >= last["other"] + WINDOW_MS and at < last["trav"] + WINDOW_MS)
 
 
@@ -390,11 +399,11 @@ def row_text(row, axes):
     node = head_node(row, row[axes]) if head_given(row) else None
     given = node is not None
     damped = row.get("damped")
-    return "%.3f %d %d %d %d %s %s %s %s %d %s %d %d %d %d %s %d %d\n" % (
+    return "%.3f %d %d %d %d %s %s %s %s %d %s %d %d %d %d %s %d %d %d\n" % (
         row["tick"], SOURCES.get(row["source"], 0), row["looked"], row.get("quiet", 0), row.get("fresh", False), " ".join(map(str, row["wanted"])),
         " ".join(map(str, row["root"])), " ".join(map(str, row["eye"])), " ".join(map(str, row[axes])), given, " ".join(map(str, node or [0.0, 0.0, 0.0])),
         row.get("mask", -1), row["kind"], -1 if damped is None or row.get("damp") is None else damped, row.get("off_foot") or 0,
-        " ".join(map(str, row.get("damp") or [0.0, 0.0, 0.0])), row.get("stable", -1), row.get("rearm_only", 0))
+        " ".join(map(str, row.get("damp") or [0.0, 0.0, 0.0])), row.get("stable", -1), row.get("rearm_only", 0), row.get("settle_arm", -1))
 
 
 def emit_head(name, rows):

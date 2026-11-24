@@ -248,6 +248,10 @@ static _Atomic uint64_t orphan_frames, orphan_refused;
 static struct { bool known; uint32_t mask, kind, weapon, key; double until; } smooth_watch;
 /* Round 24 (src/camera_traversal.h): the body root's motion, for the head-camera frames of a clamber. Policy lock. */
 static TfpRootMotion smooth_root; static TfpTraversalWatch damp_climb;
+/* Round 24, THE SETTLE (tfp_camera_settle_arm): set by the binder, taken by the next frame; settle_armed_at: when (the
+ * helper's clock; 0: not armed). Policy lock. */
+#define SETTLE_ARM_MS 2000.0
+static _Atomic uint32_t settle_arm; static double settle_armed_at;
 #define TRACE_RING 128u
 #define TRACE_BEFORE 6u   /* frames before the edge that are written with it */
 #define TRACE_MS 500.0
@@ -1005,7 +1009,7 @@ static void lock_body_shown(Policy *p, uint32_t kind, const float *head, double 
 
 /* ---- beyond retail: continuity of the presented eye, and the trace (lock frames only) ---- */
 static void smooth_forget(void) { tfp_continuity_reset(&smooth); memset(&alternation, 0, sizeof alternation); trace.last_known = false; trace_self.known = 0; eye_watch_known = false; eye_unsettled_until = 0;
-  memset(&smooth_watch, 0, sizeof smooth_watch); memset(&smooth_root, 0, sizeof smooth_root); memset(&damp_climb, 0, sizeof damp_climb); }
+  memset(&smooth_watch, 0, sizeof smooth_watch); memset(&smooth_root, 0, sizeof smooth_root); memset(&damp_climb, 0, sizeof damp_climb); settle_armed_at = 0; }
 /* True: jumps are looked for in this native frame. Called once for every frame presented under the lock. */
 static bool smooth_detect(const Policy *p, uint32_t kind, uint32_t source, const float *root, double tick) {
   const bool said = atomic_exchange_explicit(&smooth_event, 0, memory_order_relaxed) != 0;
@@ -1061,15 +1065,20 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
     smooth.traversal = tfp_traversal(p->control_mask); /* round 24: a run ending in a clamber hands no speed on */
     /* round 24, THE SETTLE: the native view coming back on mask 0 (after a backpack is picked up, the gun drawn again)
      * holds the eye until the rig is steady against the root, then eases once */
-    smooth.settle_ok = source != SMOOTH_HEAD && p->control_mask == 0 && !p->full_ads;
+    if (atomic_exchange_explicit(&settle_arm, 0, memory_order_relaxed)) settle_armed_at = tick;
+    const bool armed = settle_armed_at > 0 && tick >= settle_armed_at && tick-settle_armed_at <= SETTLE_ARM_MS;
+    smooth.settle_ok = (armed || smooth.settling) && source != SMOOTH_HEAD && p->control_mask == 0 && !p->full_ads;
+    const uint64_t settles = smooth.settles;
     correction = tfp_continuity_step_cut(&smooth, wanted_relative, wanted, root_basis, head_given ? head : NULL, source == SMOOTH_REPEAT ? SMOOTH_NATIVE : source,
                                          detect, p->full_ads, tick, p->c.max_gap_ms, &smooth_tuning, relative);
+    if (smooth.settles != settles) settle_armed_at = 0; /* one settle for one arm */
     if (correction > 1e-6f && tfp_finite3(relative)) for (unsigned component = 0; component < 3; ++component) { shown[component] = root[component];
       for (unsigned axis = 0; axis < 3; ++axis) shown[component] += relative[axis]*root_basis[axis*3+component]; }
     else correction = 0;
     what = (detect ? TFP_CAMERA_TRACE_LOOKED : 0u) | (smooth.jumps != jumps ? TFP_CAMERA_TRACE_JUMP : 0u) | (smooth.edges != edges ? TFP_CAMERA_TRACE_EDGE : 0u)
         | (smooth.reseats != reseats ? TFP_CAMERA_TRACE_ROOT : 0u) | (smooth.restarts != restarts ? TFP_CAMERA_TRACE_RESTART : 0u)
-        | (began ? TFP_CAMERA_TRACE_START : 0u) | (p->full_ads ? TFP_CAMERA_TRACE_QUIET : 0u) | (smooth.cuts != cuts ? TFP_CAMERA_TRACE_CUT : 0u);
+        | (began ? TFP_CAMERA_TRACE_START : 0u) | (p->full_ads ? TFP_CAMERA_TRACE_QUIET : 0u) | (smooth.cuts != cuts ? TFP_CAMERA_TRACE_CUT : 0u)
+        | (smooth.settling || smooth.settles != settles ? TFP_CAMERA_TRACE_SETTLE : 0u);
   }
   /* Counted only: the eye the filter was given, whether or not the continuity is on. */
   if (tfp_alternation_step(&alternation, wanted_relative, source == SMOOTH_REPEAT ? SMOOTH_NATIVE : source, p->full_ads, tick, p->c.max_gap_ms, &moved)) {
@@ -1851,6 +1860,7 @@ uint64_t tfp_camera_lock_frames(void) { return atomic_load(&lock_frames); }
 uint64_t tfp_camera_view_frames(void) { return atomic_load(&view_frames); }
 void tfp_camera_set_continuity(bool on, bool trace_frames) { atomic_store(&smooth_on, on ? 1u : 0u); atomic_store(&trace_on, trace_frames ? 1u : 0u); }
 void tfp_camera_continuity_event(void) { atomic_store(&smooth_event, 1u); }
+void tfp_camera_settle_arm(void) { atomic_store(&settle_arm, 1u); }
 void tfp_camera_set_orphan(bool on) { atomic_store(&orphan_on, on ? 1u : 0u); }
 void tfp_camera_set_veil(bool on) {
   atomic_store(&veil_armed, on ? 1u : 0u);
@@ -1983,6 +1993,7 @@ void tfp_camera_reset_for_tests(void) {
   lock_damp_ms = 0; atomic_store(&lock_bodycam, 1); tfp_eye_damp_reset(&lock_eye_damp);
   memset(&smooth, 0, sizeof smooth); memset(&trace, 0, sizeof trace); memset(&trace_self, 0, sizeof trace_self); eye_watch_known = false; eye_unsettled_until = 0;
   memset(&smooth_watch, 0, sizeof smooth_watch); atomic_store(&smooth_event, 0); memset(&trace_damp, 0, sizeof trace_damp); memset(&smooth_root, 0, sizeof smooth_root); memset(&damp_climb, 0, sizeof damp_climb);
+  atomic_store(&settle_arm, 0); settle_armed_at = 0;
   atomic_store(&original, 0);
   atomic_store(&installed, 0); atomic_store(&armed, 0); atomic_store(&reserved, 0); atomic_store(&last_error, 0);
   atomic_store(&callback_generation, 0);

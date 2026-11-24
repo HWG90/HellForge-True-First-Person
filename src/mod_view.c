@@ -418,6 +418,11 @@ static void trace_note(void) {
   const int action = motion && motion->state.phase == TFP_MOTION_PHASE_ACTIVE && motion->state.action != TFP_ACT_NONE ? (int)motion->state.action : -1;
   const unsigned edge = tfp_trace_edges_step(&edges, wire.log.has_lease, wire.controller.holding, action);
   if ((edge & TFP_TRACE_EDGE_EVENT) && lock_wanted) tfp_camera_continuity_event(); /* a lease or a hold begun or ended: the rig may be re-seated */
+  /* Round 24: the native view left because its request or firearm changed (a backpack picked up): the next entry may
+   * hold the eye until the rig has settled (THE SETTLE). On the leave only. */
+  static bool had_lease;
+  if (had_lease && !wire.log.has_lease && lock_wanted && strstr(wire.controller.wait_reason, "Native camera request or firearm changed")) tfp_camera_settle_arm();
+  had_lease = wire.log.has_lease;
   if (!lock_wanted || !trace_wanted) return;
   { /* What the arm drive drew in the frame just presented: its draw came after that frame's camera call and before this
      * tick. Said before the rows are read, once for each draw the drive saw. */
@@ -447,10 +452,11 @@ static void trace_note(void) {
      * run it again frame for frame (the soaks of 2026-11-22 on feel.51: without the time across edges, full aim and
      * the starts, and with places to 0.1 mm, 29 of 3447 frames could not be replayed: two decisions that fell
      * within the rounding). */
-    char taken[48] = "";
-    snprintf(taken, sizeof taken, "%s%s%s%s%s%s", r->what & TFP_CAMERA_TRACE_JUMP ? "+jump" : "", r->what & TFP_CAMERA_TRACE_EDGE ? "+edge" : "",
+    char taken[64] = "";
+    snprintf(taken, sizeof taken, "%s%s%s%s%s%s%s", r->what & TFP_CAMERA_TRACE_JUMP ? "+jump" : "", r->what & TFP_CAMERA_TRACE_EDGE ? "+edge" : "",
              r->what & TFP_CAMERA_TRACE_ROOT ? "+root" : "", r->what & TFP_CAMERA_TRACE_RESTART ? "+restart" : "",
-             r->what & TFP_CAMERA_TRACE_START ? "+start" : "", r->what & TFP_CAMERA_TRACE_CUT ? "+cut" : "");
+             r->what & TFP_CAMERA_TRACE_START ? "+start" : "", r->what & TFP_CAMERA_TRACE_CUT ? "+cut" : "",
+             r->what & TFP_CAMERA_TRACE_SETTLE ? "+settle" : "");
     char veil[64] = "0";
     if (r->veil[0] != 0 || r->veil[1] != 0 || r->veil[2] != 0)
       snprintf(veil, sizeof veil, "(%.5f %.5f %.5f)", (double)r->veil[0], (double)r->veil[1], (double)r->veil[2]);

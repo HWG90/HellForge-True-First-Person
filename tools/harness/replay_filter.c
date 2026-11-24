@@ -5,7 +5,7 @@
  *
  * A row: tick(ms) source detect quiet fresh  wanted x y z  root x y z  logged eye x y z  root axes (9, rows; "run" only)
  *        given  head x y z
- *        mask kind damped off_foot  damp x y z  stable rearm_only   (round 24; -1: not known)
+ *        mask kind damped off_foot  damp x y z  stable rearm_only settle_arm   (round 24; -1: not known)
  *        quiet: full aim (the filter takes nothing up); fresh: 1 the filter starts from nothing in this row (the helper
  *        forgot it), 2 the log carries no correction in this row and the filter's was not known: it is let go before
  *        the row, and the rest of the state (the eye's speed, the root's course) is kept
@@ -45,7 +45,7 @@
 #endif
 
 typedef struct Row { double tick; unsigned source; int detect, quiet, fresh, given; float wanted[3], root[3], logged[3], head[3];
-                     int mask, kind, damped, off_foot, stable, rearm_only; float damp[3]; } Row;
+                     int mask, kind, damped, off_foot, stable, rearm_only, settle_arm; float damp[3]; } Row;
 static const TfpContinuityTuning tuning = TFP_CONTINUITY_DEFAULT;
 
 static float present(TfpContinuity *c, const Row *row, const float *basis, float *shown) {
@@ -143,7 +143,7 @@ static void fit_stretch(const TfpContinuity *begin, const Row *rows, int count, 
 
 #ifdef RULES
 /* The helper's decisions around the filter (camera_helper.c smooth_detect, lock_damp_eye, smooth_present), made again. */
-typedef struct Rules { TfpRootMotion root; TfpTraversalWatch climb; TfpEyeDamp damp; bool diverged, synced; float bodycam_ms; } Rules;
+typedef struct Rules { TfpRootMotion root; TfpTraversalWatch climb; TfpEyeDamp damp; bool diverged, synced; float bodycam_ms; int settled_arm; } Rules;
 static void rules_stretch(Rules *r) { memset(&r->root, 0, sizeof r->root); memset(&r->climb, 0, sizeof r->climb); tfp_eye_damp_reset(&r->damp); r->diverged = r->synced = false; }
 static void to_root(const float *v, const float *basis, float *out) { for (int a = 0; a < 3; ++a) { out[a] = 0; for (int k = 0; k < 3; ++k) out[a] += v[k]*basis[a*3+k]; } }
 static void to_world(const float *v, const float *basis, float *out) { for (int k = 0; k < 3; ++k) { out[k] = 0; for (int a = 0; a < 3; ++a) out[k] += v[a]*basis[a*3+k]; } }
@@ -190,7 +190,7 @@ static void rules_apply(Rules *r, TfpContinuity *c, Row *row, const float *basis
   row->detect = detect;
   c->traversal = known && tfp_traversal(mask);
 #ifdef TFP_CONTINUITY_SETTLE_MS
-  c->settle_ok = known && mask == 0 && row->source == 2 && !row->quiet;
+  c->settle_ok = known && mask == 0 && row->source == 2 && !row->quiet && ((row->settle_arm >= 0 && row->settle_arm != r->settled_arm) || c->settling);
 #endif
 }
 #endif
@@ -205,13 +205,13 @@ int main(int argc, char **argv) {
     if (count == room) { room *= 2; rows = realloc(rows, (size_t)room*sizeof *rows); axes = realloc(axes, (size_t)room*9*sizeof *axes); }
     for (int i = 0; i < 9; ++i) if (scanf("%f", &axes[count*9+i]) != 1) return 1;
     if (scanf("%d %f %f %f", &row.given, row.head, row.head+1, row.head+2) != 4) return 1;
-    if (scanf("%d %d %d %d %f %f %f %d %d", &row.mask, &row.kind, &row.damped, &row.off_foot, row.damp, row.damp+1, row.damp+2, &row.stable,
-              &row.rearm_only) != 9) return 1;
+    if (scanf("%d %d %d %d %f %f %f %d %d %d", &row.mask, &row.kind, &row.damped, &row.off_foot, row.damp, row.damp+1, row.damp+2, &row.stable,
+              &row.rearm_only, &row.settle_arm) != 10) return 1;
     rows[count++] = row;
   }
   TfpContinuity c; memset(&c, 0, sizeof c);
 #ifdef RULES
-  Rules rules; memset(&rules, 0, sizeof rules); rules.bodycam_ms = 150;
+  Rules rules; memset(&rules, 0, sizeof rules); rules.bodycam_ms = 150; rules.settled_arm = -1;
 #endif
   for (int from = 0; from < count;) {
     int to = from+1;
@@ -237,6 +237,9 @@ int main(int argc, char **argv) {
       if (!fit) rules_apply(&rules, &c, &given, axes+n*9);
 #endif
       const float carried = present(&c, &given, axes+n*9, shown);
+#if defined(RULES) && defined(TFP_CONTINUITY_SETTLE_MS)
+      if (c.settles != settles) rules.settled_arm = rows[n].settle_arm; /* one settle for one arm, as the helper */
+#endif
       for (int k = 0; k < 3; ++k) apart += (shown[k]-rows[n].logged[k])*(shown[k]-rows[n].logged[k]);
       printf("%.4f %.4f %.4f %.4f %u", (double)shown[0], (double)shown[1], (double)shown[2], (double)carried,
              (c.jumps != jumps ? 1u : 0u) | (c.edges != edges ? 2u : 0u) | (c.reseats != reseats ? 4u : 0u) | (c.restarts != restarts ? 8u : 0u)
