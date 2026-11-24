@@ -701,6 +701,16 @@ TFP_SETTINGS_LOCKED(LOCKED_GETTER)
 #undef LOCKED_GETTER
 #undef LOCKED_GETTER_0
 #undef LOCKED_GETTER_1
+bool tfp_wire_settings_first_person_arms(TfpWire *w) {
+  Settings *st = state(w);
+  return st ? tfp_settings_menu_flag(&st->store, TFP_MENU_fird_person_arms) : true;
+}
+bool tfp_wire_settings_sidearm(TfpWire *w) {
+  Settings *st = state(w);
+  const char *key = w && w->ops.has_placement_weapon_key ? w->ops.placement_weapon_key : NULL;
+  const TfpActionWeapon *info = st && key ? tfp_action_weapon_info(&st->catalogue, key) : NULL;
+  return info && info->family == TFP_FAMILY_SIDEARM;
+}
 void tfp_wire_settings_save_frame(TfpWire *w) {
   static const char *const what[2] = {"settings", "locked view options"};
   Settings *st = state(w);

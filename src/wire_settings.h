@@ -150,6 +150,10 @@ bool tfp_locked_view_smooth_eye(TfpWire *w);
 /* Stored and shown greyed; nothing acts on it: the behaviour comes from the character's own animation while
  * animated_arms is on. */
 bool tfp_locked_view_one_handed_pistols(TfpWire *w);
+/* Round 23: the "First Person Arms" option (stored key fird_person_arms; true when nothing is stored), and whether the
+ * weapon in hand (the placement's weapon key) is a handgun by the catalogue. */
+bool tfp_wire_settings_first_person_arms(TfpWire *w);
+bool tfp_wire_settings_sidearm(TfpWire *w);
 
 /* Actions.actions (action_placement.lua:66-67) is handed to the editor as this value: a ref to
  * tfp_wire_settings_actions, TFP_ACT_COUNT rows of {name, label}. */

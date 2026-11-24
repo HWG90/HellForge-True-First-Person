@@ -88,7 +88,7 @@ static bool panel_wanted;
  * switch that proved put-back in 0.6.0-feel.51, is still read and changes nothing; arm_bend.txt makes the drive bend one
  * shoulder instead of following the body; rest_trace.txt makes the "Rest:" line (the resting weapon pose, once a
  * second) come every tick. */
-static bool arms_live, arms_keep, arms_restore, arms_bend, arms_rest_trace;
+static bool arms_live, arms_keep, arms_restore, arms_bend, arms_rest_trace, grip_off;
 /* Test switch depth_off.txt, read once at the start: the pose helper's zoom-depth term adds nothing on any frame, so
  * neither the rig nor its root is shifted for the optic. It is there to find out in the game whether that shift is
  * part of the unzoom gate's flipping (docs/design/specs/2026-11-23-gate-flip.md). */
@@ -638,6 +638,11 @@ static void arms_start(void) {
         "builds before round 13, 2026-11-24: the written weapon socket moves the camera); in a hold and with the gun away they are put back as always%s",
         arms_restore ? "; arms_live_restore.txt is here too and is overruled" : "");
   if (arms_live && arms_rest_trace) say("Test: rest_trace.txt: the \"Rest:\" line of the resting weapon pose comes every tick instead of once a second");
+  if (grip_off) say("Test: grip_off.txt: the left hand is not put on the weapon's grip; it stays where the body's arm puts it (as before round 23), "
+                    "whatever First Person Arms says");
+  else say("Grip: the left hand of the drawn arms holds the weapon's grip node (a foregrip's or vertical grip's own node when one is fitted) "
+           "whenever the body's left hand is on it, while First Person Arms and Animated arms are on; not for a handgun at the hip, and not "
+           "while aiming (the game's own aim pose). A file grip_off.txt beside the DLL leaves the hand as the body puts it, to compare");
   const char *why = tfp_render_slot_contract();
   if (why) {
     snprintf(arms_refusal, sizeof arms_refusal, "%s", why);
@@ -676,6 +681,8 @@ static void arms_tick(void) {
     was_wanted = wanted;
     weight = tfp_arm_weight_step(weight, aiming, weighed ? (float)(now - weighed) : 0); weighed = now;
     tfp_arm_drive_set(wanted, tfp_arm_drive_put_back(arms_keep, arms_restore), weight);
+    /* Round 23: the left hand on the weapon's grip (src/offhand_grip.h): the option, the test switch, a handgun at the hip */
+    tfp_arm_drive_set_grip(!grip_off && tfp_wire_settings_first_person_arms(&wire), tfp_wire_settings_sidearm(&wire));
   }
   { /* The resting weapon pose (src/arm_drive.h): the clock, whether this tick is a rest and in which stance, and the body's layer states.
      * The action alone is not a rest: a walk, hip fire, an ammo check and a melee are "idle" to it (src/action_select.c), and in the game
@@ -708,6 +715,19 @@ static void arms_tick(void) {
       next_rest = now + 1000;
       tfp_arm_drive_rest_take(&seen);
       if (seen.frames) say("Rest: %s", tfp_arm_drive_rest_line(&seen));
+    }
+    { /* the grip: once a second while it runs, and once whenever it lets go of the grip for another reason */
+      static uint64_t next_grip;
+      static uint32_t told_state = UINT32_MAX;
+      TfpArmDriveGrip g;
+      if (now >= next_grip) {
+        next_grip = now + 1000;
+        tfp_arm_drive_grip_take(&g);
+        if (g.frames) say("Grip: %s", tfp_arm_drive_grip_line(&g));
+        if (g.frames && g.state != told_state && g.state != TFP_ARM_GRIP_HELD && g.state != TFP_ARM_GRIP_EASING)
+          say("Grip: left as the body holds it: %s", tfp_arm_drive_grip_state_name(g.state));
+        if (g.frames) told_state = g.state;
+      }
     }
   }
   if (wanted) {
@@ -802,9 +822,9 @@ static void start(void) {
         if (panel_file) fclose(panel_file);
         panel_wanted = panel_file != NULL;
 #ifdef TFP_FEEL
-        static const char *const arm_files[] = {"arms_live_keep.txt", "arms_live_restore.txt", "arm_bend.txt", "rest_trace.txt"};
-        bool *const arm_switches[] = {&arms_keep, &arms_restore, &arms_bend, &arms_rest_trace};
-        for (int i = 0; i < 4; i++) {
+        static const char *const arm_files[] = {"arms_live_keep.txt", "arms_live_restore.txt", "arm_bend.txt", "rest_trace.txt", "grip_off.txt"};
+        bool *const arm_switches[] = {&arms_keep, &arms_restore, &arms_bend, &arms_rest_trace, &grip_off};
+        for (int i = 0; i < 5; i++) {
           strcpy(slash + 1, arm_files[i]);
           FILE *arm_file = fopen(parts_path, "r");
           if (arm_file) fclose(arm_file);
@@ -951,7 +971,9 @@ static void start(void) {
 
 #ifdef TFP_FEEL
 static unsigned menu_unavailable(void) {
-  bool arms = tfp_wire_engine_state(&wire, TFP_WE_SLEEVES) != TFP_WE_REFUSED || tfp_wire_engine_state(&wire, TFP_WE_GRIP) != TFP_WE_REFUSED;
+  /* Round 23: First Person Arms is the left hand on the grip, done by the arm drive: available while the drive's render hook
+   * contract holds, whatever the retail sleeves and hand grips (still held back) say. */
+  bool arms = !arms_refusal[0] || tfp_wire_engine_state(&wire, TFP_WE_SLEEVES) != TFP_WE_REFUSED || tfp_wire_engine_state(&wire, TFP_WE_GRIP) != TFP_WE_REFUSED;
   return (arms ? 0 : TFP_MENU_NO_ARMS) | (tfp_mod_editor_available() ? 0 : TFP_MENU_NO_EDITOR);
 }
 /* A live replace asked for the mod's registrations with other mods to be taken out; this is the game

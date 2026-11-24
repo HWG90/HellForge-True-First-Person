@@ -38,9 +38,10 @@ static const Control CONTROLS[] = {
           "While the first-person arms are up the torso is always hidden. The head and shoulders stay hidden.")),
   /* retail's label is "Fird Person Arms", a typo; the stored key keeps retail's name */
   ROW("fird_person_arms", TFP_MK_CHECK, "First Person Arms", 0, M(fird_person_arms),
-      TIP("Dress the first-person arms like your body: sleeves and shoulders follow your torso, and the left hand holds the weapon grip the way it "
-          "does in third person. Off leaves the game's own first-person arms and hand animation untouched."),
-      .note = "Sleeves and hand grips are refused on this build."),
+      TIP("The left hand holds the weapon the way it does in third person: on the vertical grip or fore-end grip when one is fitted, else on the "
+          "weapon's own grip. Handguns at the hip stay one-handed; aiming uses the game's own pose. Works with Animated arms. Off leaves the left "
+          "hand where your character's arm animation puts it."),
+      .note = "The arm drive is refused on this build, so the hand grip cannot run."),
   ROW("family_placement_defaults", TFP_MK_CHECK, "Use weapon-family placement defaults", 0, CFG(family_placement_defaults),
       TIP("Opt in to conservative defaults for catalogue-identified firearms. Saved weapon/action placements and your customised global placement "
           "take precedence. Unknown weapons retain the existing baseline.")),
@@ -324,7 +325,8 @@ bool tfp_wire_menu_bind(TfpWire *w, const TfpMenuHost *host, unsigned unavailabl
   sync_bodycam(w, m);
   if (unavailable & TFP_MENU_NO_ARMS) {
     host->set_disabled(host->user, "fird_person_arms", true);
-    tfp_wire_say(w, "Menu: \"First Person Arms\" is shown disabled: sleeves and hand grips refused on this build (see their Refused lines)");
+    tfp_wire_say(w, "Menu: \"First Person Arms\" is shown disabled: the arm drive's render hook is refused, so the left hand cannot be put on the grip "
+                    "(see the Arms lines)");
   }
   if ((unavailable & TFP_MENU_NO_EDITOR) || !edit) {
     host->set_disabled(host->user, "edit_placement", true), host->set_disabled(host->user, "editor_key", true);
