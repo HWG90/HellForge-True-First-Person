@@ -864,6 +864,14 @@ static void start(void) {
                         "0xffffffff to the pack's cached mode word so the game plays them again. \"Warp:\" lines say each step"
                       : "Warp: the Warp Pack's glow is left to the game (a file warp_hide.txt beside the DLL stops it while the view is TFP's); "
                         "\"Warp:\" lines say what the game plays");
+        /* Round 24: THE SETTLE (src/camera_continuity.h), off by default: replayed, it made soak windows worse and
+         * held back the rig's real motion; on only to compare in the game. */
+        strcpy(slash + 1, "settle_on.txt");
+        FILE *settle_file = fopen(parts_path, "r");
+        if (settle_file) fclose(settle_file);
+        tfp_camera_set_settle(settle_file != NULL);
+        if (settle_file) say("Test: settle_on.txt: the native view coming back on mask 0 after it was left for a new request or firearm holds the "
+                             "eye against the root until the rig is steady (3 frames, 350 ms at most), then eases once (THE SETTLE)");
         /* The overrides of the three live features (src/wire_options.h): for testing only. */
         static const struct { const char *name; TfpFeature feature; bool on; } forced[] = {
           {"arms_live.txt", TFP_FEATURE_ARMS, true}, {"arms_off.txt", TFP_FEATURE_ARMS, false},

@@ -19,7 +19,9 @@
  * Round 24: built against a tree that has src/camera_traversal.h (the present one) the helper's own decisions around
  * the filter are made again, as camera_helper.c makes them: jumps are not looked for in a head-camera frame of a
  * clamber while the root moves, nor where only a change into or out of a traversal mask opened the window
- * (rearm_only, which replay.py finds from the log); in a native frame on mask 0, the filter is told that THE SETTLE may hold the eye; and the head camera's eye damping is run again where its rule
+ * (rearm_only, which replay.py finds from the log); with a second argument "settle" (the helper's settle_on.txt; off
+ * by default, as in the helper) the filter is told, in a native frame on mask 0, that THE SETTLE may hold the eye;
+ * and the head camera's eye damping is run again where its rule
  * changed (not in a traversal), from the logged damping's own state up to the first frame that differs. A logged
  * build's header has none of it, and is run as it was.
  *
@@ -140,6 +142,7 @@ static void fit_stretch(const TfpContinuity *begin, const Row *rows, int count, 
   free(beam); free(next);
 }
 
+static bool settle_on; /* argv[2] "settle": the helper's settle_on.txt */
 #ifdef RULES
 /* The helper's decisions around the filter (camera_helper.c smooth_detect, lock_damp_eye, smooth_present), made again. */
 typedef struct Rules { TfpRootMotion root; TfpTraversalWatch climb; TfpEyeDamp damp; bool diverged, synced; float bodycam_ms; int settled_arm; } Rules;
@@ -188,13 +191,14 @@ static void rules_apply(Rules *r, TfpContinuity *c, Row *row, const float *basis
   if (known) detect = tfp_traversal_detect(detect, row->source == 1, mask, moving);
   row->detect = detect;
 #ifdef TFP_CONTINUITY_SETTLE_MS
-  c->settle_ok = known && mask == 0 && row->source == 2 && !row->quiet && ((row->settle_arm >= 0 && row->settle_arm != r->settled_arm) || c->settling);
+  c->settle_ok = settle_on && known && mask == 0 && row->source == 2 && !row->quiet && ((row->settle_arm >= 0 && row->settle_arm != r->settled_arm) || c->settling);
 #endif
 }
 #endif
 
 int main(int argc, char **argv) {
   const bool fit = argc > 1 && !strcmp(argv[1], "fit");
+  settle_on = argc > 2 && !strcmp(argv[2], "settle");
   int count = 0, room = 1024; Row *rows = malloc((size_t)room*sizeof *rows); float *axes = malloc((size_t)room*9*sizeof *axes);
   for (;;) {
     Row row;

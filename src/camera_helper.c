@@ -251,7 +251,7 @@ static TfpRootMotion smooth_root; static TfpTraversalWatch damp_climb;
 /* Round 24, THE SETTLE (tfp_camera_settle_arm): set by the binder, taken by the next frame; settle_armed_at: when (the
  * helper's clock; 0: not armed). Policy lock. */
 #define SETTLE_ARM_MS 2000.0
-static _Atomic uint32_t settle_arm; static double settle_armed_at;
+static _Atomic uint32_t settle_arm, settle_on; static double settle_armed_at; /* settle_on: tfp_camera_set_settle (off by default) */
 #define TRACE_RING 128u
 #define TRACE_BEFORE 6u   /* frames before the edge that are written with it */
 #define TRACE_MS 500.0
@@ -1077,10 +1077,11 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
       head[axis] += (node[component]-root[component])*root_basis[axis*3+component];
     /* The eye in the world goes with it: the root re-seated by itself is not the eye jumping (camera_continuity.h). */
     /* round 24, THE SETTLE: the native view coming back on mask 0 (after a backpack is picked up, the gun drawn again)
-     * holds the eye until the rig is steady against the root, then eases once */
+     * holds the eye until the rig is steady against the root, then eases once. A test switch (tfp_camera_set_settle,
+     * settle_on.txt), off by default: off, the filter is main's frame for frame. */
     if (atomic_exchange_explicit(&settle_arm, 0, memory_order_relaxed)) settle_armed_at = tick;
     const bool armed = settle_armed_at > 0 && tick >= settle_armed_at && tick-settle_armed_at <= SETTLE_ARM_MS;
-    smooth.settle_ok = (armed || smooth.settling) && source != SMOOTH_HEAD && p->control_mask == 0 && !p->full_ads;
+    smooth.settle_ok = atomic_load_explicit(&settle_on, memory_order_relaxed) && (armed || smooth.settling) && source != SMOOTH_HEAD && p->control_mask == 0 && !p->full_ads;
     const uint64_t settles = smooth.settles;
     correction = tfp_continuity_step_cut(&smooth, wanted_relative, wanted, root_basis, head_given ? head : NULL, source == SMOOTH_REPEAT ? SMOOTH_NATIVE : source,
                                          detect, p->full_ads, tick, p->c.max_gap_ms, &smooth_tuning, relative);
@@ -1891,6 +1892,7 @@ uint64_t tfp_camera_view_frames(void) { return atomic_load(&view_frames); }
 void tfp_camera_set_continuity(bool on, bool trace_frames) { atomic_store(&smooth_on, on ? 1u : 0u); atomic_store(&trace_on, trace_frames ? 1u : 0u); }
 void tfp_camera_continuity_event(void) { atomic_store(&smooth_event, 1u); }
 void tfp_camera_settle_arm(void) { atomic_store(&settle_arm, 1u); }
+void tfp_camera_set_settle(bool on) { atomic_store(&settle_on, on ? 1u : 0u); }
 void tfp_camera_set_orphan(bool on) { atomic_store(&orphan_on, on ? 1u : 0u); }
 void tfp_camera_set_veil(bool on) {
   atomic_store(&veil_armed, on ? 1u : 0u);
@@ -2023,7 +2025,7 @@ void tfp_camera_reset_for_tests(void) {
   lock_damp_ms = 0; atomic_store(&lock_bodycam, 1); tfp_eye_damp_reset(&lock_eye_damp);
   memset(&smooth, 0, sizeof smooth); memset(&trace, 0, sizeof trace); memset(&trace_self, 0, sizeof trace_self); eye_watch_known = false; eye_unsettled_until = 0;
   memset(&smooth_watch, 0, sizeof smooth_watch); atomic_store(&smooth_event, 0); memset(&trace_damp, 0, sizeof trace_damp); memset(&smooth_root, 0, sizeof smooth_root); memset(&damp_climb, 0, sizeof damp_climb);
-  atomic_store(&settle_arm, 0); settle_armed_at = 0;
+  atomic_store(&settle_arm, 0); atomic_store(&settle_on, 0); settle_armed_at = 0;
   atomic_store(&original, 0);
   atomic_store(&installed, 0); atomic_store(&armed, 0); atomic_store(&reserved, 0); atomic_store(&last_error, 0);
   atomic_store(&callback_generation, 0);

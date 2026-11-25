@@ -13,6 +13,7 @@ import replay  # noqa: E402
 import trace  # noqa: E402
 
 USER_LOG = Path.home() / ".cache/tfp-soak-31-user.modlog"
+MAIN = "0bfdc37"   # main as round 24 was merged into it (rounds 19, 21, 22, 23)
 
 
 class Float(unittest.TestCase):
@@ -102,11 +103,13 @@ class UserLog(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        calls = replay.read(USER_LOG.read_text(errors="replace").splitlines())
-        cls.rows = replay.merge(replay.replay(calls, "cc0a95f")[0])
+        lines = USER_LOG.read_text(errors="replace").splitlines()
+        cls.rows = replay.merge(replay.replay(replay.read(lines), "cc0a95f")[0])
+        cls.settled = replay.merge(replay.replay(replay.read(lines), "cc0a95f", settle=True)[0])   # settle_on.txt
+        cls.main = replay.merge(replay.replay(replay.read(lines), "cc0a95f", MAIN)[0])   # main before round 24 was merged
 
-    def window(self, start, end, eye, carried, taken):
-        return replay.window_figures([r for r in self.rows if start <= r["at"] <= end], eye, carried, taken)
+    def window(self, start, end, eye, carried, taken, rows=None):
+        return replay.window_figures([r for r in (rows or self.rows) if start <= r["at"] <= end], eye, carried, taken)
 
     def test_the_high_clambers(self):
         for start, end in (("20:27:42.7", "20:27:43.4"), ("20:27:50.4", "20:27:51.1"), ("20:28:13.1", "20:28:14.8")):
@@ -120,12 +123,19 @@ class UserLog(unittest.TestCase):
 
     def test_the_backpacks(self):
         # the drift after the native view came back: what is carried grows again with nothing taken up (0.154 m at
-        # 20:32:10 in the log); THE SETTLE holds the eye through the rig's re-seat and eases once
+        # 20:32:10 in the log). THE SETTLE is off by default (settle_on.txt): off, the present filter is main's frame
+        # for frame there; on, it holds the eye through the rig's re-seat and eases once
         for start, end in (("20:27:07.0", "20:27:07.7"), ("20:32:10.2", "20:32:10.8"), ("20:34:19.6", "20:34:20.4")):
-            present = self.window(start, end, "new_eye", "new_carried", "new_taken")
-            self.assertLessEqual(present["regrown"], 0.10, start)
+            present = [r for r in self.rows if start <= r["at"] <= end]
+            main = [r for r in self.main if start <= r["at"] <= end]
+            self.assertEqual([r["new_eye"] for r in present], [r["new_eye"] for r in main], start)
+            settled = self.window(start, end, "new_eye", "new_carried", "new_taken", self.settled)
+            self.assertLessEqual(settled["regrown"], 0.10, start)
         logged = self.window("20:32:10.2", "20:32:10.8", "old_eye", "old_carried", "old_taken")
         self.assertGreater(logged["regrown"], 0.15)
+        # off, no row says the settle
+        self.assertFalse(any("settle" in r["new_taken"] for r in self.rows))
+        self.assertTrue(any("settle" in r["new_taken"] for r in self.settled))
 
 
 if __name__ == "__main__":

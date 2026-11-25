@@ -426,9 +426,9 @@ def emit_head(name, rows):
     return "\n".join(out) + "\n"
 
 
-def run(binary, mode, rows, axes):
+def run(binary, mode, rows, axes, settle=False):
     text = "".join(row_text(row, axes) for row in rows)
-    out = subprocess.run([str(binary), mode], input=text, capture_output=True, text=True, check=True).stdout.splitlines()
+    out = subprocess.run([str(binary), mode] + (["settle"] if settle else []), input=text, capture_output=True, text=True, check=True).stdout.splitlines()
     assert len(out) == len(rows)
     return [[float(x) for x in line.split()] for line in out]
 
@@ -488,10 +488,11 @@ def header(revision, work, name):
     return folder
 
 
-def replay(rows, logged=None, present=None):
+def replay(rows, logged=None, present=None, settle=False):
     """Runs both filters over `rows` (read(), all of them with axes or none) and returns (the frames, whether the axes
     were given). `present`: a git revision, or a folder with camera_continuity.h and camera_math.h, in place of this
-    tree's filter. Each row gets old_eye, old_carried, old_taken (the logged build's filter), new_eye, new_carried,
+    tree's filter. `settle`: THE SETTLE on in this tree's filter (the helper's settle_on.txt; off by default, as in the
+    helper). Each row gets old_eye, old_carried, old_taken (the logged build's filter), new_eye, new_carried,
     new_taken (this tree's), fit (the axes used), misfit (m, the logged filter from the log) and follows."""
     given = bool(rows) and all(row["axes"] for row in rows)
     logged = logged or ("9a3470b" if given else "b7ce1ab")
@@ -509,7 +510,7 @@ def replay(rows, logged=None, present=None):
             row["old_eye"], row["old_carried"], row["old_taken"], row["fit"], row["misfit"] = out[0:3], out[3], taken(out[4]), out[5:14], out[14]
             row["old_wanted"] = out[15:18]
             row["follows"] = row["known"] and row["misfit"] < EXACT_M if given else row["misfit"] < NEAR_M
-        for row, out in zip(rows, run(new, "run", rows, "fit")):
+        for row, out in zip(rows, run(new, "run", rows, "fit", settle)):
             row["new_eye"], row["new_carried"], row["new_taken"] = out[0:3], out[3], taken(out[4])
             row["new_wanted"] = out[15:18]
     return (merge(rows) if given else rows), given
@@ -520,6 +521,7 @@ def main(argv):
     parser.add_argument("log")
     parser.add_argument("--logged", default=None, help="git revision of the build that wrote the log")
     parser.add_argument("--present", default=None, help="git revision (or a folder with the two headers) to run in place of this tree's filter")
+    parser.add_argument("--settle", action="store_true", help="THE SETTLE on in this tree's filter (settle_on.txt; off by default)")
     parser.add_argument("--from", dest="start", default=None)
     parser.add_argument("--to", dest="end", default=None)
     parser.add_argument("--emit", default=None, help="write the rows of --from/--to as a C array of this name")
@@ -527,7 +529,7 @@ def main(argv):
     parser.add_argument("--worst", type=int, default=0, help="list this many rows where the logged filter, replayed, is farthest from the log")
     args = parser.parse_args(argv[1:])
     calls = read(Path(args.log).read_text(errors="replace").splitlines())
-    rows, given = replay(calls, args.logged, args.present)
+    rows, given = replay(calls, args.logged, args.present, args.settle)
     if not given:
         calls = rows
 

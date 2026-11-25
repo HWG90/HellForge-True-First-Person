@@ -207,6 +207,9 @@ void tfp_camera_continuity_event(void);
  * hands and the game re-requests the native view). The next change of camera into the native view on mask 0, within
  * 2 s, may hold the eye until the rig has settled (THE SETTLE, src/camera_continuity.h). The binder calls it. */
 void tfp_camera_settle_arm(void);
+/* Round 24: THE SETTLE itself, a test switch (settle_on.txt beside the DLL); off by default and after
+ * tfp_camera_reset_for_tests. Off, an armed entry is presented as without it. */
+void tfp_camera_set_settle(bool on);
 /* Beyond retail, and only in frames the camera lock holds. `on`: the game still presents the first-person request
  * (kind 6) although its exit has been asked for and the gun has left the first-person rig (a stim keeps the request
  * for about 0.85 s). The rig's eye then sits at the body's head; while this is on, a native frame presents the head

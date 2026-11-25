@@ -218,7 +218,10 @@
  *    caller does not give the head), the held eye let go (0.15 to 0.18 m), a flick of the mouse (the node does not
  *    move), the root moving by itself with the head still in the world (the re-seat's to read), and every native
  *    frame. (Round 19 review: with the eye given, flicks of 95 and 180 degrees and the root alone 0.5 m were cuts.) */
-/*  - THE SETTLE (round 24, `settle_ok`, told by the caller: the native view on mask 0, src/camera_helper.c). Back from
+/*  - THE SETTLE (round 24, `settle_ok`, told by the caller: the native view on mask 0, src/camera_helper.c; a test
+ *    switch, OFF unless settle_on.txt is beside the DLL: the round-24 review replayed it worse than main by up to
+ *    0.05 m of step change in soaks 14, 19, 21, 24, 25, 27, 30 and 31, armed by every weapon swap, and holding back
+ *    the rig's real motion (soak 14, 04:02:13: the eye fixed for 170 ms while the rig moved 0.9 m)). Back from
  *    a backpack pick-up (the user's log of 2026-11-24, 20:27:07, 20:32:10, 20:34:19) the rig's eye is 0.22 to 0.25 m
  *    under the head camera's and re-seats itself against the root for about 300 ms (forward 0.32 -> 0 m, up 1.53 ->
  *    1.76 m) while the body turns 0.1 rad a frame: the change of camera was taken up, two or three re-seats more, and
