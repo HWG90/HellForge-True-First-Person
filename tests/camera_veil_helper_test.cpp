@@ -584,6 +584,48 @@ int main() {
     tfp_camera_veil_tick(true);
     g.end();
   }
+  // ---- 21. Round 30: the release of full aim (soak 36, 07:03:36.695): the game evaluates the camera a second time 0.35 ms
+  // after the native frame with its ordinary camera on top and no action owning the view, and the next frame is the
+  // native view again. The leave is kept pending: that frame is not moved (it is the eye the veil would not have
+  // touched), the tick opens the veil for head-camera frames only, and the native frames after it are the game's own.
+  // A swap in full aim (the gun leaving the hands, mask 2), a same-frame leave out of the hip and a lone frame a whole
+  // frame later are veiled at once as before; a kept leave whose view stays away is veiled from the next frame. ----
+  {
+    struct Release { const char *name; bool aim; uint32_t mask; double gap; bool kept; };
+    const Release cases[] = {{"aim released, nothing owns the view, 0.35 ms", true, 0, .35, true},
+                             {"a swap in full aim (mask 2), 0.25 ms", true, 2, .25, false},
+                             {"out of the hip, 0.3 ms", false, 0, .3, false},
+                             {"aim released, a whole frame later", true, 0, 33.3, false}};
+    for (const Release &c : cases) for (int stay = 0; stay < 2; ++stay) {
+      float seen[2] = {0, 0}, after[2] = {0, 0}; TfpCameraVeilStats s[2];
+      for (int armed = 0; armed < 2; ++armed) {
+        Game g; fresh(true, false, false); tfp_camera_set_veil_second(false);
+        g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+        g.eye[0] = 0; g.eye[1] = -.22f; g.eye[2] = .13f;
+        CHECK(tfp_camera_set_weapon_key(g.gen, 0x1111) == 1);
+        tfp_camera_set_veil(armed != 0);
+        for (int i = 0; i < 30; ++i) { g.native(0, c.aim); g.frame(33.3); }
+        g.hip(c.mask); g.frame(c.gap); seen[armed] = ahead_of_head(g);
+        if (stay) { tfp_camera_veil_tick(false); g.hip(c.mask); g.frame(33.3 - c.gap); after[armed] = ahead_of_head(g); }
+        else {
+          g.native(0, false); g.frame(33.3 - c.gap); after[armed] = ahead_of_head(g);
+          tfp_camera_veil_tick(false); g.native(0, false); g.frame(33.3);
+          tfp_camera_veil_tick(false); g.native(0, false); g.frame(33.3);
+        }
+        s[armed] = veil(); g.end();
+      }
+      std::printf("  %s, %s: first frame %.3f m in front of the head (bare %.3f), the next %.3f (bare %.3f); moved %llu, held back %llu\n",
+                  c.name, stay ? "the view stays away" : "back to the native view", seen[1], seen[0], after[1], after[0],
+                  (unsigned long long)s[1].moved, (unsigned long long)s[1].held_back);
+      if (c.kept) {
+        CHECK(std::fabs(seen[1] - seen[0]) < .002f && s[1].held_back == 1);
+        if (stay) CHECK(std::fabs(after[1] - TFP_CAMERA_VEIL_CLEAR) < .002f && s[1].moved == 1);
+        else CHECK(std::fabs(after[1] - after[0]) < .002f && s[1].moved == 0 && s[1].behind == 0);
+      } else {
+        CHECK(std::fabs(seen[1] - TFP_CAMERA_VEIL_CLEAR) < .002f && seen[0] < -.1f && s[1].held_back == 0 && s[1].leaves == 1);
+      }
+    }
+  }
   std::printf("camera veil through the helper: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

@@ -270,6 +270,16 @@ void tfp_camera_orphan_stats(TfpCameraOrphanStats *out);
 #define TFP_CAMERA_VEIL_FOV_MOST 2.0943951f   /* 120 degrees: tfp_settings.h fov_degrees at most */
 #define TFP_CAMERA_VEIL_FOV_SPARE .08726646f  /* 5 degrees */
 #define TFP_CAMERA_VEIL_LET_OUT_MS 300.0
+/* Round 30 (docs/design/specs/2026-11-24-helmet-in-view.md "Round 30"): at the release of full aim the game can
+ * evaluate the camera a second time in the native frame's own game frame (0.2 to 0.4 ms after it) with its ordinary
+ * camera on top, and the next frame is the native view again: feel.53's soak (~/.cache/tfp-soak-36.modlog) has six,
+ * each one frame, and the veil moved four of them 0.20 to 0.38 m forward and back (the judge read 0.390 to 0.745 m).
+ * The body is never drawn there (the native view never left). A swap made in full aim leaves the same way (out of full
+ * aim, within this time) but with the gun leaving the hands (control mask 2). So a leave noted in a head-camera frame
+ * within TFP_CAMERA_VEIL_SAME_FRAME_MS of a native frame of full aim, in which no action owns the view (control mask
+ * 0), does not open the veil there: it is kept pending, and the tick that sees it opens the veil (tfp_camera_veil_tick),
+ * which moves only head-camera frames: nothing, when the view went straight back. Every other leave opens it as before. */
+#define TFP_CAMERA_VEIL_SAME_FRAME_MS 2.0
 /* What of the last move is still added `ms` after the last veiled frame: from 1 to 0 from rest to rest (1 - smoothstep),
  * so the step changes by at most 6 (dt/T)^2 of the move a frame: 0.058 m for 0.40 m at 50 ms a frame. */
 static inline float tfp_camera_veil_let_out(double ms) {
@@ -301,7 +311,9 @@ void tfp_camera_set_veil_second(bool on);
 /* Round 26: under, of the frames it moved or found clear, those whose head was below the view before the whole way
  * to TFP_CAMERA_VEIL_CLEAR in front (moved less, or not at all); too_far, frames it left behind the head because the move
  * was over TFP_CAMERA_VEIL_MOST (counted in behind too). */
-typedef struct TfpCameraVeilStats { uint64_t leaves, frames, moved, behind; float largest_m; bool second; uint64_t under, too_far; } TfpCameraVeilStats;
+/* Round 30: held_back, leaves of a same-frame evaluation out of full aim with no action owning the view, kept pending
+ * (TFP_CAMERA_VEIL_SAME_FRAME_MS). */
+typedef struct TfpCameraVeilStats { uint64_t leaves, frames, moved, behind; float largest_m; bool second; uint64_t under, too_far, held_back; } TfpCameraVeilStats;
 void tfp_camera_veil_stats(TfpCameraVeilStats *out);
 /* The tick's whole part in the veil (src/mod_view.c head_note calls it after head visibility's update, `tick` filled as
  * the "Head:" line has it, view included). NULL, no tick read: switched off. Otherwise tfp_camera_veil_tick with
