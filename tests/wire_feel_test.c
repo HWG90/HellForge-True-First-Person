@@ -143,7 +143,7 @@ int main(void) {
                                           e_len, e_index, e_array, e_ticks, e_exe};
   static const TfpFxPlatform effects = {NULL, f_ready, f_zero, f_function, f_table, f_zero, f_render_setting, f_set_render_setting, f_main_world,
                                         f_entities, f_component, f_alive, f_instances, f_get, f_set, f_find, f_button, f_flag, f_flag, f_query,
-                                        f_write, f_widget};
+                                        f_write, f_widget, NULL};
   TfpOpsHost memory;
   memset(&memory, 0, sizeof memory);
   memory.module = no_module, memory.read = no_read, memory.write = no_write, memory.query = no_query, memory.call = no_call;

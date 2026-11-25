@@ -283,6 +283,8 @@ static bool t_widget(void *u, uint64_t function, uint64_t widget, uint8_t shown,
   win.function = function, win.widget = widget, win.shown = shown, win.widget_calls++;
   return true;
 }
+static int64_t perf_ticks_now; /* round 28: a clock that moves one tick per read */
+static int64_t t_perf_ticks(void *u) { (void)u; return ++perf_ticks_now; }
 static void platform_of(TfpFxPlatform *p) {
   tfp_win_effects_platform(p, EXE);
   p->virtual_query = t_query, p->write_process_memory = t_write, p->set_widget_shown = t_widget;
@@ -859,10 +861,23 @@ int main(int argc, char **argv) {
   image_build = &tfp_dof_build_25480438;
   vignette_view = true;
   call_count = 0, line_count = 0;
+  { int64_t dof_spent = -1, vignette_spent = -1; /* round 28: nothing timed without perf_ticks; the earlier frames left nothing */
+    tfp_wire_effects_take_spent(&wire, &dof_spent, &vignette_spent);
+    CHECK(dof_spent == 0 && vignette_spent == 0); }
+  fx.platform.perf_ticks = t_perf_ticks, perf_ticks_now = 0;
   for (int i = 0; i < 12; i++) {
     now_seconds += .6;
     CHECK(h->dof_update(h, &o1, &o2) && o1.kind == TFP_RT_TRUE);
     tfp_wire_effects_frame(&wire);
+  }
+  { /* round 28: each timed span of the fake clock is one tick per read pair, so the vignette's time is its number of
+     * entries and the depth of field's own time is its 12 updates plus the vignette's (the two reads around each) */
+    int64_t dof_spent = 0, vignette_spent = 0;
+    tfp_wire_effects_take_spent(&wire, &dof_spent, &vignette_spent);
+    CHECK(vignette_spent >= 12 && dof_spent == 12 + vignette_spent);
+    tfp_wire_effects_take_spent(&wire, &dof_spent, &vignette_spent);
+    CHECK(dof_spent == 0 && vignette_spent == 0);
+    fx.platform.perf_ticks = NULL;
   }
   CHECK(!G.dof && !G.row_enabled && G.script_errors == 0 && G.vignette_setting);
   CHECK(fx.dof.dof.phase == TFP_DOF_ACTIVE && fx.vignette.phase == TFP_VIGNETTE_ACTIVE && fx.vignette.row_count == 1 && fx.vignette.rows[0].owned);
