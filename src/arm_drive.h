@@ -228,7 +228,8 @@ const char *tfp_arm_drive_held(void);
  * Off at the start and until this is called with true. on: the left hand of the drawn arms reaches the weapon's left-hand
  * grip node (name 67C94E4B; a foregrip's or vertical grip's own node when one is fitted) as the gun is drawn, whenever the
  * body's left hand is on that node in the world (the game pins it there, also while the rig is the view), by a two-bone
- * reach of the upper arm, forearm and hand (rig nodes 10, 12, 13) on the poses the drive writes, with its step limits.
+ * reach of the upper arm, forearm and hand (rig nodes 10, 12, 13) on the poses the drive writes, with its step limits; the
+ * shoulder (node 10) comes forward where the grip is beyond 97 % of the arm (round 26).
  * one_handed: a handgun at the hip, held in one hand: the hand stays as the body holds it. While aiming the copy fades out
  * (the drive's weight) and the game's own aim pose holds the gun; the reach is not asked for then. */
 void tfp_arm_drive_set_grip(bool on, bool one_handed);
@@ -255,12 +256,23 @@ typedef struct TfpArmDriveGrip {
   bool found;                     /* a node is in use */
   float body_m;                   /* the body's left hand from the node in use, last frame */
   float to_m, most_to_m;          /* the drawn hand from the grip as drawn: last frame, and the most while held */
-  float step_degrees, limit_degrees; /* the largest change of a joint's correction in one frame, and that frame's allowance */
+  float step_degrees, limit_degrees; /* the largest turn of a written joint in one frame, and that frame's allowance */
   float weight;                   /* last frame */
+  /* round 26 (what the next game run settles) */
+  uint32_t cut;                   /* frames a joint or the shoulder was held back by its limit */
+  uint32_t out_of_reach, too_far; /* frames the grip was not taken: beyond the arm's reach, or too far from the drawn hand */
+  float reach, most_reach;        /* the grip from the drive's shoulder in arm lengths: last frame, and the most while held */
+  float shoulder_m, most_shoulder_m; /* the shoulder brought forward to reach it: last frame, and the most while held */
+  float held_step_degrees;        /* the largest turn of a written joint in a frame held on the grip (steady holding) */
+  float body_degrees;             /* the largest turn of the drive's own arm joints in one frame while the reach was in force */
+  bool drawn;                     /* the drawn hand was measured against the gun as evaluated for the draw */
+  float drawn_m, most_drawn_m;    /* the rig's evaluated hand from the gun's evaluated grip node: last frame, the most while held */
 } TfpArmDriveGrip;
 void tfp_arm_drive_grip_take(TfpArmDriveGrip *out);
 /* "60 frames, 60 held: on the attachment's grip (2 grip nodes on 3 units), the body's hand 0.002 m from it; hand 0.000 m from
- * the grip (most 0.004), largest joint step 3.1 degrees (allowed 12.0), weight 1.00". A static buffer. */
+ * the grip (most 0.004), largest joint step 3.1 degrees (allowed 12.0), weight 1.00; reach 1.05 of the arm (most 1.08), shoulder
+ * forward 0.047 m (most 0.065), held step 0.4 degrees, the body's arm turned 2.0 degrees, 0 frames cut, not taken: 0 out of reach,
+ * 0 too far; as drawn the hand 0.001 m from the gun's grip (most 0.002)". A static buffer. */
 const char *tfp_arm_drive_grip_line(const TfpArmDriveGrip *grip);
 const char *tfp_arm_drive_grip_state_name(uint32_t state);
 

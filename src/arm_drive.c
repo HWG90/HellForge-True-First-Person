@@ -191,6 +191,7 @@ static struct {
     uint32_t ref, node, weapon;
     bool attachment;
     TfpGraftMatrix rel; /* the node in the rig socket's frame, from the last frame it could be read */
+    bool measure;       /* held this frame: grip_drawn() measures the hand as drawn */
     float last[3];      /* its world position in the last frame: the body's hand trails it by up to a frame */
     TfpArmDriveGrip seen;
   } grip;
@@ -792,20 +793,41 @@ static void grip_frame(const Units *u, const TfpGraftMatrix *body, TfpGraftMatri
   if (d.grip.on) seen->frames++;
   const bool wanted = state == TFP_ARM_GRIP_HELD;
   float to = 0, step = 0, limit = 0, weight = 0;
+  TfpOffhandResult r = {0};
+  d.grip.measure = false;
   if (wanted || d.grip.ik.active || d.grip.ik.weight > 0) {
-    const TfpOffhandResult r = tfp_offhand_step(&d.grip.ik, &poses[TFP_OG_UPPER], &poses[TFP_OG_FORE], &poses[TFP_OG_HAND], wanted ? &target : NULL,
-                                                wanted, seconds);
+    r = tfp_offhand_step(&d.grip.ik, &poses[TFP_OG_UPPER], &poses[TFP_OG_FORE], &poses[TFP_OG_HAND], wanted ? &target : NULL, wanted, seconds);
     to = r.to_target_m, step = r.step_degrees, limit = r.limit_degrees, weight = r.weight;
     if (wanted)
       state = r.reason == TFP_OG_HELD ? TFP_ARM_GRIP_HELD : r.reason == TFP_OG_TOO_FAR || r.reason == TFP_OG_OUT_OF_REACH ? TFP_ARM_GRIP_FAR
               : r.reason == TFP_OG_NOT_RIGID ? TFP_ARM_GRIP_POSE : TFP_ARM_GRIP_EASING;
+    seen->cut += r.cut, seen->out_of_reach += r.reason == TFP_OG_OUT_OF_REACH, seen->too_far += r.reason == TFP_OG_TOO_FAR;
+    if (d.grip.ik.active && r.body_degrees > seen->body_degrees) seen->body_degrees = r.body_degrees;
+    d.grip.measure = state == TFP_ARM_GRIP_HELD && d.grip.latched; /* drive(): the hand against the gun as drawn */
   }
   seen->state = state, seen->weight = weight, seen->to_m = wanted ? to : 0;
+  seen->reach = wanted ? r.reach_share : 0, seen->shoulder_m = r.shoulder_m;
   if (state == TFP_ARM_GRIP_HELD) {
     seen->held++;
     if (to > seen->most_to_m) seen->most_to_m = to;
+    if (r.reach_share > seen->most_reach) seen->most_reach = r.reach_share;
+    if (r.shoulder_m > seen->most_shoulder_m) seen->most_shoulder_m = r.shoulder_m;
+    if (step > seen->held_step_degrees) seen->held_step_degrees = step;
   }
   if (step >= seen->step_degrees) seen->step_degrees = step, seen->limit_degrees = limit;
+}
+/* After the rig and the gun are evaluated for the draw: the rig's left hand (node 13) from the gun's grip node in use,
+ * both as the game evaluated them. It settles what the solver's own numbers cannot: whether the target was where the
+ * gun is drawn (a frame behind, another socket). */
+static void grip_drawn(uintptr_t rig_worlds) {
+  TfpGraftMatrix hand, grip;
+  uintptr_t worlds;
+  if (!d.grip.measure || !ptr(d.grip.object + L_UNIT_WORLDS, &worlds) || !rd(rig_worlds + 64 * 13, &hand, sizeof hand) ||
+      !rd(worlds + 64 * (uintptr_t)d.grip.node, &grip, sizeof grip) || !tfp_graft_rigid(&hand) || !tfp_graft_rigid(&grip))
+    return;
+  const float m = grip_gap(hand.values + 12, grip.values + 12);
+  d.grip.seen.drawn = true, d.grip.seen.drawn_m = m;
+  if (m > d.grip.seen.most_drawn_m) d.grip.seen.most_drawn_m = m;
 }
 
 /* ---- one frame (graft:662-817 graft_present, its steady action path) ---- */
@@ -873,6 +895,7 @@ static uint32_t drive(const Units *u) {
     if (!update(&a, u->world, u->rig_ref) || !refresh_arms(&a, u->world, u->rig, rig_worlds, d.arms, d.arm_count)) return TFP_ARM_FAULT;
     int weapon = u->gun_away ? 1 : update_weapon(&a, u->world, &tree);
     if (weapon <= 0) return weapon ? TFP_ARM_FAULT : TFP_ARM_TREE;
+    if (!d.bend) grip_drawn(rig_worlds);
   }
   return TFP_ARM_NONE;
 }
@@ -902,16 +925,21 @@ const char *tfp_arm_drive_grip_state_name(uint32_t state) {
   return state < TFP_ARM_GRIPS ? names[state] : "?";
 }
 const char *tfp_arm_drive_grip_line(const TfpArmDriveGrip *g) {
-  static char line[400];
+  static char line[720];
   char where[160];
   if (g->found)
     snprintf(where, sizeof where, "%s grip node (%u grip nodes on %u of the gun's units), the body's hand %.3f m from it", g->attachment ? "an attachment's" : "the gun's own",
              (unsigned)g->nodes, (unsigned)g->units, (double)g->body_m);
   else if (g->nodes) snprintf(where, sizeof where, "%u grip nodes on %u of the gun's units, the body's hand %.3f m from the nearest", (unsigned)g->nodes, (unsigned)g->units, (double)g->body_m);
   else snprintf(where, sizeof where, "no grip node");
-  snprintf(line, sizeof line, "%u frames, %u held: %s; %s; hand %.3f m from the grip (most %.3f while held), largest joint step %.1f degrees (allowed %.1f), weight %.2f",
+  char drawn[96] = "";
+  if (g->drawn) snprintf(drawn, sizeof drawn, "; as drawn the hand %.3f m from the gun's grip (most %.3f)", (double)g->drawn_m, (double)g->most_drawn_m);
+  snprintf(line, sizeof line, "%u frames, %u held: %s; %s; hand %.3f m from the grip (most %.3f while held), largest joint step %.1f degrees (allowed %.1f), weight %.2f; "
+           "reach %.2f of the arm (most %.2f), shoulder forward %.3f m (most %.3f), held step %.1f degrees, the body's arm turned %.1f degrees, %u frames cut, "
+           "not taken: %u out of reach, %u too far%s",
            (unsigned)g->frames, (unsigned)g->held, tfp_arm_drive_grip_state_name(g->state), where, (double)g->to_m, (double)g->most_to_m, (double)g->step_degrees,
-           (double)g->limit_degrees, (double)g->weight);
+           (double)g->limit_degrees, (double)g->weight, (double)g->reach, (double)g->most_reach, (double)g->shoulder_m, (double)g->most_shoulder_m,
+           (double)g->held_step_degrees, (double)g->body_degrees, (unsigned)g->cut, (unsigned)g->out_of_reach, (unsigned)g->too_far, drawn);
   return line;
 }
 void tfp_arm_drive_set_hold(bool on) { d.hold = on; }

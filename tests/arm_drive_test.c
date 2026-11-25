@@ -1958,6 +1958,41 @@ static void test_grip_holds(void) {
     CHECK(!memcmp(with[n].position, without[n].position, 12)); /* bone lengths: positions never change */
   }
 }
+/* Round 26, from the feel.52 Grip: lines: a grip further forward along the gun than the recorded one (a foregrip or
+ * vertical grip), so that it is 1.05 of the drawn arm's length from the drawn shoulder, where the logged hand stopped
+ * 0.03 to 0.05 m short of it (the 97 % straightening limit). The hand is to be on it, the shoulder forward. */
+static void test_grip_reach_forward(void) {
+  static const float zero[3] = {0, 0, 0};
+  TfpGraftMatrix hand, socket;
+  /* the body's hand stays on the node (the game pins it there); the gun's root 0.19 m further back along it puts the
+   * node 0.19 m further forward on the gun, as the rig draws it */
+  TfpGraftMatrix root = rig_world[TFP_GRAFT_RIG_SOCKET];
+  for (unsigned i = 0; i < 3; i++) root.values[12 + i] -= .19f * root.values[4 + i];
+  fresh();
+  grip_world(&root, zero, NULL);
+  tfp_arm_drive_set(true, true, 1);
+  tfp_arm_drive_set_grip(true, false);
+  uint64_t t = 1000;
+  float most_step = 0;
+  for (int i = 0; i < 60; i++) {
+    grip_draw(t += 33, &hand, &socket);
+    if (i == 29) { TfpArmDriveGrip g; tfp_arm_drive_grip_take(&g); }
+  }
+  TfpArmDriveGrip g;
+  tfp_arm_drive_grip_take(&g);
+  most_step = g.held_step_degrees;
+  const TfpGraftMatrix want = tfp_graft_relative(&body_now[body_left_hand()], &root), at = tfp_graft_product(&want, &socket);
+  printf("arm drive: grip %.2f of the arm's length from the shoulder: the drawn hand %.4f m from it, the shoulder %.3f m forward, held step %.2f degrees\n",
+         (double)g.reach, (double)grip_m(&hand, &at), (double)g.shoulder_m, (double)most_step);
+  CHECK(g.reach > 1.02f && g.reach < 1.10f);
+  CHECK(g.state == TFP_ARM_GRIP_HELD && g.held == 30 && grip_m(&hand, &at) < .001f && grip_degrees(&hand, &at) < .01f && g.to_m < .001f);
+  CHECK(fabsf(g.shoulder_m - (g.reach - (float)TFP_OG_STRETCH) * (float)(.3027 + .2872)) < .002f && g.most_shoulder_m >= g.shoulder_m);
+  CHECK(most_step < 1 && !g.cut && !g.out_of_reach && !g.too_far);
+  const char *line = tfp_arm_drive_grip_line(&g);
+  CHECK(strstr(line, "reach 1.0") && strstr(line, "shoulder forward 0.0") && strstr(line, "0 frames cut, not taken: 0 out of reach, 0 too far"));
+  /* the fake engine does not evaluate the rig and gun again after the write: what it reads is what the game held */
+  CHECK(g.drawn && strstr(line, "as drawn the hand"));
+}
 /* A foregrip: its own node, where the body's hand is, and the gun's own node 17 cm from there: the foregrip's is held. */
 static void test_grip_foregrip(void) {
   static const float zero[3] = {0, 0, 0}, gun_own[3] = {0, .17f, 0};
@@ -2026,7 +2061,7 @@ static void test_grip_left_alone(void) {
   tfp_arm_drive_grip_take(&g);
   CHECK(frames > 2 && frames < 40 && g.state == TFP_ARM_GRIP_FREE && g.step_degrees <= g.limit_degrees + 1e-3f);
 }
-/* A moving body and a grip that wanders, at four frame times: no joint's correction ever changes by more than the
+/* A moving body and a grip that wanders, at four frame times: no written joint ever turns by more than the
  * frame's allowance. */
 static void test_grip_step_limit(void) {
   static const unsigned frame_ms[4] = {8, 17, 33, 50};
@@ -2088,6 +2123,7 @@ int main(int argc, char **argv) {
   test_fade_and_ease_under_put_back();
   test_hold_begins_under_put_back();
   test_grip_holds();
+  test_grip_reach_forward();
   test_grip_foregrip();
   test_grip_left_alone();
   test_grip_step_limit();
