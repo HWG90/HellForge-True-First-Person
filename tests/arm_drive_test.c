@@ -2432,44 +2432,61 @@ static void test_grip_while_aiming(void) {
 static void test_grip_left_alone(void) {
   static const float far[3] = {.2f, 0, 0}, zero[3] = {0, 0, 0};
   TfpGraftMatrix hand, socket, plain_hand, plain_socket;
-  for (int way = 0; way < 4; way++) {
+  for (int way = 0; way < 5; way++) {
     fresh();
-    grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], way == 0 ? far : zero, NULL);
-    tfp_arm_drive_set(true, true, way == 2 ? 0 : 1);
+    grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], way == 0 || way == 4 ? far : zero, NULL);
+    tfp_arm_drive_set(true, true, way == 2 || way == 4 ? 0 : 1);
     grip_draw(1000, &plain_hand, &plain_socket);
     tfp_arm_drive_set_grip(way != 3, way == 1 || way == 2);
     uint64_t t = 1000;
     for (int i = 0; i < 10; i++) {
       grip_draw(t += 16, &hand, &socket);
       CHECK(!memcmp(&hand, &plain_hand, sizeof hand) && !memcmp(&socket, &plain_socket, sizeof socket));
-      if (way == 2) CHECK(!stats().owned); /* a handgun aimed: the game's own pose, nothing written */
+      if (way == 2 || way == 4) CHECK(!stats().owned); /* a handgun aimed, or a reload aimed: the game's own pose, nothing written */
     }
     TfpArmDriveGrip g;
     tfp_arm_drive_grip_take(&g);
-    static const uint32_t expected[4] = {TFP_ARM_GRIP_FREE, TFP_ARM_GRIP_ONE_HANDED, TFP_ARM_GRIP_ONE_HANDED, TFP_ARM_GRIP_OFF};
+    static const uint32_t expected[5] = {TFP_ARM_GRIP_FREE, TFP_ARM_GRIP_ONE_HANDED, TFP_ARM_GRIP_ONE_HANDED, TFP_ARM_GRIP_OFF,
+                                         TFP_ARM_GRIP_FREE};
     CHECK(g.state == expected[way] && !g.held && g.frames == (way == 3 ? 0u : 10u));
-    if (!way) CHECK(g.nodes == 1 && g.body_m > .19f && strstr(tfp_arm_drive_grip_line(&g), "the body's left hand is on no grip"));
+    if (!way || way == 4) CHECK(g.nodes == 1 && g.body_m > .19f && strstr(tfp_arm_drive_grip_line(&g), "the body's left hand is on no grip"));
   }
-  /* held, then the body's hand leaves (a reload): back to the body's pose within the step limit, then exactly it */
-  fresh();
-  grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], zero, NULL);
-  tfp_arm_drive_set(true, true, 1);
-  grip_draw(1000, &plain_hand, &plain_socket);
-  tfp_arm_drive_set_grip(true, false);
-  uint64_t t = 1000;
-  for (int i = 0; i < 30; i++) grip_draw(t += 16, &hand, &socket);
-  grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], far, NULL);
-  TfpGraftMatrix prev = hand;
-  TfpArmDriveGrip g;
-  tfp_arm_drive_grip_take(&g);
-  int frames = 0;
-  for (; frames < 40 && memcmp(&hand, &plain_hand, sizeof hand); frames++) {
-    grip_draw(t += 16, &hand, &socket);
-    CHECK(grip_degrees(&hand, &prev) < 60); /* the hand's world turn: a sum of three limited joints */
-    prev = hand;
+  /* held, then the body's hand leaves (a reload): back to the body's pose within the step limit, then exactly it. At the
+   * hip, and aiming (weight 0: the reach runs on the game's aim pose since round 36b, so a reload while aimed lets go to
+   * the game's own pose, socket untouched throughout, and then nothing is written at all) */
+  for (int aiming = 0; aiming < 2; aiming++) {
+    fresh();
+    grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], zero, NULL);
+    tfp_arm_drive_set(true, true, aiming ? 0 : 1);
+    grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], far, NULL);
+    grip_draw(1000, &plain_hand, &plain_socket); /* the pose with the body's hand off the grip */
+    grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], zero, NULL);
+    tfp_arm_drive_set_grip(true, false);
+    uint64_t t = 1000;
+    for (int i = 0; i < 30; i++) grip_draw(t += 16, &hand, &socket);
+    TfpArmDriveGrip g;
+    tfp_arm_drive_grip_take(&g);
+    CHECK(g.state == TFP_ARM_GRIP_HELD && g.weight == 1);
+    CHECK(memcmp(&hand, &plain_hand, sizeof hand) != 0);
+    grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], far, NULL);
+    TfpGraftMatrix prev = hand;
+    int frames = 0;
+    for (; frames < 40 && memcmp(&hand, &plain_hand, sizeof hand); frames++) {
+      grip_draw(t += 16, &hand, &socket);
+      CHECK(grip_degrees(&hand, &prev) < 60); /* the hand's world turn: a sum of three limited joints */
+      if (aiming) CHECK(!memcmp(&socket, &plain_socket, sizeof socket)); /* the gun where the game's aim pose has it */
+      prev = hand;
+    }
+    tfp_arm_drive_grip_take(&g);
+    CHECK(frames > 2 && frames < 40 && g.state == TFP_ARM_GRIP_FREE && g.step_degrees <= g.limit_degrees + 1e-3f);
+    for (int i = 0; i < 5; i++) {
+      grip_draw(t += 16, &hand, &socket);
+      CHECK(!memcmp(&hand, &plain_hand, sizeof hand) && !memcmp(&socket, &plain_socket, sizeof socket));
+      if (aiming) CHECK(!stats().owned);
+    }
+    printf("arm drive: a reload %s: the hand back on the %s pose in %d frames\n", aiming ? "while aimed" : "at the hip",
+           aiming ? "game's aim" : "body's", frames);
   }
-  tfp_arm_drive_grip_take(&g);
-  CHECK(frames > 2 && frames < 40 && g.state == TFP_ARM_GRIP_FREE && g.step_degrees <= g.limit_degrees + 1e-3f);
 }
 /* A moving body and a grip that wanders, at four frame times: no written joint ever turns by more than the
  * frame's allowance. */
