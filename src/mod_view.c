@@ -1296,27 +1296,13 @@ static void lock_note(void) { /* once a second while the view is on: frames by c
     say(bodycam ? "Camera style: Bodycam (the view moves with the head: the kick sliders and camera damping apply)"
                 : "Camera style: Stable (no view kick on foot; a thrown body sways the view at half the thrown strength; the head camera follows the head slowly)");
   }
-  /* Round 37: an exosuit's or vehicle's seat is handed to the game's camera (camera_helper.h TfpCameraSeatStats). */
-  static uint64_t told_entries, told_exits, told_seat;
-  TfpCameraSeatStats seat; tfp_camera_seat_stats(&seat);
-  if (seat.entries != told_entries)
-    say("Seat: in an exosuit or vehicle seat (seated, off foot, no ragdoll; camera kind %u, request weapon %u); camera handed to the game's over %u ms"
-        " (%.2f m away%s)", seat.in_kind, seat.in_weapon, seat.in_ms, (double)seat.in_metres,
-        seat.in_ms ? "" : "; 0 ms: a cut, over 8 m away or nothing shown just before (-1 m) to glide from");
-  if (seat.exits != told_exits)
-    say(seat.out_ms ? "Seat: left; head camera back over %u ms (%.2f m)" : "Seat: left; no glide back (%u ms; %.2f m: the next frame was not the head camera's, or too far)",
-        seat.out_ms, (double)seat.out_metres);
-  const uint64_t handed = seat.frames - told_seat;
-  told_entries = seat.entries; told_exits = seat.exits; told_seat = seat.frames;
   TfpCameraLockStats s; tfp_camera_lock_stats(&s);
-  if (s.frames == told_frames && s.missed == told_missed && !handed) return;
+  if (s.frames == told_frames && s.missed == told_missed) return;
   /* The kind and error are the last missed frame's: 0 in a second without one. tools/harness/matrix.py reads this line. */
   const bool missed = s.missed != told_missed;
-  say("Lock: +%llu frames held (+%llu in another camera, kind now %u), +%llu missed (kind %u, helper error %u), largest kick %.1f degrees, "
-      "+%llu frames handed to a vehicle seat",
+  say("Lock: +%llu frames held (+%llu in another camera, kind now %u), +%llu missed (kind %u, helper error %u), largest kick %.1f degrees",
       (unsigned long long)(s.frames - told_frames), (unsigned long long)(s.foreign_frames - told_foreign), s.last_kind,
-      (unsigned long long)(s.missed - told_missed), missed ? s.missed_kind : 0, missed ? s.missed_error : 0, (double)s.peak_kick_degrees,
-      (unsigned long long)handed);
+      (unsigned long long)(s.missed - told_missed), missed ? s.missed_kind : 0, missed ? s.missed_error : 0, (double)s.peak_kick_degrees);
   if (s.last_kind != 6 && (s.off_foot || s.ragdoll) && s.frames != told_frames)
     say("Body: off foot %u, ragdoll flag %u, head %.2f m from its root (the last head-camera frame the lock held)", s.off_foot, s.ragdoll, (double)s.head_distance);
   if (missed && s.missed_why == TFP_CAMERA_WHY_SPACE) say("Missed: the camera's local and world position were %.3f m apart (0: not read)", (double)s.missed_apart);
