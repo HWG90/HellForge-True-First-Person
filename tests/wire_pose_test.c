@@ -108,6 +108,27 @@ void pose_world_main_row(unsigned index, int five, int three_d, float scalar) {
   const uint64_t row = W.a[A_OWNER] + 0x53d8b0 + static_cast<uint64_t>(index) * 0x1238;
   World::put<uint8_t>(row + 5, five ? 1 : 0); World::put<uint8_t>(row + 0x3d, three_d ? 1 : 0); World::put(row + 0x11ac, scalar);
 }
+/* Round 39: the kind-6 evaluator from game+0x1287a44 (460 bytes, as build 25480438 has them: game-pre1020.dll) and the
+ * game's reload vector C where its instructions name it (game+0x37cd668). state 1: as the game has them; 0: the first
+ * byte another (not the pinned evaluator); 2: one instruction naming another place. */
+void pose_world_reload_code(int state, const float *c) {
+  static const char span[] =
+      "4180bf8d00000000f3440f100d135c5402f30f10250f5c5402f20f10008b48080f28f8f30f102d015c5402f3410f58ff"
+      "440f28f8898d28010000f3440f108528010000450fc6ff55f3450f58c4f3450f58fbf20f1185200100000f8414010000"
+      "f3410f108f88000000440f2ff10f86eb000000f30f1045a0f30f5e0554ec1301f30f58c1440f2fe876050f57d2eb0841"
+      "0f28d6f30f5dd04180bf8f00000000410f28def30f5cdaf3410f119788000000743e0f28c2f30f59fbf30f5905635b54"
+      "020f28cbf3410f59cff30f58f8f3440f59c30f28c2f30f59154f5b5402f30f5905435b5402f3440f58c2f30f58c8eb42"
+      "f30f10052c5b54020f28caf30f59c3f30f59faf3410f59cff30f58f8f3440f59c2f30f10050f5b5402f30f59c3f30f58"
+      "c8f30f1005035b5402f30f59c3f3440f58c0807c244400440f28f97437807c2445007530f3420f10842e5cea5300f30f"
+      "59f8f3440f59f8f3440f59c0eb164180bf8f00000000740c410f28f9440f28fc440f28c5488b0549e70902f3440f58c5"
+      "498b0c24410f28cff30f580d00eb1301410f28f7488b5020f30f58f4f30f5f0decea1301ff5268f3410f58f94c8d8550"
+      "010000488d9560010000f3410f117f48f3410f11774cf3450f114750";
+  const uint64_t at = W.a[A_GAME] + 0x1287a44;
+  World::literal(at, span);
+  if (state == 0) World::put<uint8_t>(at, 0x40);
+  if (state == 2) { int32_t d = 0; std::memcpy(&d, reinterpret_cast<void *>(at + (0x1287b59 - 0x1287a44)), 4); d += 4; std::memcpy(reinterpret_cast<void *>(at + (0x1287b59 - 0x1287a44)), &d, 4); }
+  for (int i = 0; i < 3; ++i) World::put(W.a[A_GAME] + 0x37cd668 + 4 * i, c[i]);
+}
 void pose_world_build(PoseWorld *out) {
   W.build(HERE);
   for (uint32_t i = 0; i < RIG_NODES; ++i) { scene.hashes[i] = 0x1000 + i; scene.links[i] = 0x10001; }
@@ -535,6 +556,7 @@ void pose_world_seated(int seated);
 void pose_world_aim(int on);
 void pose_world_second_request(int pushed);
 void pose_world_request_field(unsigned at, uint32_t value);
+void pose_world_reload_code(int state, const float *c);
 static PoseWorld world;
 static int lock_depth[2], lock_faults;
 static unsigned forwarded_calls, getter_calls, cas_calls, input_only_calls;
@@ -1355,6 +1377,88 @@ static int real(void) {
   {
     TfpGateSecond g;
     tfp_pose_gate_take(&g);
+  }
+
+  /* ---- round 39: the eye held through a reload (src/reload_hold.h). The game's evaluator as the listing has it: the
+   * rig's forward value request+0x4c is v' + C, v' = (1-r) v + r C, r the share of C (the weight +0x88 stepped by dt/75
+   * ms as +0x8f changes). The eye goes with the rig's forward value, the root's half (the eye at request+0x4c less the
+   * root's forward shift). At the hip it stays where it was through the whole reload; in full aim the game's own reload
+   * is left as it is; with the evaluator not the pinned one, or one of its instructions naming another place for C, as
+   * main had it. Frames with no reload: the same bits with and without the evaluator pinned. ---- */
+  {
+    static const uint64_t steps[3] = {16, 9, 33};
+    static const float C3[3] = {.003f, -.0107f, .02f};
+    const float v = .233f, C = C3[1];
+    enum { CAP = 4 * 600 };
+    static float calm[2][3][CAP];
+    int calm_n[2][3] = {{0}};
+    static const int STATES[3] = {1, 2, 0}; /* as the game has it; one instruction naming another place; not the pinned evaluator */
+    for (int sx = 0; sx < 3; sx++) for (int f = 0; f < 3; f++) for (int aim = 0; aim < 2; aim++) {
+      TfpSteadySecond held; char line[640]; TfpGateSecond g;
+      const uint64_t step = steps[f]; const int code = STATES[sx] == 1;
+      pose_world_reload_code(STATES[sx], C3);
+      pose_world_third_person();
+      CHECK(H->prepare(H->user, &c, &native, &why) == TFP_OPS_TRUE && H->begin(H->user, &c, native, &handle, &why) == TFP_OPS_TRUE);
+      pose_world_first_person();
+      CHECK(tfp_pose_set_depth_steady(1) == 1 && tfp_pose_steady_take(&held) == 1);
+      game_frame(handle, &stats, 300);
+      pose_world_optic();
+      pose_world_aim(aim);
+      float w = 1; uint8_t ability = 0;
+      double eye_rest = 0, eye_least = 1e9, eye_most = -1e9, step_most = 0, eye_last = 0; int n = 0, kept = 0;
+      /* one frame of the game: the bytes, the rig's forward value, the evaluator's two writes; what the eye is */
+#define RELOAD_FRAME(calm_) do { \
+        const float before_ = w; if (w < 1) { w += (float)step / 75.0f; if (w > 1) w = 1; } \
+        const float r_ = before_ < 1 ? (ability ? w : 1 - w) : (ability ? 1.0f : 0.0f); \
+        pose_world_request_field(0x8C, 0x00000100u | (ability ? 0x01000000u : 0)); \
+        { uint32_t u_; memcpy(&u_, &w, 4); pose_world_request_field(0x88, u_); } \
+        { const float y_ = (1 - r_) * v + r_ * C + C; uint32_t u_; memcpy(&u_, &y_, 4); pose_world_request_field(0x4C, u_); } \
+        root_frame(step); \
+        const double eye_ = (double)((1 - r_) * v + r_ * C + C) - (double)root_forwarded[1]; \
+        if (n) { step_most = fmax(step_most, fabs(eye_ - eye_last)); } \
+        eye_least = fmin(eye_least, eye_); eye_most = fmax(eye_most, eye_); eye_last = eye_; ++n; \
+        if ((calm_) && kept + 4 <= CAP) { float *o_ = &calm[aim][f][kept]; \
+          if (code) { o_[0] = forwarded[0]; o_[1] = forwarded[1]; o_[2] = forwarded[2]; o_[3] = root_forwarded[1]; } \
+          else CHECK(o_[0] == forwarded[0] && o_[1] == forwarded[1] && o_[2] == forwarded[2] && o_[3] == root_forwarded[1]); \
+          kept += 4; } \
+      } while (0)
+      for (int i = 0; i < (int)(1200 / step); i++) RELOAD_FRAME(true);        /* at rest: the held depth settles */
+      eye_rest = eye_last; eye_least = eye_most = eye_rest; step_most = 0;
+      CHECK(tfp_pose_steady_take(&held) == 1 && held.reload.count == 0);
+      ability = 1; w = 0;                                                    /* the reload begins */
+      for (int i = 0; i < (int)(1500 / step); i++) RELOAD_FRAME(false);
+      ability = 0; w = 0;                                                    /* and ends */
+      for (int i = 0; i < (int)(600 / step); i++) RELOAD_FRAME(false);
+      CHECK(tfp_pose_steady_take(&held) == 1 && held.reload.count == 1);
+      tfp_reload_line(&held.reload.ends[0], line, sizeof line);
+      if (code && !aim) {
+        if (eye_most - eye_least > 2e-6 || step_most > 2e-6)
+          printf("wire pose: a reload at the hip, %llu ms frames: the eye went %.6f to %.6f m (rest %.6f), its largest step %.6f m\n",
+                 (unsigned long long)step, eye_least, eye_most, eye_rest, step_most);
+        CHECK(eye_most - eye_least <= 2e-6 && step_most <= 2e-6);         /* held: where it was, the whole reload */
+        char want[120]; snprintf(want, sizeof want, "Reload: eye held through the reload (would have slid %.3f m)", eye_rest - 2 * (double)C); /* to 2C: the eye at rest (with the held depth's own) to the game's reload place */
+        if (strcmp(line, want)) printf("wire pose: %s (wanted: %s)\n", line, want);
+        CHECK(!strcmp(line, want));
+        CHECK(held.roots == held.shifted && held.stops == 0);              /* node 5 and its root together, every frame */
+      } else if (code) {
+        CHECK(near(eye_least, 2 * C, 2e-6) && near(eye_most, eye_rest, 2e-6) && near(eye_rest, v + C, 2e-6)); /* full aim: the game's own reload, off the sight to 2C */
+        CHECK(strstr(line, "Reload: eye held through the reload (would have slid ") != NULL); /* worked out, nothing put back (the hip share is 0) */
+      } else {
+        CHECK(near(eye_least, 2 * C, 2e-6) && near(eye_most, eye_rest, 2e-6) && eye_rest - eye_least > .1); /* not the pinned evaluator: main's slide, to 2C */
+        CHECK(strstr(line, "Reload: eye not held through the reload (") && strstr(line, "the game's reload vector could not be read"));
+      }
+      for (int i = 0; i < (int)(300 / step); i++) RELOAD_FRAME(true);        /* calm again: the same bits as without it */
+#undef RELOAD_FRAME
+      if (code) calm_n[aim][f] = kept; else CHECK(kept == calm_n[aim][f] && kept > 4 * 40);
+      pose_world_request_field(0x8C, 0); pose_world_request_field(0x88, 0x3f800000);
+      { const float two = 2; uint32_t u; memcpy(&u, &two, 4); pose_world_request_field(0x4C, u); }
+      pose_world_aim(0);
+      CHECK(tfp_pose_set_depth_steady(0) == 1);
+      CHECK(H->finish(H->user, handle, &has_stats, &stats, &why) == TFP_OPS_TRUE);
+      tfp_pose_steady_take(&held); tfp_pose_gate_take(&g);
+    }
+    pose_world_reload_code(0, C3);
+    pose_world_third_person();
   }
 
   /* ---- the action hold (not in retail). Off: the first frame of an action ends the placement, as retail ---- */
