@@ -19,7 +19,9 @@
  *     of the frame's allowance;
  *   - the elbow is put in the plane of shoulder, target and a pole that points down and a little out (the rig's own left
  *     elbow hangs that way at the hip), kept from the previous frame's side where the target comes near the pole's line;
- *     each frame's reach turns the arm the least way from the last reach, so the body's own swings do not twist it;
+ *     each frame's reach swings the arm the least way from the last reach, and its twist about each bone goes to the
+ *     body's at TWIST_DPS at most: anchored to the body's, so a long hold cannot wind the elbow and wrist up, and a body
+ *     arm jittering frame to frame does not twist the drawn one;
  *   - the arm stretches to STRETCH of its length at most; where the grip is further, the shoulder comes forward along the
  *     line to it by the rest, up to SHOULDER of the arm's length (round 26: the drawn shoulder is the body's, carried by
  *     the right hand's alignment, and a fore-end or vertical grip is 1.0 to 1.15 arm lengths from it; the feel.52 hand
@@ -41,6 +43,7 @@ enum { TFP_OG_UPPER = 0, TFP_OG_FORE = 2, TFP_OG_HAND = 3 };
 #define TFP_OG_EASE_BUDGET .5   /* the ease turns no joint by more than this share of the frame's allowance (round 26) */
 #define TFP_OG_TURN_DPS 720.0   /* a written joint turns by at most this many degrees a second... */
 #define TFP_OG_TURN_CAP 30.0    /* ...and never by more than this in one frame */
+#define TFP_OG_TWIST_DPS 90.0   /* a held reach's twist about each bone goes to the body's at this many degrees a second */
 #define TFP_OG_STRETCH .97      /* the arm is never straighter than this share of its length */
 #define TFP_OG_REACH 1.15       /* a target further from the shoulder than this share of the arm's length is out of reach */
 #define TFP_OG_REACH_KEEP 1.18  /* ...and one held already is let go only beyond this share (round 26) */
@@ -221,10 +224,29 @@ static inline void tfp_offhand_reset(TfpOffhand *s) {
   memset(s, 0, sizeof *s);
   for (unsigned j = 0; j < 3; ++j) tfp_og_identity(s->c[j]);
 }
-/* The full reach of the hand onto target T: the three local rotations, from the last full reach where there is one
- * (each frame turns the arm the least way from where it was, so the drive's own swings do not twist it) or from the
- * drive's; the shoulder forward along the line to T by what the arm lacks at STRETCH, up to SHOULDER of its length. */
-static inline void tfp_og_full(TfpOffhand *s, const TfpOgFrame L[3], const double S[3], double a, double b, const TfpOgFrame *T) {
+/* The upper arm and forearm (world rotations ru, rf, turned in place) swung so the elbow is at E2 and the hand at H2,
+ * each by the shortest arc from where they were: the upper arm (carrying the forearm) onto the elbow, then the forearm
+ * onto the hand. elbow, hand: the drive's local positions of the forearm (in the upper arm) and the hand (in the forearm). */
+static inline void tfp_og_swing(double ru[3][3], double rf[3][3], const double elbow[3], const double hand[3], const double S2[3],
+                                const double E2[3], const double H2[3]) {
+  double es[3], v[3], e2s[3], h2e[3], axis[3], angle;
+  for (unsigned j = 0; j < 3; ++j) es[j] = elbow[0] * ru[0][j] + elbow[1] * ru[1][j] + elbow[2] * ru[2][j];
+  for (unsigned j = 0; j < 3; ++j) v[j] = hand[0] * rf[0][j] + hand[1] * rf[1][j] + hand[2] * rf[2][j];
+  tfp_og_sub(E2, S2, e2s);
+  tfp_og_arc(es, e2s, axis, &angle);
+  tfp_og_turn_rows(ru, axis, angle), tfp_og_turn_rows(rf, axis, angle), tfp_og_turn_vector(v, axis, angle);
+  tfp_og_sub(H2, E2, h2e);
+  tfp_og_arc(v, h2e, axis, &angle);
+  tfp_og_turn_rows(rf, axis, angle);
+}
+/* The full reach of the hand onto target T: the three local rotations; the shoulder forward along the line to T by
+ * what the arm lacks at STRETCH, up to SHOULDER of its length. The bones point where the reach puts them; the twist
+ * about each is the body's (the drive's pose swung onto the reach, as main solved it), reached from the last full
+ * reach's at TWIST_DPS at most (`twist`: radians this frame). Carried over whole from frame to frame, a grip circling
+ * the shoulder left a little twist behind on every loop and the elbow and wrist wound up while the hand stayed on the
+ * grip (review of round 26: 37 -> 173 degrees in 1000 one-second 3 cm loops); taken whole from the body, a body arm
+ * jittering by 10 degrees a frame twisted the drawn arm by 12 in a frame. */
+static inline void tfp_og_full(TfpOffhand *s, const TfpOgFrame L[3], const double S[3], double a, double b, const TfpOgFrame *T, double twist) {
   double to[3], dir[3], hint[3] = {-.35, -.15, -.92}, side[3];
   tfp_og_sub(T->p, S, to);
   const double dist = tfp_og_len(to);
@@ -253,20 +275,24 @@ static inline void tfp_og_full(TfpOffhand *s, const TfpOgFrame L[3], const doubl
   for (unsigned i = 0; i < 3; ++i) side[i] /= n;
   memcpy(s->side, side, sizeof side), s->has_side = true;
   const double along = (a * a - b * b + reach * reach) / (2 * reach), up = sqrt(fmax(0, a * a - along * along));
-  double E2[3], H2[3], axis[3], angle, ru[3][3], rf[3][3], es[3], v[3], e2s[3], h2e[3];
+  double E2[3], H2[3], ru[3][3], rf[3][3];
   for (unsigned i = 0; i < 3; ++i) E2[i] = S2[i] + dir[i] * along + side[i] * up, H2[i] = S2[i] + dir[i] * reach;
-  /* where the arm turns from: the last full reach, or the drive's pose */
-  memcpy(ru, s->has_full ? s->full[0] : L[0].r, sizeof ru);
-  tfp_og_rmul(s->has_full ? s->full[1] : L[1].r, ru, rf);
-  for (unsigned j = 0; j < 3; ++j) es[j] = L[1].p[0] * ru[0][j] + L[1].p[1] * ru[1][j] + L[1].p[2] * ru[2][j];
-  for (unsigned j = 0; j < 3; ++j) v[j] = L[2].p[0] * rf[0][j] + L[2].p[1] * rf[1][j] + L[2].p[2] * rf[2][j];
-  /* the upper arm swung so its elbow is at E2; the forearm carried with it, then bent so the hand is at H2 */
-  tfp_og_sub(E2, S2, e2s);
-  tfp_og_arc(es, e2s, axis, &angle);
-  tfp_og_turn_rows(ru, axis, angle), tfp_og_turn_rows(rf, axis, angle), tfp_og_turn_vector(v, axis, angle);
-  tfp_og_sub(H2, E2, h2e);
-  tfp_og_arc(v, h2e, axis, &angle);
-  tfp_og_turn_rows(rf, axis, angle);
+  /* the body's twist: the drive's pose swung onto the reach */
+  memcpy(ru, L[0].r, sizeof ru);
+  tfp_og_rmul(L[1].r, ru, rf);
+  tfp_og_swing(ru, rf, L[1].p, L[2].p, S2, E2, H2);
+  if (s->has_full) {
+    /* the last full reach swung onto this one, its twist turned towards the body's by `twist` at most (the two differ
+     * only by a turn about each bone, so the bones stay where the reach puts them) */
+    double cu[3][3], cf[3][3], tu[3][3], tf[3][3];
+    bool held;
+    memcpy(cu, s->full[0], sizeof cu);
+    tfp_og_rmul(s->full[1], cu, cf);
+    tfp_og_swing(cu, cf, L[1].p, L[2].p, S2, E2, H2);
+    tfp_og_towards(cu, ru, twist, tu, &held);
+    tfp_og_towards(cf, rf, twist, tf, &held);
+    memcpy(ru, tu, sizeof ru), memcpy(rf, tf, sizeof rf);
+  }
   memcpy(s->full[0], ru, sizeof ru);
   tfp_og_rmul_t(rf, ru, s->full[1]);
   tfp_og_rmul_t(T->r, rf, s->full[2]);
@@ -318,7 +344,7 @@ static inline TfpOffhandResult tfp_offhand_step(TfpOffhand *s, TfpGraftMatrix *u
     else if (tfp_og_len(ts) > (s->reaching ? TFP_OG_REACH_KEEP : TFP_OG_REACH) * (a + b)) usable = false, reason = TFP_OG_OUT_OF_REACH;
   } else if (wanted) reason = TFP_OG_NO_TARGET;
   const bool going = wanted && usable;
-  if (usable) tfp_og_full(s, L, S, a, b, &T);
+  if (usable) tfp_og_full(s, L, S, a, b, &T, TFP_OG_TWIST_DPS * seconds * (TFP_OG_PI / 180));
   /* the full reach as corrections of the drive's rotations; how far the furthest joint is from the drive's */
   double full_c[3][3][3], most_c = 0;
   if (s->has_full)

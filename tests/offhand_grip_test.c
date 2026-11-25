@@ -401,22 +401,27 @@ static void test_logged_ease(void) {
            way ? "in, then out as the target goes" : "in and out", frames, most, TFP_OG_TURN_DPS / 30);
   }
 }
-/* Held while the body's arm swings 10 degrees a frame at 8.3 ms frames (a body whose left arm follows the grip as the
- * view turns): the drawn hand stays on the grip and the written joints hardly move; the correction's own change is
- * not what is limited. */
+/* Held while the body's arm jitters 20 degrees a frame, between 10 and 30 degrees from its pose, at 8.3 ms frames (a
+ * body whose left arm follows the grip as the view turns): the drawn hand stays on the grip, the bones point where the
+ * reach puts them, and the twist about
+ * each follows the body's at 90 degrees a second at most, so a written joint turns by under a degree a frame (the
+ * allowance is 6). When the body's arm is still again, the arm comes back to the reach of a hold that never saw the
+ * jitter: the twist is the body's, nothing of the jitter is kept. */
 static void test_held_body_moves(void) {
-  TfpOffhand s;
-  tfp_offhand_reset(&s);
+  TfpOffhand s, calm;
+  tfp_offhand_reset(&s), tfp_offhand_reset(&calm);
   const TfpGraftMatrix t = logged_target(.80, .25, -.15, .3, NULL);
-  Arm a, prev;
+  const double p[3] = {t.values[12], t.values[13], t.values[14]};
+  Arm a, prev, still;
   run(&s, &a, &t, true, 1 / 120.0, 120);
+  run(&calm, &still, &t, true, 1 / 120.0, 240);
   prev = a;
   double most = 0, body = 0;
   for (int i = 0; i < 60; i++) {
     Arm moved = model();
     double r[3][3], u[3][3], turned[3][3];
     const double axis[3] = {.3, -.2, 1};
-    rotation(axis, (i % 2 ? 10 : -10) * TFP_OG_PI / 180, r);
+    rotation(axis, (i % 2 ? 30 : 10) * TFP_OG_PI / 180, r);
     const TfpOgFrame f = tfp_og_frame(&moved.upper);
     memcpy(u, f.r, sizeof u);
     tfp_og_rmul(u, r, turned);
@@ -424,20 +429,71 @@ static void test_held_body_moves(void) {
     a = moved;
     const TfpOffhandResult res = tfp_offhand_step(&s, &a.upper, &a.fore, &a.hand, &t, true, 1 / 120.0);
     const World w = world(&a);
-    const double p[3] = {t.values[12], t.values[13], t.values[14]};
     CHECK(res.reason == TFP_OG_HELD && gap(w.h.p, p) < 1e-4);
     const double step = fmax(degrees(&a.upper, &prev.upper), fmax(degrees(&a.fore, &prev.fore), degrees(&a.hand, &prev.hand)));
-    CHECK(step < .5 * res.limit_degrees && fabs(res.step_degrees - step) < 1e-3);
+    CHECK(step < 1.0 && fabs(res.step_degrees - step) < 1e-3);
     if (i) CHECK(res.body_degrees > 19.9 && res.body_degrees < 20.1);
     if (step > most) most = step;
     if (res.body_degrees > body) body = res.body_degrees;
     prev = a;
   }
-  printf("offhand grip: held while the body's arm swings %.1f degrees a frame: largest written joint step %.2f degrees (allowed %.1f)\n", body, most,
-         TFP_OG_TURN_DPS / 120);
+  /* still again: back on the calm hold's arm within a quarter of a second (each joint's twist under 20 degrees away) */
+  int back = 0;
+  for (int i = 0; i < 120; i++) {
+    a = model();
+    const TfpOffhandResult res = tfp_offhand_step(&s, &a.upper, &a.fore, &a.hand, &t, true, 1 / 120.0);
+    CHECK(res.reason == TFP_OG_HELD && res.to_target_m < 1e-4);
+    const double off = fmax(degrees(&a.upper, &still.upper), fmax(degrees(&a.fore, &still.fore), degrees(&a.hand, &still.hand)));
+    if (off < 1e-3 && !back) back = i + 1;
+  }
+  CHECK(back > 0 && back <= 30);
+  printf("offhand grip: held while the body's arm swings %.1f degrees a frame: largest written joint step %.2f degrees (allowed %.1f); "
+         "still again, on the calm hold's arm after %d frames\n", body, most, TFP_OG_TURN_DPS / 120, back);
+}
+/* A long hold (review of round 26): the grip circles a small loop against the shoulder, once a second at 30 frames a
+ * second (walking sway, breathing, the view turning), for thousands of loops while held. Each written joint's turn
+ * against the body's own rotation for it stays where it was after the first loop: the twist about each bone is
+ * anchored to the body's, not carried over from frame to frame (where every loop leaves a little twist behind, the
+ * elbow and wrist wind up while the hand stays on the grip). Loops of 1 and 3 cm, at 0.8 and 1.05 of the arm. */
+static void test_long_hold(void) {
+  static const double loops[2] = {.01, .03}, shares[2] = {.80, 1.05};
+  const int per = 30, cycles = 3000;
+  for (unsigned k = 0; k < 4; k++) {
+    const double amp = loops[k & 1], share = shares[k >> 1];
+    double c[3], r[3][3];
+    const double z[3] = {0, 0, 1};
+    around((UPPER + LOWER) * share, .25, -.15, c);
+    rotation(z, .3, r);
+    TfpOffhand s;
+    tfp_offhand_reset(&s);
+    const Arm base = model();
+    Arm a = base;
+    double first[3] = {0, 0, 0}, drift = 0, off = 0;
+    for (int cyc = 0; cyc <= cycles; cyc++) {
+      for (int i = 0; i < per; i++) {
+        const double ph = 2 * TFP_OG_PI * i / per, p[3] = {c[0] + amp * cos(ph), c[1], c[2] + amp * sin(ph)};
+        const TfpGraftMatrix t = target_at(p, r);
+        a = base;
+        const TfpOffhandResult res = tfp_offhand_step(&s, &a.upper, &a.fore, &a.hand, &t, true, 1 / 30.0);
+        if (cyc >= 1) {
+          CHECK(res.reason == TFP_OG_HELD);
+          if (res.to_target_m > off) off = res.to_target_m;
+        }
+      }
+      const double now[3] = {degrees(&a.upper, &base.upper), degrees(&a.fore, &base.fore), degrees(&a.hand, &base.hand)};
+      if (cyc == 1) memcpy(first, now, sizeof first);
+      else if (cyc > 1)
+        for (unsigned j = 0; j < 3; j++) drift = fmax(drift, fabs(now[j] - first[j]));
+    }
+    printf("offhand grip: held %d loops of %.0f cm at %.2f of the arm: the joints against the body's %.2f / %.2f / %.2f degrees after the first, "
+           "drifted at most %.3f degrees; the hand at most %.5f m from the grip\n",
+           cycles, amp * 100, share, first[0], first[1], first[2], drift, off);
+    CHECK(drift < .5 && off < 1e-4);
+  }
 }
 
 int main(void) {
+  test_long_hold();
   test_logged_reach();
   test_logged_reach_edge();
   test_logged_ease();
