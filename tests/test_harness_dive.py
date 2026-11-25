@@ -53,6 +53,31 @@ class Reading(unittest.TestCase):
         self.assertEqual(min(r["up"] for r in rows), -0.2228)       # a crouch; round 26 estimated -0.55 in a dive
 
 
+class Leave(unittest.TestCase):
+    DIVE = "10:00:02.000 Motion: action=dive placement=idle>family(sidearm) x=0.1 softened=0 phase=active"
+    IDLE = "10:00:02.300 Motion: action=idle placement=idle x=0.1 softened=0 phase=active"
+
+    def test_a_leave_in_the_dive(self):
+        self.assertEqual(dive.dive_leave([self.DIVE] + LEFT), 2)
+
+    def test_a_leave_after_the_dive_landed_is_not_one(self):
+        # the swap came once the dive was over: the head is a standing body's, not a diving one's
+        self.assertIsNone(dive.dive_leave([self.DIVE, self.IDLE] + LEFT))
+        self.assertIsNone(dive.dive_leave(LEFT))
+
+    def test_only_the_action_named_dive(self):
+        back = self.DIVE.replace("action=dive ", "action=dive-back ")
+        self.assertIsNone(dive.dive_leave([back] + LEFT))
+        self.assertEqual(dive.dive_leave([back] + LEFT, "dive-back"), 2)
+
+    def test_the_rows_of_that_leave_only(self):
+        # a crouch's veil after the view came back is not the dive's head
+        later = VEILED[0].replace("10:00:02.430", "10:00:06.000").replace("veil_head=(0.1200 -0.5100)", "veil_head=(0.0500 -0.9000)")
+        lines = [self.DIVE] + LEFT + VEILED + ["10:00:05.000 State: entered the native view request=0x1 kind=6",
+                                              "10:00:05.900 State: left the native view: x", later]
+        self.assertEqual([r["up"] for r in dive.leave_rows(lines, dive.dive_leave(lines))], [-0.51, -0.47])
+
+
 class DiveSwap(unittest.TestCase):
     def setUp(self):
         self.log, self.clock = FakeLog(self), Clock()
@@ -67,7 +92,7 @@ class DiveSwap(unittest.TestCase):
             if script == dive.PRIMARY:
                 log.write(NATIVE)
             elif script == dive.script(dive.SWAP_AFTER_S[1]):
-                log.write("10:00:02.000 Feel: t=1 pose=none action=dive phase=idle", *LEFT, *VEILED)
+                log.write(Leave.DIVE, *LEFT, *VEILED)
         scripts, result = self.run_dive(react)
         back = dive.PRIMARY + "; wait 1.7"
         self.assertEqual(scripts, [dive.PRIMARY, dive.script(1.0), back, dive.PRIMARY, dive.script(0.6), back])
@@ -93,11 +118,23 @@ class DiveSwap(unittest.TestCase):
             if script == dive.PRIMARY:
                 log.write(NATIVE)
             elif script.startswith("down w"):
-                log.write(*LEFT)
+                log.write(Leave.DIVE, *LEFT)
         _, result = self.run_dive(react)
         self.assertTrue(result["left"])
         self.assertFalse(dive.verdict(result)["pass"])
         self.assertIn("no veiled Trace row", result["notes"][0])
+
+    def test_a_leave_after_the_dive_is_not_counted(self):
+        def react(script, log, n):
+            if script == dive.PRIMARY:
+                log.write(NATIVE)
+            elif script.startswith("down w"):
+                log.write(Leave.DIVE, Leave.IDLE, *LEFT, *VEILED)
+        _, result = self.run_dive(react)
+        self.assertFalse(result["left"])
+        self.assertTrue(all(a["left_any"] and not a["veil_heads"] for a in result["attempts"]))
+        self.assertIn("left after the dive, not in it", " ".join(result["notes"]))
+        self.assertFalse(dive.verdict(result)["pass"])
 
     def test_the_primary_comes_back_when_the_input_fails(self):
         def react(script, log, n):

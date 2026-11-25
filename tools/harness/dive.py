@@ -27,7 +27,8 @@ STAMP = aim.STAMP
 LEFT = re.compile(STAMP + r"State: left the native view\b")
 ENTERED = re.compile(STAMP + r"State: entered the native view\b")
 VIEW_KIND = re.compile(STAMP + r"View: .*?\bkind=(\d+)")
-DIVING = re.compile(r"\baction=dive\b")
+MOTION = re.compile(STAMP + r"Motion: action=([\w-]+)")
+DIVE_ACTION = "dive"   # the mod's name for a dive (src/action_select.c), forward or back; never "dive-back"
 VEIL_HEAD = re.compile(STAMP + r"Trace: t=\S+ kind=(\d+)\b.*? veil_head=\((-?[\d.]+) (-?[\d.]+)\)")
 
 SWAP_AFTER_S = (1.0, 0.6, 1.3, 0.3)   # the swap this long after the dive key, tried in turn (soak 34: 1.3 s left the view)
@@ -57,6 +58,27 @@ def in_native_view(lines):
     return state
 
 
+def dive_leave(lines, action=DIVE_ACTION):
+    """The index in `lines` of the first "left the native view" whose last "Motion: action=" before it is `action` (a
+    dive): the view left in the dive, not after it. None where no leave is.  A leave after another action (the dive
+    landed and the swap came after it) is not one."""
+    last = None
+    for i, line in enumerate(lines):
+        m = MOTION.match(line)
+        if m:
+            last = m[2]
+        elif LEFT.match(line) and last == action:
+            return i
+    return None
+
+
+def leave_rows(lines, at):
+    """The veiled rows of the leave at index `at`: from it to the next "entered the native view" (the veil of that
+    leave only)."""
+    end = next((i for i in range(at + 1, len(lines)) if ENTERED.match(lines[i])), len(lines))
+    return veil_heads(lines[at:end])
+
+
 def veil_heads(lines):
     """Every veiled Trace row of `lines`: {at, kind, ahead, up} (veil_head: the head from the eye before the veil)."""
     out = []
@@ -69,10 +91,12 @@ def veil_heads(lines):
 
 def dive_swap(device, tail, delays=SWAP_AFTER_S, sleep=time.sleep, clock=time.monotonic):
     """Dives and swaps from the game's view until the log says the view was left. Returns:
-      left        a try left the game's view ("State: left the native view" in its stretch of the log)
+      left        a try left the game's view in the dive: a "State: left the native view" in its stretch of the log
+                  whose last "Motion: action=" before it is a dive (dive_leave)
       swap_after  the delay of that try (None: none left)
-      attempts    every try: {swap_after_s, from_native, left, dived, veil_heads}
-      veil_heads  the veiled rows of the try that left; lowest_up their lowest head (m from the eye, below < 0)
+      attempts    every try: {swap_after_s, from_native, left, left_any (a leave not in the dive too), dived, veil_heads}
+      veil_heads  the veiled rows of that leave (to the next "entered the native view"); lowest_up their lowest head
+                  (m from the eye, below < 0)
     The primary is brought back after every try, also when one fails."""
     result = {"left": False, "swap_after": None, "attempts": [], "veil_heads": [], "lowest_up": None, "notes": []}
     for after in delays:
@@ -87,8 +111,11 @@ def dive_swap(device, tail, delays=SWAP_AFTER_S, sleep=time.sleep, clock=time.mo
         finally:
             device.run(PRIMARY + "; wait 1.7")   # the primary back for what comes next
         part = tail.lines[start:]
-        attempt = {"swap_after_s": after, "from_native": native, "left": aim.first(LEFT, part) is not None,
-                   "dived": any(DIVING.search(line) for line in part), "veil_heads": veil_heads(part)}
+        at = dive_leave(part)
+        attempt = {"swap_after_s": after, "from_native": native, "left": at is not None,
+                   "left_any": aim.first(LEFT, part) is not None,
+                   "dived": any((m := MOTION.match(line)) and m[2] == DIVE_ACTION for line in part),
+                   "veil_heads": leave_rows(part, at) if at is not None else []}
         result["attempts"].append(attempt)
         if attempt["left"]:
             result.update(left=True, swap_after=after, veil_heads=attempt["veil_heads"])
@@ -98,6 +125,10 @@ def dive_swap(device, tail, delays=SWAP_AFTER_S, sleep=time.sleep, clock=time.mo
     if not result["left"]:
         result["notes"].append(f"no dive + swap left the game's view (swaps {', '.join(f'{d:.1f}' for d in delays)} s into "
                                "the dive): the head in a dive is still unmeasured")
+        late = [a["swap_after_s"] for a in result["attempts"] if a["left_any"]]
+        if late:
+            result["notes"].append(f"the view was left after the dive, not in it (swaps {', '.join(f'{d:.1f}' for d in late)} s): "
+                                   "not counted")
     elif not result["veil_heads"]:
         result["notes"].append("the view was left in the dive and no veiled Trace row was written: the veil is off, or "
                                "a build before round 26 (no veil_head)")
