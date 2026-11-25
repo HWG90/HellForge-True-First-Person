@@ -13,17 +13,22 @@
  *
  * What it does. In the frame of the rig's presentation root (node 7: X right, Y forward, Z up, the eye's axes), with
  * the drive's locals of the upper arm (node 10, a child of node 7), the forearm (12, of 10) and the hand (13, of 12):
- *   - the hand is to be at the target (the grip node as the drive draws the gun) with the target's turn, blended in by
- *     the weight (eased over EASE_S, a smoothstep);
- *   - the shoulder stays; the elbow is put in the plane of shoulder, target and a pole that points down and a little
- *     out (the rig's own left elbow hangs that way at the hip), kept from the previous frame's side where the target
- *     comes near the pole's line; the arm stretches to STRETCH of its length at most (the hand stops short of a grip
- *     further away);
- *   - the result is a correction of each of the three joints' rotations (the positions are the bone lengths and are
- *     never changed). A correction moves from the previous frame's by at most TURN_DPS a second and TURN_CAP in one
- *     frame, so no joint can turn over by a flip of the solve; going away, it returns to none at the same rate;
+ *   - the hand is to be at the target (the grip node as the drive draws the gun) with the target's turn: the full reach
+ *     is solved each frame and a share of each joint's correction of it is in force (the shorter way round), eased in
+ *     and out over EASE_S at the quickest, a smoothstep, slower where that would turn a joint by more than EASE_BUDGET
+ *     of the frame's allowance;
+ *   - the elbow is put in the plane of shoulder, target and a pole that points down and a little out (the rig's own left
+ *     elbow hangs that way at the hip), kept from the previous frame's side where the target comes near the pole's line;
+ *     each frame's reach turns the arm the least way from the last reach, so the body's own swings do not twist it;
+ *   - the arm stretches to STRETCH of its length at most; where the grip is further, the shoulder comes forward along the
+ *     line to it by the rest, up to SHOULDER of the arm's length (round 26: the drawn shoulder is the body's, carried by
+ *     the right hand's alignment, and a fore-end or vertical grip is 1.0 to 1.15 arm lengths from it; the feel.52 hand
+ *     stopped 0.03 to 0.106 m short, the most being (1.15 - 0.97) x 0.5899 m exactly). It moves SHOULDER_MPS at most;
+ *   - each written joint's rotation turns from the previous frame's by at most TURN_DPS a second and TURN_CAP in one
+ *     frame, so no joint can turn over by a flip of the solve; going away, it returns to the drive's pose at that rate;
  *   - a target further than SHIFT_M from where the body's pose put the hand, or than REACH times the arm's length from
- *     the shoulder, is not taken: the arm eases back to the body's pose (the reason says which).
+ *     the shoulder (REACH_KEEP once held, so a grip swaying about the limit does not flicker), is not taken: the arm
+ *     eases back to the body's pose (the reason says which).
  * The fingers are the body's (the drive copies them relative to the hand), and the body's hand is the one the game
  * shapes around this grip. */
 #ifndef TFP_OFFHAND_GRIP_H
@@ -32,11 +37,15 @@
 
 /* Joints of the drive's map (src/arm_graft.h: joint i is rig node 10 + i for the arms). */
 enum { TFP_OG_UPPER = 0, TFP_OG_FORE = 2, TFP_OG_HAND = 3 };
-#define TFP_OG_EASE_S .15       /* weight 0 to 1 and back: the retail module's EASE */
-#define TFP_OG_TURN_DPS 720.0   /* a joint's correction changes by at most this many degrees a second... */
+#define TFP_OG_EASE_S .15       /* weight 0 to 1 and back at the quickest: the retail module's EASE */
+#define TFP_OG_EASE_BUDGET .5   /* the ease turns no joint by more than this share of the frame's allowance (round 26) */
+#define TFP_OG_TURN_DPS 720.0   /* a written joint turns by at most this many degrees a second... */
 #define TFP_OG_TURN_CAP 30.0    /* ...and never by more than this in one frame */
 #define TFP_OG_STRETCH .97      /* the arm is never straighter than this share of its length */
 #define TFP_OG_REACH 1.15       /* a target further from the shoulder than this share of the arm's length is out of reach */
+#define TFP_OG_REACH_KEEP 1.18  /* ...and one held already is let go only beyond this share (round 26) */
+#define TFP_OG_SHOULDER .21     /* the shoulder comes forward by at most this share of the arm's length (round 26) */
+#define TFP_OG_SHOULDER_MPS .6  /* ...moving by at most this many metres a second */
 #define TFP_OG_SHIFT_M .60      /* a target further than this from the hand the body's pose drew is not taken */
 #define TFP_OG_PI 3.14159265358979323846
 
@@ -46,25 +55,36 @@ enum {
   TFP_OG_HELD,         /* the hand is on the target at full weight */
   TFP_OG_EASING,       /* on its way to the target or back to the body's pose */
   TFP_OG_NO_TARGET,    /* wanted, but no target this frame: easing back */
-  TFP_OG_OUT_OF_REACH, /* the target is beyond REACH of the arm's length from the shoulder */
+  TFP_OG_OUT_OF_REACH, /* the target is beyond REACH (REACH_KEEP once held) of the arm's length from the shoulder */
   TFP_OG_TOO_FAR,      /* the target is more than SHIFT_M from the hand the body's pose drew */
   TFP_OG_NOT_RIGID,    /* a pose was not rigid or a bone has no length: nothing was changed this frame */
   TFP_OG_REASONS
 };
 typedef struct TfpOffhand {
-  bool active;            /* a correction is in the poses (not all three are none) */
-  double weight;          /* 0..1, before the smoothstep */
+  bool active;            /* a correction is in the poses (not all three are none, or the shoulder is moved) */
+  double weight, eased;   /* 0..1: the ease's progress, and the share of the reach in force (its smoothstep, or slower) */
   double c[3][3][3];      /* the corrections of the upper arm, forearm and hand: local rotation = c x the drive's */
+  double o[3][3][3];      /* the local rotations written last frame (while active) */
+  double shift[3];        /* the shoulder's move in force, in node 7's frame */
   bool has_side;
   double side[3];         /* the elbow's side of the last solve, for continuity */
+  bool has_full, reaching;
+  double full[3][3][3];   /* the last full reach: the three local rotations, and the shoulder's move */
+  double full_shift[3];
+  bool has_body;
+  double body[3][3][3];   /* the drive's local rotations last frame */
 } TfpOffhand;
 typedef struct TfpOffhandResult {
   unsigned reason;        /* TFP_OG_* */
-  float weight;           /* as used (after the smoothstep) */
+  bool cut;               /* a joint or the shoulder was held back by its limit this frame */
+  float weight;           /* the share of the reach in force */
   float to_target_m;      /* the hand as written from the target; 0 without a target */
   float shift_m;          /* the hand as written from where the drive's pose had it */
-  float step_degrees;     /* the largest change of any of the three corrections from the previous frame */
-  float limit_degrees;    /* what that change was allowed to be this frame */
+  float shoulder_m;       /* the shoulder as written from the drive's */
+  float reach_share;      /* the target from the drive's shoulder, in arm lengths; 0 without a target */
+  float step_degrees;     /* the largest turn of any of the three written joints from the previous frame */
+  float limit_degrees;    /* what that turn was allowed to be this frame */
+  float body_degrees;     /* the largest turn of the drive's own three joints from the previous frame */
 } TfpOffhandResult;
 
 typedef struct { double r[3][3], p[3]; } TfpOgFrame; /* rows are the axes; a point is (local row) x r + p */
@@ -190,21 +210,84 @@ static inline void tfp_og_arc(const double u[3], const double v[3], double axis[
 }
 static inline bool tfp_og_frame_ok(const TfpGraftMatrix *m) { return tfp_graft_rigid(m); }
 
+static inline void tfp_og_identity(double m[3][3]) { memset(m, 0, 9 * sizeof(double)), m[0][0] = m[1][1] = m[2][2] = 1; }
+static inline bool tfp_og_is_identity(const double m[3][3]) {
+  for (unsigned i = 0; i < 3; ++i)
+    for (unsigned j = 0; j < 3; ++j)
+      if (m[i][j] != (i == j)) return false;
+  return true;
+}
 static inline void tfp_offhand_reset(TfpOffhand *s) {
   memset(s, 0, sizeof *s);
-  for (unsigned j = 0; j < 3; ++j) s->c[j][0][0] = s->c[j][1][1] = s->c[j][2][2] = 1;
+  for (unsigned j = 0; j < 3; ++j) tfp_og_identity(s->c[j]);
+}
+/* The full reach of the hand onto target T: the three local rotations, from the last full reach where there is one
+ * (each frame turns the arm the least way from where it was, so the drive's own swings do not twist it) or from the
+ * drive's; the shoulder forward along the line to T by what the arm lacks at STRETCH, up to SHOULDER of its length. */
+static inline void tfp_og_full(TfpOffhand *s, const TfpOgFrame L[3], const double S[3], double a, double b, const TfpOgFrame *T) {
+  double to[3], dir[3], hint[3] = {-.35, -.15, -.92}, side[3];
+  tfp_og_sub(T->p, S, to);
+  const double dist = tfp_og_len(to);
+  if (!(dist > 1e-6)) return; /* on the shoulder: the last full reach stays */
+  for (unsigned i = 0; i < 3; ++i) dir[i] = to[i] / dist;
+  const double most = (a + b) * TFP_OG_STRETCH, forward = fmin(fmax(dist - most, 0), (a + b) * TFP_OG_SHOULDER);
+  const double reach = fmax(fabs(a - b) + 1e-4, fmin(dist - forward, most));
+  double S2[3];
+  for (unsigned i = 0; i < 3; ++i) S2[i] = S[i] + dir[i] * forward;
+  /* the pole, across the reach; the last side keeps it where the pole comes near the reach's line */
+  const double hn = tfp_og_len(hint);
+  for (unsigned i = 0; i < 3; ++i) hint[i] /= hn;
+  const double h = tfp_og_dot(hint, dir);
+  for (unsigned i = 0; i < 3; ++i) side[i] = hint[i] - dir[i] * h;
+  if (s->has_side) {
+    const double p = tfp_og_dot(s->side, dir);
+    for (unsigned i = 0; i < 3; ++i) side[i] += .25 * (s->side[i] - dir[i] * p);
+  }
+  double n = tfp_og_len(side);
+  if (n < 1e-6) { /* along the pole with nothing before: any side across the reach */
+    double angle;
+    tfp_og_arc(dir, dir, side, &angle);
+    tfp_og_cross(dir, side, side);
+    n = tfp_og_len(side);
+  }
+  for (unsigned i = 0; i < 3; ++i) side[i] /= n;
+  memcpy(s->side, side, sizeof side), s->has_side = true;
+  const double along = (a * a - b * b + reach * reach) / (2 * reach), up = sqrt(fmax(0, a * a - along * along));
+  double E2[3], H2[3], axis[3], angle, ru[3][3], rf[3][3], es[3], v[3], e2s[3], h2e[3];
+  for (unsigned i = 0; i < 3; ++i) E2[i] = S2[i] + dir[i] * along + side[i] * up, H2[i] = S2[i] + dir[i] * reach;
+  /* where the arm turns from: the last full reach, or the drive's pose */
+  memcpy(ru, s->has_full ? s->full[0] : L[0].r, sizeof ru);
+  tfp_og_rmul(s->has_full ? s->full[1] : L[1].r, ru, rf);
+  for (unsigned j = 0; j < 3; ++j) es[j] = L[1].p[0] * ru[0][j] + L[1].p[1] * ru[1][j] + L[1].p[2] * ru[2][j];
+  for (unsigned j = 0; j < 3; ++j) v[j] = L[2].p[0] * rf[0][j] + L[2].p[1] * rf[1][j] + L[2].p[2] * rf[2][j];
+  /* the upper arm swung so its elbow is at E2; the forearm carried with it, then bent so the hand is at H2 */
+  tfp_og_sub(E2, S2, e2s);
+  tfp_og_arc(es, e2s, axis, &angle);
+  tfp_og_turn_rows(ru, axis, angle), tfp_og_turn_rows(rf, axis, angle), tfp_og_turn_vector(v, axis, angle);
+  tfp_og_sub(H2, E2, h2e);
+  tfp_og_arc(v, h2e, axis, &angle);
+  tfp_og_turn_rows(rf, axis, angle);
+  memcpy(s->full[0], ru, sizeof ru);
+  tfp_og_rmul_t(rf, ru, s->full[1]);
+  tfp_og_rmul_t(T->r, rf, s->full[2]);
+  for (unsigned i = 0; i < 3; ++i) s->full_shift[i] = dir[i] * forward;
+  s->has_full = true;
 }
 /* One frame. upper, fore, hand: the drive's locals of rig nodes 10, 12, 13 (of node 7, 10 and 12), changed in place
- * when a correction is in force (rotations only). target: the grip in node 7's frame, NULL for none. wanted: the hand
- * is to be on the target (the caller's conditions: switched on, the body's hand on that grip, not one-handed, not
- * aiming). seconds: since the previous frame (0: the same frame again, or unknown: nothing may change). */
+ * when a correction is in force (the three rotations, and the upper arm's position by the shoulder's move). target:
+ * the grip in node 7's frame, NULL for none. wanted: the hand is to be on the target (the caller's conditions:
+ * switched on, the body's hand on that grip, not one-handed, not aiming). seconds: since the previous frame (0: the
+ * same frame again, or unknown: nothing may change). */
 static inline TfpOffhandResult tfp_offhand_step(TfpOffhand *s, TfpGraftMatrix *upper, TfpGraftMatrix *fore, TfpGraftMatrix *hand,
                                                 const TfpGraftMatrix *target, bool wanted, double seconds) {
   TfpOffhandResult out = {.reason = TFP_OG_IDLE};
   if (!(seconds >= 0) || seconds > .25) seconds = 0; /* a NaN, a clock that ran back, a long pause: no step */
   const double limit = fmin(TFP_OG_TURN_DPS * seconds, TFP_OG_TURN_CAP) * (TFP_OG_PI / 180);
   out.limit_degrees = (float)(limit * 180 / TFP_OG_PI);
-  if (!wanted && !s->active && !(s->weight > 0)) { s->weight = 0, s->has_side = false; return out; }
+  if (!wanted && !s->active && !(s->weight > 0)) {
+    s->weight = s->eased = 0, s->has_side = s->has_full = s->reaching = s->has_body = false;
+    return out;
+  }
   if (!tfp_og_frame_ok(upper) || !tfp_og_frame_ok(fore) || !tfp_og_frame_ok(hand) || (target && !tfp_og_frame_ok(target))) {
     out.reason = TFP_OG_NOT_RIGID; /* corrections kept as they were for the next frame; this one is drawn as the body has it */
     return out;
@@ -215,106 +298,114 @@ static inline TfpOffhandResult tfp_offhand_step(TfpOffhand *s, TfpGraftMatrix *u
   memcpy(S, wu.p, sizeof S), memcpy(E, wf.p, sizeof E), memcpy(H, wh.p, sizeof H);
   tfp_og_sub(E, S, es), tfp_og_sub(H, E, he);
   const double a = tfp_og_len(es), b = tfp_og_len(he);
+  if (!(a > 1e-4) || !(b > 1e-4)) { out.reason = TFP_OG_NOT_RIGID; return out; }
+  /* how far the drive's own joints turned since the last frame (for the log: what the body did, not this) */
+  double body = 0;
+  for (unsigned j = 0; j < 3; ++j) {
+    if (s->has_body) body = fmax(body, tfp_og_angle(L[j].r, s->body[j]));
+    memcpy(s->body[j], L[j].r, sizeof s->body[j]);
+  }
+  s->has_body = true, out.body_degrees = (float)(body * 180 / TFP_OG_PI);
   unsigned reason = TFP_OG_EASING;
   bool usable = target != NULL;
   TfpOgFrame T = {0};
-  if (!(a > 1e-4) || !(b > 1e-4)) { out.reason = TFP_OG_NOT_RIGID; return out; }
   if (usable) {
     T = tfp_og_frame(target);
     double ts[3], th[3];
     tfp_og_sub(T.p, S, ts), tfp_og_sub(T.p, H, th);
+    out.reach_share = (float)(tfp_og_len(ts) / (a + b));
     if (tfp_og_len(th) > TFP_OG_SHIFT_M) usable = false, reason = TFP_OG_TOO_FAR;
-    else if (tfp_og_len(ts) > TFP_OG_REACH * (a + b)) usable = false, reason = TFP_OG_OUT_OF_REACH;
+    else if (tfp_og_len(ts) > (s->reaching ? TFP_OG_REACH_KEEP : TFP_OG_REACH) * (a + b)) usable = false, reason = TFP_OG_OUT_OF_REACH;
   } else if (wanted) reason = TFP_OG_NO_TARGET;
   const bool going = wanted && usable;
-  if (seconds > 0) s->weight = going ? fmin(1, s->weight + seconds / TFP_OG_EASE_S) : fmax(0, s->weight - seconds / TFP_OG_EASE_S);
-  const double w = s->weight * s->weight * (3 - 2 * s->weight);
-  /* the corrections wanted: none, or the reach */
-  double want[3][3][3];
-  for (unsigned j = 0; j < 3; ++j) { memset(want[j], 0, sizeof want[j]); want[j][0][0] = want[j][1][1] = want[j][2][2] = 1; }
-  if (usable && w > 0) {
-    /* where the hand is to be: from the drawn hand towards the target by w */
-    double D[3], Dr[3][3], rel[3][3], part[3][3];
-    for (unsigned i = 0; i < 3; ++i) D[i] = H[i] + (T.p[i] - H[i]) * w;
-    tfp_og_rmul_t(T.r, wh.r, rel);
-    tfp_og_part(rel, w, part);
-    tfp_og_rmul(part, wh.r, Dr);
-    double to[3];
-    tfp_og_sub(D, S, to);
-    const double dist = tfp_og_len(to);
-    if (dist > 1e-6) {
-      double dir[3], hint[3] = {-.35, -.15, -.92}, side[3];
-      for (unsigned i = 0; i < 3; ++i) dir[i] = to[i] / dist;
-      const double reach = fmax(fabs(a - b) + 1e-4, fmin(dist, (a + b) * TFP_OG_STRETCH));
-      /* the pole, across the reach; the last side keeps it where the pole comes near the reach's line */
-      const double hn = tfp_og_len(hint);
-      for (unsigned i = 0; i < 3; ++i) hint[i] /= hn;
-      double h = tfp_og_dot(hint, dir);
-      for (unsigned i = 0; i < 3; ++i) side[i] = hint[i] - dir[i] * h;
-      if (s->has_side) {
-        const double p = tfp_og_dot(s->side, dir);
-        for (unsigned i = 0; i < 3; ++i) side[i] += .25 * (s->side[i] - dir[i] * p);
-      }
-      double n = tfp_og_len(side);
-      if (n < 1e-6) { /* along the pole with nothing before: any side across the reach */
-        double angle;
-        tfp_og_arc(dir, dir, side, &angle);
-        tfp_og_cross(dir, side, side);
-        n = tfp_og_len(side);
-      }
-      for (unsigned i = 0; i < 3; ++i) side[i] /= n;
-      memcpy(s->side, side, sizeof side), s->has_side = true;
-      const double along = (a * a - b * b + reach * reach) / (2 * reach), up = sqrt(fmax(0, a * a - along * along));
-      double E2[3], H2[3], axis[3], angle, ru[3][3], rf[3][3], v[3], e2s[3], h2e[3];
-      for (unsigned i = 0; i < 3; ++i) E2[i] = S[i] + dir[i] * along + side[i] * up, H2[i] = S[i] + dir[i] * reach;
-      /* the upper arm swung so its elbow is at E2; the forearm carried with it, then bent so the hand is at H2 */
-      tfp_og_sub(E2, S, e2s);
-      tfp_og_arc(es, e2s, axis, &angle);
-      memcpy(ru, wu.r, sizeof ru), memcpy(rf, wf.r, sizeof rf), memcpy(v, he, sizeof v);
-      tfp_og_turn_rows(ru, axis, angle), tfp_og_turn_rows(rf, axis, angle), tfp_og_turn_vector(v, axis, angle);
-      tfp_og_sub(H2, E2, h2e);
-      tfp_og_arc(v, h2e, axis, &angle);
-      tfp_og_turn_rows(rf, axis, angle);
-      /* the locals these worlds are, and the corrections that make them from the drive's */
-      double lu[3][3], lf[3][3], lh[3][3];
-      memcpy(lu, ru, sizeof lu);
-      tfp_og_rmul_t(rf, ru, lf);
-      tfp_og_rmul_t(Dr, rf, lh);
-      tfp_og_rmul_t(lu, L[0].r, want[0]), tfp_og_rmul_t(lf, L[1].r, want[1]), tfp_og_rmul_t(lh, L[2].r, want[2]);
+  if (usable) tfp_og_full(s, L, S, a, b, &T);
+  /* the full reach as corrections of the drive's rotations; how far the furthest joint is from the drive's */
+  double full_c[3][3][3], most_c = 0;
+  if (s->has_full)
+    for (unsigned j = 0; j < 3; ++j) {
+      tfp_og_rmul_t(s->full[j], L[j].r, full_c[j]);
+      double id[3][3];
+      tfp_og_identity(id);
+      most_c = fmax(most_c, tfp_og_angle(full_c[j], id));
     }
+  /* the ease: a smoothstep over EASE_S at the quickest, slowed so that it turns no joint by more than BUDGET of the
+   * frame's allowance (a long reach eases over more frames, not in bigger steps) */
+  if (seconds > 0) {
+    double raw = going && s->has_full ? fmin(1, s->weight + seconds / TFP_OG_EASE_S) : fmax(0, s->weight - seconds / TFP_OG_EASE_S);
+    double eased = raw * raw * (3 - 2 * raw);
+    if (most_c > 1e-9) {
+      const double most = TFP_OG_EASE_BUDGET * limit / most_c;
+      if (fabs(eased - s->eased) > most) {
+        eased = s->eased + (eased > s->eased ? most : -most);
+        raw = eased >= 1 ? 1 : eased <= 0 ? 0 : .5 - sin(asin(1 - 2 * eased) / 3); /* the smoothstep's inverse */
+      }
+    }
+    s->weight = raw, s->eased = eased;
   }
-  /* each correction from the last frame's by at most `limit` */
-  double most = 0;
+  const double w = s->has_full ? s->eased : 0;
+  /* the corrections wanted (a share of the full reach, the shorter way), and the shoulder's move */
+  double want[3][3][3], want_shift[3];
+  for (unsigned j = 0; j < 3; ++j) {
+    if (w >= 1) memcpy(want[j], full_c[j], sizeof want[j]);
+    else if (w > 0) tfp_og_part(full_c[j], w, want[j]);
+    else tfp_og_identity(want[j]);
+  }
+  for (unsigned i = 0; i < 3; ++i) want_shift[i] = w > 0 ? s->full_shift[i] * w : 0;
+  /* each written joint from the last frame's by at most `limit`: what is drawn turns no faster, whatever the drive's own
+   * pose did (a correction that only undoes the body's swing is not limited) */
+  double most = 0, next[3][3][3];
   bool any = false, cut = false;
   for (unsigned j = 0; j < 3; ++j) {
-    double next[3][3];
-    bool held;
-    const double moved = tfp_og_towards(s->c[j], want[j], limit, next, &held);
-    cut = cut || held;
-    if (moved > most) most = moved;
-    memcpy(s->c[j], next, sizeof next);
-    if (fabs(next[0][0] - 1) + fabs(next[1][1] - 1) + fabs(next[2][2] - 1) > 1e-12) any = true;
+    if (!(limit > 0)) { /* no time: the corrections stay */
+      tfp_og_rmul(s->c[j], L[j].r, next[j]);
+    } else {
+      double from[3][3], to[3][3];
+      bool held;
+      if (s->active) memcpy(from, s->o[j], sizeof from);
+      else memcpy(from, L[j].r, sizeof from);
+      tfp_og_rmul(want[j], L[j].r, to);
+      const double moved = tfp_og_towards(from, to, limit, next[j], &held);
+      if (held) tfp_og_rmul_t(next[j], L[j].r, s->c[j]), cut = true;
+      else memcpy(s->c[j], want[j], sizeof want[j]);
+      if (moved > most) most = moved;
+    }
+    if (!tfp_og_is_identity(s->c[j])) any = true;
   }
-  out.step_degrees = (float)(most * 180 / TFP_OG_PI), out.weight = (float)w;
+  if (limit > 0) {
+    double d[3];
+    tfp_og_sub(want_shift, s->shift, d);
+    const double gap = tfp_og_len(d), may = TFP_OG_SHOULDER_MPS * seconds;
+    if (gap > may) {
+      for (unsigned i = 0; i < 3; ++i) s->shift[i] += d[i] * (may / gap);
+      cut = true;
+    } else memcpy(s->shift, want_shift, sizeof want_shift);
+  }
+  if (s->shift[0] != 0 || s->shift[1] != 0 || s->shift[2] != 0) any = true;
+  out.step_degrees = (float)(most * 180 / TFP_OG_PI), out.weight = (float)w, out.cut = cut;
   s->active = any;
   if (!any) {
-    if (!(s->weight > 0)) s->has_side = false;
+    if (!(s->weight > 0)) s->has_side = s->has_full = false;
+    s->reaching = going;
     out.reason = going ? TFP_OG_EASING : reason == TFP_OG_EASING ? TFP_OG_IDLE : reason;
     return out;
   }
-  /* the written locals: the corrections on the drive's rotations, the drive's positions */
+  /* the written locals: the rotations limited above, the drive's positions, the upper arm's moved with the shoulder */
   TfpGraftMatrix *const m[3] = {upper, fore, hand};
   TfpOgFrame now[3];
   for (unsigned j = 0; j < 3; ++j) {
     now[j] = L[j];
-    tfp_og_rmul(s->c[j], L[j].r, now[j].r);
+    memcpy(now[j].r, next[j], sizeof next[j]);
+    memcpy(s->o[j], next[j], sizeof next[j]);
     for (unsigned i = 0; i < 3; ++i)
       for (unsigned k = 0; k < 3; ++k) m[j]->values[4 * i + k] = (float)now[j].r[i][k];
   }
+  for (unsigned i = 0; i < 3; ++i) now[0].p[i] += s->shift[i], upper->values[12 + i] = (float)now[0].p[i];
+  out.shoulder_m = (float)tfp_og_len(s->shift);
   const TfpOgFrame nf = tfp_og_then(&now[1], &now[0]), nh = tfp_og_then(&now[2], &nf);
   double d[3];
   tfp_og_sub(nh.p, H, d), out.shift_m = (float)tfp_og_len(d);
   if (target) tfp_og_sub(nh.p, T.p, d), out.to_target_m = (float)tfp_og_len(d);
+  s->reaching = going;
   out.reason = going ? (s->weight >= 1 && !cut ? TFP_OG_HELD : TFP_OG_EASING) : reason;
   return out;
 }

@@ -106,8 +106,9 @@ static void test_reach(void) {
     CHECK(tfp_graft_rigid(&a.upper) && tfp_graft_rigid(&a.fore) && tfp_graft_rigid(&a.hand));
   }
 }
-/* A target past the arm's reach (but within REACH): the hand stops on the line to it at STRETCH of the arm, the elbow
- * bent on the pole's side (down and a little out). */
+/* A target past the arm's reach (but within REACH): the arm straightens to STRETCH of its length and the shoulder
+ * comes forward along the line to the target by the rest, so the hand is on it; the elbow bent on the pole's side
+ * (down and a little out). */
 static void test_stretch(void) {
   for (int n = 0; n < 100; n++) {
     TfpOffhand s;
@@ -121,14 +122,16 @@ static void test_stretch(void) {
     Arm a;
     const TfpOffhandResult res = run(&s, &a, &t, true, 1 / 60.0, 60);
     const World w = world(&a);
-    double dir[3], reached[3];
+    double dir[3], moved[3];
     tfp_og_sub(p, SHOULDER, dir);
-    for (unsigned i = 0; i < 3; i++) dir[i] /= distance, reached[i] = SHOULDER[i] + dir[i] * (UPPER + LOWER) * TFP_OG_STRETCH;
-    CHECK(res.reason == TFP_OG_HELD && gap(w.h.p, reached) < 3e-5);
-    CHECK(fabs(res.to_target_m - (distance - (UPPER + LOWER) * TFP_OG_STRETCH)) < 3e-5);
+    const double lack = distance - (UPPER + LOWER) * TFP_OG_STRETCH;
+    for (unsigned i = 0; i < 3; i++) dir[i] /= distance, moved[i] = SHOULDER[i] + dir[i] * lack;
+    CHECK(res.reason == TFP_OG_HELD && gap(w.h.p, p) < 3e-5 && res.to_target_m < 3e-5);
+    CHECK(gap(w.u.p, moved) < 3e-5 && fabs(res.shoulder_m - lack) < 3e-5);
+    CHECK(fabs(gap(w.h.p, w.u.p) - (UPPER + LOWER) * TFP_OG_STRETCH) < 3e-5);
     /* the elbow is off the line, below it */
     double es[3], along = 0, off[3];
-    tfp_og_sub(w.f.p, SHOULDER, es);
+    tfp_og_sub(w.f.p, w.u.p, es);
     along = tfp_og_dot(es, dir);
     for (unsigned i = 0; i < 3; i++) off[i] = es[i] - dir[i] * along;
     CHECK(tfp_og_len(off) > .03 && off[2] < 0);
@@ -146,12 +149,18 @@ static void test_refused(void) {
   TfpGraftMatrix t = target_at(p, r);
   Arm a;
   CHECK(run(&s, &a, &t, true, 1 / 60.0, 30).reason == TFP_OG_HELD && s.active);
-  around((UPPER + LOWER) * (TFP_OG_REACH + .02), .3, 0, p);
+  around((UPPER + LOWER) * (TFP_OG_REACH_KEEP + .02), .3, 0, p);
   t = target_at(p, r);
   CHECK(gap(p, b.h.p) < TFP_OG_SHIFT_M);
   TfpOffhandResult res = run(&s, &a, &t, true, 1 / 60.0, 1);
   CHECK(res.reason == TFP_OG_OUT_OF_REACH && s.active);
   res = run(&s, &a, &t, true, 1 / 60.0, 60);
+  CHECK(res.reason == TFP_OG_OUT_OF_REACH && !s.active && !memcmp(&a, &base, sizeof a));
+  /* not held before: out of reach already beyond REACH */
+  tfp_offhand_reset(&s);
+  around((UPPER + LOWER) * (TFP_OG_REACH + .01), .3, 0, p);
+  t = target_at(p, r);
+  res = run(&s, &a, &t, true, 1 / 60.0, 5);
   CHECK(res.reason == TFP_OG_OUT_OF_REACH && !s.active && !memcmp(&a, &base, sizeof a));
   /* too far from the drawn hand */
   tfp_offhand_reset(&s);
@@ -304,7 +313,135 @@ static void test_short_way(void) {
   }
 }
 
+/* ---- round 26: scenes from the feel.52 Grip: lines (soaks 33 and 34) ----
+ * A target `share` of the arm's length from the shoulder, in direction (yaw, pitch), turned `turn` radians about Z,
+ * and its distance from the drawn hand. */
+static TfpGraftMatrix logged_target(double share, double yaw, double pitch, double turn, double *from_hand) {
+  double p[3], r[3][3];
+  const double z[3] = {0, 0, 1};
+  around((UPPER + LOWER) * share, yaw, pitch, p);
+  rotation(z, turn, r);
+  const World b = world(&(Arm){model().upper, model().fore, model().hand});
+  if (from_hand) *from_hand = gap(p, b.h.p);
+  return target_at(p, r);
+}
+/* Held at 1.05 and 1.149 of the arm's length (the logged 0.043 m median and 0.106 m most while held are
+ * (share - 0.97) x 0.5899 m: the 97 % straightening limit, nothing else): the hand is on the grip, the shoulder
+ * having come forward along the line to it by what the arm lacks, the bone lengths kept. */
+static void test_logged_reach(void) {
+  static const double shares[2] = {1.05, 1.149};
+  for (unsigned k = 0; k < 2; k++) {
+    double from_hand;
+    const TfpGraftMatrix t = logged_target(shares[k], .25, -.15, .3, &from_hand);
+    CHECK(from_hand < TFP_OG_SHIFT_M);
+    TfpOffhand s;
+    tfp_offhand_reset(&s);
+    Arm a;
+    const TfpOffhandResult res = run(&s, &a, &t, true, 1 / 30.0, 60);
+    const World w = world(&a);
+    const double p[3] = {t.values[12], t.values[13], t.values[14]};
+    printf("offhand grip: a grip %.3f of the arm's length from the shoulder: the hand %.4f m from it, the shoulder %.3f m forward\n", shares[k],
+           res.to_target_m, gap(w.u.p, SHOULDER));
+    CHECK(res.reason == TFP_OG_HELD && res.to_target_m < 1e-4 && gap(w.h.p, p) < 1e-4);
+    /* the shoulder moved along the line to the grip, by the arm's lack only */
+    const double lack = (UPPER + LOWER) * (shares[k] - TFP_OG_STRETCH);
+    CHECK(fabs(gap(w.u.p, SHOULDER) - lack) < 1e-4 && fabs(res.shoulder_m - lack) < 1e-4);
+    CHECK(fabs(gap(p, w.u.p) + gap(w.u.p, SHOULDER) - gap(p, SHOULDER)) < 1e-5);
+    CHECK(fabs(gap(w.f.p, w.u.p) - UPPER) < 1e-5 && fabs(gap(w.h.p, w.f.p) - LOWER) < 1e-5);
+    CHECK(fabs(res.reach_share - shares[k]) < 1e-4);
+  }
+}
+/* The grip swaying across the reach limit (1.14 to 1.16 of the arm's length, the logged out-of-reach flicker): once
+ * held it stays held, on the grip. */
+static void test_logged_reach_edge(void) {
+  TfpOffhand s;
+  tfp_offhand_reset(&s);
+  const Arm base = model();
+  Arm a;
+  const TfpGraftMatrix start = logged_target(1.149, .25, -.15, .3, NULL);
+  CHECK(run(&s, &a, &start, true, 1 / 30.0, 30).reason == TFP_OG_HELD);
+  for (int i = 0; i < 120; i++) {
+    const TfpGraftMatrix t = logged_target(1.15 + .01 * sin(i * .7), .25, -.15, .3, NULL);
+    a = base;
+    const TfpOffhandResult res = tfp_offhand_step(&s, &a.upper, &a.fore, &a.hand, &t, true, 1 / 30.0);
+    CHECK(res.reason == TFP_OG_HELD && res.to_target_m < .01);
+  }
+}
+/* Easing in from the body's pose 0.39 m and 17 degrees off the grip (the feel.51/52 measurement), out again when not
+ * wanted, and out when the target goes (a reload) at 30 frames a second: no joint step reaches the allowance. */
+static void test_logged_ease(void) {
+  double from_hand = 0, yaw = 0;
+  for (double y = -1.5; y < 1.5; y += .01) { /* the direction (at a level pitch) that puts the grip 0.39 m from the drawn hand */
+    double m;
+    logged_target(.80, y, -.15, .3, &m);
+    if (fabs(m - .39) < fabs(from_hand - .39)) from_hand = m, yaw = y;
+  }
+  const TfpGraftMatrix t = logged_target(.80, yaw, -.15, .3, &from_hand);
+  printf("offhand grip: the eased-in grip is %.3f m from the drawn hand\n", from_hand);
+  CHECK(from_hand > .3 && from_hand < TFP_OG_SHIFT_M);
+  for (int way = 0; way < 2; way++) {
+    TfpOffhand s;
+    tfp_offhand_reset(&s);
+    const Arm base = model();
+    Arm a, prev = base;
+    double most = 0;
+    int frames = 0;
+    for (int i = 0; i < 90; i++) {
+      const bool in = i < 45;
+      a = base;
+      const TfpOffhandResult res = tfp_offhand_step(&s, &a.upper, &a.fore, &a.hand, in || way == 0 ? &t : NULL, in, 1 / 30.0);
+      const double step = fmax(degrees(&a.upper, &prev.upper), fmax(degrees(&a.fore, &prev.fore), degrees(&a.hand, &prev.hand)));
+      CHECK(step <= TFP_OG_EASE_BUDGET * res.limit_degrees + 1e-3 && res.step_degrees <= TFP_OG_EASE_BUDGET * res.limit_degrees + 1e-3);
+      if (step > most) most = step;
+      if (in && res.reason == TFP_OG_HELD && !frames) frames = i + 1;
+      prev = a;
+    }
+    CHECK(frames > 4 && frames < 30 && !s.active && !memcmp(&a, &base, sizeof a));
+    printf("offhand grip: eased %s at 33.3 ms frames: on the grip after %d frames, largest joint step %.1f degrees (allowed %.1f)\n",
+           way ? "in, then out as the target goes" : "in and out", frames, most, TFP_OG_TURN_DPS / 30);
+  }
+}
+/* Held while the body's arm swings 10 degrees a frame at 8.3 ms frames (a body whose left arm follows the grip as the
+ * view turns): the drawn hand stays on the grip and the written joints hardly move; the correction's own change is
+ * not what is limited. */
+static void test_held_body_moves(void) {
+  TfpOffhand s;
+  tfp_offhand_reset(&s);
+  const TfpGraftMatrix t = logged_target(.80, .25, -.15, .3, NULL);
+  Arm a, prev;
+  run(&s, &a, &t, true, 1 / 120.0, 120);
+  prev = a;
+  double most = 0, body = 0;
+  for (int i = 0; i < 60; i++) {
+    Arm moved = model();
+    double r[3][3], u[3][3], turned[3][3];
+    const double axis[3] = {.3, -.2, 1};
+    rotation(axis, (i % 2 ? 10 : -10) * TFP_OG_PI / 180, r);
+    const TfpOgFrame f = tfp_og_frame(&moved.upper);
+    memcpy(u, f.r, sizeof u);
+    tfp_og_rmul(u, r, turned);
+    moved.upper = matrix(turned, f.p);
+    a = moved;
+    const TfpOffhandResult res = tfp_offhand_step(&s, &a.upper, &a.fore, &a.hand, &t, true, 1 / 120.0);
+    const World w = world(&a);
+    const double p[3] = {t.values[12], t.values[13], t.values[14]};
+    CHECK(res.reason == TFP_OG_HELD && gap(w.h.p, p) < 1e-4);
+    const double step = fmax(degrees(&a.upper, &prev.upper), fmax(degrees(&a.fore, &prev.fore), degrees(&a.hand, &prev.hand)));
+    CHECK(step < .5 * res.limit_degrees && fabs(res.step_degrees - step) < 1e-3);
+    if (i) CHECK(res.body_degrees > 19.9 && res.body_degrees < 20.1);
+    if (step > most) most = step;
+    if (res.body_degrees > body) body = res.body_degrees;
+    prev = a;
+  }
+  printf("offhand grip: held while the body's arm swings %.1f degrees a frame: largest written joint step %.2f degrees (allowed %.1f)\n", body, most,
+         TFP_OG_TURN_DPS / 120);
+}
+
 int main(void) {
+  test_logged_reach();
+  test_logged_reach_edge();
+  test_logged_ease();
+  test_held_body_moves();
   test_reach();
   test_stretch();
   test_refused();
