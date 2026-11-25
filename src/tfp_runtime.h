@@ -111,6 +111,10 @@ typedef struct TfpRt {
   bool has_candidate, has_hip_capture;
   TfpRtKept candidate, hip_capture;
   TfpRtValue candidate_time;
+  /* Not in retail (round 35, the Perf update line): lap(lap_user, TFP_RT_PART_*) where each part of on_update's work
+   * begins; NULL (tfp_rt_init) marks nothing. Logging only: no answer depends on it. */
+  void (*lap)(void *user, int part);
+  void *lap_user;
   /* Raising and texts. */
   TfpRtValue error;
   void *frame;
@@ -119,6 +123,10 @@ typedef struct TfpRt {
   char arena[TFP_RT_ARENA];
 } TfpRt;
 
+/* The parts of on_update the runtime marks (TfpRt.lap); the same order and meaning as TFP_UPD_* of src/perf_line.h. */
+enum { TFP_RT_PART_FRAME, TFP_RT_PART_ENTRY, TFP_RT_PART_OWNER, TFP_RT_PART_PRESENTATION, TFP_RT_PART_RECOVERY, TFP_RT_PART_CONTROLLER,
+       TFP_RT_PART_EDITOR_MOTION, TFP_RT_PART_STOPS, TFP_RT_PART_MANAGED, TFP_RT_PART_CLEAN, TFP_RT_PART_MENU, TFP_RT_PART_READY,
+       TFP_RT_PART_AIM_MARKERS, TFP_RT_PART_DIAGNOSTICS, TFP_RT_PARTS };
 void tfp_rt_init(TfpRt *rt, TfpRtHost *host);
 /* Calls one of the functions runtime.lua hands out (TFP_RT_ENTRY_LIST): the four of the module
  * table (on_enable, on_update, on_disable, on_cleanup_poll) and every closure it gives to a

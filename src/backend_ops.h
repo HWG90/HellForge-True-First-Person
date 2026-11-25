@@ -218,6 +218,16 @@ typedef struct TfpOpsMemo {
   TfpOpsResult result;                   /* TRUE or NIL */
   TfpOpsSnapshot s;                      /* TRUE: the snapshot */
   char why[320];                         /* NIL: the text */
+  /* Round 35, kept only with the memo on (tfp_ops_set_memo): the take's guarded reads (what a served hit saves), and
+   * whether the take rewrote the backend's `why` and to what (a served hit leaves `why` as the take would have). */
+  uint32_t reads;
+  bool wrote_why;
+  char left_why[320];
+  /* the take reached the foreign-camera step (a pin or a full one with the hook): a served hit replays that step from
+   * `base`, the snapshot before it, with `why` as it stood then (base_why when the take had written it by then) */
+  bool replay, replay_full, base_wrote_why;
+  TfpOpsSnapshot base;
+  char base_why[320];
 } TfpOpsMemo;
 typedef struct TfpOpsMismatch {
   bool has;
@@ -236,7 +246,26 @@ typedef struct TfpOpsPerf {
   uint64_t memo_moved;                   /* hits whose own take left the backend's state (below `why`) changed */
   TfpOpsMismatch first;                  /* the first mismatch of all, kept */
   TfpOpsMemo memo[TFP_OPS_TAKES];
+  /* Round 35 (docs/design/specs/2026-11-25-performance.md, section 6): the memo live, behind the test switch memo_on.txt
+   * (tfp_ops_set_memo; off after tfp_ops_init). On, a hit answers the stored snapshot instead of taking one ("served"),
+   * except every TFP_OPS_MEMO_CHECK_EVERY-th live hit (the first, the 17th, ...), which still takes a fresh one and compares
+   * as the shadow does ("checked"). A checked hit that differs (a mismatch) or whose take moved the backend's state turns
+   * the memo off for this backend: memo_live false, `off` kept, and from then on every call is fresh again (the shadow). */
+  bool memo_on;                          /* tfp_ops_set_memo(true) */
+  bool memo_live;                        /* on and not turned off by a check */
+  uint64_t memo_live_hits;               /* hits while live, served or checked (the check's sample counter) */
+  uint64_t memo_served[TFP_OPS_TAKES];   /* hits answered from the memo, by mode */
+  uint64_t memo_checked[TFP_OPS_TAKES];  /* live hits that took a fresh snapshot to compare */
+  uint64_t memo_saved_reads;             /* the guarded reads the served hits did not make (each: its stored take's reads) */
+  uint64_t why_writes;                   /* every write of the backend's `why` (fail()): a take that wrote it, a served hit writes it */
+  struct { bool reached, full; uint64_t why_writes; TfpOpsSnapshot base; char why[320]; } tail; /* the last take's foreign step (memo on) */
+  /* Round 35: the Perf lines' clock (QueryPerformanceCounter's ticks; NULL: nothing timed) and the ticks spent in the
+   * three public snapshot functions, every caller, served or taken. Set again after tfp_ops_init (src/wire_rt.c). */
+  int64_t (*clock)(void);
+  uint64_t snapshot_ticks;
+  struct { bool has, moved; int mode; size_t offset; const char *field; uint64_t epoch; } off; /* what turned it off */
 } TfpOpsPerf;
+enum { TFP_OPS_MEMO_CHECK_EVERY = 16 };
 typedef struct TfpOps {
   const TfpOpsHost *host;
   TfpOpsProfile profile;
@@ -286,6 +315,16 @@ TfpOpsResult tfp_ops_hold_snapshot(TfpOps *b, TfpOpsHold *out, TfpOpsText *why);
  * it, for which neither the full nor the retiring snapshot can be had (an action flag is set and the wield row has
  * moved on), gets the game's exit on the first poll, proven by the player's snapshot, where retail waits four. */
 void tfp_ops_set_hold(TfpOps *b, bool on);
+/* Round 35: the snapshot memo live (TfpOpsPerf above). Off after tfp_ops_init; the caller sets it again on every new
+ * backend (src/wire_rt.c rt_backend_new). Off, every answer and every byte of the backend is what it was without it. */
+void tfp_ops_set_memo(TfpOps *b, bool on);
+/* Round 35: drops the stored answers (the next call of each mode takes a fresh snapshot). For a caller that knows the
+ * game's memory changed inside one frame epoch without a call of the backend (the vector test's scene changes). */
+void tfp_ops_memo_forget(TfpOps *b);
+/* Round 35: the mod wrote the game's memory without a backend call that starts a new epoch (the backend's own
+ * keep_aim_view; the effects' WriteProcessMemory of the locomotion byte and the aim option): with the memo on, drops the
+ * stored answers; off, does nothing (the shadow then counts as it did in round 32). */
+void tfp_ops_memo_wrote(TfpOps *b);
 TfpOpsResult tfp_ops_backpack(TfpOps *b, const TfpOpsSnapshot *s, TfpOpsBackpack *out, TfpOpsText *why); /* TRUE, NIL (none), RAISED */
 bool tfp_ops_inventory_row(TfpOps *b, const TfpOpsSnapshot *s, uint32_t slots[6]); /* beyond retail (round 22): the log's */
 TfpOpsResult tfp_ops_camera_only_weapon(TfpOps *b, const TfpOpsSnapshot *s, TfpOpsText *why);

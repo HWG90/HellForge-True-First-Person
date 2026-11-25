@@ -248,21 +248,41 @@ int main(void) {
     CHECK(wire.laps.tick[TFP_LAP_UPDATE] > 0 && wire.laps.tick[TFP_LAP_EXTRA] > 0 && wire.laps.tick[TFP_LAP_HOLD] > 0 && wire.laps.tick[TFP_LAP_VIEW_LOG] > 0);
     CHECK(wire.laps.tick[TFP_LAP_POSE] > 0 && wire.laps.tick[TFP_LAP_MOTION] > 0 && wire.laps.tick[TFP_LAP_ENGINE] > 0 && wire.laps.tick[TFP_LAP_EFFECTS] > 0);
     CHECK(line_count == lines_before); /* idle: the laps say nothing */
+    { /* round 35: on_update's parts add up to its lap, the runtime marked its parts, the snapshot calls are timed */
+      int64_t parts = 0;
+      for (int i = 0; i < TFP_UPDS; i++) { CHECK(wire.laps.part[i] >= 0); parts += wire.laps.part[i]; }
+      CHECK(parts == wire.laps.tick[TFP_LAP_UPDATE] && !wire.laps.in_update);
+      CHECK(wire.laps.part[TFP_UPD_ENTRY] > 0 && wire.laps.part[TFP_UPD_MENU] > 0 && wire.laps.part[TFP_UPD_DIAGNOSTICS] > 0 &&
+            wire.laps.part[TFP_UPD_FRAME] > 0);
+      CHECK(wire.rt.lap && wire.rt.lap_user == &wire && wire.ops.perf.clock == fake_ticks);
+    }
     /* each wrapper answers what the target's own update answers, and times it */
     static const int laps[7] = {TFP_LAP_FOV, TFP_LAP_BLUR, TFP_LAP_CAMERA, TFP_LAP_HEAD, TFP_LAP_MOVEMENT, TFP_LAP_NEAR, TFP_LAP_DOF};
     bool (*const lapped[7])(TfpRtHost *, TfpRtValue *, TfpRtValue *) = {h->fov_update, h->blur_update, h->camera_update, h->head_update,
                                                                        h->movement_update, h->near_update, h->dof_update};
+    int64_t parts_before[TFP_UPDS];
+    memcpy(parts_before, wire.laps.part, sizeof parts_before);
     for (int i = 0; i < 7; i++) {
       TfpRtValue a1, a2, b1, b2;
       const int64_t spent = wire.laps.tick[laps[i]];
       const bool own = wire.laps.update[i](h, &a1, &a2), timed = lapped[i](h, &b1, &b2);
       CHECK(own == timed && a1.kind == b1.kind && a2.kind == b2.kind && wire.laps.tick[laps[i]] > spent);
     }
+    CHECK(!memcmp(parts_before, wire.laps.part, sizeof parts_before)); /* round 35: outside on_update no part is charged */
+    { /* round 35: inside on_update a target's call is the targets part; the part it was called from carries on after it */
+      wire.laps.in_update = true, wire.laps.current = TFP_UPD_MANAGED, wire.laps.mark = fake_ticks();
+      TfpRtValue a1, a2;
+      const int64_t targets = wire.laps.part[TFP_UPD_TARGETS], managed = wire.laps.part[TFP_UPD_MANAGED];
+      lapped[0](h, &a1, &a2);
+      CHECK(wire.laps.current == TFP_UPD_MANAGED && wire.laps.part[TFP_UPD_TARGETS] > targets && wire.laps.part[TFP_UPD_MANAGED] > managed);
+      wire.laps.in_update = false;
+    }
     int64_t lap[TFP_LAPS];
     memcpy(lap, wire.laps.tick, sizeof lap);
     tfp_perf_laps_close(lap);
     CHECK(lap[TFP_LAP_EXTRA_OTHER] >= 0 && lap[TFP_LAP_UPDATE_OTHER] >= 0);
     memset(wire.laps.tick, 0, sizeof wire.laps.tick);
+    memset(wire.laps.part, 0, sizeof wire.laps.part);
   }
 
   /* ---- presentation:action and :resume through the motion binder (transition.lua:85-104) ---- */
@@ -431,7 +451,28 @@ int main(void) {
   line_count = 0;
   CHECK(tfp_wire_call(&wire, TFP_RT_E_on_disable, NULL, r) == TFP_RT_OK && !logged("Refused"));
   CHECK(!tfp_wire_feel_held(&wire));                          /* and nothing is held afterwards */
+
+  /* ---- round 35: the snapshot memo's switch (memo_on.txt): on this backend and every one made after it, until a check
+   * turns it off for the session; off, the backend is as round 32 left it ---- */
+  CHECK(!wire.memo_on && !wire.ops.perf.memo_on && tfp_wire_memo_state(&wire) == TFP_PERF_MEMO_SHADOW);
+  {
+    const TfpOpsPerf before = wire.ops.perf;
+    tfp_wire_set_memo(&wire, false); /* no memo_on.txt: the backend is not touched */
+    CHECK(!memcmp(&before, &wire.ops.perf, sizeof before));
+  }
+  tfp_wire_set_memo(&wire, true);
+  CHECK(wire.ops.perf.memo_on && wire.ops.perf.memo_live && tfp_wire_memo_state(&wire) == TFP_PERF_MEMO_LIVE);
+  CHECK(h->backend_new(h) && wire.ops.perf.memo_on && wire.ops.perf.memo_live && wire.ops.perf.clock == fake_ticks); /* a new backend */
+  wire.ops.perf.off.has = true, wire.ops.perf.off.field = "controller_bytes", wire.ops.perf.off.epoch = 7, wire.ops.perf.memo_live = false;
+  CHECK(tfp_wire_memo_state(&wire) == TFP_PERF_MEMO_TURNED_OFF);
+  CHECK(h->backend_new(h) && wire.ops.perf.memo_on && !wire.ops.perf.memo_live && !wire.ops.perf.off.has && wire.memo_off &&
+        !strcmp(wire.memo_off_cause.field, "controller_bytes") && wire.memo_off_cause.epoch == 7);
+  CHECK(tfp_wire_memo_state(&wire) == TFP_PERF_MEMO_TURNED_OFF); /* the session's check holds on the new backend */
+  tfp_wire_set_memo(&wire, true);
+  CHECK(!wire.ops.perf.memo_live);
+  tfp_wire_set_memo(&wire, false);
+  CHECK(!wire.ops.perf.memo_on && !wire.ops.perf.memo_live && tfp_wire_memo_state(&wire) == TFP_PERF_MEMO_SHADOW);
   printf("wire feel: %u checks passed (all five module binders joined with no game: enable, 90 frames, F11 refused, the placement editor opened and refused, disable, what a live replace finds held; the motion "
-         "binder's shapes and presentation calls; the markers table; the Feel line)\n", checks);
+         "binder's shapes and presentation calls; the markers table; the Feel line; the laps and parts; the memo switch)\n", checks);
   return 0;
 }

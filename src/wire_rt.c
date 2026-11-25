@@ -498,10 +498,35 @@ static bool near_clock(void *u, double *seconds, const char **error) {
 }
 
 /* ---- backend: the runtime host's pointers --------------------------------------------------- */
+/* Round 35: a check that turned the memo off on the backend about to be replaced keeps it off for the session. */
+static void memo_keep_off(TfpWire *w) {
+  const TfpOpsPerf *p = &w->ops.perf;
+  if (w->memo_off || !p->off.has) return;
+  w->memo_off = true;
+  w->memo_off_cause.moved = p->off.moved, w->memo_off_cause.mode = p->off.mode, w->memo_off_cause.offset = p->off.offset;
+  w->memo_off_cause.field = p->off.field, w->memo_off_cause.epoch = p->off.epoch;
+}
+static void memo_apply(TfpWire *w) {
+  memo_keep_off(w);
+  tfp_ops_set_memo(&w->ops, w->memo_on);
+  if (w->memo_on && w->memo_off) w->ops.perf.memo_live = false; /* a check failed earlier this session */
+}
+void tfp_wire_set_memo(TfpWire *w, bool on) {
+  const bool was = w->memo_on || w->ops.perf.memo_on;
+  w->memo_on = on;
+  if (on || was) memo_apply(w); /* off and never on: the backend is not touched (round 32's, byte for byte) */
+}
+int tfp_wire_memo_state(const TfpWire *w) {
+  if (!w->memo_on) return TFP_PERF_MEMO_SHADOW;
+  return w->memo_off || w->ops.perf.off.has ? TFP_PERF_MEMO_TURNED_OFF : TFP_PERF_MEMO_LIVE;
+}
 static bool rt_backend_new(TfpRtHost *h) {
   TfpWire *w = W(h);
+  memo_keep_off(w);
   tfp_ops_init(&w->ops, &w->ops_host, NULL, w->pose_helper ? w->pose_helper : &w->null_pose);
   if (w->hold.on) tfp_ops_set_hold(&w->ops, true); /* the action hold probe; off without its switch file */
+  if (w->memo_on) memo_apply(w); /* round 35: memo_on.txt */
+  w->ops.perf.clock = w->laps.clock; /* round 35: the snapshot calls' time (NULL: not timed) */
   return true;
 }
 static bool rt_backend_begin_frame(TfpRtHost *h) { tfp_ops_begin_frame(&W(h)->ops); return true; }
@@ -1311,13 +1336,37 @@ TfpRtStatus tfp_wire_call(TfpWire *w, TfpRtEntry entry, const TfpRtArgs *args, T
   return status;
 }
 
-/* Round 32: the laps (wire.h). Each wrapper calls the target's own update function and adds its time to the lap. */
+/* Round 32: the laps (wire.h). Each wrapper calls the target's own update function and adds its time to the lap.
+ * Round 35: within on_update the call is also the "targets" part of the Perf update line (exclusive: the time before it
+ * goes to the part it was called from, which carries on after it). */
+static void lap_switch(TfpWire *w, int part, int64_t now) {
+  w->laps.part[w->laps.current] += now - w->laps.mark;
+  w->laps.mark = now, w->laps.current = part;
+}
+static void rt_lap(void *user, int part) { /* TfpRt.lap: the runtime's marks */
+  TfpWire *w = user;
+  if (w->laps.in_update && w->laps.clock && part >= 0 && part < TFP_UPDS) lap_switch(w, part, w->laps.clock());
+}
+_Static_assert((int)TFP_RT_PART_FRAME == (int)TFP_UPD_FRAME && (int)TFP_RT_PART_ENTRY == (int)TFP_UPD_ENTRY &&
+               (int)TFP_RT_PART_OWNER == (int)TFP_UPD_OWNER && (int)TFP_RT_PART_PRESENTATION == (int)TFP_UPD_PRESENTATION &&
+               (int)TFP_RT_PART_RECOVERY == (int)TFP_UPD_RECOVERY && (int)TFP_RT_PART_CONTROLLER == (int)TFP_UPD_CONTROLLER &&
+               (int)TFP_RT_PART_EDITOR_MOTION == (int)TFP_UPD_EDITOR_MOTION && (int)TFP_RT_PART_STOPS == (int)TFP_UPD_STOPS &&
+               (int)TFP_RT_PART_MANAGED == (int)TFP_UPD_MANAGED && (int)TFP_RT_PART_CLEAN == (int)TFP_UPD_CLEAN &&
+               (int)TFP_RT_PART_MENU == (int)TFP_UPD_MENU && (int)TFP_RT_PART_READY == (int)TFP_UPD_READY &&
+               (int)TFP_RT_PART_AIM_MARKERS == (int)TFP_UPD_AIM_MARKERS &&
+               (int)TFP_RT_PART_DIAGNOSTICS == (int)TFP_UPD_DIAGNOSTICS && (int)TFP_RT_PARTS == (int)TFP_UPD_TARGETS,
+               "the runtime's parts are the Perf update line's");
 #define LAPPED(name, slot, lap) \
   static bool lapped_##name(TfpRtHost *h, V *o1, V *o2) { \
     TfpWire *w = W(h); \
     const int64_t t0 = w->laps.clock(); \
+    const bool inside = w->laps.in_update; \
+    const int from = w->laps.current; \
+    if (inside) lap_switch(w, TFP_UPD_TARGETS, t0); \
     const bool done = w->laps.update[slot](h, o1, o2); \
-    w->laps.tick[lap] += w->laps.clock() - t0; \
+    const int64_t t1 = w->laps.clock(); \
+    w->laps.tick[lap] += t1 - t0; \
+    if (inside) lap_switch(w, from, t1); \
     return done; \
   }
 LAPPED(fov, 0, TFP_LAP_FOV)
@@ -1334,7 +1383,11 @@ void tfp_wire_laps_start(TfpWire *w, int64_t (*clock)(void)) {
                          &w->host.movement_update, &w->host.near_update, &w->host.dof_update};
   static const Update lapped[7] = {lapped_fov, lapped_blur, lapped_camera, lapped_head, lapped_movement, lapped_near, lapped_dof};
   memset(w->laps.tick, 0, sizeof w->laps.tick);
+  memset(w->laps.part, 0, sizeof w->laps.part);
   w->laps.clock = clock;
+  w->laps.in_update = false;
+  w->ops.perf.clock = clock; /* round 35: the snapshot calls' time */
+  w->rt.lap = clock ? rt_lap : NULL, w->rt.lap_user = w; /* round 35: the runtime's parts */
   if (!clock) return;
   for (int i = 0; i < 7; i++)
     if (*at[i] && *at[i] != lapped[i]) w->laps.update[i] = *at[i], *at[i] = lapped[i]; /* NULL stays NULL: the runtime's "not a function" */
@@ -1344,6 +1397,7 @@ void tfp_wire_frame(TfpWire *w, const char *extra) {
   V r[2] = {nil(), nil()};
   int64_t mark = tfp_wire_lap_now(w); /* round 32: the laps of the Perf frame line */
   w->has_row = w->frame_full = false;
+  if (w->laps.clock) w->laps.mark = mark, w->laps.current = TFP_UPD_FRAME, w->laps.in_update = true; /* round 35: the parts */
   if (tfp_wire_call(w, TFP_RT_E_on_update, NULL, r) == TFP_RT_RAISED) {
     char why[240];
     value_show(w->rt.error, why, sizeof why);
@@ -1352,7 +1406,12 @@ void tfp_wire_frame(TfpWire *w, const char *extra) {
       tfp_view_log_event(&w->log, "Refused: the frame raised: %s", why);
     }
   } else w->entry_fault[0] = 0;
-  tfp_wire_lap(w, TFP_LAP_UPDATE, &mark);
+  if (w->laps.clock) { /* the update lap and the last part end at the same instant: the parts add up to the lap */
+    const int64_t now = w->laps.clock();
+    lap_switch(w, TFP_UPD_FRAME, now);
+    w->laps.in_update = false;
+    w->laps.tick[TFP_LAP_UPDATE] += now - mark, mark = now;
+  }
 
   if (w->frame_extra) w->frame_extra(w);
   tfp_wire_lap(w, TFP_LAP_EXTRA, &mark);
