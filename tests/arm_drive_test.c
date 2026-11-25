@@ -1992,6 +1992,16 @@ static void test_grip_reach_forward(void) {
   CHECK(strstr(line, "reach 1.0") && strstr(line, "shoulder forward 0.0") && strstr(line, "0 frames cut, not taken: 0 out of reach, 0 too far"));
   /* the fake engine does not evaluate the rig and gun again after the write: what it reads is what the game held */
   CHECK(g.drawn && strstr(line, "as drawn the hand"));
+  /* aiming fading in or out (the copy's weight under 1): the drawn arm is part the game's aim pose, so the hand as
+   * drawn is not measured, though the reach holds the grip (review of round 26) */
+  tfp_arm_drive_set(true, true, .5f);
+  for (int i = 0; i < 10; i++) grip_draw(t += 33, &hand, &socket);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(g.state == TFP_ARM_GRIP_HELD && g.held == 10 && !g.drawn && !strstr(tfp_arm_drive_grip_line(&g), "as drawn"));
+  tfp_arm_drive_set(true, true, 1);
+  for (int i = 0; i < 10; i++) grip_draw(t += 33, &hand, &socket);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(g.state == TFP_ARM_GRIP_HELD && g.drawn);
 }
 /* A foregrip: its own node, where the body's hand is, and the gun's own node 17 cm from there: the foregrip's is held. */
 static void test_grip_foregrip(void) {

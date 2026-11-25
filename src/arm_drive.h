@@ -265,7 +265,7 @@ typedef struct TfpArmDriveGrip {
   float shoulder_m, most_shoulder_m; /* the shoulder brought forward to reach it: last frame, and the most while held */
   float held_step_degrees;        /* the largest turn of a written joint in a frame held on the grip (steady holding) */
   float body_degrees;             /* the largest turn of the drive's own arm joints in one frame while the reach was in force */
-  bool drawn;                     /* the drawn hand was measured against the gun as evaluated for the draw */
+  bool drawn;                     /* the drawn hand was measured against the gun as evaluated for the draw (held, full weight) */
   float drawn_m, most_drawn_m;    /* the rig's evaluated hand from the gun's evaluated grip node: last frame, the most while held */
 } TfpArmDriveGrip;
 void tfp_arm_drive_grip_take(TfpArmDriveGrip *out);

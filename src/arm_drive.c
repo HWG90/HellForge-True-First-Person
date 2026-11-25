@@ -191,7 +191,7 @@ static struct {
     uint32_t ref, node, weapon;
     bool attachment;
     TfpGraftMatrix rel; /* the node in the rig socket's frame, from the last frame it could be read */
-    bool measure;       /* held this frame: grip_drawn() measures the hand as drawn */
+    bool measure;       /* held this frame at full weight: grip_drawn() measures the hand as drawn */
     float last[3];      /* its world position in the last frame: the body's hand trails it by up to a frame */
     TfpArmDriveGrip seen;
   } grip;
@@ -803,7 +803,9 @@ static void grip_frame(const Units *u, const TfpGraftMatrix *body, TfpGraftMatri
               : r.reason == TFP_OG_NOT_RIGID ? TFP_ARM_GRIP_POSE : TFP_ARM_GRIP_EASING;
     seen->cut += r.cut, seen->out_of_reach += r.reason == TFP_OG_OUT_OF_REACH, seen->too_far += r.reason == TFP_OG_TOO_FAR;
     if (d.grip.ik.active && r.body_degrees > seen->body_degrees) seen->body_degrees = r.body_degrees;
-    d.grip.measure = state == TFP_ARM_GRIP_HELD && d.grip.latched; /* drive(): the hand against the gun as drawn */
+    /* drive(): the hand against the gun as drawn; not while aiming fades in or out (weight under 1), when the drawn arm
+     * is part the game's aim pose and the hand is that far off the grip by design */
+    d.grip.measure = state == TFP_ARM_GRIP_HELD && d.grip.latched && d.weight >= 1;
   }
   seen->state = state, seen->weight = weight, seen->to_m = wanted ? to : 0;
   seen->reach = wanted ? r.reach_share : 0, seen->shoulder_m = r.shoulder_m;
