@@ -1235,6 +1235,30 @@ int main() {
       tfp_camera_set_action_tuning(0, 300, false); // the defaults again for what runs after
     }
   }
+  // ---- 29. The window and a clamber's masks, in the helper (round 24 review: putting the old rule back in
+  // smooth_detect, any change of mask opening the window, survived every test). The head camera on a vault's mask
+  // 0x20 with the root still, long after any event (no jump is looked for), then the clamber's 0x22: nothing opens.
+  // The same with a swap's 2 then 0: that change of mask opens the window, as it always did. ----
+  for (int traversal = 0; traversal < 2; ++traversal) {
+    fresh(true, true, true);
+    tfp_camera_set_action_tuning(0x22, 900, true);
+    Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+    standing(g, 40, 33.3, false, traversal ? 0x20u : 2u); // 1.3 s: any window is over
+    { TfpCameraTraceRow drop[128]; while (tfp_camera_trace_read(drop, 128)) {} }
+    standing(g, 5, 33.3, false, traversal ? 0x22u : 0u);
+    tfp_camera_trace_edge();
+    TfpCameraTraceRow rows[64];
+    const uint32_t count = tfp_camera_trace_read(rows, 64);
+    unsigned before = 0, after = 0;
+    for (uint32_t i = 0; i < count; ++i) if (rows[i].what & TFP_CAMERA_TRACE_LOOKED) { if (i == 0) ++before; else ++after; }
+    std::printf("the window at a change of mask %s, the head camera, the root still: %u of %u frames after it looked at\n",
+                traversal ? "0x20 -> 0x22" : "2 -> 0", after, count - 1);
+    CHECK(count == 6 && before == 0);
+    if (traversal) CHECK(after == 0); else CHECK(after == 5);
+    CHECK(tfp_camera_error() == 0);
+    g.end();
+    tfp_camera_set_action_tuning(0, 300, false);
+  }
   std::printf("camera smooth: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }
