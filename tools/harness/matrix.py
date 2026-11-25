@@ -60,7 +60,7 @@ PHASES = {
     "aim-fire": ("down right; wait 0.35; click middle; wait 0.7; click left 0.5; wait 0.4; up right", 1.0),
     "aim-walk": ("down right; wait 0.35; click middle; wait 0.5; hold w 1.0; up right", 1.0),
     "aim-full": ("down right; wait 0.35; click middle; wait 2.5; up right", 1.0),
-    "aim-scope-zoom": ("down right; wait 0.35; click middle; wait 1.0; down r; wait 0.6; key arrowright; wait 0.2; up r; wait 1.5; up right", 1.0),
+    "aim-scope-zoom": ("down right; wait 0.35; click middle; wait 1.0; down r; wait 0.8; key arrowright; wait 0.2; up r; wait 1.5; up right", 1.0),
     "reload": ("click left 0.3; wait 0.3; key r", 4.0),
     "ammo-check": ("hold r 0.8", 2.5),
     "swap-secondary": ("key 2", 2.0),

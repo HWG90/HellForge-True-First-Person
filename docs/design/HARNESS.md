@@ -88,7 +88,7 @@ What the harness does about it, as a spec:
 - `aim.py` `full_aim()`: `down right; keep right; wait 0.35`, then `click middle`, then read the log for
   `State: aim in` for 1.5 s; one more `click middle` where it did not come; the phase's action; the hold; `up right`
   always. A result says reached, presses, seconds to full aim, and lost (out before the harness let go).
-- `aim.py` `zoom_cycle()`: in full aim, `down r; wait 0.6; key DIRECTION; wait 0.2; up r` for each arrow in turn
+- `aim.py` `zoom_cycle()`: in full aim, `down r; wait 0.8; key DIRECTION; wait 0.2; up r` for each arrow in turn
   until an `Aim: changed` line has another `fov` (0.5 degrees or more), then that direction once more.
 - `matrix.py` `AIMED`: aim, aim-fire, aim-walk, pistol-aim, aim-full, aim-scope-zoom go through `full_aim()` and fail
   without full aim (`aim.verdict()`). `soak.py` plays them so too (not aim-scope-zoom) and counts reached aims.

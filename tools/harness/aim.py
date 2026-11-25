@@ -44,7 +44,8 @@ RAISE_S = 0.35           # the aim held this long before the mode switch: the sw
 WAIT_S = 1.5             # how long the log is read for "State: aim in" after a switch (the line is the tick's)
 SWITCHES = 2             # a second press for a mode the game remembered as first person (the first took it out)
 HOLD_S = 2.0             # full aim held this long once the log said so: the "Aim: in" line (0.3 s) and a "second"
-MENU_S = 0.6             # R held this long before a direction: the weapon functions menu (a tap is a reload)
+MENU_S = 0.8             # R held this long before a direction: the weapon functions menu (a tap is a reload; the
+                         # matrix's ammo-check holds R 0.8 s)
 ZOOM_KEYS = ("arrowright", "arrowleft", "arrowup", "arrowdown")   # the menu's directions, tried in turn
 ZOOM_WAIT_S = 1.2        # an "Aim: changed" line comes 0.3 s after a change has settled
 POLL_S = 0.1

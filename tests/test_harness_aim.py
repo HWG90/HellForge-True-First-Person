@@ -73,7 +73,7 @@ class Events(unittest.TestCase):
 
     def test_the_weapon_functions_menu_is_r_held_then_an_arrow(self):
         lines, _ = drive.events(f"down r; wait {aim.MENU_S}; key arrowright; wait 0.2; up r")
-        self.assertEqual(lines, ["0 d 82", "630 d 39", "710 u 39", "940 u 82"])
+        self.assertEqual(lines, ["0 d 82", "830 d 39", "910 u 39", "1140 u 82"])
 
     def test_what_is_held_after_a_script(self):
         self.assertEqual(drive.held_after("down right; keep right; wait 0.35"), {"right"})
