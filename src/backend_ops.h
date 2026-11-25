@@ -202,6 +202,37 @@ typedef struct TfpOpsBinding { const void *identity; uint64_t address; bool is_f
 typedef enum TfpOpsSetting { TFP_OPS_SETTING_DEFAULT, TFP_OPS_SETTING_DOF, TFP_OPS_SETTING_VIGNETTE, TFP_OPS_SETTING_OTHER } TfpOpsSetting;
 
 typedef struct TfpOpsLayerMap { bool has; uint64_t def; uint32_t count; uint64_t at[2048]; } TfpOpsLayerMap;
+/* Round 32 (docs/design/specs/2026-11-25-performance.md, section 5): counts for the Perf lines and a SHADOW snapshot memo.
+ * Logging only: nothing in this file reads any of it back into an answer. The memo keeps the last answer of
+ * tfp_ops_snapshot / _player_snapshot / _pin_player_snapshot per mode with the frame_epoch it was taken in; the next
+ * call in the same epoch still takes its own snapshot and returns it, and only compares the two (a "hit"). A hit whose
+ * answers differ is a mismatch: a memo that returned the stored answer would have answered differently. */
+enum { TFP_OPS_TAKE_FULL, TFP_OPS_TAKE_PLAYER, TFP_OPS_TAKE_PIN, TFP_OPS_TAKES };
+typedef struct TfpOpsMemo {
+  bool has;
+  uint64_t epoch;                        /* frame_epoch after the take */
+  TfpOpsResult result;                   /* TRUE or NIL */
+  TfpOpsSnapshot s;                      /* TRUE: the snapshot */
+  char why[320];                         /* NIL: the text */
+} TfpOpsMemo;
+typedef struct TfpOpsMismatch {
+  bool has;
+  int mode;                              /* TFP_OPS_TAKE_* */
+  size_t offset;                         /* first differing byte of TfpOpsSnapshot (0 for result / why) */
+  const char *field;                     /* its field: "camera_kind", "flags", "action.states", "result", "why", ... */
+  uint64_t epoch;
+} TfpOpsMismatch;
+typedef struct TfpOpsPerf {
+  uint64_t reads;                        /* guarded reads (every _read through the host) */
+  uint64_t takes[TFP_OPS_TAKES];         /* snapshots built, by mode: the public three, the hold's and the backend's own */
+  uint64_t invokes, invoke_bodies;       /* native calls: invoke (allowed, enter, exit) and invoke_body (body event) */
+  uint64_t memo_calls[TFP_OPS_TAKES];    /* calls of the three public snapshot functions */
+  uint64_t memo_hits[TFP_OPS_TAKES];     /* of which with a stored answer of the same frame_epoch (a frame active) */
+  uint64_t memo_mismatches[TFP_OPS_TAKES];
+  uint64_t memo_moved;                   /* hits whose own take left the backend's state (below `why`) changed */
+  TfpOpsMismatch first;                  /* the first mismatch of all, kept */
+  TfpOpsMemo memo[TFP_OPS_TAKES];
+} TfpOpsPerf;
 typedef struct TfpOps {
   const TfpOpsHost *host;
   TfpOpsProfile profile;
@@ -228,6 +259,7 @@ typedef struct TfpOps {
            TfpOpsLayerMap maps[5]; } actions;
   char why[320];                         /* the error being raised */
   bool hold;                             /* not in retail: tfp_ops_set_hold */
+  TfpOpsPerf perf;                       /* not in retail: round 32's counts and shadow memo (above); last, outside the compared state */
 } TfpOps;
 
 void tfp_ops_init(TfpOps *b, const TfpOpsHost *host, const TfpOpsPoseHelper *alignment, const TfpOpsPoseHelper *pose); /* Backend.new */
@@ -303,6 +335,8 @@ bool tfp_ops_ptr(TfpOps *b, uint64_t at, uint64_t *out, TfpOpsText *why);
 bool tfp_ops_alignment_context(TfpOps *b, uint32_t unit, bool has_owner, uint64_t owner, bool has_avatar_index, uint32_t avatar_index,
                                bool profile_pose, TfpOpsContext *out, TfpOpsText *why);
 bool tfp_ops_pose_context(TfpOps *b, const TfpOpsSnapshot *s, TfpOpsContext *out, TfpOpsText *why);
+/* Round 32: the TfpOpsSnapshot field a byte offset falls in ("action.states", ...; "padding" between fields). */
+const char *tfp_ops_snapshot_field(size_t offset);
 /* tostring() of a Lua number as the reference LuaJIT prints it. */
 void tfp_ops_number(double value, char *out, size_t size);
 #endif

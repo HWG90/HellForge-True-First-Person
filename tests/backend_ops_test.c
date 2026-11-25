@@ -1192,6 +1192,82 @@ int main(int argc, char **argv) {
       failures++;
     }
   }
+  unsigned memo_worlds = 0;
+  { /* round 32: the shadow memo (backend_ops.h TfpOpsPerf) counts and compares, and never changes an answer */
+    static TfpOpsHost quiet;
+    static TfpOps fresh_backend;
+    quiet = host;
+    quiet.log = NULL, quiet.camera_before_entry = NULL, quiet.placement_resolver = NULL, quiet.presentation_transition = NULL;
+    for (unsigned n = 0; n < run_count && !failures; n++) {
+      TfpOpsSnapshot full, again, alone;
+      TfpOpsText why, why_alone;
+      const char *wrong = NULL;
+      run = ops_runs + n;
+      memset(&state, 0, sizeof state);
+      armed_count = 0;
+      first_image();
+      tfp_ops_init(&backend, &quiet, NULL, NULL);
+      if (tfp_ops_snapshot(&backend, &full, &why) != TFP_OPS_TRUE || !full.safe) continue;
+      const TfpOpsPerf *p = &backend.perf;
+      /* outside a frame: never a hit */
+      if (tfp_ops_snapshot(&backend, &again, &why) != TFP_OPS_TRUE || p->memo_calls[TFP_OPS_TAKE_FULL] != 2 || p->memo_hits[TFP_OPS_TAKE_FULL] ||
+          p->takes[TFP_OPS_TAKE_FULL] != 2 || !p->reads)
+        wrong = "outside a frame: two calls, two takes, no hit";
+      /* in a frame, unchanged memory: a hit per repeated mode, no mismatch, the backend's state untouched by the hit's take */
+      tfp_ops_begin_frame(&backend);
+      for (int mode = 0; mode < TFP_OPS_TAKES && !wrong; mode++) {
+        TfpOpsResult (*take)(TfpOps *, TfpOpsSnapshot *, TfpOpsText *) =
+            mode == TFP_OPS_TAKE_FULL ? tfp_ops_snapshot : mode == TFP_OPS_TAKE_PLAYER ? tfp_ops_player_snapshot : tfp_ops_pin_player_snapshot;
+        const uint64_t hits = p->memo_hits[mode];
+        TfpOpsResult first = take(&backend, &full, &why), second = take(&backend, &again, &why);
+        if (first != second || (first == TFP_OPS_TRUE && memcmp(&full, &again, sizeof full)) || p->memo_hits[mode] != hits + 1 ||
+            p->memo_mismatches[mode] || p->memo_moved)
+          wrong = "in a frame: the second call of a mode is a hit with the same answer, no mismatch, nothing moved";
+        /* the same answer as a backend that never kept anything */
+        tfp_ops_init(&fresh_backend, &quiet, NULL, NULL);
+        tfp_ops_begin_frame(&fresh_backend);
+        if (!wrong && (take(&fresh_backend, &alone, &why_alone) != second ||
+                       (second == TFP_OPS_TRUE ? memcmp(&alone, &again, sizeof alone) : strcmp(why.text, why_alone.text))))
+          wrong = "the answer differs from a backend without the memo";
+      }
+      /* the game's memory changes in the frame without an invalidate: the hit is a mismatch, its first field kept */
+      if (!wrong) {
+        poke(full.controller, 2); /* an action */
+        if (tfp_ops_snapshot(&backend, &again, &why) != TFP_OPS_TRUE || again.safe || p->memo_mismatches[TFP_OPS_TAKE_FULL] != 1 || !p->first.has ||
+            p->first.mode != TFP_OPS_TAKE_FULL || strcmp(p->first.field, "controller_bytes") ||
+            p->first.offset != offsetof(TfpOpsSnapshot, controller_bytes))
+          wrong = "a change without an invalidate: one mismatch, at controller_bytes";
+        poke(full.controller, 0);
+      }
+      /* an invalidate (any native call or write) moves the epoch: the next call is not a hit */
+      if (!wrong) {
+        const uint64_t hits = p->memo_hits[TFP_OPS_TAKE_FULL];
+        tfp_ops_invalidate_frame_checks(&backend);
+        if (tfp_ops_snapshot(&backend, &again, &why) != TFP_OPS_TRUE || p->memo_hits[TFP_OPS_TAKE_FULL] != hits ||
+            p->memo_mismatches[TFP_OPS_TAKE_FULL] != 1)
+          wrong = "after an invalidate: no hit";
+      }
+      /* a failure is compared by its text; the next frame starts with nothing stored */
+      tfp_ops_end_frame(&backend);
+      tfp_ops_begin_frame(&backend);
+      if (!wrong) {
+        const uint64_t hits = p->memo_hits[TFP_OPS_TAKE_FULL];
+        if (tfp_ops_snapshot(&backend, &again, &why) != TFP_OPS_TRUE || p->memo_hits[TFP_OPS_TAKE_FULL] != hits) wrong = "a new frame: no hit";
+      }
+      if (!wrong && (strcmp(tfp_ops_snapshot_field(offsetof(TfpOpsSnapshot, action) + offsetof(TfpOpsAction, states) + 3), "action.states") ||
+                     strcmp(tfp_ops_snapshot_field(offsetof(TfpOpsSnapshot, camera_kind)), "camera_kind")))
+        wrong = "the field names";
+      if (wrong) {
+        fprintf(stderr, "shadow memo, run %s: %s (\"%s\")\n", run->name, wrong, why.present ? why.text : "");
+        failures++;
+      }
+      memo_worlds++;
+    }
+    if (!memo_worlds && !failures) {
+      fprintf(stderr, "shadow memo: no run starts with a safe full snapshot\n");
+      failures++;
+    }
+  }
   if (failures) {
     fprintf(stderr, "%u runs differ from retail\n", failures);
     return 1;
@@ -1209,5 +1285,7 @@ int main(int argc, char **argv) {
   printf("Backend operations, held release (not in retail): on %u first images: off as retail; on, the game's exit for the lease's own record "
          "whose weapon the game renamed, an exit that did not take, the player's aim, a replaced record, the exit at once when only the "
          "player's snapshot can be had\n", held_releases);
+  printf("Backend operations, shadow memo (round 32, logging only): on %u first images: hits only in a frame and the same epoch, the same answers "
+         "as a backend without it, a change without an invalidate counted as a mismatch at its field\n", memo_worlds);
   return 0;
 }
