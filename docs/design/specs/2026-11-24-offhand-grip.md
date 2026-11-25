@@ -279,8 +279,14 @@ cut step, which are not counted as held.
   a jump. The ease is a smoothstep over 0.15 s at the quickest, slowed so that it turns no joint by more than half the
   frame's allowance. When the target goes, it eases out on the last full reach instead of dropping it.
 - **The written joint is limited, not the correction.** Each written rotation turns at most 720 degrees a second and 30
-  in a frame from the last frame's written rotation, so the flip limits stand. Each frame's reach turns the arm the
-  least way from the last reach, so the body's own swings do not twist the held arm.
+  in a frame from the last frame's written rotation, so the flip limits stand.
+- **The twist about each bone is the body's.** Each frame's reach is the drive's pose swung onto it (as main solved
+  it); the last reach, swung onto this one, turns its twist towards that at 90 degrees a second at most. The bones point
+  where the reach puts them either way; only the turn about each bone is followed at that rate. (The first version
+  carried the last reach whole, which left the twist unanchored: a grip circling a 3 cm loop once a second at 0.8 of
+  the arm took the upper arm, forearm and hand against the body's from 36.6/81.7/50.1 degrees to 172.6/122.2/168.3 in
+  1000 loops while the hand stayed on the grip. Taken whole from the body each frame, a body arm jittering 20 degrees
+  a frame twisted the drawn one by 12 degrees a frame.)
 - **Out of reach has a margin.** A grip is taken within 1.15 arm lengths and let go beyond 1.18 once held.
 
 ### Numbers before and after
@@ -295,7 +301,9 @@ said):
 | grip swaying 1.14 to 1.16 | 2 of 120 frames held, 67 out of reach, step 24.0 | 120 of 120 held, step 0.0 |
 | ease in and out, 0.39 m | 5 frames at the allowance (24.0) | largest step 12.0, on the grip after 8 frames |
 | ease in, target lost | 6 frames at the allowance | largest step 12.0 |
-| body's arm swinging 20 degrees a frame, 8.3 ms | 0 of 60 held, 0.079 m off, step 15.2 (allowed 6.0) | 60 of 60 held, 0.000 m off, step 0.0 |
+| body's arm jittering 20 degrees a frame (10 to 30 from its pose), 8.3 ms | 0 of 60 held, 0.091 m off, step 15.8 (allowed 6.0) | 60 of 60 held, 0.000 m off, step 0.9; back on a calm hold's arm 9 frames after it stops |
+| 3 cm loop a second, 0.8 of the arm, 2000 loops | joints against the body's 36.57/82.55/50.29 throughout | the same, 36.57/82.55/50.29 throughout |
+| 1 cm loop, 3000 loops; 1.05 of the arm, 1 and 3 cm | steady | steady: drift 0.000 degrees, the hand 0.0000 m off |
 
 In the drive with the recorded body (`tests/arm_drive_test.c` `test_grip_reach_forward`, the grip 0.19 m further
 forward along the gun, 1.04 arm lengths from the drawn shoulder): the hand 0.0000 m from the grip, the shoulder 0.043 m
@@ -316,7 +324,7 @@ the gun's grip (most 0.002)`
 - **frames cut / not taken**: the limits holding the arm back, and refusals split into out of reach and too far from
   the drawn hand (feel.52 counted them together).
 - **as drawn**: after the rig and the gun are evaluated for the draw, the rig's hand from the gun's grip node, both as
-  the game evaluated them. The solver's "hand from the grip" is its own number. This one says whether the target was
+  the game evaluated them, in frames held at full weight (not while aiming fades in or out). The solver's "hand from the grip" is its own number. This one says whether the target was
   where the gun is drawn: a frame behind, another socket, or a scale on the gun would show here and nowhere else.
 
 ### What only the game can show
