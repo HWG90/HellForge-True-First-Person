@@ -299,7 +299,13 @@ def scope_zoom(device, tail, sleep=time.sleep, clock=time.monotonic, capture=Non
     result = full_aim(device, tail, 0.3, during, sleep, clock)
     result.setdefault("zoom_steps", []); result.setdefault("zoom_where", None)
     if result["reached"] and not result["zoom_where"]:
+        in_aim_notes = list(result["notes"])
         zoom_before_aim(device, tail, result, sleep, clock, capture)
+        if result["zoom_where"] == "before aim":
+            # the fallback's own case (R in the sights drops full aim): what the ranges in aim said is kept apart, not
+            # held against the ranges that did change the zoom
+            result["in_aim_notes"] = in_aim_notes
+            result["notes"] = [n for n in result["notes"] if n not in in_aim_notes]
     if result["reached"] and not result["zoom_where"]:
         fovs = sorted({z["fov_after"] for z in result["zoom_steps"] if z["fov_after"] is not None})
         moved = sum(1 for z in result["zoom_steps"] if z["seat_moved"])
@@ -323,7 +329,8 @@ def during_script(script):
 
 def verdict(result, lines, hold=HOLD_S, zoom=False):
     """The aim's own pass: full aim reached and kept until the harness let go, an "Aim: in" line, an "Aim: out" line
-    of at least `hold` seconds; with zoom, two zoom levels in the "Aim:" lines."""
+    of at least `hold` seconds; with zoom, two zoom levels in the "Aim:" lines and every step where the zoom changed
+    (result["zoom_where"]: in aim, or the fallback before aiming) held in full aim."""
     rows = aim_lines(lines)
     notes = list(result.get("notes", []))
     if result.get("reached"):
@@ -333,7 +340,8 @@ def verdict(result, lines, hold=HOLD_S, zoom=False):
             notes.append(f"no \"Aim: out\" line after {hold:.1f} s or more of full aim")
         if zoom and len(zoom_levels(lines)) < 2:
             notes.append(f"one zoom level seen ({zoom_levels(lines)}): the scope's range did not change")
-        loose = [z["step"] for z in result.get("zoom_steps", []) if not z["full_aim"]]
+        where = result.get("zoom_where")   # the steps that changed the zoom are judged, the others only kept
+        loose = [z["step"] for z in result.get("zoom_steps", []) if not z["full_aim"] and (not where or z["where"] == where)]
         if zoom and loose:
             notes.append(f"range steps {loose} were not held in full aim")
     return {"pass": bool(result.get("reached")) and not notes, "notes": notes}

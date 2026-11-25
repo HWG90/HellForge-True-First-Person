@@ -341,6 +341,33 @@ class ZoomCycle(unittest.TestCase):
         self.assertIn("full aim was lost while the scope's range was stepped", " ".join(result["notes"]))
         self.assertFalse(result["zoom_steps"][0]["full_aim"])
 
+    def test_the_fallback_passes_where_r_in_the_sights_drops_full_aim(self):
+        # the Steam reply's case: R in the sights takes the game out of full aim, and the ranges before aiming change
+        # the field of view. The in-aim step's loss is kept apart, and the phase passes on the fallback's steps.
+        aims = [0]
+
+        def react(script, log, n):
+            if script == "click middle":
+                aims[0] += 1
+                log.write(f"10:00:{aims[0]:02d}.700 State: aim in", _aim_line("in", 30.8 if aims[0] < 3 else 15.0, at=f"10:00:{aims[0]:02d}.900"))
+            elif script == aim.ZOOM_STEP and aims[0] == 1:
+                log.write("10:00:01.700 State: aim out")
+            elif script == "up right" and aims[0] > 1:
+                log.write(f"10:00:{aims[0]:02d}.990 State: aim out", f"10:00:{aims[0]:02d}.990 Aim: out after 2.4 s; zoom levels (game fov: "
+                          "sight m, depth m, optic): 30.8: sight 0.220, depth 0.270 | x")
+        _, result, tail = self.zoom(react)
+        self.assertFalse(result["zoom_steps"][0]["full_aim"])
+        self.assertEqual(result["zoom_where"], "before aim")
+        self.assertIn("full aim was lost while the scope's range was stepped", " ".join(result["in_aim_notes"]))
+        v = aim.verdict(result, tail.lines, aim.ZOOM_HOLD_S, zoom=True)
+        self.assertTrue(v["pass"], v["notes"])
+
+    def test_a_fallback_step_not_held_in_full_aim_still_fails(self):
+        result = {"reached": True, "notes": [], "zoom_where": "before aim",
+                  "zoom_steps": [{"step": 1, "where": "in aim", "full_aim": False}, {"step": 2, "where": "before aim", "full_aim": False}]}
+        lines = [AIM_IN_LINE, _aim_line("in", 15.0), "10:00:05.000 Aim: out after 2.4 s | x"]
+        self.assertEqual(aim.verdict(result, lines, aim.ZOOM_HOLD_S, zoom=True)["notes"], ["range steps [2] were not held in full aim"])
+
     def test_a_capture_for_each_range(self):
         shots = []
         game = FakeGame(self.log, lambda s, log, n: log.write("10:00:00.700 State: aim in", AIM_IN_LINE) if s == "click middle" else None)
