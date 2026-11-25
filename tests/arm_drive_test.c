@@ -1938,6 +1938,12 @@ static void test_grip_holds(void) {
   CHECK(g.frames == 30 && g.held > 10 && g.state == TFP_ARM_GRIP_HELD && g.found && !g.attachment && g.nodes == 1 && g.units == 1);
   CHECK(g.body_m < .001f && g.to_m < .001f && g.weight == 1 && g.step_degrees <= g.limit_degrees + 1e-3f && g.limit_degrees > 11 && g.limit_degrees < 12);
   CHECK(strstr(tfp_arm_drive_grip_line(&g), "30 frames") && strstr(tfp_arm_drive_grip_line(&g), "on the grip; the gun's own grip node"));
+  /* round 36: a gun whose only grip node is its own; the optic hangs on it without one. The units line says so, once */
+  CHECK(g.tree_units == 2 && g.listed == 2 && g.target_unit == 0 && g.gate_unit == 0 && g.target_node == 2 && g.gate_node == 2);
+  const char *units = tfp_arm_drive_grip_units_line(&g, true);
+  CHECK(units && strstr(units, "the gun's units: 2, 1 with a grip node: [0] the gun 0000000000000000, 4 nodes, grip node 2; "
+                               "[1] on [0] node 1 (00000000) 0000000000000000, 2 nodes, no grip node"));
+  CHECK(!tfp_arm_drive_grip_units_line(&g, true) && tfp_arm_drive_grip_units_line(&g, false));
   /* the rest of the arm and the right side are the drive's: only nodes 10, 12, 13 and what hangs on them moved */
   TfpGraftLocal with[TFP_GRAFT_RIG_NODES], without[TFP_GRAFT_RIG_NODES];
   tfp_arm_drive_set_rest(t += 16, TFP_ARM_REST_NONE, 0);
@@ -2027,6 +2033,129 @@ static void test_grip_foregrip(void) {
   grip_world(&behind, shifted_gun, shifted);
   for (int i = 0; i < 3; i++) grip_draw(t += 16, &hand, &socket);
   CHECK(grip_m(&hand, &at) < .002f);
+}
+/* Round 36 (the user's R-4 Hyena, "Hand on foregrip attachments is not working"): the game holds the body's left hand on
+ * the gun's OWN grip node, while a fitted vertical grip carries its own node further forward (the Hyena's standard vertical
+ * grip, mounted on the gun's attach_underbarrel node 7950E36E, has its node 0.169 m from the gun's: filediver, the unit
+ * files). The hand is to go on the grip, the attachment's node; the body's hand on the gun's node is what says the game pins
+ * it. Here the optic stands in for the grip unit, its node 0.12 m forward along the gun and 0.04 m down. */
+enum { FOREGRIP = 603 };
+static void grip_resources(void) {
+  const uint64_t gun = UINT64_C(0xe5796355a8fd67e0);
+  put(object_of(GUN) + 0x358, &gun, 8);
+  n32(names_of(GUN) + 1 * 4, UINT32_C(0x7950e36e)); /* attach_underbarrel */
+}
+/* The grip fitted: a new unit, the gun's first child (the optic its sibling), on gun node 1, its grip node at `offset`
+ * from the body's left hand. */
+static void fit_grip(const float *offset) {
+  const uint64_t grip = UINT64_C(0xf9df21c8e52cac95);
+  make_unit(FOREGRIP, 2, object_of(GUN), (1u << 16) | 2);
+  put(object_of(FOREGRIP) + 0x358, &grip, 8);
+  p64(object_of(GUN) + 0x1d8, object_of(FOREGRIP)), p64(object_of(FOREGRIP) + 0x1e0, object_of(OPTIC));
+  put(worlds_of(FOREGRIP), &rig_world[TFP_GRAFT_RIG_SOCKET], 64);
+  TfpGraftMatrix g = body_now[body_left_hand()];
+  for (unsigned i = 0; i < 3; i++) g.values[12 + i] += offset[i];
+  n32(names_of(FOREGRIP) + 1 * 4, GRIP_NAME_T), put(worlds_of(FOREGRIP) + 64, &g, 64);
+}
+static void forward_of_socket(float along, float up, float *out) {
+  const float *s = rig_world[TFP_GRAFT_RIG_SOCKET].values;
+  for (unsigned i = 0; i < 3; i++) out[i] = along * s[4 + i] + up * s[8 + i];
+}
+static void test_grip_foregrip_body_on_gun(void) {
+  static const float zero[3] = {0, 0, 0};
+  float ahead[3];
+  forward_of_socket(.12f, -.04f, ahead);
+  TfpGraftMatrix hand, socket;
+  /* first the gun alone, held on its own node; then the grip is fitted: the hand goes there within the step limits */
+  fresh();
+  grip_resources();
+  grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], zero, NULL);
+  tfp_arm_drive_set(true, true, 1);
+  tfp_arm_drive_set_grip(true, false);
+  uint64_t t = 1000;
+  for (int i = 0; i < 30; i++) grip_draw(t += 16, &hand, &socket);
+  TfpArmDriveGrip g;
+  tfp_arm_drive_grip_take(&g);
+  CHECK(g.state == TFP_ARM_GRIP_HELD && !g.attachment && g.target_unit == 0);
+  fit_grip(ahead);
+  const TfpGraftMatrix want = grip_on_socket(ahead), own = grip_on_socket(zero);
+  TfpGraftMatrix at = tfp_graft_product(&want, &socket);
+  const float from_own = grip_m(&want, &own);
+  const float first = grip_m(&hand, &at);
+  int frames = 0;
+  for (; frames < 60; frames++) {
+    grip_draw(t += 16, &hand, &socket);
+    at = tfp_graft_product(&want, &socket);
+    const float now = grip_m(&hand, &at);
+    CHECK(now <= first + .01f); /* on its way: the joints' limits allow a wobble, not a turn back to the gun's own node */
+    tfp_arm_drive_grip_take(&g);
+    CHECK(g.step_degrees <= g.limit_degrees + 1e-3f);
+    if (now < .001f && grip_degrees(&hand, &at) < .01f) break;
+  }
+  printf("arm drive: grip: a vertical grip fitted %.3f m from the gun's own node, the body's hand on the gun's: the drawn hand on the "
+         "grip after %d frames, %.4f m / %.2f degrees from it\n", (double)from_own, frames + 1, (double)grip_m(&hand, &at), (double)grip_degrees(&hand, &at));
+  CHECK(frames < 40 && grip_m(&hand, &at) < .001f && grip_degrees(&hand, &at) < .01f);
+  for (int i = 0; i < 30; i++) grip_draw(t += 16, &hand, &socket);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(g.state == TFP_ARM_GRIP_HELD && g.held == 30 && g.found && g.attachment && g.nodes == 2 && g.units == 2 && g.body_m < .001f);
+  CHECK(g.target_unit == 1 && g.target_node == 1 && g.gate_unit == 0 && g.gate_node == 2 && g.drawn);
+  CHECK(grip_m(&hand, &at) < .001f && g.step_degrees <= g.limit_degrees + 1e-3f);
+  CHECK(strstr(tfp_arm_drive_grip_line(&g), "on the grip; an attachment's grip node (2 grip nodes on 2 of the gun's units), the body's hand 0.000 m from the gun's own"));
+  const char *units = tfp_arm_drive_grip_units_line(&g, false);
+  CHECK(strstr(units, "the gun's units: 3, 2 with a grip node: [0] the gun e5796355a8fd67e0, 4 nodes, grip node 2; [1] on [0] node 1 (7950e36e) "
+                      "f9df21c8e52cac95, 2 nodes, grip node 1; [2] on [0] node 1 (7950e36e) 0000000000000000, 2 nodes, no grip node"));
+  /* steady: the target stays the grip's while the body's hand stays on the gun's own node (no drift between the two) */
+  TfpGraftMatrix before = hand;
+  for (int i = 0; i < 30; i++) grip_draw(t += 16, &hand, &socket);
+  CHECK(!memcmp(&hand, &before, sizeof hand));
+  /* the body's hand leaves the gun (a reload): the arm goes back to the body's pose; then back on the grip */
+  static const float far[3] = {.2f, 0, 0};
+  grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], far, NULL);
+  for (int i = 0; i < 5; i++) grip_draw(t += 16, &hand, &socket);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(g.state == TFP_ARM_GRIP_FREE);
+  grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], zero, NULL);
+  for (int i = 0; i < 60; i++) grip_draw(t += 16, &hand, &socket);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(g.state == TFP_ARM_GRIP_HELD && g.target_unit == 1 && grip_m(&hand, &at) < .001f);
+}
+/* Round 36: a grip unit that is not a child of the gun but hangs on one of its nodes from elsewhere (a child of the rig
+ * whose external array is the gun's): seen, listed as from elsewhere, and held. */
+enum { LOOSE_GRIP = 602 };
+static void test_grip_mounted_from_rig(void) {
+  static const float zero[3] = {0, 0, 0};
+  float ahead[3];
+  forward_of_socket(.12f, -.04f, ahead);
+  TfpGraftMatrix hand, socket;
+  fresh();
+  grip_resources();
+  make_unit(LOOSE_GRIP, 2, object_of(RIG), (1u << 16) | 2);
+  p64(object_of(LOOSE_GRIP) + 0x78, worlds_of(GUN));
+  { const uint64_t grip = UINT64_C(0x177863efec0c9807); put(object_of(LOOSE_GRIP) + 0x358, &grip, 8); }
+  p64(object_of(RIG) + 0x1d8, object_of(LOOSE_GRIP)); /* the rig's first child; the gun is not in this list here */
+  grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], zero, NULL);
+  put(worlds_of(LOOSE_GRIP), &rig_world[TFP_GRAFT_RIG_SOCKET], 64);
+  {
+    TfpGraftMatrix g = body_now[body_left_hand()];
+    for (unsigned i = 0; i < 3; i++) g.values[12 + i] += ahead[i];
+    n32(names_of(LOOSE_GRIP) + 1 * 4, GRIP_NAME_T), put(worlds_of(LOOSE_GRIP) + 64, &g, 64);
+  }
+  tfp_arm_drive_set(true, true, 1);
+  tfp_arm_drive_set_grip(true, false);
+  uint64_t t = 1000;
+  for (int i = 0; i < 60; i++) grip_draw(t += 16, &hand, &socket);
+  TfpArmDriveGrip g;
+  tfp_arm_drive_grip_take(&g);
+  const TfpGraftMatrix want = grip_on_socket(ahead), at = tfp_graft_product(&want, &socket);
+  CHECK(g.state == TFP_ARM_GRIP_HELD && g.attachment && g.nodes == 2 && g.units == 2 && g.tree_units == 3 && g.target_unit == 2);
+  CHECK(grip_m(&hand, &at) < .001f && grip_degrees(&hand, &at) < .01f);
+  const char *units = tfp_arm_drive_grip_units_line(&g, false);
+  CHECK(strstr(units, "[2] from elsewhere, on [0] node 1 (7950e36e) 177863efec0c9807, 2 nodes, grip node 1"));
+  /* a unit of the rig that hangs on the rig, not on the gun, is not taken */
+  p64(object_of(LOOSE_GRIP) + 0x78, worlds_of(RIG));
+  for (int i = 0; i < 5; i++) grip_draw(t += 16, &hand, &socket);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(g.tree_units == 2 && !g.attachment && g.target_unit == 0);
 }
 /* The body's left hand on no grip node (a reload, a weapon the game does not pin): the arm is the body's. One-handed,
  * aiming (weight 0), and the test switch off: the same. */
@@ -2135,6 +2264,8 @@ int main(int argc, char **argv) {
   test_grip_holds();
   test_grip_reach_forward();
   test_grip_foregrip();
+  test_grip_foregrip_body_on_gun();
+  test_grip_mounted_from_rig();
   test_grip_left_alone();
   test_grip_step_limit();
   if (argc == 3) test_rest_recorded(argv[2]);

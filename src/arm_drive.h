@@ -229,7 +229,9 @@ const char *tfp_arm_drive_held(void);
  * grip node (name 67C94E4B; a foregrip's or vertical grip's own node when one is fitted) as the gun is drawn, whenever the
  * body's left hand is on that node in the world (the game pins it there, also while the rig is the view), by a two-bone
  * reach of the upper arm, forearm and hand (rig nodes 10, 12, 13) on the poses the drive writes, with its step limits; the
- * shoulder (node 10) comes forward where the grip is beyond 97 % of the arm (round 26).
+ * shoulder (node 10) comes forward where the grip is beyond 97 % of the arm (round 26). Round 36: the body's hand on any
+ * grip node of the gun says the game pins it; the hand holds a fitted grip's node even when the body's is on the gun's own
+ * (the R-4 Hyena's case), and units hanging on the gun's nodes from elsewhere (the rig's or the body's) are searched too.
  * one_handed: a handgun at the hip, held in one hand: the hand stays as the body holds it. While aiming the copy fades out
  * (the drive's weight) and the game's own aim pose holds the gun; the reach is not asked for then. */
 void tfp_arm_drive_set_grip(bool on, bool one_handed);
@@ -248,6 +250,15 @@ enum {
   TFP_ARM_GRIP_POSE,      /* the arm's pose was not usable this frame */
   TFP_ARM_GRIPS
 };
+/* One of the gun's units as the grip search saw it (round 36). */
+enum { TFP_ARM_GRIP_LIST = 6 };
+typedef struct TfpArmDriveGripUnit {
+  uint64_t resource;              /* the unit's resource (its 64-bit name hash) */
+  uint32_t nodes;
+  uint32_t on, on_node, on_name;  /* the unit[] index it hangs on, that unit's node and the node's name (unit 0: the gun, on the rig) */
+  uint32_t grips, grip_node;      /* its grip nodes (name 67C94E4B), and the first */
+  bool elsewhere;                 /* not a child of the gun: a unit of the rig or the body mounted on one of the gun's nodes */
+} TfpArmDriveGripUnit;
 typedef struct TfpArmDriveGrip {
   uint32_t frames, held;          /* driven frames with the grip switched on; of those, held on the grip */
   uint32_t state;                 /* TFP_ARM_GRIP_* of the last frame */
@@ -267,8 +278,20 @@ typedef struct TfpArmDriveGrip {
   float body_degrees;             /* the largest turn of the drive's own arm joints in one frame while the reach was in force */
   bool drawn;                     /* the drawn hand was measured against the gun as evaluated for the draw (held, full weight) */
   float drawn_m, most_drawn_m;    /* the rig's evaluated hand from the gun's evaluated grip node: last frame, the most while held */
+  /* round 36: the gun's units as the last grip search saw them, and which node the hand holds and the body's is on */
+  uint32_t tree_units;            /* the gun, its attachments, and units from elsewhere mounted on its nodes */
+  uint32_t listed;                /* of them in unit[] (the first TFP_ARM_GRIP_LIST) */
+  TfpArmDriveGripUnit unit[TFP_ARM_GRIP_LIST];
+  int32_t target_unit, gate_unit; /* unit[] indices: the node the hand holds, the node the body's hand is on (-1: none) */
+  uint32_t target_node, gate_node;
 } TfpArmDriveGrip;
 void tfp_arm_drive_grip_take(TfpArmDriveGrip *out);
+/* "the gun's units: 2, 2 with a grip node: [0] the gun e5796355a8fd67e0, 39 nodes, grip node 13; [1] on [0] node 17
+ * (7950e36e) f9df21c8e52cac95, 13 nodes, grip node 8". Resources are the units' 64-bit name hashes (filediver's), the
+ * name in brackets is that of the node a unit hangs on, grip nodes are those named 67C94E4B; "[2] from elsewhere, on
+ * [0] ..." is a unit that is not the gun's child but hangs on one of its nodes. only_changed: NULL when the list is the one
+ * last returned with only_changed (which node the hand holds is in the Grip: line). A static buffer. */
+const char *tfp_arm_drive_grip_units_line(const TfpArmDriveGrip *grip, bool only_changed);
 /* "60 frames, 60 held: on the attachment's grip (2 grip nodes on 3 units), the body's hand 0.002 m from it; hand 0.000 m from
  * the grip (most 0.004), largest joint step 3.1 degrees (allowed 12.0), weight 1.00; reach 1.05 of the arm (most 1.08), shoulder
  * forward 0.047 m (most 0.065), held step 0.4 degrees, the body's arm turned 2.0 degrees, 0 frames cut, not taken: 0 out of reach,
