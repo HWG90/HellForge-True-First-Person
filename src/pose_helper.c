@@ -786,6 +786,19 @@ static float depth_delta(Policy *p, const DepthObservation *observation, uint64_
  * that both belong to this call. True: `*delta` is to go out in place of the term's own number (it can be nothing).
  * `argument` is the game's own forward value for the node, for the line only. */
 static TfpSteady steady; static TfpSteadyLog steady_log; static TfpSteadyPair steady_pair;
+/* Not in retail (round 39, src/reload_hold.h): the eye held through a reload. Under the policy lock. reload_lease: the
+ * lease C was read for (reload_read: it was); reload_known: C's forward part was read, in reload_forward. */
+static TfpReloadHold reload_hold; static uint64_t reload_lease; static bool reload_read, reload_known; static float reload_forward;
+/* C, the game's reload vector, from the evaluator's own code: the 460 bytes from game+0x1287a44 checked against the
+ * pinned evaluator, the three floats its nine instructions name read where they name them (src/reload_hold.h). Its
+ * forward part (request+0x4c's) to `*forward`. Once a lease: C is the game's data, and a lease is short. */
+static bool reload_constant(const TfpPoseConfig *c, float *forward) {
+  uint8_t code[TFP_RELOAD_CODE_SIZE]; uint32_t rva = 0; float vector[3] = {0, 0, 0};
+  if (!read(c->game + TFP_RELOAD_CODE_RVA, code, sizeof code) || !tfp_reload_code(code, &rva)
+      || !read(c->game + rva, vector, sizeof vector) || !tfp_reload_constant_ok(vector)) return false;
+  *forward = vector[1];
+  return true;
+}
 /* Not in retail (round 20, src/ads_seat.h): the binder's sight and wanted distance, and what the last frame did. */
 static _Atomic uint32_t ads_sight, ads_wanted, ads_pull_bits, ads_share_bits, ads_closer_bits, ads_forward_bits, ads_depth_bits = UINT32_C(0x7fc00000);
 static _Atomic uint32_t ads_full, ads_near_bits; /* what the near clip moves in by (tfp_pose_ads_near) */
@@ -843,6 +856,22 @@ static bool steady_frame(Policy *p, const DepthObservation *observation, uint64_
     if (reason == TFP_STEADY_OFF && mode == 1) reason = TFP_STEADY_NO_ROOT;
     /* Round 20, review 24: a frame passed in full aim keeps the held distance instead of stepping (tfp_steady_carry) */
     if (reason != TFP_STEADY_WORKED && aim_held) carried = tfp_steady_carry(&steady, &in, reason, p->full_ads, generation, (double)now, depth, delta);
+    /* Round 39 (src/reload_hold.h): the eye held through a reload. The rig's own vector of the last frame without the
+     * game's C in it (`argument`, less C, with what the held depth added) is put back in the share of C, by the hip
+     * share: node 5 forward and the root back, the held depth's own pair. Added only to a frame the held depth worked
+     * out (the request proven this frame's, the switch on); every other frame here is counted as not held. Nothing is
+     * added to a frame with none of C in it. */
+    if (reason != TFP_STEADY_RANGE) {
+      if (!reload_read || reload_lease != generation) { reload_read = true; reload_lease = generation; reload_known = reload_constant(&p->c, &reload_forward); }
+      TfpReloadInput r; memset(&r, 0, sizeof r);
+      r.blend = in.blend; r.ability = in.ability; r.bit = in.bit; r.mix_before = in.mix_before; r.mix_after = in.mix_after;
+      r.argument = argument; r.constant = reload_forward; r.constant_known = reload_known; r.added = reason == TFP_STEADY_WORKED ? *delta : 0;
+      r.share = p->weight; r.on = reason == TFP_STEADY_WORKED;
+      float added = 0; TfpReloadEnd end;
+      tfp_reload_frame(&reload_hold, &r, generation, &added, &end);
+      tfp_reload_note(&steady_log.now.reload, &end);
+      if (reason == TFP_STEADY_WORKED) *delta += added;
+    }
     bit = in.bit;
     tfp_steady_aim_note(&steady_log, p->full_ads, reason == TFP_STEADY_WORKED || reason == TFP_STEADY_OFF || reason == TFP_STEADY_NO_ROOT
                         || (carried && reason == TFP_STEADY_SCALED), depth+*delta);
@@ -2226,6 +2255,7 @@ void tfp_pose_reset_for_tests(void) {
   atomic_store(&hold_mode, 0); atomic_store(&hold_probe, 0); atomic_store(&hold_node5_calls, 0);
   memset(&gate, 0, sizeof gate); atomic_store(&gate_reads, 0); atomic_store(&depth_off, 0);
   memset(&steady, 0, sizeof steady); memset(&steady_log, 0, sizeof steady_log); memset(&steady_pair, 0, sizeof steady_pair); atomic_store(&steady_mode, 0); atomic_store(&aim_steady, 0);
+  memset(&reload_hold, 0, sizeof reload_hold); reload_lease = 0; reload_read = reload_known = false; reload_forward = 0;
   atomic_store(&ads_sight, 0); atomic_store(&ads_wanted, 0); atomic_store(&ads_pull_bits, 0); atomic_store(&ads_share_bits, 0);
   atomic_store(&ads_closer_bits, 0); atomic_store(&ads_forward_bits, 0); atomic_store(&ads_depth_bits, UINT32_C(0x7fc00000)); atomic_store(&ads_full, 0);
   atomic_store(&ads_near_bits, 0); atomic_store(&ads_editing, 0);

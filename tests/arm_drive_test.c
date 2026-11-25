@@ -2243,6 +2243,8 @@ static void test_grip_drawn_line(void) {
   big.body_m = big.to_m = big.most_to_m = big.reach = big.most_reach = big.shoulder_m = big.most_shoulder_m = -999999.f;
   big.step_degrees = big.limit_degrees = big.weight = big.held_step_degrees = big.body_degrees = -999999.f;
   big.drawn = true;
+  big.gate = TFP_ARM_GATE_NOT_AT_REST, big.taken = big.let_far = big.let_fast = big.let_action = UINT32_MAX;
+  big.gun_mps = big.most_held_mps = -999999.f;
   TfpArmDriveDrawn *const b[2] = {&big.hip, &big.aim};
   for (unsigned k = 0; k < 2; k++) {
     b[k]->frames = b[k]->held = UINT32_MAX;
@@ -2250,8 +2252,12 @@ static void test_grip_drawn_line(void) {
   }
   for (uint32_t state = 0; state < TFP_ARM_GRIPS; state++) {
     big.state = state;
-    CHECK(strlen(tfp_arm_drive_grip_line(&big)) + 6 < 700);
+    for (uint32_t gate = 0; gate < TFP_ARM_GATES; gate++) {
+      big.gate = gate, big.gun_mps = gate % 2 ? -1.f : -999999.f;
+      CHECK(strlen(tfp_arm_drive_grip_line(&big)) + 6 < 700 && strlen(tfp_arm_drive_grip_gate_line(&big)) + 12 < 700);
+    }
   }
+  big.gate = TFP_ARM_GATE_NOT_AT_REST, big.gun_mps = -999999.f;
   CHECK(strlen(tfp_arm_drive_grip_drawn_line(&big)) + 6 < 700);
   printf("arm drive: grip lines at most %zu and %zu characters (say() keeps 699)\n", strlen(tfp_arm_drive_grip_line(&big)) + 6,
          strlen(tfp_arm_drive_grip_drawn_line(&big)) + 6);
@@ -2519,6 +2525,200 @@ static void test_grip_step_limit(void) {
   }
 }
 
+/* ---- Round 38b: the grip gate (the user on feel.56, AR-23 Liberator with a vertical grip: "Still not holding onto the
+ * grip"). The game rests the body's left hand some 9 cm from both grip nodes (the gun's own and the grip's), never within
+ * the 3 cm that took a grip until now: 16925 frames free, 134 on the grip. The hand is now held whenever the body's hand
+ * is with the gun (by the grip and steady against it) and let go when it truly leaves: beyond the leave radius, moving
+ * fast against the gun (a reload's pull, a melee), or the game's own action (its reload flag, the drive's hold).
+ * The test world puts the grip nodes against the body's hand, so the hand moving by d is every node moving by -d. */
+static const float LIB_GUN[3] = {-.06f, .07f, 0}, LIB_GRIP[3] = {.06f, -.07f, 0}; /* along the socket, up: 0.092 m each */
+static float lib_side[3];  /* the socket's X: a reload's reach to the magazine, across the gun */
+static void liberator(const float *hand_moved) {
+  float gun[3], grip[3], g[3], a[3];
+  forward_of_socket(LIB_GUN[0], LIB_GUN[1], g), forward_of_socket(LIB_GRIP[0], LIB_GRIP[1], a);
+  for (unsigned i = 0; i < 3; i++) gun[i] = g[i] - hand_moved[i], grip[i] = a[i] - hand_moved[i];
+  grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], gun, NULL);
+  fit_grip(grip);
+}
+static void liberator_at(float side) {
+  float moved[3];
+  for (unsigned i = 0; i < 3; i++) moved[i] = side * lib_side[i];
+  liberator(moved);
+}
+static void reload_flag(bool on) {
+  uint8_t byte;
+  CHECK(read_fake(&f, AVATAR + FP_AVATAR_FLAGS + 15, &byte, 1));
+  byte = on ? (uint8_t)(byte | 2) : (uint8_t)(byte & ~2);
+  put(AVATAR + FP_AVATAR_FLAGS + 15, &byte, 1);
+}
+static float liberator_hand_off(const TfpGraftMatrix *hand, const TfpGraftMatrix *socket) {
+  float a[3];
+  forward_of_socket(LIB_GRIP[0], LIB_GRIP[1], a);
+  const TfpGraftMatrix want = grip_on_socket(a), at = tfp_graft_product(&want, socket);
+  return grip_m(hand, &at);
+}
+/* frames until held again (each checked within the step limits), at most `limit` */
+static int until_held(uint64_t *t, int limit, TfpGraftMatrix *hand, TfpGraftMatrix *socket) {
+  for (int i = 0; i < limit; i++) {
+    grip_draw(*t += 16, hand, socket);
+    TfpArmDriveGrip g;
+    tfp_arm_drive_grip_take(&g);
+    CHECK(g.step_degrees <= g.limit_degrees + 1e-3f);
+    if (g.state == TFP_ARM_GRIP_HELD && liberator_hand_off(hand, socket) < .001f) return i + 1;
+  }
+  return limit + 1;
+}
+static void test_grip_gate_liberator(void) {
+  TfpGraftMatrix hand, socket;
+  static const float still[3] = {0, 0, 0};
+  for (unsigned i = 0; i < 3; i++) lib_side[i] = rig_world[TFP_GRAFT_RIG_SOCKET].values[i];
+  fresh();
+  grip_resources();
+  liberator(still);
+  tfp_arm_drive_set(true, true, 1);
+  tfp_arm_drive_set_grip(true, false);
+  uint64_t t = 1000;
+  /* the body's hand 0.092 m from both nodes, steady: held on the grip's node, after a short settle */
+  const int first = until_held(&t, 60, &hand, &socket);
+  for (int i = 0; i < 30; i++) grip_draw(t += 16, &hand, &socket);
+  TfpArmDriveGrip g;
+  tfp_arm_drive_grip_take(&g);
+  printf("arm drive: grip gate: the body's hand %.3f m from both nodes and steady (the Liberator): held after %d frames, "
+         "the drawn hand %.4f m from the grip's node\n", (double)g.body_m, first, (double)liberator_hand_off(&hand, &socket));
+  CHECK(first < 30 && g.state == TFP_ARM_GRIP_HELD && g.held == 30 && g.attachment && g.target_unit == 1);
+  CHECK(g.gate == TFP_ARM_GATE_WITH_GUN && g.body_m > .09f && g.body_m < .095f && g.gun_mps >= 0 && g.gun_mps < .01f);
+  CHECK(liberator_hand_off(&hand, &socket) < .001f && g.step_degrees <= g.limit_degrees + 1e-3f);
+  CHECK(strstr(tfp_arm_drive_grip_line(&g), "on the grip; an attachment's grip node"));
+  CHECK(strstr(tfp_arm_drive_grip_gate_line(&g), "held, the body's hand with the gun (0.092 m from the nearest grip node, 0.00 m/s against the gun)"));
+  /* aiming (round 36b's path, the weight down as arm_weight.h steps it): still held */
+  for (float w = 1; w > 0;) {
+    w = tfp_arm_weight_step(w, true, 16);
+    tfp_arm_drive_set(true, true, w);
+    grip_draw(t += 16, &hand, &socket);
+  }
+  tfp_arm_drive_grip_take(&g);
+  CHECK(!g.let_far && !g.let_fast && !g.let_action);
+  for (int i = 0; i < 10; i++) grip_draw(t += 16, &hand, &socket);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(g.state == TFP_ARM_GRIP_HELD && g.held == 10 && g.gate == TFP_ARM_GATE_WITH_GUN && liberator_hand_off(&hand, &socket) < .001f);
+  for (float w = 0; w < 1;) {
+    w = tfp_arm_weight_step(w, false, 16);
+    tfp_arm_drive_set(true, true, w);
+    grip_draw(t += 16, &hand, &socket);
+  }
+  for (int i = 0; i < 10; i++) grip_draw(t += 16, &hand, &socket);
+  /* a reload: the body's hand goes 0.10 m across the gun to the magazine in 80 ms (still within the take radius of
+   * both nodes), rests there 400 ms, comes back in 80 ms. Let go on the pull; not taken at the magazine; held again */
+  tfp_arm_drive_grip_take(&g);
+  bool let_go = false;
+  int let_at = -1;
+  for (int i = 1; i <= 5; i++) {
+    liberator_at(.02f * (float)i);
+    grip_draw(t += 16, &hand, &socket);
+    tfp_arm_drive_grip_take(&g);
+    CHECK(g.step_degrees <= g.limit_degrees + 1e-3f);
+    if (!let_go && g.state != TFP_ARM_GRIP_HELD) let_go = true, let_at = i;
+  }
+  CHECK(let_go && g.state != TFP_ARM_GRIP_HELD && g.body_m < .15f);
+  bool any_held = false;
+  TfpArmDriveGrip at_mag;
+  memset(&at_mag, 0, sizeof at_mag);
+  for (int i = 0; i < 25; i++) {
+    grip_draw(t += 16, &hand, &socket);
+    tfp_arm_drive_grip_take(&g);
+    any_held |= g.held != 0;
+    CHECK(g.step_degrees <= g.limit_degrees + 1e-3f);
+    if (i == 24) at_mag = g;
+  }
+  CHECK(!any_held && at_mag.state == TFP_ARM_GRIP_FREE && at_mag.gate == TFP_ARM_GATE_NOT_AT_REST && at_mag.body_m < .15f);
+  CHECK(strstr(tfp_arm_drive_grip_gate_line(&at_mag), "not held, the body's hand by the grip but not where it rests on this gun"));
+  for (int i = 4; i >= 0; i--) {
+    liberator_at(.02f * (float)i);
+    grip_draw(t += 16, &hand, &socket);
+  }
+  const int back = until_held(&t, 60, &hand, &socket);
+  for (int i = 0; i < 5; i++) grip_draw(t += 16, &hand, &socket);
+  tfp_arm_drive_grip_take(&g);
+  printf("arm drive: grip gate: a reload's pull (0.10 m in 80 ms) let go on frame %d, not taken at the magazine for 400 ms, "
+         "held again %d frames after the hand came back\n", let_at, back);
+  CHECK(back < 40 && g.state == TFP_ARM_GRIP_HELD);
+  /* the game's reload flag lets go though the body's hand stays; back once it clears */
+  reload_flag(true);
+  for (int i = 0; i < 3; i++) grip_draw(t += 16, &hand, &socket);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(g.state == TFP_ARM_GRIP_FREE && g.gate == TFP_ARM_GATE_ACTION && g.let_action == 1 && !g.held);
+  CHECK(strstr(tfp_arm_drive_grip_gate_line(&g), "not held, the game's action (a reload it flags, or a hold)"));
+  for (int i = 0; i < 20; i++) grip_draw(t += 16, &hand, &socket);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(!g.held && g.gate == TFP_ARM_GATE_ACTION && g.step_degrees <= g.limit_degrees + 1e-3f);
+  reload_flag(false);
+  CHECK(until_held(&t, 60, &hand, &socket) < 40);
+  /* a melee: the hand 0.30 m away in 100 ms: let go (fast, then far), then back */
+  tfp_arm_drive_grip_take(&g);
+  for (int i = 1; i <= 6; i++) {
+    float moved[3];
+    forward_of_socket(.05f * (float)i, 0, moved);
+    liberator(moved);
+    grip_draw(t += 16, &hand, &socket);
+  }
+  for (int i = 0; i < 10; i++) grip_draw(t += 16, &hand, &socket);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(g.state == TFP_ARM_GRIP_FREE && g.gate == TFP_ARM_GATE_FAR && g.let_fast + g.let_far == 1 && g.body_m > .18f);
+  liberator(still);
+  CHECK(until_held(&t, 60, &hand, &socket) < 40);
+  /* a throw or a stratagem: the drive's hold says the game is in an action */
+  tfp_arm_drive_set_hold(true);
+  for (int i = 0; i < 5; i++) grip_draw(t += 16, &hand, &socket);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(g.state == TFP_ARM_GRIP_FREE && g.gate == TFP_ARM_GATE_ACTION && g.let_action == 1);
+  tfp_arm_drive_set_hold(false);
+  CHECK(until_held(&t, 60, &hand, &socket) < 40);
+  /* moving slowly against the gun (walking sway, breathing: 0.2 m/s, a few centimetres) keeps it */
+  tfp_arm_drive_grip_take(&g);
+  for (int i = 0; i < 60; i++) {
+    liberator_at(.02f * sinf((float)i * .2f));
+    grip_draw(t += 16, &hand, &socket);
+  }
+  tfp_arm_drive_grip_take(&g);
+  CHECK(g.state == TFP_ARM_GRIP_HELD && g.held == 60 && !g.let_fast && !g.let_far && !g.let_action && g.most_held_mps > .05f);
+  printf("arm drive: grip gate: the game's reload flag and a hold let go, a melee too; a sway of %.2f m/s against the gun keeps it\n",
+         (double)g.most_held_mps);
+  liberator(still);
+}
+/* Round 38b: the pinned case (the body's hand on the gun's own node, the old take) still holds at once, says so, and a hand
+ * that only passes a node fast is not taken; far away the line says why. */
+static void test_grip_gate_pinned(void) {
+  static const float zero[3] = {0, 0, 0}, far[3] = {.2f, 0, 0};
+  TfpGraftMatrix hand, socket;
+  fresh();
+  grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], zero, NULL);
+  tfp_arm_drive_set(true, true, 1);
+  tfp_arm_drive_set_grip(true, false);
+  uint64_t t = 1000;
+  grip_draw(t += 16, &hand, &socket);
+  TfpArmDriveGrip g;
+  tfp_arm_drive_grip_take(&g);
+  CHECK(g.state != TFP_ARM_GRIP_FREE && g.gate == TFP_ARM_GATE_ON_NODE && g.taken == 1); /* the first frame: no settle */
+  for (int i = 0; i < 30; i++) grip_draw(t += 16, &hand, &socket);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(g.state == TFP_ARM_GRIP_HELD && g.gate == TFP_ARM_GATE_ON_NODE);
+  CHECK(strstr(tfp_arm_drive_grip_gate_line(&g), "held, the body's hand on a grip node (0.000 m"));
+  grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], far, NULL);
+  for (int i = 0; i < 10; i++) grip_draw(t += 16, &hand, &socket);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(g.state == TFP_ARM_GRIP_FREE && g.gate == TFP_ARM_GATE_FAR && g.let_far + g.let_fast == 1);
+  CHECK(strstr(tfp_arm_drive_grip_gate_line(&g), "not held, the body's hand 0.200 m from the nearest grip node"));
+  /* swept through the node at 2.5 m/s: not taken on the way */
+  for (int i = -4; i <= 4; i++) {
+    const float at[3] = {.04f * (float)i, 0, 0};
+    grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], at, NULL);
+    grip_draw(t += 16, &hand, &socket);
+    tfp_arm_drive_grip_take(&g);
+    CHECK(!g.held && g.state == TFP_ARM_GRIP_FREE);
+  }
+  printf("arm drive: grip gate: the body's hand on the node is held at once; swept through it at 2.5 m/s, not taken\n");
+}
+
 int main(int argc, char **argv) {
   if (argc != 2 && argc != 3) { fprintf(stderr, "usage: arm_drive_test FIXTURE [EVERY-FRAME-FIXTURE]\n"); return 2; }
   load(argv[1]);
@@ -2560,6 +2760,8 @@ int main(int argc, char **argv) {
   test_grip_fingers_close();
   test_grip_left_alone();
   test_grip_step_limit();
+  test_grip_gate_liberator();
+  test_grip_gate_pinned();
   if (argc == 3) test_rest_recorded(argv[2]);
   printf("arm drive: %u checks passed\n", checks);
   return 0;

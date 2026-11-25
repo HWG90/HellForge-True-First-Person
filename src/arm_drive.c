@@ -139,7 +139,20 @@ typedef struct GripUnit {
   uint64_t resource;
   uint32_t on, on_name;
 } GripUnit;
-static const float GRIP_PIN_M = .03f, GRIP_LEAVE_M = .10f;
+/* Round 38b, the gate: whether the body's left hand is with the gun. GRIP_PIN_M: on a node (the game pins it there):
+ * taken at once unless moving fast. GRIP_TAKE_M: within this of the nearest grip node (either: the gun's own or an
+ * attachment's) and steady (GRIP_STEADY_MPS against the gun) for GRIP_SETTLE_MS, it is taken; the feel.56 AR-23 Liberator
+ * with a vertical grip rested the body's hand 0.085 to 0.101 m from both nodes, so the 3 cm take of rounds 23 to 37 held
+ * it in 134 frames of 20910. Once held it is kept until the body's hand is beyond GRIP_LEAVE_M, moves faster than
+ * GRIP_FAST_MPS against the gun (a reload's pull, a melee), or the game's action says so (its reload flag; the drive's
+ * hold through a throw, a stratagem, an injection). Speeds are of the hand in a grip node's own frame (rigid on the gun),
+ * over the last GRIP_SPEED_MS, so walking and turning, which move the two together, are not counted. Where the hand rests
+ * on this gun while held (GRIP_REST_S to follow it) is kept: after letting go it is taken again only back within
+ * GRIP_RETURN_M of there, or after GRIP_SETTLE_LONG_MS steady anywhere by the grip (a pause at the magazine is neither). */
+static const float GRIP_PIN_M = .03f, GRIP_TAKE_M = .15f, GRIP_LEAVE_M = .18f, GRIP_RETURN_M = .05f;
+static const float GRIP_STEADY_MPS = .35f, GRIP_FAST_MPS = .9f;
+static const double GRIP_REST_S = .5;
+enum { GRIP_SPEED_MS = 80, GRIP_TRACK_MS = 250, GRIP_SETTLE_MS = 150, GRIP_SETTLE_LONG_MS = 800, GRIP_TRACK = 32 };
 
 static struct {
   TfpArmDriveHost host;
@@ -196,7 +209,7 @@ static struct {
     unsigned unit_count;
     /* the node the body's hand is on: taken once the body's hand was on it, kept while it is there and the hand is on no other */
     bool latched, held, has_rel, has_last;
-    bool pinned; /* the body's hand within GRIP_PIN_M of the gate this frame: the game pins it (offhand_grip.h TfpOffhand.pinned) */
+    bool pinned; /* the gate holds the body's hand with the gun this frame (offhand_grip.h TfpOffhand.pinned; round 38b) */
     uintptr_t object;
     uint32_t ref, node, weapon;
     /* the node the hand holds (round 36): an attachment's when one is fitted, though the body's hand is on the gun's own */
@@ -216,6 +229,14 @@ static struct {
     uintptr_t own_object; /* the gun's own grip node nearest the one held (0: the gun has none), for the log */
     uint32_t own_node;
     float last[3];      /* its world position in the last frame: the body's hand trails it by up to a frame */
+    /* round 38b, the gate: the body's hand in the frame of the gun's first grip node (ref_*), its last GRIP_TRACK_MS */
+    bool action;        /* this frame: the game's reload flag (the snapshot's), or the drive's hold */
+    uintptr_t ref_object;
+    uint32_t ref_node, track_count, track_next;
+    struct { uint64_t at; float p[3]; } track[GRIP_TRACK];
+    uint64_t steady_since; /* the body's hand by the grip and steady since (0: it is not) */
+    bool has_rest;
+    float rest[3];      /* where it rests on this gun while held, in the same frame */
     TfpArmDriveGrip seen;
   } grip;
 } d;
@@ -784,6 +805,32 @@ static float grip_gap(const float *a, const float *b) {
   const float x = a[0] - b[0], y = a[1] - b[1], z = a[2] - b[2];
   return sqrtf(x * x + y * y + z * z);
 }
+/* ---- round 38b, the gate's track of the body's hand against the gun ---- */
+static void grip_track_reset(void) { d.grip.track_count = d.grip.track_next = 0, d.grip.steady_since = 0; }
+/* `hand` (world) in the frame of the rigid node matrix `ref`: its offset along the node's own axes */
+static void grip_local(const TfpGraftMatrix *ref, const float *hand, float out[3]) {
+  const float v[3] = {hand[0] - ref->values[12], hand[1] - ref->values[13], hand[2] - ref->values[14]};
+  for (unsigned k = 0; k < 3; ++k) out[k] = v[0] * ref->values[4 * k] + v[1] * ref->values[4 * k + 1] + v[2] * ref->values[4 * k + 2];
+}
+/* The speed (m/s) from the newest sample at least GRIP_SPEED_MS old (else the oldest there is) to `p`, then `p` kept;
+ * -1: no clock or nothing within GRIP_TRACK_MS. */
+static float grip_track(const float p[3]) {
+  if (!d.now) return -1;
+  float mps = -1;
+  for (unsigned k = 1; k <= d.grip.track_count; ++k) { /* newest first */
+    const unsigned i = (d.grip.track_next + GRIP_TRACK - k) % GRIP_TRACK;
+    if (d.grip.track[i].at > d.now || d.now - d.grip.track[i].at > GRIP_TRACK_MS) break;
+    const uint64_t age = d.now - d.grip.track[i].at;
+    if (!age) continue;
+    mps = grip_gap(p, d.grip.track[i].p) / ((float)age / 1000);
+    if (age >= GRIP_SPEED_MS) break;
+  }
+  const unsigned at = d.grip.track_next;
+  d.grip.track[at].at = d.now, memcpy(d.grip.track[at].p, p, sizeof d.grip.track[at].p);
+  d.grip.track_next = (at + 1) % GRIP_TRACK;
+  if (d.grip.track_count < GRIP_TRACK) d.grip.track_count++;
+  return isfinite(mps) ? mps : -1;
+}
 /* Which grip node the hand is to hold, and where it is as the drive draws the gun: TFP_ARM_GRIP_HELD with *out, the node
  * in the frame of the rig's presentation root (node 7) under the socket local this frame writes; else why not.
  * Two nodes are told apart (round 36). The gate: the node the body's left hand is on, which says the game pins the hand
@@ -795,8 +842,9 @@ static float grip_gap(const float *a, const float *b) {
 static uint32_t grip_target(const Units *u, const TfpGraftMatrix *body, const TfpGraftMatrix *socket_local, TfpGraftMatrix *out) {
   TfpArmDriveGrip *seen = &d.grip.seen;
   Tree tree = {0};
-  if (d.grip.weapon != u->weapon_ref) grip_unlatch(), d.grip.weapon = u->weapon_ref;
+  if (d.grip.weapon != u->weapon_ref) grip_unlatch(), grip_track_reset(), d.grip.has_rest = false, d.grip.weapon = u->weapon_ref;
   seen->nodes = seen->units = seen->tree_units = seen->listed = 0, seen->found = false, seen->gate_unit = seen->target_unit = -1;
+  seen->gate = TFP_ARM_GATE_NONE, seen->gun_mps = -1;
   if (!collect(u->world, u->rig, u->weapon, u->weapon_ref, 0, &tree)) { grip_unlatch(); return TFP_ARM_GRIP_NO_NODE; }
   const unsigned own = tree.count;
   mounted_elsewhere(u, &tree);
@@ -806,6 +854,8 @@ static uint32_t grip_target(const Units *u, const TfpGraftMatrix *body, const Tf
   float best_m = FLT_MAX, kept_m = FLT_MAX;
   struct { unsigned unit; uint32_t node; float at[3]; } seen_nodes[TREE_UNITS * GRIP_PER_UNIT];
   unsigned count = 0;
+  TfpGraftMatrix ref_w = {.values = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}}; /* the first grip node found: the frame the gate tracks the body's hand in */
+  uintptr_t ref_object = 0;
   for (unsigned i = 0; i < tree.count; ++i) {
     const GripUnit *g = grip_unit(&tree.units[i]);
     if (g && i < TFP_ARM_GRIP_LIST) {
@@ -823,6 +873,7 @@ static uint32_t grip_target(const Units *u, const TfpGraftMatrix *body, const Tf
       if (!rd(worlds + 64 * (uintptr_t)g->node[k], &w, sizeof w) || !tfp_graft_rigid(&w)) continue;
       seen_nodes[count].unit = i, seen_nodes[count].node = g->node[k];
       memcpy(seen_nodes[count].at, w.values + 12, sizeof seen_nodes[count].at);
+      if (!count) ref_w = w, ref_object = tree.units[i].object;
       float m = grip_gap(w.values + 12, hand);
       const bool in_use = d.grip.latched && tree.units[i].object == d.grip.object && tree.units[i].ref == d.grip.ref && g->node[k] == d.grip.node;
       if (in_use && d.grip.has_last) m = fminf(m, grip_gap(d.grip.last, hand));
@@ -833,20 +884,59 @@ static uint32_t grip_target(const Units *u, const TfpGraftMatrix *body, const Tf
   }
   seen->nodes = count;
   if (!count) { grip_unlatch(); return TFP_ARM_GRIP_NO_NODE; }
-  /* the gate stays unless the body's hand is on another (retail grip_hand.lua: a foregrip's node 0.0 mm from the
-   * hand, the gun's own 17 cm from it) */
+  /* the gate (round 38b; GRIP_* above): is the body's hand with the gun? */
+  const bool was_held = d.grip.held;
+  if (d.grip.ref_object != ref_object || d.grip.ref_node != seen_nodes[0].node)
+    grip_track_reset(), d.grip.has_rest = false, d.grip.ref_object = ref_object, d.grip.ref_node = seen_nodes[0].node;
+  float local[3];
+  grip_local(&ref_w, hand, local);
+  const uint64_t previous_at = d.grip.track_count ? d.grip.track[(d.grip.track_next + GRIP_TRACK - 1) % GRIP_TRACK].at : 0;
+  const float mps = grip_track(local);
+  const float near_m = kept >= 0 ? fminf(best_m, kept_m) : best_m;
+  const bool fast = mps > GRIP_FAST_MPS, steady = mps >= 0 && mps <= GRIP_STEADY_MPS, on_node = near_m <= GRIP_PIN_M;
+  if (near_m <= GRIP_TAKE_M && steady && !d.grip.action) { if (!d.grip.steady_since) d.grip.steady_since = d.now; }
+  else d.grip.steady_since = 0;
+  const uint64_t settled = d.grip.steady_since && d.now >= d.grip.steady_since ? d.now - d.grip.steady_since : 0;
+  bool hold = false;
+  uint32_t gate;
+  if (d.grip.action) gate = TFP_ARM_GATE_ACTION;
+  else if (was_held && on_node) hold = true, gate = TFP_ARM_GATE_ON_NODE; /* the game pins it: kept however it moves */
+  else if (was_held && near_m > GRIP_LEAVE_M) gate = TFP_ARM_GATE_FAR;
+  else if (was_held && fast) gate = TFP_ARM_GATE_FAST;
+  else if (was_held) hold = true, gate = TFP_ARM_GATE_WITH_GUN;
+  else if (on_node && !fast) hold = true, gate = TFP_ARM_GATE_ON_NODE;
+  else if (near_m > GRIP_TAKE_M) gate = TFP_ARM_GATE_FAR;
+  else if (!steady) gate = TFP_ARM_GATE_MOVING;
+  else if (settled < GRIP_SETTLE_MS) gate = TFP_ARM_GATE_SETTLING;
+  else if (d.grip.has_rest && grip_gap(local, d.grip.rest) > GRIP_RETURN_M && settled < GRIP_SETTLE_LONG_MS) gate = TFP_ARM_GATE_NOT_AT_REST;
+  else hold = true, gate = TFP_ARM_GATE_WITH_GUN;
+  seen->gate = gate, seen->gun_mps = mps;
+  if (hold && !was_held) seen->taken++;
+  if (!hold && was_held) seen->let_far += gate == TFP_ARM_GATE_FAR, seen->let_fast += gate == TFP_ARM_GATE_FAST, seen->let_action += gate == TFP_ARM_GATE_ACTION;
+  if (!hold) { grip_unlatch(); seen->body_m = near_m; return TFP_ARM_GRIP_FREE; }
+  if (mps > seen->most_held_mps) seen->most_held_mps = mps;
+  /* where the hand rests on this gun: followed while held and steady */
+  if (steady) {
+    if (!d.grip.has_rest) memcpy(d.grip.rest, local, sizeof local), d.grip.has_rest = true;
+    else if (previous_at && d.now > previous_at) {
+      const float a = (float)(1 - exp(-(double)(d.now - previous_at) / 1000 / GRIP_REST_S));
+      for (unsigned k = 0; k < 3; ++k) d.grip.rest[k] += a * (local[k] - d.grip.rest[k]);
+    }
+  }
+  /* the node it is latched on stays unless the body's hand is on another, or it is beyond the leave radius of it
+   * (retail grip_hand.lua: a foregrip's node 0.0 mm from the hand, the gun's own 17 cm from it) */
   int use = kept;
   float use_m = kept_m;
-  if (best >= 0 && best_m <= GRIP_PIN_M && (kept < 0 || kept_m > GRIP_PIN_M)) use = best, use_m = best_m;
-  if (use < 0) { grip_unlatch(); seen->body_m = best_m; return TFP_ARM_GRIP_FREE; }
+  if (use < 0 || (best_m <= GRIP_PIN_M && kept_m > GRIP_PIN_M) || kept_m > GRIP_LEAVE_M) use = best, use_m = best_m;
   const Part *part = &tree.units[seen_nodes[use].unit];
   if (use != kept) {
     grip_unlatch();
     d.grip.latched = true, d.grip.object = part->object, d.grip.ref = part->ref, d.grip.node = seen_nodes[use].node;
   }
   memcpy(d.grip.last, seen_nodes[use].at, sizeof d.grip.last), d.grip.has_last = true;
-  d.grip.held = use_m <= GRIP_PIN_M || (d.grip.held && use_m <= GRIP_LEAVE_M);
-  d.grip.pinned = use_m <= GRIP_PIN_M;
+  /* held; and for the reach (offhand_grip.h TfpOffhand.pinned, the walking keep of round 36b) the body's hand counts as
+   * on the target whenever the gate holds it: the game keeps it with the gun, wherever the drawn hand swings */
+  d.grip.held = true, d.grip.pinned = true;
   /* the target: fixed while the gate and the gun's units are (the nodes are rigid on the gun), so it does not drift. With
    * an attachment's node anywhere on the gun the gun's own is never the target, whichever node the latch keeps (round 36b,
    * E: the BR-14's vertical grip node is 0.084 m from the gun's own, inside GRIP_LEAVE_M) */
@@ -899,7 +989,7 @@ static void grip_frame(const Units *u, const TfpGraftMatrix *body, TfpGraftLocal
   double seconds = 0;
   if (d.grip.rig != u->rig || !d.now || !d.grip.at || d.now < d.grip.at || d.now - d.grip.at > 250) {
     if (d.grip.rig != u->rig || (d.grip.at && (!d.now || d.now < d.grip.at || d.now - d.grip.at > 250)))
-      tfp_offhand_reset(&d.grip.ik), grip_unlatch(), d.grip.finger_weight = 0;
+      tfp_offhand_reset(&d.grip.ik), grip_unlatch(), grip_track_reset(), d.grip.finger_weight = 0;
     d.grip.rig = u->rig;
   } else seconds = (double)(d.now - d.grip.at) / 1000;
   d.grip.at = d.now;
@@ -912,6 +1002,10 @@ static void grip_frame(const Units *u, const TfpGraftMatrix *body, TfpGraftLocal
   else if (u->gun_away || !u->weapon) state = TFP_ARM_GRIP_NO_GUN;
   else state = grip_target(u, body, &socket, &target);
   if (state < TFP_ARM_GRIP_NO_GUN) seen->found = false, seen->nodes = seen->units = 0;
+  if (state <= TFP_ARM_GRIP_NO_GUN) { /* the gate not asked: what it held is let go, and its track starts again */
+    if (d.grip.held && state == TFP_ARM_GRIP_NO_GUN) seen->let_action++; /* the gun put away: a throw, a stratagem, a swap */
+    grip_unlatch(), grip_track_reset(), seen->gate = TFP_ARM_GATE_NONE, seen->gun_mps = -1;
+  }
   if (d.grip.on) seen->frames++;
   const bool wanted = state == TFP_ARM_GRIP_HELD;
   float to = 0, step = 0, limit = 0, weight = 0, weight_of_reach = 0;
@@ -1084,12 +1178,38 @@ void tfp_arm_drive_grip_take(TfpArmDriveGrip *out) {
   d.grip.seen.tree_units = keep.tree_units, d.grip.seen.listed = keep.listed, memcpy(d.grip.seen.unit, keep.unit, sizeof keep.unit);
   d.grip.seen.gate_unit = keep.gate_unit, d.grip.seen.gate_node = keep.gate_node;
   d.grip.seen.target_unit = keep.target_unit, d.grip.seen.target_node = keep.target_node;
+  d.grip.seen.gate = keep.gate, d.grip.seen.gun_mps = keep.gun_mps;
+}
+/* Round 38b: the gate's words, "held, the body's hand with the gun (0.092 m from the nearest grip node, 0.02 m/s against
+ * the gun)"; then the takes and let-gos since the last line. */
+static void gate_part(char *out, size_t size, const TfpArmDriveGrip *g) {
+  char mps[24];
+  if (g->gun_mps < 0) snprintf(mps, sizeof mps, "speed not known");
+  else snprintf(mps, sizeof mps, "%.2f m/s", (double)g->gun_mps);
+  const double m = g->body_m;
+  int at;
+  switch (g->gate) {
+  case TFP_ARM_GATE_ON_NODE: at = snprintf(out, size, "held, the body's hand on a grip node (%.3f m, %s against the gun)", m, mps); break;
+  case TFP_ARM_GATE_WITH_GUN: at = snprintf(out, size, "held, the body's hand with the gun (%.3f m from the nearest grip node, %s against the gun)", m, mps); break;
+  case TFP_ARM_GATE_SETTLING: at = snprintf(out, size, "not held yet, the body's hand by the grip and settling (%.3f m, %s)", m, mps); break;
+  case TFP_ARM_GATE_NOT_AT_REST:
+    at = snprintf(out, size, "not held, the body's hand by the grip but not where it rests on this gun (%.3f m, %s)", m, mps);
+    break;
+  case TFP_ARM_GATE_MOVING: at = snprintf(out, size, "not held, the body's hand by the grip but moving (%.3f m, %s against the gun)", m, mps); break;
+  case TFP_ARM_GATE_FAR: at = snprintf(out, size, "not held, the body's hand %.3f m from the nearest grip node (%s)", m, mps); break;
+  case TFP_ARM_GATE_FAST: at = snprintf(out, size, "let go, the body's hand moving fast against the gun (%.3f m, %s)", m, mps); break;
+  case TFP_ARM_GATE_ACTION: at = snprintf(out, size, "not held, the game's action (a reload it flags, or a hold)"); break;
+  default: at = snprintf(out, size, "not asked"); break;
+  }
+  if (at > 0 && (size_t)at < size)
+    snprintf(out + at, size - (size_t)at, "; taken %u, let go %u far, %u fast, %u for an action; most %.2f m/s held", (unsigned)g->taken,
+             (unsigned)g->let_far, (unsigned)g->let_fast, (unsigned)g->let_action, (double)g->most_held_mps);
 }
 const char *tfp_arm_drive_grip_state_name(uint32_t state) {
   static const char *const names[TFP_ARM_GRIPS] = {
       "switched off", "a handgun: held in one hand", "aiming: the game's own aim pose holds the gun", "no gun on the rig",
       "no grip node on the gun's units", "the gun's units could not be read in the socket's frame", ("the body's left hand is on no grip (a reload, "
-      "or a weapon the game does not pin the hand to)"), "on the grip", "easing", "the grip is out of the arm's reach or too far from the drawn hand",
+      "or not with the gun: the gate says why)"), "on the grip", "easing", "the grip is out of the arm's reach or too far from the drawn hand",
       "the arm's pose was not usable"};
   return state < TFP_ARM_GRIPS ? names[state] : "?";
 }
@@ -1107,6 +1227,11 @@ const char *tfp_arm_drive_grip_line(const TfpArmDriveGrip *g) {
            (unsigned)g->frames, (unsigned)g->held, tfp_arm_drive_grip_state_name(g->state), where, (double)g->to_m, (double)g->most_to_m, (double)g->step_degrees,
            (double)g->limit_degrees, (double)g->weight, (double)g->reach, (double)g->most_reach, (double)g->shoulder_m, (double)g->most_shoulder_m,
            (double)g->held_step_degrees, (double)g->body_degrees, (unsigned)g->cut, (unsigned)g->out_of_reach, (unsigned)g->too_far);
+  return line;
+}
+const char *tfp_arm_drive_grip_gate_line(const TfpArmDriveGrip *g) {
+  static char line[400];
+  gate_part(line, sizeof line, g);
   return line;
 }
 static void drawn_part(char *out, size_t size, const char *when, const TfpArmDriveDrawn *b) {
@@ -1196,12 +1321,15 @@ bool tfp_arm_drive_render(uint64_t world, bool game_thread) {
   if (d.on) {
     static TfpSnapshot s;
     Units u;
+    d.grip.action = d.hold; /* round 38b: the grip's gate lets go in the game's actions (and its reload flag, below) */
     if (tfp_snapshot(mem(), TFP_SNAPSHOT_FULL, &s, NULL, 0)) {
       native_view = s.camera_kind == 6;
+      d.grip.action |= s.reloading;
       if (native_view) reason = prove((uintptr_t)world, &s, lenient(), &u);
     } else {
       /* Not provable in full (no weapon, a request for another weapon): a refusal only in the native view of the local avatar. */
       native_view = tfp_snapshot(mem(), TFP_SNAPSHOT_PLAYER, &s, NULL, 0) && s.camera_kind == 6;
+      d.grip.action |= native_view && s.reloading;
       reason = TFP_ARM_SNAPSHOT;
       /* In a hold that is the expected state (a stow, a throw, an injection): the player's snapshot has the body,
        * the rig and the camera request; it names no weapon unit, so the gun counts as away. */

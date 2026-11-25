@@ -251,6 +251,21 @@ enum {
   TFP_ARM_GRIP_POSE,      /* the arm's pose was not usable this frame */
   TFP_ARM_GRIPS
 };
+/* Round 38b: why the body's left hand counts as with the gun or not (the Grip line's "gate:"). The game pins the body's
+ * hand on a grip node for some guns (held at once) and only rests it near one for others (the AR-23 Liberator with a
+ * vertical grip: some 9 cm from both nodes, held once it has been there and steady for a moment). */
+enum {
+  TFP_ARM_GATE_NONE = 0,    /* not asked: switched off, a handgun, no gun, no grip node */
+  TFP_ARM_GATE_ON_NODE,     /* held: the body's hand on a grip node (the game pins it there) */
+  TFP_ARM_GATE_WITH_GUN,    /* held: the body's hand by the grip and steady against the gun, or kept there */
+  TFP_ARM_GATE_SETTLING,    /* not yet: by the grip and steady, not long enough */
+  TFP_ARM_GATE_NOT_AT_REST, /* not yet: by the grip, steady, but not where it rests on this gun (a pause at the magazine) */
+  TFP_ARM_GATE_MOVING,      /* not held: by the grip but moving against the gun */
+  TFP_ARM_GATE_FAR,         /* not held: beyond the take radius (once held, the leave radius) */
+  TFP_ARM_GATE_FAST,        /* let go this frame: moved fast against the gun (a reload's pull, a melee) */
+  TFP_ARM_GATE_ACTION,      /* not held: the game's action (its reload flag, or the drive's hold through a throw or stratagem) */
+  TFP_ARM_GATES
+};
 /* One of the gun's units as the grip search saw it (round 36). */
 enum { TFP_ARM_GRIP_LIST = 6 };
 typedef struct TfpArmDriveGripUnit {
@@ -297,6 +312,11 @@ typedef struct TfpArmDriveGrip {
   TfpArmDriveGripUnit unit[TFP_ARM_GRIP_LIST];
   int32_t target_unit, gate_unit; /* unit[] indices: the node the hand holds, the node the body's hand is on (-1: none) */
   uint32_t target_node, gate_node;
+  /* round 38b: the gate */
+  uint32_t gate;                  /* TFP_ARM_GATE_* of the last frame */
+  float gun_mps;                  /* the body's hand against the gun over the last ~80 ms, last frame; -1: not known */
+  float most_held_mps;            /* the most of that while held */
+  uint32_t taken, let_far, let_fast, let_action; /* times the grip was taken, and let go for each reason */
 } TfpArmDriveGrip;
 void tfp_arm_drive_grip_take(TfpArmDriveGrip *out);
 /* "the gun's units: 2, 2 with a grip node: [0] the gun e5796355a8fd67e0, 39 nodes, grip node 13; [1] on [0] node 17
@@ -310,6 +330,10 @@ const char *tfp_arm_drive_grip_units_line(const TfpArmDriveGrip *grip, bool only
  * forward 0.047 m (most 0.065), held step 0.4 degrees, the body's arm turned 2.0 degrees, 0 frames cut, not taken: 0 out of reach,
  * 0 too far". A static buffer. */
 const char *tfp_arm_drive_grip_line(const TfpArmDriveGrip *grip);
+/* Round 38b, a line of its own beside it ("Grip: gate: ..."): why the hand is held or not, "held, the body's hand with the
+ * gun (0.092 m from the nearest grip node, 0.02 m/s against the gun); taken 1, let go 0 far, 1 fast, 0 for an action; most
+ * 0.21 m/s held". A static buffer. */
+const char *tfp_arm_drive_grip_gate_line(const TfpArmDriveGrip *grip);
 /* Round 36b, a line of its own so that say()'s 700 characters cut nothing: "as drawn at the hip (60 frames, 60 held): the hand
  * 0.000 m from the grip (most 0.001), turned 2.1 degrees (most 4.0), palm 0.002 m (most 0.004), fingers curled 65.0 degrees
  * (least 64.2), 0.084 m from the gun's own node; while aiming (30 frames, 30 held): ...". NULL: nothing measured. A static buffer. */

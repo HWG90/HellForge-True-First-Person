@@ -35,6 +35,11 @@ left the view or no veiled row was written (dive.verdict).
 The camera style the run was in (Bodycam or Stable) is read from the log's own "Camera style:" lines and printed at
 the top, where it changes, and in the summary; each phase's result carries it. It is never taken from an argument or a
 file name: the two feel.49 soaks of 2026-11-24 were named the wrong way round.
+
+Round 39: the reload phases (RELOADS) are judged on the traced eye only (a phase with no Trace rows fails), and also
+fail on a slide: the eye's offset from the body root along the level view changing by more than SLIDE_M within
+SLIDE_MS while the root stays within ROOT_STILL_M (reload_slide). The feel.44 matrix's "reload" passed while every
+reload slid the eye 0.21 to 0.26 m back and forward again over 75 ms: five frames of 0.045 m, none of them a jump.
 """
 import json
 import re
@@ -105,6 +110,11 @@ AIMED = {
 # Round 30: phases played by dive.dive_swap(), judged by dive.verdict().
 DIVES = {"dive-swap"}
 DRIVEN = set(AIMED) | DIVES   # the phases play() hands to a function that reads the log as it goes
+# Round 39: phases judged on the traced eye and its slide along the view (reload_slide).
+RELOADS = {"reload", "pistol-reload"}
+SLIDE_M = 0.05      # the eye's offset from the root along the level view may change by this much ...
+SLIDE_MS = 500.0    # ... within this (a reload's edge is 75 ms; the user's slowest, R2, 0.4 s) ...
+ROOT_STILL_M = 0.02 # ... where the root moved less than this in the same time
 LOCK = re.compile(r"Lock: \+(\d+) frames held \(\+(\d+) in another camera, kind now (\d+)\), \+(\d+) missed \(kind (\d+), helper error (\d+)\), largest kick ([\d.]+)")
 CUT = re.compile(r"Cut: largest camera jump ([\d.]+) m")
 MASK = re.compile(r" (?:Hold|Return|Drop|Wait): .*?\bmask=([0-9a-fA-F]+)")
@@ -321,6 +331,8 @@ def describe(result):
     text += f" [by lengths {result['by_lengths_m']:.3f}]"
     if result.get("largest_float_m"):
         text += f" float {result['largest_float_m']:.3f} m ({result['float_at']})"
+    if "slide_m" in result:
+        text += f" slide {result['slide_m']:.3f} m"
     return text
 
 
@@ -344,7 +356,40 @@ def pop_lines(result, indent="       "):
     return out
 
 
-def judge(lines, toggles=False):
+def _level_forward(row):
+    """The shown eye's offset from the root along the row's level view (the view's horizontal part as a unit); None
+    without a root or a view."""
+    view, root = row.get("view"), row.get("root")
+    if not view or not root:
+        return None
+    length = (view[0] ** 2 + view[1] ** 2) ** 0.5
+    if length < 0.5:
+        return None
+    eye = _shown(row)
+    return ((eye[0] - root[0]) * view[0] + (eye[1] - root[1]) * view[1]) / length
+
+
+def reload_slide(rows):
+    """(the largest slide, the row it ends at): the change of the eye's offset from the root along the level view
+    between two traced frames at most SLIDE_MS apart, the root within ROOT_STILL_M of where it was. Summed over the
+    frames between, so a slide made of steps that are each under the jump limit is seen whole. (0.0, None) where no
+    two frames have a root and a view."""
+    best, where = 0.0, None
+    known = [(row, _level_forward(row)) for row in rows]
+    known = [(row, f) for row, f in known if f is not None]
+    for j, (b, fb) in enumerate(known):
+        for i in range(j - 1, -1, -1):
+            a, fa = known[i]
+            if b["tick"] - a["tick"] > SLIDE_MS:
+                break
+            if _length(_sub(b["root"], a["root"])) >= ROOT_STILL_M:
+                continue
+            if abs(fb - fa) > best:
+                best, where = abs(fb - fa), b
+    return best, where
+
+
+def judge(lines, toggles=False, reload=False):
     held = other = missed = 0
     masks = set()
     kick = jump = 0.0
@@ -379,10 +424,20 @@ def judge(lines, toggles=False):
         jump = max([0.0] + [f["bare"] for f in found])
     floated, float_row = trace_reader.largest_float(rows) if traced else (0.0, None)   # round 24
     ok = held > 0 and missed == 0 and (jump < (POP_M if traced else LIMIT_M) or toggles) and not refused and (floated <= trace_reader.FLOAT_M or toggles)   # the toggle itself is a cut by design
-    return {"pass": ok, "frames": held, "other_camera_frames": other, "missed": missed, "kinds": sorted(kinds),
+    extra, first = {}, []
+    if reload:   # round 39: on the traced eye only, and its slide along the view across the reload's edges
+        slide, slide_row = reload_slide(rows)
+        extra = {"slide_m": slide, "slide_at": slide_row["at"] if slide_row else None}
+        if not traced:
+            ok = False
+            first.append("not traced: a reload phase is judged on the traced eye only")
+        elif slide > SLIDE_M:
+            ok = False
+            first.append(f"the eye slid {slide:.3f} m along the view with the root still (to {slide_row['at']}): a reload's step, summed over its frames")
+    return {**extra, "pass": ok, "frames": held, "other_camera_frames": other, "missed": missed, "kinds": sorted(kinds),
             "largest_jump_m": jump, "largest_veil_m": veil_m, "from_trace": traced, "judged": len(found),
             "by_lengths_m": max([0.0] + [f["lengths"] for f in found]), "body_m": max([0.0] + [f["body"] for f in found]),
-            "pops": [f for f in found if f["whose"]], "largest_kick_deg": kick, "notes": sorted(set(notes))[:6],
+            "pops": [f for f in found if f["whose"]], "largest_kick_deg": kick, "notes": first + sorted(set(notes))[:6],
             "largest_float_m": floated, "float_at": float_row["at"] if float_row else None, "masks": sorted(masks)}
 
 
@@ -473,7 +528,7 @@ def main(argv):
             time.sleep(max(0.0, settle - 1.0) + 1.2)   # the Lock line is written once a second
             with open(log, errors="replace") as handle:
                 handle.seek(start); lines = handle.read().splitlines()
-            results[name] = judge_aim(name, aimed, lines, judge(lines, name.startswith('toggle')))
+            results[name] = judge_aim(name, aimed, lines, judge(lines, name.startswith('toggle'), reload=name in RELOADS))
             r = results[name]
             for text in style_changes(lines):
                 print(text)
