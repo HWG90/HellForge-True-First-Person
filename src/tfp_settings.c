@@ -484,12 +484,26 @@ bool tfp_settings_set_menu(TfpSettings *s, TfpSettingsMenuId id, bool is_bool, b
   s->menu[id] = next;
   return true;
 }
+/* A locked-view number kept in its range; "Aim field of view" is a choice, a whole number (review N1: a hand-edited 2.5
+ * read as the game's zoom). */
+static double locked_number(TfpSettingsLockedId id, double number) {
+  number = number < locked_info[id].min ? locked_info[id].min : number > locked_info[id].max ? locked_info[id].max : number;
+  return id == TFP_LOCKED_fov_aim ? floor(number + .5) : number;
+}
 bool tfp_settings_set_locked(TfpSettings *s, TfpSettingsLockedId id, bool is_bool, bool boolean, double number) {
   if ((unsigned)id >= TFP_LOCKED_COUNT || locked_info[id].is_bool != is_bool || (!is_bool && number != number)) return false;
-  if (!is_bool) number = number < locked_info[id].min ? locked_info[id].min : number > locked_info[id].max ? locked_info[id].max : number;
+  if (!is_bool) number = locked_number(id, number);
   TfpSettingsMenuValue next = {is_bool, is_bool && boolean, is_bool ? 0 : number};
   if (s->locked[id].boolean != next.boolean || s->locked[id].number != next.number) s->locked_writes++;
   s->locked[id] = next;
+  /* "Aim field of view" and the toggle it replaced, kept in step (tfp_settings.h) */
+  if (id == TFP_LOCKED_fov_aim) {
+    const bool zoom = next.number == 1;
+    s->locked[TFP_LOCKED_fov_zoom_when_aiming].boolean = zoom; /* the one change is counted once, above */
+  } else if (id == TFP_LOCKED_fov_zoom_when_aiming && s->locked[TFP_LOCKED_fov_aim].number != 3) {
+    const double aim = next.boolean ? 1 : 2;
+    s->locked[TFP_LOCKED_fov_aim].number = aim;
+  }
   return true;
 }
 bool tfp_settings_locked_flag(const TfpSettings *s, TfpSettingsLockedId id) { return (unsigned)id < TFP_LOCKED_COUNT && s->locked[id].is_bool && s->locked[id].boolean; }
@@ -737,10 +751,14 @@ static bool load_locked_options(const JDoc *d, const JNode *object, TfpSettings 
     }
     if (old && has_put_away) continue;
     double number = is_bool ? 0 : leaf->number;
-    if (!is_bool) number = number < locked_info[id].min ? locked_info[id].min : number > locked_info[id].max ? locked_info[id].max : number;
+    if (!is_bool) number = locked_number(id, number);
     staged[id] = (TfpSettingsMenuValue){is_bool, leaf->type == J_TRUE, number};
     taken |= UINT32_C(1) << id;
   }
+  /* A file of feel.51 and before names the toggle and not the choice that replaced it: its answer, as the choice. */
+  if ((taken >> TFP_LOCKED_fov_zoom_when_aiming & 1) && !(taken >> TFP_LOCKED_fov_aim & 1))
+    staged[TFP_LOCKED_fov_aim].number = staged[TFP_LOCKED_fov_zoom_when_aiming].boolean ? 1 : 2;
+  else if (taken >> TFP_LOCKED_fov_aim & 1) staged[TFP_LOCKED_fov_zoom_when_aiming].boolean = staged[TFP_LOCKED_fov_aim].number == 1;
   memcpy(s->locked, staged, sizeof staged);
   if (named) *named = taken;
   return true;

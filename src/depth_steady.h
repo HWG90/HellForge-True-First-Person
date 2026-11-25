@@ -69,7 +69,7 @@ typedef struct TfpSteadyInput {
   float share;                   /* 0 to 1: the hip share */
   bool on;                       /* false: depth_steady_off.txt */
 } TfpSteadyInput;
-typedef struct TfpSteady { bool known; uint64_t lease; double tick; float held, speed; } TfpSteady;
+typedef struct TfpSteady { bool known; uint64_t lease; double tick; float held, speed, added; } TfpSteady; /* added: the last frame's shift */
 
 /* A finite number, told by its bits: these values are the game's memory, and comparing a NaN inside the game's own
  * call would leave the processor's invalid-operation flag set behind it (as src/gate_log.h says). */
@@ -119,6 +119,21 @@ static inline float tfp_steady_held(TfpSteady *s, uint64_t lease, double tick, f
   }
   return s->held;
 }
+/* Round 20: the share and the settled distance for the frame (docs/design/specs/2026-11-23-gate-flip.md "Round 20").
+ * `weight`: the hip share (1 at the hip, 0 in full aim, eased by the caller); `hip_settled`: where to rest at the hip.
+ * Round 9 weighted what is added by the hip share, so in full aim the game's own depth went out whole, and with it
+ * the unzoom gate's lever: a gate that flips in full aim moved the eye 0.24 m a frame (the model) at a zoom that
+ * magnifies it. Now the whole of it is held in full aim too (share 1), and only where it rests moves with the hip
+ * share: the hip's resting distance at the hip, the game's own selected distance (request+0x90) in full aim, eased in
+ * between. Both ends of the gate are the same place at rest, in full aim as at the hip, so what is lost is the
+ * lens's travel only, as at the hip; the held distance's own ease (nine tenths in 216 ms) takes the place of it. No
+ * step at aim in or out: the share is the same on both sides, and the place to rest is eased by the hip share and
+ * reached by the held distance's ease, never in one frame. */
+static inline void tfp_steady_aim(TfpSteadyInput *in, float weight, float hip_settled) {
+  const float w = tfp_steady_finite(weight) ? (weight < 0 ? 0 : weight > 1 ? 1 : weight) : 1;
+  in->share = 1;
+  in->settled = w == 1 ? hip_settled : w == 0 ? in->current : w*hip_settled+(1-w)*in->current;
+}
 /* One frame. Returns a TFP_STEADY_* reason; `*delta` is what to add to the rig's node 5 on its forward axis (and to
  * take from the root along the view's forward), 0 on every pass. `*depth` is the game's own D where it could be
  * worked out (0 else), `*held` the held distance where the shift was worked out. A pass leaves the state as it was.
@@ -140,7 +155,35 @@ static inline uint32_t tfp_steady_frame(TfpSteady *s, const TfpSteadyInput *in, 
     memcpy(s, &before, sizeof before); *delta = 0; *held = 0;
     return TFP_STEADY_RANGE;
   }
+  s->added = *delta;
   return TFP_STEADY_WORKED;
+}
+/* Round 20, review 24 IMPORTANT 3: a frame the hold passes in full aim. With the hold at full strength there, a pass
+ * that added nothing would put the eye back at the game's own depth for that frame (0.10 to 0.19 m in the model with
+ * the gate flipping), where round 9's share of 0 in full aim could not step. So in full aim (`aiming`) such a frame
+ * keeps the last held distance, within TFP_STEADY_GAP_MS of the last frame worked out and in its lease, where the
+ * request is proven this frame's:
+ *   - the game scaling the rig (TFP_STEADY_SCALED): the game's own depth `depth` of the frame is known, so what is
+ *     added puts it at the held distance, with the share the blend would give it unscaled (what the game's scaling
+ *     by main row +0x11ac does to the rest of the vector is the game's, as before);
+ *   - a value out of range (TFP_STEADY_RANGE): the last frame's shift, as it was.
+ * Never for the others: no lens read (no proof the request is this frame's), the switch off, the code not the
+ * pinned one, or the root not following (node 5 moved alone puts the gun against the eye; that stop is for the
+ * whole lease, and easing it would move node 5 alone). True: `*delta` goes out as a worked frame's would. The state
+ * is not changed. */
+static inline bool tfp_steady_carry(const TfpSteady *s, const TfpSteadyInput *in, uint32_t reason, bool aiming, uint64_t lease, double tick, float depth, float *delta) {
+  *delta = 0;
+  if (!in->on) return false; /* round 20c (review 27, 3): the switch off or the root not following: never carried */
+  if (!aiming || (reason != TFP_STEADY_SCALED && reason != TFP_STEADY_RANGE)) return false;
+  if (!s->known || s->lease != lease || !(tick > s->tick) || tick-s->tick > TFP_STEADY_GAP_MS) return false;
+  float carried = s->added;
+  if (reason == TFP_STEADY_SCALED) {
+    if (!tfp_steady_within(depth, -4, 4) || !tfp_steady_within(in->mix_after, 0, 1)) return false;
+    carried = (in->ability ? 1-in->mix_after : in->mix_after)*(s->held-depth);
+  }
+  if (!(fabsf(carried) <= TFP_STEADY_MOST)) return false;
+  *delta = carried;
+  return true;
 }
 
 /* ---- the pair: node 5 never keeps moving without its root ----
@@ -187,8 +230,11 @@ typedef struct TfpSteadySecond {
   uint32_t stops; uint64_t stop_lease;     /* the held depth stopped for a lease in this second (the root did not follow), and which */
   uint32_t stop_lost, stop_running;        /* the frames of that lease in which node 5 was moved alone, and how many of them were the last, running */
   uint32_t off;                            /* the switch, as the helper has it */
+  uint32_t aim_frames;                     /* round 20: frames worked out in full aim (the hip share under 1/2) */
+  TfpSteadyRange aim_depth;                /* the rig's depth in them: the game's own plus what the hold added */
+  float aim_step;                          /* its largest change between two frames running in full aim, m */
 } TfpSteadySecond;
-typedef struct TfpSteadyLog { TfpSteadySecond now; } TfpSteadyLog;
+typedef struct TfpSteadyLog { TfpSteadySecond now; float aim_last; bool aim_known; } TfpSteadyLog;
 
 static inline void tfp_steady_range(TfpSteadyRange *r, float v) {
   if (!tfp_steady_finite(v)) return;
@@ -210,6 +256,15 @@ static inline void tfp_steady_note(TfpSteadyLog *g, uint32_t reason, bool bit, f
   tfp_steady_range(bit ? &s->argument_gated : &s->argument_clear, argument);
   if (reason != TFP_STEADY_WORKED) return;
   tfp_steady_range(&s->held, held);
+}
+/* Round 20: a frame worked out (`worked`) in full aim or not, and the rig's depth it ends at along the view: the
+ * game's own plus what was added. For the "Aim:" line: how much the eye moved along the view in full aim. */
+static inline void tfp_steady_aim_note(TfpSteadyLog *g, bool aiming, bool worked, float depth) {
+  if (!aiming || !worked || !tfp_steady_finite(depth)) { g->aim_known = false; return; }
+  TfpSteadySecond *s = &g->now;
+  ++s->aim_frames; tfp_steady_range(&s->aim_depth, depth);
+  if (g->aim_known && fabsf(depth-g->aim_last) > s->aim_step) s->aim_step = fabsf(depth-g->aim_last);
+  g->aim_last = depth; g->aim_known = true;
 }
 /* The root's half was done in this frame: the same was taken from it along the view (to the float). */
 static inline void tfp_steady_root(TfpSteadyLog *g) { ++g->now.roots; }

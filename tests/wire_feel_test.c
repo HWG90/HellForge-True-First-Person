@@ -266,8 +266,12 @@ int main(void) {
       bool open = false;
       TfpActionPlacement preview;
       CHECK(motion && motion->host->editor_is_active && motion->host->editor_preview_rotation);       /* feel.1-feel.50: both NULL */
+      CHECK(motion->host->editor_preview_ads);                                                         /* round 20: the ADS draft, live in full aim */
       CHECK(motion->host->editor_is_active(motion->host->user, &open, NULL) && open);                  /* queued counts as active, as retail */
       CHECK(motion->host->editor_preview_rotation(motion->host->user, &preview) == TFP_MOTION_GOT_NIL); /* no draft before it is active */
+      bool authored = true;                                                                            /* round 20, the binder's own path: */
+      const char *refused = NULL;                                                                      /* queued, no draft: nothing sent */
+      CHECK(motion->host->editor_preview_ads(motion->host->user, NULL, &authored, &refused) && !authored && !refused);
     }
     CHECK((why = tfp_wire_feel_held(&wire)) && strstr(why, "the placement editor is open"));            /* a live replace waits for it */
     CHECK(wire.rt.store_mode == 1);                                                                     /* store.select_mode('weapon') reached the runtime */

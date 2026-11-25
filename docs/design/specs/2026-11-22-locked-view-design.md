@@ -2212,3 +2212,348 @@ Not yet known, only the game can show: which of the two writes is drawn (the fix
 not depend on it, except at the end of a glide out at the hip and on the first frame of switching the lock on,
 where the helper's hip lens and the game's own still differ); that the zoom feels steady in ADS; whether the second
 call is made outside first person.
+
+## Round 20 (2026-11-24): the scope too far in full aim, and the editor that would not move it (branch `round20-ads-distance`; offline, not yet in a build)
+
+The report (Mr.Roarke, on feel.50): "In ADS the scope is too far away on the Hyena rifle, at any zoom level". He opened
+the placement editor (Page Up) while aiming to pull it closer, "but the weapon would not move". His two screenshots,
+current against wanted, have the scope much closer, filling more of the view. A moderator: "more or less an FOV and
+screen zoom to get a proper FPS version."
+
+No log has the R-4 Hyena, its 50/100 m scope ranges, or this tester's `locked_view.json`. What is below is from the
+code, the user's own feel.50 log (`~/.cache/tfp-user-0819.modlog`, the LAS-5 Scythe in full aim 13:27:39 to :55) and
+soaks 20 to 30.
+
+### How the eye-to-optic distance in full aim is decided today
+
+**Proven, from the code** (`src/pose_helper.c` position_locked; `src/camera_helper.c`):
+
+- The game seats the rig: the kind-6 evaluator adds the optic's depth D (request+0x90, blended over the lens as in
+  `2026-11-23-gate-flip.md`) to node 5's forward value and takes it from the root, so the weapon socket sits D before
+  the eye. The camera hangs on the rig's eye.
+- The mod adds nothing to that in full aim: the hip placement is multiplied by the hip weight, which eases to 0 in full
+  aim ("full ADS is never offset"); the zoom depth term passes full aim (reason 1); the held depth's share is the hip
+  weight, 0; the ADS placement is all zeros unless one is saved ("Motion: action=ads placement=ads default x=0 y=0 z=0"
+  in every aim of the user's log). The user's 16 s stretch has `Hold: ... eye=(51.254 -133.831 4.921)
+  rig_eye=(51.254 -133.831 4.921)` every second: the camera is the game's rig eye.
+- The near clip in full aim is the game's own: `src/near_helper.c` forwards it untouched in full ADS. The game sets it
+  to the sight's distance: 0.173 m for the Scythe (`View: ... ads=1 ... near=0.173` all through the stretch),
+  0.066 m for the LAS-44 Nova's scope, the game's 0.05 for the LAS-58 Talon; earlier live notes have 0.22 m and
+  0.35 m for the two zoom levels of one scope. The game's depth D at rest: 0.2102 m (Scythe), 0.2693 m (Talon),
+  0.3477 m (Nova) (`Steady:` lines, soaks 21 to 30).
+
+So **nothing puts the sight farther than the game's own full-aim view would**: the distance on screen is the game's.
+
+**The field of view in aim** (`src/fov_lock.h`, `src/fov_helper.c`): with "Zoom when aiming" on (the default) full
+aim shows the game's lens; off, the locked value (the user's 105 degrees) whatever the weapon and zoom level. The
+user's log: on, `Fov: ... the game asked for 61.5 degrees, shown 64.5` on feel.50 (the pulse of round 15: the second
+write of each frame dragged the value toward the locked one), `fov=1.0734` (61.5) on screen in `View:`.
+
+**Inferred, not proven:** the tester's "at any zoom level" fits the locked field of view (zoom when aiming off): a
+locked 105 is the same at every zoom level and makes a sight 0.46 times as wide as the game's 61.5 (Scythe), 0.18
+times a scope's 25.7. With zoom on, feel.50's pulse also showed a scope's 25.7 as about 38 degrees at 116 frames a
+second (0.66 times as wide). And even the game's own seat is far for a first-person shooter: 0.17 to 0.35 m from the
+eye to the sight, where a base-game shooter brings the sight close enough to fill a good part of the screen. Which of
+these the tester had cannot be known without his log or his `locked_view.json`.
+
+### Why the editor would not move the weapon in full aim
+
+**Proven, from the code** (`tests/editor_ads_test.c` reproduces it with the real editor and motion runtime):
+
+1. The editor always opened on its first action, idle (`placement_editor.c`, action_index 1).
+2. Its live preview of any action goes to the controller's placement (`C_SET_PLACEMENT`), which the pose helper adds
+   to node 5 times the hip weight: 0 in full aim. The drag changed numbers and nothing drawn.
+3. The ADS placement, the one full aim draws, reached the pose helper only from the motion runtime at a new lease or a
+   saved revision (`set_ads_placement`), and the motion runtime is frozen while the editor is open. Choosing ADS with
+   ">" did not help either: its draft went to the hip placement too.
+
+**Not known:** whether the game keeps the aim while the editor's panel has the cursor (the overlay host takes the
+mouse). The new `Aim:` line says, per aim, whether the editor was open in it.
+
+### What this round changes
+
+1. **Aim field of view** (Locked view page, both menus, one row of `src/wire_menu.c`): "The game's zoom" (as "Zoom when
+   aiming" on), "Your locked view" (as off), "A chosen value" with **Aim field of view (degrees)** (20 to 90, default
+   50; greyed unless chosen). A chosen value holds in full aim with the lock off too. Stored as `fov_aim` 1/2/3 and
+   `fov_aim_degrees` in `locked_view.json`; `fov_zoom_when_aiming` is kept in step (on exactly for 1) so an older
+   build reads the nearest answer, and a file that has only the toggle reads as 1 or 2. `src/fov_lock.h`
+   (`tfp_fov_lock_step_aim`; the old call is the first two answers, checked frame for frame), `src/fov_helper.c`
+   (`tfp_fov_set_lock_aim`, one value a frame as round 15 has it).
+2. **Sight distance in aim (cm)** (Locked view page; 0 to 30, default 15 since the review, 10 before, **0 since round 20c**, below; 0 is the game's own seat). In full aim the
+   gun is moved toward the eye along node 5's forward axis until the sight the game sets the near clip to is that far
+   away (`src/ads_seat.h`): pull = sight - wanted, at most 0.25 m, nothing for a sight already closer or for the
+   game's 0.05 (no sight). The root is not moved: the eye stays where the game puts it. The pull follows the hip
+   placement's blend into and out of full aim and glides (80 ms) between zoom levels, held each frame so the sight is
+   never nearer than the wanted distance while the game reseats a zoom level (the review's B2, below). **The near
+   clip moves in with the gun** by the same amount, in the same frame (B1), never under 0.05, so the same parts of the
+   weapon are cut as the game cuts them. Off
+   until the binder hands a distance (the helpers start as retail's; both differential tests pass unchanged).
+   Per weapon: the placement editor's ADS action, whose forward is added on top (forward is away from the eye; the
+   wheel), saved per weapon in `action_placements` as before.
+   - Why 15 cm (the review; 10 cm before): the game's own sight distances are 0.066 to 0.35 m (above). 15 cm draws a
+     0.22/0.35 m scope 1.5/2.3 times as large, the same distance at every zoom level, which answers "too far at every
+     zoom" plainly, and leaves the Nova's scope (0.066 m) alone. It is the cautious default because what it rests on is
+     what only the game can show: that the game's near clip is the sight's rear, how the game's depth moves, and
+     whether arms or body show with the gun pulled in. At 15 cm the most pulled is 0.20 m (a 0.35 m scope; 0.25 m at
+     10 cm), the Scythe's sight moves 2.3 cm (7.3 cm at 10), and the depth limit of the review's B2 bites less. 10 cm
+     stays on the slider. The Hyena's own numbers are not in the repo; its line will be in the next log.
+3. **The editor in full aim:** opened in full aim (Page Up or the menu button) it begins on its ADS action and says so
+   (`Placement editor: opened in full aim: editing the ADS placement ...`); while the ADS action is edited the motion
+   runtime hands the draft to the pose helper's ADS placement every frame (`editor_preview_ads`, `src/editor_motion.h`),
+   with the rotation drawn as an authored ADS rotation; the hip placement keeps the one the editor opened with (in
+   retail it took the ADS draft, invisibly in full aim, and slid from it when the aim ended). Save keeps it for the
+   weapon's ADS action; cancel puts the saved one back at once.
+4. **The `Aim:` line** (`src/aim_log.h`, every tick from `src/mod_view.c`): one line when an aim has settled (300 ms),
+   one when a zoom level, the sight, the editor, the ADS placement or the option changed and settled, one at the end:
+
+   ```
+   Aim: in: "LAS-5 Scythe"; field of view 61.5 degrees (Aim field of view: the game's zoom; the game asked for 61.5); the game's sight at 0.173 m (its near clip), sight distance in aim 0.100 m: the gun 0.073 m closer (pull 0.073 m, ADS placement forward +0.000 m), near clip 0.100 m; the game's depth 0.210 m; placement editor closed
+   Aim: out after 16.2 s; zoom levels seen (the game's field of view): 61.5 degrees
+   ```
+
+   (Made up from the user's numbers and the test.) "the game asked for" is the game's lens: the zoom level. "the
+   game's depth" is D worked out in the frames of full aim (`not read` where the evaluator's lens was not).
+
+### The model's numbers, before and after
+
+How wide the sight is drawn, as 1 / (distance x tan(field of view / 2)), against feel.51's default (the game's zoom at
+the game's distance). The scope rows assume a lens of 25.7 degrees (the Nova's, the only scope lens in the logs) at the
+two scope distances the live notes give; the Hyena's are not known.
+
+| weapon | feel.51 default | feel.50, zoom on, 116 fps | zoom off, locked 105 | default (game's zoom, 15 cm) | game's zoom, 10 cm | locked 105, 15 cm | chosen 50, 15 cm |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Scythe sight, 0.173 m, 61.5 deg | 1.00 | 0.88 | 0.46 | 1.15 | 1.73 | 0.53 | 1.47 |
+| scope, 0.22 m | 1.00 | 0.66 | 0.18 | 1.47 | 2.20 | 0.26 | 0.72 |
+| scope, 0.35 m | 1.00 | 0.66 | 0.18 | 2.33 | 3.50 | 0.41 | 1.14 |
+| Nova scope, 0.066 m | 1.00 | 0.66 | 0.18 | 1.00 | 1.00 | 0.18 | 0.49 |
+
+That measure is the sight's body. Through a scope's lens what is magnified is set by the field of view alone; the
+distance only changes how much of the screen the scope fills.
+
+### What the tests show
+
+- `tests/run-fov-lock.sh` (96 checks; 80 on main): the three answers, the chosen value with the lock off (glided in and
+  out, then let go), the old call equal to the new one frame for frame.
+- `tests/run-fov-lock-helper.sh` (174 after the review; 165 on main): a chosen value through the real helper, two calls a frame, one value a
+  frame, lock on and off.
+- `tests/run-ads-seat.sh` (136 after the review; new): the pull, its glide, its depth limit, the near clip and its lead, the `Aim:` line.
+- `tests/run-wire-pose.sh` (1082 after the review, with the frame-by-frame aims and zoom changes against the real near helper; 397 on main): the real pose helper in full aim: the gun 7.3 cm closer for the Scythe,
+  eased in and out, the ADS placement on top, another zoom level glided, 0 cm the game's seat; the root never written.
+- `tests/run-near-ads.sh` (76 after the review; new): the real near helper: the sight published, the near clip in with the gun, never
+  under 0.05, iron sights untouched, the game's value with nothing closer.
+- `tests/run-editor-ads.sh` (64 after the review; new): the report reproduced (opened on idle, a drag moves only the hip placement,
+  nothing drawn in full aim moves), then opened in full aim on ADS: drag, wheel, save and cancel move what full aim
+  draws, live; the hip placement untouched. Without `editor_preview_ads` it fails ("full_aim_right() > .04").
+- `tests/run-wire-settings.sh` (6982; 6829 on main), `run-wire-panel.sh` (460; 450), `run-wire-feel.sh` (96; 94): the store, the migration from the toggle, both
+  menus' rows, the greyed slider, the weapon name.
+- Unchanged against retail: `run-diff-pose.sh`, `run-diff-near.sh`, `run-vectors-placement-editor.sh`,
+  `run-vectors-motion-runtime.sh`.
+
+### What only the game can show
+
+- Whether the game's near clip in full aim is the sight's rear (the pull is read off it). If it is not, the sight ends
+  nearer or farther than 15 cm; the `Aim:` line's "sight at" and the picture will say.
+- What the Hyena's sight distance, lens per zoom level and depth are, and whether its two zoom levels change the near
+  clip (the `Aim: changed:` line).
+- Whether the arms or the body come into view with the gun up to 20 cm closer (25 cm at 10 cm; the near clip moves in
+  with it).
+- How the game's depth D moves in full aim: on the way in, at a zoom change, and whether the unzoom gate flips it.
+  The pull follows D where D is short of its rest (the review's B2), so a D that jumps about would move the gun with
+  it; the `Aim:` line's depth and the picture will say.
+- Whether the game keeps the aim while the editor has the cursor. If it drops it, use the game's toggle-aim setting
+  or open the editor, then aim.
+- Whether the game's own aim transition and the 150 ms blend of the pull look as one movement.
+
+### What to try in the game
+
+1. Defaults (Aim field of view: the game's zoom; Sight distance in aim 15 cm). Take the Scythe, a scoped rifle (the
+   Hyena if you have it; else the R-63 Diligence or the Nova) and a pistol. Aim at each zoom level for a few seconds.
+   `grep -n "Aim:" <modlog>`: one `in`, a `changed` per zoom level, one `out` per aim. The sight should be clearly
+   closer than on feel.51, the pistol's iron sights unchanged (no sight seen, nothing pulled).
+2. Sight distance 0, then 10, then 20, then 5: 0 must look as feel.51; 5 closest. Note what clips (arms, scope rim),
+   and whether a zoom-level change in aim ever puts the sight against the eye or cuts into it.
+3. Aim field of view: Your locked view (the scope as small as at the hip), then A chosen value at 40 and at 60.
+4. Aim, press Page Up: the editor should say "opened in full aim: editing the ADS placement"; drag left/right and
+   scroll the wheel: the sight must move while you drag. Save weapon, close, aim again: it stays. Do it once with the
+   editor opened at the hip and ">" to ADS, then aim. Note whether the aim drops when the editor opens.
+5. Send the mod log and `locked_view.json`. Ask the tester (Mr.Roarke) for his `locked_view.json` and whether "Zoom when aiming" was on.
+
+### The review's findings, fixed (2026-11-24)
+
+The review (verdict: do not merge) found two blocking faults in the model of the pull and its near clip, three tests
+that let mutations through, and binder paths no test ran.
+
+- **B1, the near clip trailed the gun.** The gun moves in a frame (`src/pose_helper.c`); the near clip followed a tick
+  later (`ads_seat_tick` handed the closer over) and then eased in over 45 ms, so on every aim-in it stood behind the
+  sight's rear and cut into it. Now the near helper asks the pose helper itself in each of its calls
+  (`tfp_near_set_ads_source(tfp_pose_ads_near)`, bound in `src/wire_win_pose.c`); while the gun comes in the near clip
+  leads it by three times the last frame's step and the glide's snap (`tfp_ads_lead`: the game may set the near clip
+  before the gun's node in a frame), and a change toward the eye is taken at once (going out it eases, as retail).
+  `tests/wire_pose_test.c` `ads_frames` steps both real helpers, each on its own fake game memory
+  (`tests/near_world_shim.cpp`), at 60, 116 and 144 fps with the near setter before and after the gun: 1.5 to 8.7 cm
+  cut with the old handoff, none now.
+- **B2, a zoom-level change could put the sight at or behind the eye.** The pull's target jumps with the game's near
+  clip (a tick late) and glided 80 ms while the game reseats at its own pace. Now the pull is held each frame
+  (`tfp_ads_sight_least`, `tfp_ads_pull_most`) by where the sight can be: the game's depth D of this very frame
+  (`steady_frame`, which now runs before the pull) against its rest (request+0x90), and the last sight and D that
+  stood still together for 50 ms, moved by as much as D moved since. The sight never comes nearer than the wanted
+  distance (no margin: with the review's 1 cm the first step of a glide could bring the sight inside the near clip set
+  before it in that frame). The near clip goes in from that distance when it is nearer than the game's value. Each aim
+  pairs anew (another weapon's pair would hold the pull at nothing). `ads_zoom_frames`: 0.35 to 0.22 m and back,
+  the game reseating over 0, 80, 150 and 250 ms, at 10 and 15 cm wanted: the sight came to -3.0 cm and the near clip
+  cut up to 9.9 cm before; now the sight stays at the wanted distance, nothing is cut, and the gun never jumps back
+  out (a first version of the limit counted the change twice and did, by 12 cm for a frame; that check found it).
+  A wanted distance under the game's own 0.05 pulls no nearer than 0.05.
+- **I1.** The three surviving mutations are killed: the share raised at the hip (a lease that blends in from weight 0;
+  `wire-pose`), the near clip moved at the hip (`near-ads`: at the hip the pose helper is not even asked), and the
+  authored flag dropped (`editor-ads` now right-drags in full aim; its old check was an OR with a disjunct always true).
+- **I2.** `src/wire_editor.c` `open_editor` and `src/wire_motion.c` `host_editor_preview_ads` are one call each into
+  `src/editor_motion.h` (`tfp_editor_motion_open`, `tfp_editor_motion_preview_ads`), which `editor-ads` drives;
+  `wire-feel` calls the bound `editor_preview_ads`. Still not run by a test: the full-aim read through the player
+  snapshot, and `ads_seat_tick` (now only the sight and wanted distance for the pose helper and the `Aim:` line).
+- **N1.** `fov_aim` is rounded when set or read (2.5 was the game's zoom). **N3.** The `Aim:` line's game field of
+  view is the armed camera's only. **N2** is not fixed: an older build that saves the file drops `fov_aim`, and the
+  toggle it keeps cannot say "a chosen value"; coming back, that reads as "your locked view".
+- **The default is 15 cm** (above, "Why 15 cm").
+
+Models (the review's `model_near.py` and `model_zoom.py`, and the same with this branch's rules, wanted 10 and 15 cm):
+
+| | before | after |
+| --- | --- | --- |
+| aim-in, sight 0.173 / 0.22 / 0.35 m, 60-144 fps, near before or after the gun | cut 1.5-3.4 / 2.7-5.8 / 5.7-12.2 cm | 0 |
+| zoom 0.35 to 0.22 m, the game reseating at once | sight at -0.6 to -1.9 cm | at the wanted distance |
+| zoom 0.22 to 0.35 m, reseating over 250 ms | cut up to 12.0 cm | 0 |
+
+What this adds to what only the game can show: how D moves in full aim (on the way in, at a zoom change, and whether
+the unzoom gate flips it there). The pull follows D where D is short of its rest, so a D that jumps about would move
+the gun with it.
+
+## Round 20c (2026-11-24): ship what is safe and what measures (branch `round20c-aim`; offline, not yet in a build)
+
+Two branches answered the two aiming reports and neither passed its third review (review 27,
+`~/.cache/tfp-round20/b-result-2.md` and `b-result-3.md`): `round20-ads-distance` popped the gun 8 to 13 cm out in one
+frame at a zoom change toward the nearer sight (B1), and `round20-zoom-shake` popped the view 37.7 % in one frame at a
+zoom-level change while the gate flips and sharpened a real unzoom at a wall. Both causes rest on game behaviour no log
+has: the Hyena, a scope at 50 or 100 m, the unzoom gate in full aim. The decision: stop guessing, ship what is safe and
+what measures, then fix from game data. `round20c-aim` is cut from main (3664712) with:
+
+| What | From | State in round 20c |
+| --- | --- | --- |
+| Aim field of view (the game's zoom / your locked view / a chosen value, `fov_aim` rounded) | ads-distance (merged as reviewed) | on; default the game's zoom, as feel.51 |
+| Placement editor in full aim: opens on ADS, live preview, save, cancel | ads-distance | on |
+| Sight distance in aim (`ads_sight_cm`) | ads-distance, with B1 fixed here | **default 0: off, the game's own seat** |
+| Zoom-shake logging: gate frames and changes, the optic's lens target and magnification, lens, the game's value, shown value, largest magnification change between frames, the factor (game value over lens), the rig's depth | zoom-shake (copied) | on, in the one `Aim:` line |
+| Field of view held at the optic's own zoom while the gate flips (`tfp_aim_lens_goal`) | zoom-shake | **behind `zoom_steady.txt`, off** |
+| Held depth at full strength in full aim, and the carry through passed frames (`tfp_steady_aim`, `tfp_steady_carry`) | zoom-shake | **behind `zoom_steady.txt`, off** |
+| One `Aim:` line | both (union) | on |
+
+With neither the file nor a sight distance set, full aim draws exactly what main draws: the pull is 0 (wanted 0), the
+field of view's goal is the game's value (`steady` false in `lock_field`; the lens goal's ease is held at nothing so
+switching it on begins from nothing), and the held depth is weighted by the hip share as in round 9
+(`in.share = p->weight`, no carry). What runs in addition is counting only: the pose helper hands each frame's lens to
+the field-of-view helper (`host.note_lens`), which counts it in full aim. Both retail comparisons (`diff-fov`,
+`diff-pose`) pass: counting is off until the binder calls `tfp_fov_set_aim_watch(true, …)`, and no clock is read for it
+without the lock or a frame of full aim.
+
+### The sight distance's pull, B1 fixed (src/ads_seat.h)
+
+- **The pull goes down no faster than the game's depth comes in** (`tfp_ads_pull_frame`). While the pull is shown (ADS
+  share above 0) it may fall in a frame by at most what the depth the gun is drawn at fell since the last frame: the
+  gun the game brings toward the eye, the pull gives back as much, and the sight stays where it was. The limit
+  (`tfp_ads_pull_most`) still takes the near clip the frame it changes; only how fast the pull follows it is bounded.
+  With no depth worked out it glides (80 ms), never at once. The player asking for a farther sight in the menu is no
+  move of the game's: that glides too. Going up, and at the hip, it is as before.
+- **The aim's sight/depth pair is kept** for the aim (`tfp_ads_sight_least`). A new pair 50 ms after a zoom change
+  said the same where the sight goes with the depth; where the game changes its near clip and not its depth it moved
+  the limit by the whole difference in one frame, and toward the farther level pulled the gun 13 cm in front of a
+  sight that had not moved (the new test below caught it: the near clip cut 130 mm).
+- **I1 (the clash with the held depth):** the pull's depth is the one the gun is drawn at, the game's plus what the
+  held depth added (`ads_frame_depth += held_delta` in `position_locked`). With `zoom_steady.txt` absent nothing is
+  added in full aim and the two are the same, so the clash is moot by default; with it, the pull follows the held depth
+  and a gate flip does not move it (`wire-pose`: 12.8 to 14.1 cm of pull movement with the guard removed, none with it).
+- **Tests:** `ads_zoom_frames` now checks the sight's largest step in a frame against the game's own (feel.51, nothing
+  wanted) in both zoom directions, at 10 and 15 cm, reseats over 0 to 250 ms, 60/116/144 fps, near setter before and
+  after (the old code fails it: 8.42 cm against the game's 3.85 at 80 ms, 60 fps). A new case has the game change its
+  near clip with its depth standing still: the gun must not move either way, nor the near clip cut. `ads-seat` has the
+  arithmetic of each rule.
+
+### Zoom-shake behind the switch (src/fov_lock.h, src/fov_helper.c, src/depth_steady.h, src/pose_helper.c)
+
+The branch's code is copied whole; what changed is when it acts. `zoom_steady.txt` beside the DLL, read once at the
+start (`src/mod_view.c`, a `Test:` line when present), calls `tfp_pose_set_aim_steady(true)` and
+`tfp_fov_set_aim_watch(true, true)`. Review 27's finding 3 is fixed (the carry checks `in->on`: never carried with the
+switch off or the root's stop). Findings 1 and 2 (the 37.7 % pop at a zoom-level change while the gate flips; the
+sharper unzoom at a wall) are **not** fixed: they are behind the switch, and whether they matter depends on whether the
+gate flips in full aim at all. The tests that pin the corrections run with the switch set (`fov-lock-helper` parts 10
+and 11, `wire-pose`'s scaled-frame carry); new ones pin the switch off (`fov-lock-helper` part 12: the game's value
+through the lock's glide, the pulse there, nothing corrected, every count made; `wire-pose`: the scaled frame is the
+game's own). `aim-zoom` and `fov-lock` test the arithmetic, which does not depend on the switch.
+
+### The one `Aim:` line (src/aim_log.h)
+
+Written by `ads_seat_tick` (`src/mod_view.c`) from the sample of the tick and the frames since the line before: the
+field-of-view helper's counts, taken every tick, and the rig's depth in full aim from each `Steady:` second. Kinds:
+`in` (the aim settled, 300 ms), `changed` (zoom level, sight, editor, ADS placement or option changed and settled),
+`second` (once a second while aiming), `out` (the end). Under 700 characters (`say()`); the test's longest is 627.
+
+```
+Aim: in: "LAS-5 Scythe"; fov 61.5 shown 61.5 (Aim field of view: the game's zoom); sight 0.173 m (near clip), wanted 0.000: pull 0.000, closer 0.000 (ADS fwd +0.000), near clip 0.173 m; depth 0.210 m; editor closed | 18 frames: gate set 0 of 18 noted, changed 0 times; optic target 60.00-60.00 deg (x1.50-x1.50 of 90.0); lens 60.00-61.20; game 61.50-62.70, shown 61.50-62.70 (corrected 0); step 0.410 %; game/lens x1.0272-x1.0272 (18); rig depth 0.2102-0.2400 m (18), step 0.0030 m
+Aim: second: ... | 116 frames: gate set 58 of 116 noted, changed 114 times; optic target 7.50-7.50 deg (x12.00-x12.00 of 90.0); ...
+Aim: out after 16.2 s; zoom levels (game fov: sight m, depth m, optic): 30.8: sight 0.220, depth 0.270, optic 30.00 deg x3.00; 15.6: sight 0.350, depth 0.400, optic 15.00 deg x6.00 | ...
+```
+
+(Made up, from the tests' numbers.) Before the `|`: the sample now (the game's field of view and the one shown, the
+option, the game's sight distance as its near clip, the wanted distance, the pull and how much closer the gun is drawn,
+the ADS placement's forward, the near clip handed on, the game's depth, the editor). After it: the frames since the
+line before. "gate set N of M noted, changed K times": in how many frames the unzoom gate was set while aiming, and how
+often it changed. "optic target": the optic's own lens target (the gate clear) and its magnification of the
+third-person field of view: the zoom level. "game/lens": the hooked value over the evaluator's lens, in the tangent.
+"corrected": frames the zoom-shake goal was shown (0 without the file). "step": the largest change of magnification
+between two frames shown. "rig depth": the depth along the view in full aim, the game's plus what was held, and its
+largest frame step.
+
+### What the game run must show (docs/guides/AIM-TEST.md has the steps)
+
+1. **Does the gate flip in full aim?** `gate set` above 0 with `changed` many times in a `second` line taken standing
+   in the open says yes; 0 at every zoom level says the shake is something else, and the zoom-shake corrections are
+   not the answer. At a ledge or wall, a long set stretch is the game's own unzoom (expected).
+2. **The optic's zoom levels:** the `out` line's levels, each with its field of view, the optic's magnification, the
+   game's sight distance (near clip) and depth. That is the data the sight distance's pull rests on: whether the near
+   clip changes with the level, and whether the depth moves with it (and how fast: `second` lines during a change).
+3. **Does the hooked value lag the lens?** `game/lens` one value (to 4 places) while the lens moves (aim-in, a zoom
+   change) says no; a spread that comes with gate changes says it lags a frame.
+4. **The sight distance at 15 cm:** the gun closer at every zoom level, no jump at a zoom change, nothing cut.
+   `closer` 0.15 m less than `sight` per level.
+5. **The editor in aim:** `editor open on "ads"` while aiming, the sight moving with the drag, the aim kept.
+6. **With `zoom_steady.txt`:** `corrected` above 0 only while the gate flips, `step` under the run without the file
+   at the same level, and whether the view looks steadier, or pops at a zoom change.
+
+What decides the next round: if the gate never flips in full aim, the zoom-shake corrections are dropped and the shake
+is looked for elsewhere (the `step` with the gate clear, the lock's glide). If it does, the corrections are fixed for
+review 27's two findings against the logged pattern. The sight distance's default is chosen from the per-level sight
+and depth.
+
+### Review 28 (2026-11-24): the near clip only on the player's ask, the pull let go at 0, the binder lines tested
+
+- **B1, a saved ADS placement changed the near clip with the default settings.** The near clip followed the pose
+  helper's `closer` (the ADS placement's forward, too) from the sight's least distance (the game's depth moved it), so
+  with Sight distance in aim 0 a placement 3 cm toward the eye put the near clip 3 to 15 cm nearer than feel.51's in
+  full aim, and with the gate flipping it alternated every frame. Decision (the user's): the near clip follows only the
+  game's value less the gun's move (`tfp_ads_near(native, closer)`, no least distance), and only while the player asks
+  for it: Sight distance in aim above 0, or the placement editor on its ADS action (`tfp_pose_set_ads_editing`, set each
+  tick from `tfp_editor_motion_editing_ads`). Otherwise the pose helper publishes nothing closer and the near clip is
+  feel.51's frame for frame (`wire-pose` `ads_default_frames`: the near clip, node 5 and the root bit for bit against
+  no source at all, ADS forward -3 cm, aim in, two zoom changes, the gate flipping every frame, modes 1 and 2, 16/9/7 ms,
+  the near setter before and after the gun). Starting to follow gives no lead (the gun did not move). With a wanted
+  distance the near clip now cuts at a zoom change what the game's own value cuts of the game's sight (feel.51's cut),
+  not nothing: the zoom tests count only what is cut beyond that.
+- **I1, Sight distance in aim set to 0 mid-aim left the gun pulled until the aim ended.** Only a larger wanted distance
+  counted as the player's change. Now a wanted distance going to 0, or no sight handed (`tfp_ads_sight_none`), glides the
+  pull down too (`tfp_ads_pull_frame` takes the sight); a sight nearer than the wanted distance is still the game's move
+  and held (`ads-seat`: 15 -> 0, 5 -> 0, the sight going to 0 and to the game's 0.05).
+- **I2, binder lines no test reached.** They are in `src/aim_bind.h` (`tfp_aim_bind_pose`: the lens note and the near
+  source; `tfp_aim_bind_switches`: zoom_steady.txt; `tfp_aim_bind_tick`), tested by `tests/run-aim-bind.sh` over the
+  real helpers; whether the editor opens in full aim is `tfp_editor_motion_full_aim` (`editor-ads`). The Windows
+  binders keep one call each.
+- **N2/N3:** AIM-TEST.md says the `out` line can file a range under the gate's wide value; the `Aim:` depth comment says
+  it is the game's own depth.

@@ -140,6 +140,12 @@ typedef struct TfpPoseHost {
    * 0..3 of the pose slots, 4 for UnitAPI+0x90. */
   void (*forward_setter)(void *user, unsigned which, uint64_t original, uint32_t unit, uint32_t node, const float *pose);
   const float *(*forward_getter)(void *user, unsigned which, uint64_t original, uint32_t unit, uint32_t node);
+  /* Optional, not retail's (round 20, docs/design/specs/2026-11-23-gate-flip.md "Round 20"). NULL: nothing. Set:
+   * called on each frame of the rig's node 5 whose kind-6 lens the held depth read with its proofs (the same
+   * evaluation; the evaluator runs before the frame's hooked field-of-view call): the unzoom gate as the evaluator
+   * took it (the avatar's packed bit 0, or request+0x8f), the lens target it chose, the lens after its step. The feel
+   * build hands it to the field-of-view helper (tfp_fov_note_lens). */
+  void (*note_lens)(void *user, bool gated, float target, float lens);
 } TfpPoseHost;
 
 /* Supply the host once, before any other call. The struct is copied. */
@@ -234,4 +240,35 @@ typedef struct TfpPoseHoldProbe {
   uint64_t node5_calls;          /* position-setter calls for node 5 of the watched rig, counted from the first tfp_pose_set_hold on */
 } TfpPoseHoldProbe;
 uint32_t tfp_pose_hold_probe(TfpPoseHoldProbe *out); /* 1; reads only */
+/* Not in retail (round 20; src/ads_seat.h): the sight brought closer in full aim. `sight`: the game's near clip of a
+ * sight (m; what src/near_helper.c saw), `wanted`: how far from the eye the sight is to be (m; 0 leaves the game's own
+ * seat, the start-up value, so the helper is retail's until the binder calls this). Any thread; read in each frame.
+ * tfp_pose_ads_probe: what the last frame of node 5 did with it, for the "Aim:" line and the near clip (closer). */
+void tfp_pose_set_ads_seat(float sight, float wanted);
+/* Not in retail (round 20c; docs/guides/AIM-TEST.md): the test switch zoom_steady.txt. true: the held depth works at
+ * full strength in full aim too (src/depth_steady.h tfp_steady_aim) and a frame it passes there keeps the held distance
+ * (tfp_steady_carry). false, the start-up value: the hip share weights it, nothing in full aim (feel.51). Either way
+ * the frame's lens goes to host.note_lens and the depth in full aim is counted for the "Aim:" line. */
+void tfp_pose_set_aim_steady(bool on);
+typedef struct TfpPoseAdsProbe {
+  bool armed, full_ads;
+  float share;        /* the ADS share: 0 at the hip, 1 in full aim */
+  float pull;         /* m toward the eye the sight asks for, glided */
+  float closer;       /* m the gun is drawn closer than the game seats it: pull * share less the ADS placement's forward */
+  float ads_forward;  /* m: the ADS placement's forward (the editor's ADS action) */
+  float depth;        /* m: the game's own depth in the last frame of full aim (request+0x90 blended); NAN: not worked out */
+  bool aim_steady;    /* round 20c: tfp_pose_set_aim_steady (zoom_steady.txt) */
+  bool editing;       /* round 20c: tfp_pose_set_ads_editing */
+  float sight, wanted; /* round 20c: what tfp_pose_set_ads_seat was handed last */
+} TfpPoseAdsProbe;
+bool tfp_pose_ads_probe(TfpPoseAdsProbe *out); /* reads only */
+/* For the near helper's own calls (tfp_near_set_ads_source): how far in the near clip goes in full aim this frame, `closer`
+ * m (the gun's move toward the eye, leading it while it comes in: src/ads_seat.h tfp_ads_lead). 0 unless the player asks
+ * for the near clip to follow (round 20c, review 28 B1): a wanted distance above 0 (tfp_pose_set_ads_seat), or the
+ * placement editor on its ADS action (tfp_pose_set_ads_editing). false, 0: no lease. Any thread; reads only. */
+bool tfp_pose_ads_near(float *closer);
+/* Round 20c: the placement editor is on its ADS action (its draft is full aim's ADS placement, drawn live), so the near
+ * clip follows the gun as with a wanted distance. false, the start-up value: a saved ADS placement is drawn as on
+ * feel.51, the near clip the game's. The binder sets it each tick (src/aim_bind.h). Any thread. */
+void tfp_pose_set_ads_editing(bool on);
 #endif

@@ -12,6 +12,10 @@
 #include <string.h>
 #include "wire_win_pose.h"
 #include "slot_platform.h"
+#include "near_helper.h"
+#include "pose_helper.h"
+#include "fov_helper.h"
+#include "aim_bind.h"
 
 /* The function each pose slot must hold before one of the helper's values goes in: exe RVA and the
  * bytes there. The same numbers as src/pose_helper.c B_EXE_POSITION / _ROTATION / _BRANCH_ROTATION /
@@ -221,5 +225,8 @@ void tfp_win_pose_hosts(void) {
   host.lock_exclusive = host_lock_exclusive, host.unlock_exclusive = host_unlock_exclusive;
   host.lock_shared = host_lock_shared, host.unlock_shared = host_unlock_shared;
   host.writable32 = host_writable32, host.cas32 = host_cas32, host.region = host_region, host.allocate = host_allocate;
+  /* Round 20: the frame's kind-6 lens to the field-of-view helper, and the near clip read from the pose helper in each
+   * of the near helper's own calls (src/aim_bind.h, tested there). */
+  tfp_aim_bind_pose(&host);
   tfp_pose_set_host(&host);
 }

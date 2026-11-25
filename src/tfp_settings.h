@@ -93,7 +93,15 @@ typedef struct TfpSettingsMenuValue { bool is_bool, boolean; double number; } Tf
 #define TFP_SETTINGS_LOCKED(X) \
   X(camera_lock, 1, 1, 0, 1, 1) X(fov_lock, 1, 1, 0, 1, 1) X(fov_degrees, 0, 80, 50, 120, 1) X(fov_zoom_when_aiming, 1, 1, 0, 1, 1) \
   X(bodycam, 1, 0, 0, 1, 1) X(kick_strength, 0, 35, 0, 100, 5) X(kick_max_degrees, 0, 8, 0, 20, 1) X(thrown_kick_strength, 0, 70, 0, 100, 5) \
-  X(camera_damping, 0, 60, 0, 100, 5) X(animated_arms, 1, 1, 0, 1, 1) X(one_handed_pistols, 1, 1, 0, 1, 1) X(put_away, 1, 1, 0, 1, 1) X(smooth_eye, 1, 1, 0, 1, 1)
+  X(camera_damping, 0, 60, 0, 100, 5) X(animated_arms, 1, 1, 0, 1, 1) X(one_handed_pistols, 1, 1, 0, 1, 1) X(put_away, 1, 1, 0, 1, 1) X(smooth_eye, 1, 1, 0, 1, 1) \
+  X(fov_aim, 0, 1, 1, 3, 1) X(fov_aim_degrees, 0, 50, 20, 90, 1) X(ads_sight_cm, 0, 0, 0, 30, 1)
+/* Round 20 (docs/design/specs/2026-11-22-locked-view-design.md "Round 20"): fov_aim is "Aim field of view", 1 the game's
+ * zoom, 2 your locked view, 3 the chosen fov_aim_degrees. It took the place of the toggle fov_zoom_when_aiming, which
+ * is still stored and kept in step (on exactly when fov_aim is 1) so a build before this one reads the nearest answer;
+ * a file that names the toggle and not fov_aim (feel.51 and before) reads as 1 or 2. ads_sight_cm: how far from the eye
+ * full aim seats the sight the game sets the near clip to (src/ads_seat.h); 0 leaves the game's own seat. Default 0 (round 20c):
+ * off, the game's own seat as on feel.51, until a game run shows how the game moves its sight between zoom levels
+ * (docs/design/specs/2026-11-22-locked-view-design.md "Round 20c"). */
 /* "holster_animation" (an option until 0.6.0-feel.23 that did nothing) is read as put_away when the file has no
  * put_away of its own, and is never written: the next save holds put_away only. */
 #define TFP_SETTINGS_LOCKED_OLD_PUT_AWAY "holster_animation"

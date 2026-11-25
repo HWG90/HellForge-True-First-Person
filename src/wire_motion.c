@@ -319,6 +319,11 @@ static bool host_editor_is_active(void *user, bool *active, const char **problem
 static TfpMotionRuntimeGot host_editor_preview_rotation(void *user, TfpActionPlacement *out) {
   return tfp_editor_motion_preview(tfp_wire_editor_of(((Motion *)user)->w), out);
 }
+/* Round 20 (src/editor_motion.h): while the editor's "ads" action is edited, its draft is the ADS placement, every frame:
+ * full aim draws only that one, and before this a drag in full aim moved nothing that is drawn. */
+static bool host_editor_preview_ads(void *user, const TfpMotionRuntimeLease *view, bool *authored, const char **why) {
+  return tfp_editor_motion_preview_ads(tfp_wire_editor_of(((Motion *)user)->w), host_set_ads_placement, user, view, authored, why);
+}
 static TfpMotionRuntimeGot host_action_placement(void *user, const char *key, TfpAct action, TfpActionPlacement *out) { /* rt:740 */
   Motion *m = user;
   TfpRtArgs args;
@@ -541,6 +546,7 @@ bool tfp_wire_motion_bind(TfpWire *w) {
     .presentation_transition = host_presentation_transition, .presentation_action = host_presentation_action,
     .presentation_resume = host_presentation_resume,
     .editor_is_active = host_editor_is_active, .editor_preview_rotation = host_editor_preview_rotation, /* round 16 */
+    .editor_preview_ads = host_editor_preview_ads, /* round 20 */
     .sample = host_sample, .to_parent = NULL};
   w->ext[TFP_WIRE_EXT_MOTION] = m;
   TfpRtHost *h = &w->host;

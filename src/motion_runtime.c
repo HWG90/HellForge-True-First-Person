@@ -433,6 +433,11 @@ TfpMotionRuntimeAnswer tfp_motion_runtime_update(TfpMotionRuntime *rt, const cha
   TfpLocomotionSample sample;
   if (editing) { /* :287-296 */
     rt->profile_lease = NULL;
+    bool authored = false; /* not in retail (round 20): the ADS draft drawn live in full aim */
+    if (host->editor_preview_ads) {
+      const char *why = NULL;
+      if (!host->editor_preview_ads(host->user, lease, &authored, &why)) return NEUTRAL(TFP_MOTION_PHASE_EDITOR_FROZEN, why ? why : "ADS placement preview refused");
+    }
     TfpActionPlacement preview = {0, 0, 0, 0, 0, 0, 0};
     TfpMotionRuntimeGot got = host->editor_preview_rotation ? host->editor_preview_rotation(host->user, &preview) : TFP_MOTION_GOT_NIL;
     if (got == TFP_MOTION_GOT_RAISED) return TFP_MOTION_RUNTIME_RAISED;
@@ -445,6 +450,7 @@ TfpMotionRuntimeAnswer tfp_motion_runtime_update(TfpMotionRuntime *rt, const cha
     const char *error = NULL;
     if (!to_parent(rt, 0, 0, 0, pitch * RAD, yaw * RAD, roll * RAD, &sample, &parent, &error) || !vector(parent.axis))
       return NEUTRAL(TFP_MOTION_PHASE_EDITOR_FROZEN, "Rotation preview basis unavailable");
+    if (authored) parent.authored_ads = true;
     apply(rt, lease, parent, TFP_MOTION_PHASE_EDITOR_FROZEN, NULL, true, false);
     return answered(rt, reason);
   }

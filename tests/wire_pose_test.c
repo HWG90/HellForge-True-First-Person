@@ -54,6 +54,8 @@ void pose_world_weapon(int present) {
   sync();
 }
 void pose_world_seated(int seated) { scene.flags[14] = seated ? 4 : 0; sync(); }
+/* Full aim: the controller's aim byte (byte 4), as the game sets it in the sights. */
+void pose_world_aim(int on) { scene.controller[4] = on ? 1 : 0; sync(); }
 /* Another first-person request of the same avatar, weapon and body pushed above the owned one (1), or taken off again (0).
  * Nothing of the owned record changes: only the top of the ring is another record. */
 void pose_world_second_request(int pushed) {
@@ -126,12 +128,15 @@ void pose_world_build(PoseWorld *out) {
 #else
 #define _GNU_SOURCE
 #include <math.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/uio.h>
 #include <unistd.h>
 #include "wire_pose.h"
 #include "wire_off.h"
+#include "near_helper.h"
+#include "pose_helper.h"
 
 static unsigned checks;
 #define CHECK(condition) do { checks++; if (!(condition)) { printf("wire pose: FAILED %s (line %d)\n", #condition, __LINE__); return 1; } } while (0)
@@ -527,6 +532,7 @@ void pose_world_first_person(void);
 void pose_world_action(unsigned flags);
 void pose_world_weapon(int present);
 void pose_world_seated(int seated);
+void pose_world_aim(int on);
 void pose_world_second_request(int pushed);
 void pose_world_request_field(unsigned at, uint32_t value);
 static PoseWorld world;
@@ -541,6 +547,8 @@ static bool w_read(void *u, uint64_t at, void *out, size_t length) {
   return process_vm_readv(getpid(), &local, 1, &remote, 1, 0) == (ssize_t)length;
 }
 static uint64_t w_tick(void *u) { (void)u; return now_ms; }
+static struct { unsigned calls, gated; float target, lens; } lens_notes; /* round 20: what the pose helper hands the field-of-view helper */
+static void w_note_lens(void *u, bool gated, float target, float lens) { (void)u; ++lens_notes.calls; lens_notes.gated += gated; lens_notes.target = target; lens_notes.lens = lens; }
 static uint32_t w_thread(void *u) { (void)u; return 1; }
 static bool w_writable_slot(void *u, uint64_t at, uint64_t exe) { (void)u; return exe == world.exe && at >= world.api_begin && at + 8 <= world.api_end; }
 static bool w_executable(void *u, uint64_t at) { (void)u; return at >= 65536; }
@@ -604,8 +612,328 @@ static void root_frame(uint64_t step_ms) {
 static bool applied_is(double x, double y, double z) {
   return near(forwarded[0] - NATIVE[0], x, 2e-6) && near(forwarded[1] - NATIVE[1], y, 2e-6) && near(forwarded[2] - NATIVE[2], z, 2e-6);
 }
+/* Full aim, the hip placement eased out on the transition's own (exponential) step: x and z near 0, the forward as given. */
+static bool aimed_is(double y) {
+  return near(forwarded[0] - NATIVE[0], 0, 1e-4) && near(forwarded[1] - NATIVE[1], y, 1e-4) && near(forwarded[2] - NATIVE[2], 0, 1e-4);
+}
 static bool meter_is_applied(void) { /* the meter's commanded shift is what the helper really added to the game's pose */
   return applied_is(pose.meter.shift[0], pose.meter.shift[1], pose.meter.shift[2]);
+}
+
+/* ---- round 20, the review's B1 (2026-11-24): the gun and the near clip, frame by frame ----
+ * The pose helper moves the gun toward the eye in one frame; the near clip has to be there in the same frame, or it
+ * stands behind the sight's rear and cuts into the sight. Here both real helpers, each on its own fake game memory
+ * (tests/near_world_shim.cpp for the near helper), are stepped through aims at 60, 116 and 144 fps, with the game
+ * calling the near setter before the gun's node in a frame and after it. The game's sight (its near clip) is S; the
+ * sight's rear is drawn at S less what the gun was moved toward the eye in that frame (the hip placement's forward is 0
+ * here). In no frame may the near clip handed to the game be farther than that. */
+int near_world_begin(float hip, uint64_t now_us);
+float near_world_frame(float native, int full_aim, uint64_t now_us);
+void near_world_end(void);
+static float ads_sight_cut(float sight, float near_clip) { return near_clip - (sight - (NATIVE[1] - forwarded[1])); }
+/* One frame: the game's near setter before (0) or after (1) the rig's node 5; returns the near clip handed on. */
+static float ads_frame(TfpOpsHandle *handle, TfpOpsHelperStats *stats, uint64_t step, int order, float sight, int aim) {
+  float near_clip = 0;
+  if (order == 0) near_clip = near_world_frame(sight, aim, (now_ms + step) * 1000);
+  game_frame(handle, stats, step);
+  if (order == 1) near_clip = near_world_frame(sight, aim, now_ms * 1000);
+  return near_clip;
+}
+static int ads_frames(const TfpOpsPoseHelper *H, const TfpOpsHelperConfig *c) {
+  static const uint64_t steps[3] = {16, 9, 7};
+  static const float sights[3] = {.173f, .22f, .35f};
+  TfpOpsText why;
+  TfpOpsHandle *handle = NULL;
+  TfpOpsHelperStats stats;
+  void *native = NULL;
+  bool has_stats = false;
+  tfp_near_set_ads_source(tfp_pose_ads_near); /* as src/wire_win.c binds it */
+  for (int s = 0; s < 3; s++) for (int f = 0; f < 3; f++) for (int order = 0; order < 2; order++) {
+    const float sight = sights[s];
+    pose_world_third_person();
+    CHECK(H->prepare(H->user, c, &native, &why) == TFP_OPS_TRUE && H->begin(H->user, c, native, &handle, &why) == TFP_OPS_TRUE);
+    pose_world_first_person();
+    game_frame(handle, &stats, 300);
+    CHECK(near_world_begin(.05f, now_ms * 1000));
+    tfp_pose_set_ads_seat(sight, .10f);
+    float near_clip = 0, worst = 0, worst_out = 0;
+    for (int i = 0; i < 10; i++) near_clip = ads_frame(handle, &stats, steps[f], order, sight, 0);
+    CHECK(near(near_clip, .05, 1e-6) && near(forwarded[1] - NATIVE[1], 0, 1e-6)); /* at the hip: the hip clearance, nothing pulled */
+    pose_world_aim(1);
+    for (int i = 0; i < (int)(600 / steps[f]); i++) {
+      near_clip = ads_frame(handle, &stats, steps[f], order, sight, 1);
+      const float cut = ads_sight_cut(sight, near_clip);
+      if (cut > worst) worst = cut;
+    }
+    /* settled: the sight 10 cm from the eye (at most 0.25 m pulled) and the near clip at its rear */
+    const float pulled = sight - .10f > .25f ? .25f : sight - .10f;
+    CHECK(near(NATIVE[1] - forwarded[1], pulled, 1e-4) && near(near_clip, sight - pulled, 2e-3));
+    pose_world_aim(0);
+    for (int i = 0; i < (int)(600 / steps[f]); i++) {
+      near_clip = ads_frame(handle, &stats, steps[f], order, sight, 0);
+      const float cut = ads_sight_cut(sight, near_clip);
+      if (cut > worst_out) worst_out = cut;
+    }
+    if (worst > 1e-4f || worst_out > 1e-4f)
+      printf("wire pose: sight %.3f m, %llu ms frames, near setter %s the gun: the near clip cut %.2f mm into the sight aiming in, %.2f mm aiming out\n",
+             sight, (unsigned long long)steps[f], order ? "after" : "before", worst * 1000, worst_out * 1000);
+    near_world_end();
+    H->finish(H->user, handle, &has_stats, &stats, &why);
+    if (!getenv("TFP_ADS_ALL")) CHECK(worst <= 1e-4f && worst_out <= 1e-4f);
+  }
+  tfp_near_set_ads_source(NULL);
+  pose_world_third_person();
+  return 0;
+}
+
+/* ---- round 20, the review's B2 (2026-11-24): a zoom level changes in full aim ----
+ * The game's sight (its near clip) jumps to the new zoom level's at once; the pull's target with it, a tick later; the
+ * game moves its own seat, the depth D (request+0x90 blended over the lens, src/depth_steady.h), at a pace of its own
+ * (here 0 to 250 ms). The sight is where the game's seat has it: S_from + (D - D_from), less what the gun is drawn in.
+ * In no frame may the sight come nearer than the wanted distance (10 cm, and 15, the default), nor the near clip stand beyond the
+ * sight's rear. Zoom levels: 0.35 m with D 0.40 m (lens 0.40 rad) and 0.22 m with D 0.27 m (lens 0.20 rad). */
+static void put_f32(unsigned at, float v) { uint32_t u; memcpy(&u, &v, 4); pose_world_request_field(at, u); }
+static void ads_seat_world(float rest, float before, float prior, float target, float lens) {
+  put_f32(0x90, rest); put_f32(0x9C, before); put_f32(0xA0, prior);
+  pose_world_lens(target, lens);
+}
+static int ads_zoom_frames(const TfpOpsPoseHelper *H, const TfpOpsHelperConfig *c) {
+  static const uint64_t steps[3] = {16, 9, 7};
+  static const double seats[4] = {0, 80, 150, 250};
+  static const float S[2] = {.35f, .22f}, D[2] = {.40f, .27f}, LENS[2] = {.40f, .20f};
+  TfpOpsText why;
+  TfpOpsHandle *handle = NULL;
+  TfpOpsHelperStats stats;
+  void *native = NULL;
+  bool has_stats = false;
+  tfp_near_set_ads_source(tfp_pose_ads_near);
+  CHECK(tfp_pose_set_depth_steady(2) == 1 || tfp_pose_set_depth_steady(2) == 0); /* the game's depth worked out, nothing added (as depth_steady_off.txt) */
+  static const float WANTED[2] = {.10f, .15f};
+  for (int w = 0; w < 2; w++) for (int from = 0; from < 2; from++) for (int z = 0; z < 4; z++) for (int f = 0; f < 3; f++) for (int order = 0; order < 2; order++) {
+    const int to = 1 - from;
+    const float wanted_m = WANTED[w];
+    pose_world_third_person();
+    CHECK(H->prepare(H->user, c, &native, &why) == TFP_OPS_TRUE && H->begin(H->user, c, native, &handle, &why) == TFP_OPS_TRUE);
+    pose_world_first_person();
+    pose_world_optic();
+    ads_seat_world(D[from], 0, LENS[from], LENS[from], LENS[from]);
+    game_frame(handle, &stats, 300);
+    CHECK(near_world_begin(.05f, now_ms * 1000));
+    tfp_pose_set_ads_seat(S[from], wanted_m);
+    pose_world_aim(1);
+    float near_clip = 0;
+    for (int i = 0; i < (int)(800 / steps[f]); i++) {
+      if (order == 0) near_clip = near_world_frame(S[from], 1, (now_ms + steps[f]) * 1000);
+      depth_frame(steps[f]);
+      if (order == 1) near_clip = near_world_frame(S[from], 1, now_ms * 1000);
+    }
+    const float settled = NATIVE[1] - forwarded[1];
+    CHECK(near(settled, S[from] - wanted_m, 1e-4) && near(near_clip, wanted_m, 2e-3));    /* settled: at the wanted distance */
+    /* the zoom level changes: the game's sight at once, the tick's a frame later, the lens over seats[z] ms */
+    float nearest = 1, cut = 0, back = 0, before = NATIVE[1] - forwarded[1];
+    /* round 20c (review 27, B1): the largest step of the sight in a frame, against the game's own (feel.51: nothing
+     * wanted, the sight goes with the depth). Toward the nearer zoom level the pull's limit used to take the new near
+     * clip at once and the gun jumped 8 to 13 cm out in one frame. In both directions now. */
+    float step_most = 0, game_step_most = 0, last_sight = S[from] - settled, last_depth = D[from];
+    const uint64_t begun = now_ms;
+    for (int i = 0; i < (int)(800 / steps[f]); i++) {
+      const double t = (double)(now_ms + steps[f] - begun);
+      const double u = seats[z] > 0 ? (t / seats[z] > 1 ? 1 : t / seats[z]) : 1, eased = u * u * (3 - 2 * u);
+      const float lens = (float)(LENS[from] + (LENS[to] - LENS[from]) * eased);
+      ads_seat_world(D[to], D[from], LENS[from], LENS[to], lens);
+      if (i == 1) tfp_pose_set_ads_seat(S[to], wanted_m);
+      if (order == 0) near_clip = near_world_frame(S[to], 1, (now_ms + steps[f]) * 1000);
+      depth_frame(steps[f]);
+      if (order == 1) near_clip = near_world_frame(S[to], 1, now_ms * 1000);
+      /* the game's own depth this frame, as it works it out (src/depth_steady.h) */
+      const float span = fabsf(LENS[to] - LENS[from]), tt = fabsf(LENS[to] - lens) / span, depth = (1 - (1 - tt)) * D[from] + (1 - tt) * D[to];
+      const float sight = S[from] + (depth - D[from]) - (NATIVE[1] - forwarded[1]);
+      if (sight < nearest) nearest = sight;
+      /* round 20c (review 28, B1): the near clip is the game's value less the gun's move, so it cuts what the game's own
+       * value cuts of the game's own sight (feel.51), no more: the game sets the new zoom level's near clip before its
+       * seat is there. Counted is what is cut beyond that. */
+      const float game_cut = S[to] - (S[from] + (depth - D[from]));
+      if (near_clip - sight - (game_cut > 0 ? game_cut : 0) > cut) cut = near_clip - sight - (game_cut > 0 ? game_cut : 0);
+      if (fabsf(sight - last_sight) > step_most) step_most = fabsf(sight - last_sight);
+      if (fabsf(depth - last_depth) > game_step_most) game_step_most = fabsf(depth - last_depth);
+      last_sight = sight; last_depth = depth;
+      /* to a farther zoom level the gun only comes nearer: it never jumps back out for a frame */
+      if (S[to] > S[from] && before - (NATIVE[1] - forwarded[1]) > back) back = before - (NATIVE[1] - forwarded[1]);
+      before = NATIVE[1] - forwarded[1];
+    }
+    const float pulled = S[to] - wanted_m > .25f ? .25f : S[to] - wanted_m;
+    CHECK(near(NATIVE[1] - forwarded[1], pulled, 1e-4) && near(near_clip, S[to] - pulled, 2e-3));    /* settled at the new zoom level */
+    if (nearest < wanted_m - 1e-4f || cut > 1e-4f || back > 1e-4f || step_most > game_step_most + 1e-3f)
+      printf("wire pose: %.0f cm wanted, %.2f -> %.2f m, the game's seat over %.0f ms, %llu ms frames, near setter %s the gun: the sight came to %.1f cm, the near clip cut %.2f mm into it beyond the game's own cut, the gun went back out %.1f cm, "
+             "the sight's largest step %.2f cm (the game's own %.2f cm)\n",
+             wanted_m * 100, S[from], S[to], seats[z], (unsigned long long)steps[f], order ? "after" : "before", nearest * 100, cut * 1000, back * 100,
+             step_most * 100, game_step_most * 100);
+    near_world_end();
+    pose_world_aim(0);
+    H->finish(H->user, handle, &has_stats, &stats, &why);
+    if (!getenv("TFP_ADS_ALL")) CHECK(nearest >= wanted_m - 1e-4f && cut <= 1e-4f && back <= 1e-4f && step_most <= game_step_most + 1e-3f);
+  }
+  /* round 20c (review 27, B1): the game changes its near clip to the other zoom level's and its depth does not move
+   * at all (nothing has shown that it does). The gun is not moved: the pull stays where it was (it was 13 cm out and
+   * stayed there), the sight where it was, and the near clip cuts no more of it than the game's own value cuts of the
+   * game's own sight (review 28, B1: the game's value less the gun's move). */
+  for (int from = 0; from < 2; from++) for (int f = 0; f < 3; f++) {
+    const float wanted_m = .15f;
+    pose_world_third_person();
+    CHECK(H->prepare(H->user, c, &native, &why) == TFP_OPS_TRUE && H->begin(H->user, c, native, &handle, &why) == TFP_OPS_TRUE);
+    pose_world_first_person();
+    pose_world_optic();
+    ads_seat_world(D[from], 0, LENS[from], LENS[from], LENS[from]);
+    game_frame(handle, &stats, 300);
+    CHECK(near_world_begin(.05f, now_ms * 1000));
+    tfp_pose_set_ads_seat(S[from], wanted_m);
+    pose_world_aim(1);
+    float near_clip = 0;
+    for (int i = 0; i < (int)(800 / steps[f]); i++) { depth_frame(steps[f]); near_clip = near_world_frame(S[from], 1, now_ms * 1000); }
+    const float settled = NATIVE[1] - forwarded[1];
+    CHECK(near(settled, S[from] - wanted_m, 1e-4));
+    float step_most = 0, cut = 0, last = settled;
+    tfp_pose_set_ads_seat(S[1 - from], wanted_m);
+    for (int i = 0; i < (int)(800 / steps[f]); i++) {
+      depth_frame(steps[f]); near_clip = near_world_frame(S[1 - from], 1, now_ms * 1000);
+      const float pulled = NATIVE[1] - forwarded[1], sight = S[from] - pulled, game_cut = S[1 - from] - S[from];
+      if (fabsf(pulled - last) > step_most) step_most = fabsf(pulled - last);
+      if (near_clip - sight - (game_cut > 0 ? game_cut : 0) > cut) cut = near_clip - sight - (game_cut > 0 ? game_cut : 0);
+      last = pulled;
+    }
+    if (step_most > 1e-4f || cut > 1e-4f || !near(last, settled, 1e-4))
+      printf("wire pose: %.2f -> %.2f m with the game's depth standing still, %llu ms frames: the gun's largest step %.2f cm, the near clip cut %.2f mm beyond the game's own, the pull %.3f m (was %.3f)\n",
+             S[from], S[1 - from], (unsigned long long)steps[f], step_most * 100, cut * 1000, last, settled);
+    /* either way the gun stays where it was: toward the nearer the pull is not cut (the depth did not come in), toward
+     * the farther it is not grown (the aim's pair says the sight did not go out) */
+    CHECK(cut <= 1e-4f && step_most <= 1e-4f && near(last, settled, 1e-4));
+    near_world_end();
+    pose_world_aim(0);
+    H->finish(H->user, handle, &has_stats, &stats, &why);
+  }
+  /* another weapon in the next aim: the sight and depth paired in the last aim (a Nova-like scope: sight 0.066 m, D
+   * 0.348 m) say nothing of it (the Scythe: 0.173 m, D 0.21 m); paired anew each aim, the pull is the whole 7.3 cm from
+   * the first frame of the aim, not held to nothing until the new weapon has stood still */
+  {
+    TfpPoseAdsProbe ads;
+    pose_world_third_person();
+    CHECK(H->prepare(H->user, c, &native, &why) == TFP_OPS_TRUE && H->begin(H->user, c, native, &handle, &why) == TFP_OPS_TRUE);
+    pose_world_first_person();
+    pose_world_optic();
+    ads_seat_world(.348f, 0, .2f, .2f, .2f);
+    game_frame(handle, &stats, 300);
+    tfp_pose_set_ads_seat(.066f, .10f);
+    pose_world_aim(1);
+    for (int i = 0; i < 40; i++) depth_frame(16);
+    pose_world_aim(0);
+    for (int i = 0; i < 40; i++) depth_frame(16);
+    ads_seat_world(.21f, .30f, .6f, .5f, .55f);                      /* the lens on its way: D (0.255 m) not at its rest */
+    tfp_pose_set_ads_seat(.173f, .10f);
+    for (int i = 0; i < 40; i++) depth_frame(16);                   /* the pull's target glided there at the hip */
+    pose_world_aim(1);
+    for (int i = 0; i < 6; i++) { depth_frame(16); CHECK(tfp_pose_ads_probe(&ads) && near(ads.pull, .073, 1e-4)); }
+    pose_world_aim(0);
+    H->finish(H->user, handle, &has_stats, &stats, &why);
+  }
+  tfp_pose_set_depth_steady(0);
+  tfp_near_set_ads_source(NULL);
+  pose_world_third_person();
+  return 0;
+}
+
+/* ---- round 20c, review 28's B1: a saved ADS placement toward the eye, with the default settings ----
+ * Nothing wanted (Sight distance in aim 0) and the placement editor closed: the near clip in full aim is feel.51's,
+ * frame for frame (the same as with no source bound at all, as on main), through an aim in, zoom level changes and the
+ * unzoom gate flipping every frame; and the gun is drawn as without the source. With the editor on its ADS action the
+ * near clip follows the gun's 3 cm, and closed again it goes back to the game's. */
+static int ads_default_script(const TfpOpsPoseHelper *H, const TfpOpsHelperConfig *c, uint64_t step, int order, bool editor, float *out, int cap,
+                               int *count, int *editing_from) {
+  static const float S[2] = {.35f, .22f}, D[2] = {.40f, .27f}, LENS[2] = {.40f, .20f};
+  TfpOpsText why; TfpOpsHandle *handle = NULL; TfpOpsHelperStats stats; void *native = NULL; bool has_stats = false;
+  int n = 0;
+#define ADS_DEFAULT_FRAME(sight_) do { \
+    float nc_ = 0; \
+    if (order == 0) nc_ = near_world_frame((sight_), 1, (now_ms + step) * 1000); \
+    root_frame(step); \
+    if (order == 1) nc_ = near_world_frame((sight_), 1, now_ms * 1000); \
+    if (n + 3 <= cap) { out[n] = nc_; out[n + 1] = forwarded[1]; out[n + 2] = root_forwarded[1]; } n += 3; \
+  } while (0)
+  pose_world_third_person();
+  CHECK(H->prepare(H->user, c, &native, &why) == TFP_OPS_TRUE && H->begin(H->user, c, native, &handle, &why) == TFP_OPS_TRUE);
+  pose_world_first_person(); pose_world_optic();
+  ads_seat_world(D[0], 0, LENS[0], LENS[0], LENS[0]);
+  game_frame(handle, &stats, 300);
+  CHECK(near_world_begin(.05f, now_ms * 1000));
+  CHECK(H->set_ads_placement(H->user, handle, 0, -.03, 0, &why) == TFP_OPS_TRUE); /* a saved ADS placement 3 cm toward the eye */
+  tfp_pose_set_ads_seat(S[0], 0);
+  pose_world_aim(1);
+  for (int i = 0; i < (int)(600 / step); i++) ADS_DEFAULT_FRAME(S[0]);
+  int from = 0;
+  for (int z = 0; z < 2; z++) { /* 0.35 -> 0.22 over 150 ms, back at once */
+    const int to = 1 - from; const uint64_t begun = now_ms; const double seat = z ? 0 : 150;
+    tfp_pose_set_ads_seat(S[to], 0);
+    for (int i = 0; i < (int)(500 / step); i++) {
+      const double t = (double)(now_ms + step - begun), u = seat > 0 ? (t / seat > 1 ? 1 : t / seat) : 1, e = u * u * (3 - 2 * u);
+      ads_seat_world(D[to], D[from], LENS[from], LENS[to], (float)(LENS[from] + (LENS[to] - LENS[from]) * e));
+      ADS_DEFAULT_FRAME(S[to]);
+    }
+    from = to;
+  }
+  for (int i = 0; i < (int)(600 / step); i++) { /* the gate flipping every frame, the game's seat thrown 24 cm with it */
+    const bool set = i % 2 == 0;
+    pose_world_gate(set, 0);
+    ads_seat_world(D[from], D[from] - .24f, LENS[from], set ? 1.2f : LENS[from], set ? (LENS[from] + 1.2f) * .5f : LENS[from]);
+    ADS_DEFAULT_FRAME(S[from]);
+  }
+  pose_world_gate(0, 0); ads_seat_world(D[from], 0, LENS[from], LENS[from], LENS[from]);
+  for (int i = 0; i < (int)(300 / step); i++) ADS_DEFAULT_FRAME(S[from]);
+  *editing_from = n;
+  if (editor) { /* the placement editor opened on its ADS action, then closed */
+    tfp_pose_set_ads_editing(true);
+    for (int i = 0; i < (int)(400 / step); i++) ADS_DEFAULT_FRAME(S[from]);
+    tfp_pose_set_ads_editing(false);
+    for (int i = 0; i < (int)(800 / step); i++) ADS_DEFAULT_FRAME(S[from]);
+  }
+#undef ADS_DEFAULT_FRAME
+  *count = n;
+  near_world_end();
+  pose_world_aim(0);
+  H->finish(H->user, handle, &has_stats, &stats, &why);
+  return 0;
+}
+static int ads_default_frames(const TfpOpsPoseHelper *H, const TfpOpsHelperConfig *c) {
+  enum { CAP = 3 * 600 };
+  static float bound[CAP], unbound[CAP];
+  static const uint64_t steps[3] = {16, 9, 7};
+  for (int mode = 1; mode <= 2; mode++) for (int f = 0; f < 3; f++) for (int order = 0; order < 2; order++) {
+    int n_bound = 0, n_unbound = 0, at_bound = 0, at_unbound = 0;
+    CHECK(tfp_pose_set_depth_steady((uint32_t)mode) <= 1);
+    tfp_near_set_ads_source(NULL); /* main: no source; once first, so that both runs begin from what a lease leaves (the
+                                    * entry position remembered for the weapon) */
+    if (ads_default_script(H, c, steps[f], order, false, unbound, CAP, &n_unbound, &at_unbound)) return 1;
+    if (ads_default_script(H, c, steps[f], order, false, unbound, CAP, &n_unbound, &at_unbound)) return 1;
+    tfp_near_set_ads_source(tfp_pose_ads_near);
+    if (ads_default_script(H, c, steps[f], order, true, bound, CAP, &n_bound, &at_bound)) return 1;
+    CHECK(n_bound <= CAP && at_bound == at_unbound && at_unbound == n_unbound);
+    int differ = 0;
+    for (int i = 0; i < at_bound && i < CAP; i++) differ += memcmp(&bound[i], &unbound[i], sizeof(float)) != 0;
+    if (differ) printf("wire pose: ADS placement 3 cm toward the eye, nothing wanted, mode %d, %llu ms frames, near setter %s the gun: %d of %d values differ from no source\n",
+                       mode, (unsigned long long)steps[f], order ? "after" : "before", differ, at_bound);
+    CHECK(differ == 0); /* the near clip, node 5 and the root: bit for bit */
+    /* the editor on its ADS action: the near clip 3 cm in with the gun (0.35 m sight: 0.32 m) from the next call of the
+     * near setter (the first, with the near setter before the gun, is the game's: the pose helper had not yet seen it);
+     * closed: back out to the game's 0.35 m, eased (never nearer than with the editor open) */
+    const int open_end = at_bound + 3 * (int)(400 / steps[f]);
+    CHECK(near(bound[at_bound], order ? .32f : .35f, 1e-6));
+    for (int i = at_bound + 3; i < open_end; i += 3) CHECK(near(bound[i], .32, 1e-6));
+    for (int i = open_end + 3; i < n_bound; i += 3) CHECK(bound[i] >= bound[i - 3] && bound[i] <= .35f);
+    CHECK(bound[open_end + 6] > .32f && near(bound[n_bound - 3], .35, 1e-5));
+    for (int i = at_bound; i < n_bound; i += 3) CHECK(bound[i + 1] == bound[at_bound - 2] && bound[i + 2] == bound[at_bound - 1]); /* the gun did not move */
+  }
+  tfp_pose_set_depth_steady(0);
+  tfp_near_set_ads_source(NULL);
+  pose_world_third_person();
+  return 0;
 }
 
 static int real(void) {
@@ -627,7 +955,7 @@ static int real(void) {
   host.cas = w_cas, host.write = w_write, host.pin = w_pin;
   host.lock_exclusive = w_lock, host.unlock_exclusive = w_unlock, host.lock_shared = w_lock, host.unlock_shared = w_unlock;
   host.writable32 = w_writable32, host.cas32 = w_cas32, host.region = w_region, host.allocate = w_allocate, host.native_exp = w_exp;
-  host.forward_setter = w_forward_setter, host.forward_getter = w_forward_getter;
+  host.forward_setter = w_forward_setter, host.forward_getter = w_forward_getter, host.note_lens = w_note_lens;
   tfp_pose_set_host(&host);
   tfp_pose_reset_for_tests();
 
@@ -768,15 +1096,19 @@ static int real(void) {
     CHECK(applied_is(.11, .02 + (double)depth, -.12) && near(root_forwarded[1], -(double)depth, 2e-6) && root_forwarded[0] == 0 && root_forwarded[2] == 0);
     CHECK(tfp_pose_steady_take(&held) == 1 && held.frames == 61 && held.worked == 61 && held.roots == held.shifted && held.shifted >= 59 && tfp_steady_passed(&held) == 0);
     CHECK(tfp_pose_gate_take(&g) == 1 && g.applied == 0 && g.passed[TFP_GATE_STEADY] == 61);
+    memset(&lens_notes, 0, sizeof lens_notes);
     for (int i = 0; i < 6; i++) {
       pose_world_gate(i % 2 == 0, 0);
       root_frame(16);
+      /* round 20: each of these frames' lens goes to the field-of-view helper, the gate as the evaluator took it */
+      CHECK(lens_notes.calls == (unsigned)i + 1 && lens_notes.gated == (unsigned)i / 2 + 1 && near(lens_notes.target * 57.29578, i % 2 == 0 ? 90 : 36, .01) && lens_notes.lens > 0);
       const double added = i % 2 == 0 ? (double)current + (double)depth - (double)gated_depth : (double)depth;
       CHECK(applied_is(.11, .02 + added, -.12) && near(root_forwarded[1], -added, 2e-6));
       /* what the player sees of it: the game's depth plus the shift is the same distance on every frame */
       CHECK(near((i % 2 == 0 ? (double)gated_depth : (double)current) + added, (double)current + (double)depth, 2e-6));
     }
     CHECK(tfp_pose_steady_take(&held) == 1 && held.frames == 6 && held.gated.count == 3 && held.clear.count == 3 && held.shifted == 6 && held.roots == 6);
+    CHECK(held.aim_frames == 0); /* round 20: the hip, not full aim: nothing for the "Aim:" line */
     CHECK(near(held.gated.least, gated_depth, 1e-6) && near(held.clear.most, current, 0) && held.held.least == held.held.most && near(held.held.most, current + depth, 1e-6));
     CHECK(tfp_steady_worth(&held) && held.off == 0 && held.lease == 1 && near(held.argument_gated.least, NATIVE[1], 0));
     CHECK(tfp_pose_gate_take(&g) == 1 && g.avatar_changes == 6 && g.applied == 0 && g.passed[TFP_GATE_STEADY] == 3 && g.passed[TFP_GATE_GATED] == 3);
@@ -786,8 +1118,10 @@ static int real(void) {
     pose_world_gate(0, 1);
     pose_world_request_field(0x8C, 0x01000100); /* +0x8d set, +0x8f set */
     pose_world_request_field(0x88, 0x3f800000); /* the weight at 1 */
+    memset(&lens_notes, 0, sizeof lens_notes);
     root_frame(16);
     CHECK(applied_is(.11, .02, -.12));
+    CHECK(lens_notes.calls == 1 && lens_notes.gated == 1); /* round 20: request+0x8f alone is the gate too, as the evaluator takes it */
     pose_world_request_field(0x8C, 0);
     pose_world_gate(0, 0);
     root_frame(16);
@@ -796,6 +1130,60 @@ static int real(void) {
     game_frame(handle, &stats, 16);
     CHECK(applied_is(.11, .02, -.12));
     CHECK(tfp_pose_steady_take(&held) == 1 && held.frames == 3 && held.passed[TFP_STEADY_NO_LENS] == 1);
+    /* round 20, review 24 IMPORTANT 3: full aim, the hold at full strength there. A frame the game scales (the
+     * reload blend running, the gate bit set) is passed by the hold; in full aim the held distance is kept through
+     * it, node 5 and the root together, instead of the eye going back to the game's own depth for the frame.
+     * Round 20c: only with zoom_steady.txt (tfp_pose_set_aim_steady). Without it, as feel.51: nothing is held in full
+     * aim, the scaled frame is the game's own, and the depth in full aim is still counted for the "Aim:" line. */
+    for (int steady_aim = 1; steady_aim >= 0; --steady_aim) {
+      tfp_pose_set_aim_steady(steady_aim);
+      pose_world_aim(1);
+      for (int i = 0; i < 60; i++) root_frame(16);
+      CHECK(tfp_pose_steady_take(&held) == 1 && held.aim_frames > 50 && held.worked == 60 && tfp_steady_passed(&held) == 0);
+      const float before = forwarded[1], root_before = root_forwarded[1];
+      pose_world_gate(1, 0);
+      pose_world_request_field(0x8C, 0x00000100); /* +0x8d set */
+      pose_world_request_field(0x88, 0x3f000000); /* the weight at .5: the blend runs, and with the bit set the game scales the rig */
+      root_frame(16);
+      const double kept = steady_aim ? .5 * ((double)current - (double)gated_depth) : 0; /* the blend's share of it, unscaled; off: nothing */
+      CHECK(near(forwarded[1] - before, kept, 2e-6) && near(root_forwarded[1] - root_before, -kept, 2e-6));
+      CHECK(tfp_pose_steady_take(&held) == 1 && held.frames == 1 && held.passed[TFP_STEADY_SCALED] == 1 && held.shifted == (unsigned)steady_aim && held.roots == (unsigned)steady_aim);
+      pose_world_request_field(0x8C, 0); pose_world_request_field(0x88, 0x3f800000);
+      pose_world_gate(0, 0);
+      pose_world_aim(0);
+      for (int i = 0; i < 60; i++) root_frame(16);
+      CHECK(applied_is(.11, .02 + (double)depth, -.12));
+      tfp_pose_steady_take(&held);
+    }
+    tfp_pose_set_aim_steady(0);
+    /* round 20c (review 27, I1): with zoom_steady.txt the gun is drawn at the held depth in full aim, so the sight
+     * distance's pull follows that depth, not the game's own: the gate flipping (the game's depth thrown back and
+     * forth, the drawn one still) leaves the pull where it is. Taken from the game's own depth it would give back what
+     * the gate throws, on a gun that did not move. */
+    {
+      TfpPoseAdsProbe ads;
+      tfp_pose_set_aim_steady(1);
+      pose_world_aim(1);
+      tfp_pose_set_ads_seat(.35f, .15f);
+      for (int i = 0; i < 60; i++) root_frame(16);
+      CHECK(tfp_pose_ads_probe(&ads) && ads.full_ads && near(ads.pull, .20, 1e-4));
+      float least = 1, most = 0;
+      for (int i = 0; i < 8; i++) {
+        pose_world_gate(i % 2 == 0, 0);
+        root_frame(16);
+        CHECK(tfp_pose_ads_probe(&ads));
+        if (ads.pull < least) least = ads.pull;
+        if (ads.pull > most) most = ads.pull;
+      }
+      if (most - least > 1e-4f) printf("wire pose: zoom_steady.txt, the gate flipping in full aim: the pull went %.4f to %.4f m\n", least, most);
+      CHECK(most - least <= 1e-4f && near(most, .20, 1e-4));
+      pose_world_gate(0, 0);
+      tfp_pose_set_ads_seat(0, 0);
+      pose_world_aim(0);
+      for (int i = 0; i < 60; i++) root_frame(16);
+      tfp_pose_set_aim_steady(0);
+      tfp_pose_steady_take(&held);
+    }
     /* a shift too small for node 5's float (the lens one step short of its target): nothing is moved, nothing is
      * asked of the root, and neither is counted; it is not a root that failed to follow */
     CHECK(tfp_pose_set_depth_off(1) == 1); /* the hold then rests on the optic's own distance, where the game's depth is */
@@ -1074,6 +1462,76 @@ static int real(void) {
   H->finish(H->user, handle, &has_stats, &stats, &why);
   pose_world_action(0);
   for (int i = 0; i < 5; i++) CHECK(slot_now(i) == world.native[i]);
+
+  /* ---- round 20: the sight brought closer in full aim (src/ads_seat.h; not retail's). Off until the binder hands a
+   * wanted distance; then, in full aim, the gun goes toward the eye along node 5's forward axis by the game's sight
+   * (its near clip) less the wanted distance, eased in and out with the hip placement's blend, and the ADS placement's
+   * forward (the editor's) on top. The root is never written for it: the eye stays where the game puts it. ---- */
+  {
+    TfpPoseAdsProbe ads;
+    pose_world_third_person();
+    CHECK(H->prepare(H->user, &c, &native, &why) == TFP_OPS_TRUE && H->begin(H->user, &c, native, &handle, &why) == TFP_OPS_TRUE);
+    pose_world_first_person();
+    game_frame(handle, &stats, 300);
+    CHECK(applied_is(.15, 0, -.12));
+    tfp_pose_set_ads_seat(.173f, .10f);                               /* the Scythe's sight, 10 cm wanted */
+    game_frame(handle, &stats, 16);
+    CHECK(applied_is(.15, 0, -.12) && tfp_pose_ads_probe(&ads) && !ads.full_ads && ads.share == 0 && ads.closer == 0); /* at the hip: nothing */
+    pose_world_aim(1);
+    const unsigned roots_before = root_calls;
+    float last = forwarded[1], worst = 0;
+    for (int i = 0; i < 40; i++) {
+      game_frame(handle, &stats, 16);
+      if (fabsf(forwarded[1] - last) > worst) worst = fabsf(forwarded[1] - last);
+      CHECK(forwarded[1] <= last + 1e-6f);                            /* toward the eye only, never back and forth */
+      last = forwarded[1];
+    }
+    CHECK(aimed_is(-.073) && worst < .02f && root_calls == roots_before);  /* full aim: the hip placement gone, the gun 7.3 cm closer */
+    CHECK(tfp_pose_ads_probe(&ads) && ads.full_ads && near(ads.share, 1, 1e-3) && near(ads.pull, .073, 1e-4) && near(ads.closer, .073, 1e-4));
+    /* the editor's ADS forward on top: 2 cm back from the eye; the near clip comes in by 5.3 cm then */
+    CHECK(H->set_ads_placement(H->user, handle, 0, .02, 0, &why) == TFP_OPS_TRUE);
+    game_frame(handle, &stats, 16);
+    CHECK(aimed_is(-.053) && tfp_pose_ads_probe(&ads) && near(ads.closer, .053, 1e-4) && near(ads.ads_forward, .02, 1e-6));
+    CHECK(H->set_ads_placement(H->user, handle, 0, 0, 0, &why) == TFP_OPS_TRUE);
+    game_frame(handle, &stats, 16);
+    CHECK(aimed_is(-.073));                                           /* the ADS placement is retail's: a step, as the editor drags it */
+    /* another zoom level: the game's sight at 0.35 m. Glided, the most (0.25 m) at the end */
+    tfp_pose_set_ads_seat(.35f, .10f);
+    last = forwarded[1]; worst = 0;
+    for (int i = 0; i < 60; i++) { game_frame(handle, &stats, 16); if (fabsf(forwarded[1] - last) > worst) worst = fabsf(forwarded[1] - last); last = forwarded[1]; }
+    CHECK(aimed_is(-.25) && worst < .04f);
+    /* out of aim: eased back to the hip placement, nothing pulled */
+    pose_world_aim(0);
+    last = forwarded[1]; worst = 0;
+    for (int i = 0; i < 40; i++) { game_frame(handle, &stats, 16); CHECK(forwarded[1] >= last - 1e-6f); if (fabsf(forwarded[1] - last) > worst) worst = fabsf(forwarded[1] - last); last = forwarded[1]; }
+    CHECK(near(forwarded[0] - NATIVE[0], .15, 1e-4) && near(forwarded[1] - NATIVE[1], 0, 1e-4) && near(forwarded[2] - NATIVE[2], -.12, 1e-4));
+    CHECK(tfp_pose_ads_probe(&ads) && ads.share < 1e-3f && ads.closer < 1e-4f);
+    /* 0 cm: the game's own seat, in full aim too */
+    tfp_pose_set_ads_seat(.35f, 0);
+    pose_world_aim(1);
+    for (int i = 0; i < 40; i++) game_frame(handle, &stats, 16);
+    CHECK(aimed_is(0) && tfp_pose_ads_probe(&ads) && ads.pull == 0 && ads.closer == 0);
+    pose_world_aim(0);
+    H->finish(H->user, handle, &has_stats, &stats, &why);
+    pose_world_third_person();
+    /* a lease that is not a steady entry begins its hip weight at 0 and blends it up at the hip: 1 - weight is then
+     * near 1, but that is no aim, and nothing is pulled (the review's I1, mutation #5) */
+    TfpOpsHelperConfig blended = c;
+    blended.steady_entry = false;
+    tfp_pose_set_ads_seat(.173f, .10f);
+    CHECK(H->prepare(H->user, &blended, &native, &why) == TFP_OPS_TRUE && H->begin(H->user, &blended, native, &handle, &why) == TFP_OPS_TRUE);
+    pose_world_first_person();
+    for (int i = 0; i < 12; i++) {
+      game_frame(handle, &stats, 16);
+      CHECK(forwarded[1] == NATIVE[1] && tfp_pose_ads_probe(&ads) && ads.share == 0 && ads.closer == 0);
+    }
+    CHECK(near(forwarded[0] - NATIVE[0], .15, 1e-4));                 /* the hip placement did blend in */
+    H->finish(H->user, handle, &has_stats, &stats, &why);
+    pose_world_third_person();
+  }
+  if (ads_frames(H, &c)) return 1;
+  if (ads_zoom_frames(H, &c)) return 1;
+  if (ads_default_frames(H, &c)) return 1;
   CHECK(lock_faults == 0 && lock_depth[0] == 0 && lock_depth[1] == 0);
   return 0;
 }

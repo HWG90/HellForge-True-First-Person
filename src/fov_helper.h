@@ -119,6 +119,37 @@ uint32_t tfp_fov_error(void);
 /* Called every tick. The glide runs on the host's `seconds` clock, read in every rendered frame; `now_ms` (any
  * millisecond clock that keeps going) is only what it falls back on while that clock cannot be read. */
 void tfp_fov_set_lock(float radians, bool zoom_when_aiming, double now_ms);
+/* Round 20, "Aim field of view": `aim` is what full aim shows (src/fov_lock.h): TFP_FOV_AIM_ZOOM the game's lens,
+ * TFP_FOV_AIM_LOCKED the locked value, or a chosen value in radians, which holds with the lock off (`radians` 0) too.
+ * tfp_fov_set_lock(r, zoom, t) is tfp_fov_set_lock_aim(r, zoom ? TFP_FOV_AIM_ZOOM : TFP_FOV_AIM_LOCKED, t). */
+void tfp_fov_set_lock_aim(float radians, float aim, double now_ms);
 typedef struct TfpFovLockStats { uint64_t applied; float game_radians, shown_radians; } TfpFovLockStats;
 void tfp_fov_lock_stats(TfpFovLockStats *out);
+/* Beyond retail (round 20, docs/design/specs/2026-11-23-gate-flip.md "Round 20"): the kind-6 evaluator's lens of this
+ * frame, as the pose helper read it in the same evaluation (before the hooked setter call of the frame): the unzoom
+ * gate as the evaluator took it (the avatar's packed bit 0 or request+0x8f), the lens target it chose, the lens after
+ * its step. In full aim with "Aim field of view" the game's zoom, and zoom_steady.txt, the lock glides to the optic's
+ * own zoom instead of the gate's (src/fov_lock.h, tfp_aim_lens_goal). Game thread. */
+void tfp_fov_note_lens(bool gated, float target, float lens);
+/* Round 20c: `count` counts each hooked frame of full aim for the "Aim:" line (TfpFovAimSecond), the lock on or off;
+ * `steady` (only with `count`) is the test switch zoom_steady.txt: the correction above (tfp_aim_lens_goal's goal in
+ * place of the game's value, in full aim with the lock on and "Aim field of view" the game's zoom). Both false, the
+ * start-up value: retail's helper (no clock read for it). steady false: the game's value, as feel.51. */
+void tfp_fov_set_aim_watch(bool count, bool steady);
+/* What tfp_fov_set_aim_watch set, and the lens the last tfp_fov_note_lens noted (0: none). Reads only. */
+void tfp_fov_aim_watch_probe(bool *count, bool *steady, float *noted_lens);
+/* One second of full aim (the lock on or off), for the "Aim:" line. Taken (and cleared) once a second by the binder. */
+typedef struct TfpFovAimSecond {
+  uint32_t frames, noted, gated, changes, corrected; /* hooked frames in full aim; with the evaluator's numbers; gated; gate changes; the optic's own zoom shown instead of the gate's */
+  float clear_least, clear_most;                     /* radians: the optic's own lens target (gate clear) */
+  float lens_least, lens_most;                       /* radians: the evaluator's lens */
+  float game_least, game_most;                       /* radians: the game's value for the hooked call */
+  float shown_least, shown_most;                     /* radians: what the lock handed over */
+  float step_most;                                   /* the largest change of magnification between two frames shown, as a fraction */
+  float factor_least, factor_most;                   /* the game's value over the evaluator's lens, in the tangent, in the frames with this frame's note:
+                                                      * constant while the lens moves if the value is built from this frame's lens, spread if it lags */
+  uint32_t factored;                                 /* the frames with a factor */
+  float third_person;                                /* degrees: the game's third-person field of view (the wide target), as last read */
+} TfpFovAimSecond;
+void tfp_fov_aim_take(TfpFovAimSecond *out);
 #endif
