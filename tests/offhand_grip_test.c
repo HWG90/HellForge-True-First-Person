@@ -391,14 +391,42 @@ static void test_logged_ease(void) {
       a = base;
       const TfpOffhandResult res = tfp_offhand_step(&s, &a.upper, &a.fore, &a.hand, in || way == 0 ? &t : NULL, in, 1 / 30.0);
       const double step = fmax(degrees(&a.upper, &prev.upper), fmax(degrees(&a.fore, &prev.fore), degrees(&a.hand, &prev.hand)));
-      CHECK(step <= TFP_OG_EASE_BUDGET * res.limit_degrees + 1e-3 && res.step_degrees <= TFP_OG_EASE_BUDGET * res.limit_degrees + 1e-3);
+      CHECK(step <= .5 * res.limit_degrees + 1e-3 && res.step_degrees <= .5 * res.limit_degrees + 1e-3); /* half the allowance: 12 degrees */
       if (step > most) most = step;
       if (in && res.reason == TFP_OG_HELD && !frames) frames = i + 1;
       prev = a;
     }
     CHECK(frames > 4 && frames < 30 && !s.active && !memcmp(&a, &base, sizeof a));
+    CHECK(most > 11.9 && most < 12.1); /* the measured 12.0: the ease is held back by the budget, not under it by chance */
     printf("offhand grip: eased %s at 33.3 ms frames: on the grip after %d frames, largest joint step %.1f degrees (allowed %.1f)\n",
            way ? "in, then out as the target goes" : "in and out", frames, most, TFP_OG_TURN_DPS / 30);
+  }
+}
+/* The shoulder's top speed: held at 0.9 of the arm (no shoulder move), the grip jumps to 1.149 (a vertical grip, the
+ * logged most): the shoulder comes forward by at most 0.6 m/s (0.02 m a 33.3 ms frame) and gets there, the 0.106 m
+ * in six frames; then the hand is on the grip. The grip jumping back, the shoulder goes back as fast and no faster. */
+static void test_shoulder_speed(void) {
+  TfpOffhand s;
+  tfp_offhand_reset(&s);
+  Arm a;
+  const TfpGraftMatrix near = logged_target(.90, .25, -.15, .3, NULL), far = logged_target(1.149, .25, -.15, .3, NULL);
+  CHECK(run(&s, &a, &near, true, 1 / 30.0, 30).reason == TFP_OG_HELD && s.shift[0] == 0 && s.shift[1] == 0 && s.shift[2] == 0);
+  const double lack = (UPPER + LOWER) * (1.149 - TFP_OG_STRETCH);
+  for (int way = 0; way < 2; way++) {
+    double last = way ? lack : 0, most = 0;
+    int there = 0;
+    for (int i = 0; i < 30; i++) {
+      const TfpOffhandResult res = run(&s, &a, way ? &near : &far, true, 1 / 30.0, 1);
+      const double moved = fabs(res.shoulder_m - last);
+      CHECK(moved <= .02 + 1e-6);
+      if (moved > most) most = moved;
+      last = res.shoulder_m;
+      if (!there && fabs(res.shoulder_m - (way ? 0 : lack)) < 1e-5) there = i + 1;
+    }
+    CHECK(there >= 6 && there <= 8 && most > .0199);
+    CHECK(run(&s, &a, way ? &near : &far, true, 1 / 30.0, 1).reason == TFP_OG_HELD);
+    printf("offhand grip: the grip jumping %s: the shoulder moves at most %.4f m a 33.3 ms frame, %s after %d frames\n",
+           way ? "back to 0.9 of the arm" : "from 0.9 to 1.149 of the arm", most, way ? "back" : "0.106 m forward", there);
   }
 }
 /* Held while the body's arm jitters 20 degrees a frame, between 10 and 30 degrees from its pose, at 8.3 ms frames (a
@@ -498,6 +526,7 @@ int main(void) {
   test_logged_reach_edge();
   test_logged_ease();
   test_held_body_moves();
+  test_shoulder_speed();
   test_reach();
   test_stretch();
   test_refused();
