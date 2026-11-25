@@ -38,7 +38,10 @@ only while the game and launcher are closed, and keep a copy.
 | `peek.py`, `watch_field.py` | read the running game's memory from Linux by module offset |
 
 Input script words: `wait S`, `key NAME`, `hold NAME S`, `click left|right|middle [S]`, `down NAME`,
-`up NAME`, `look DX DY`. Names: letters, digits, `shift ctrl alt space tab esc f9 f10 f11`.
+`up NAME`, `keep NAME`, `look DX DY`. Names: letters, digits, `shift ctrl alt space tab esc f9 f10 f11`, the arrows
+`arrowup arrowdown arrowleft arrowright`. `keep NAME` (round 26) leaves what the script pressed with `down NAME` down
+when the helper ends; without it the helper lets go of everything it holds, so nothing stays held from one
+`Input.run()` to the next. `aim.py` and `aim-full` in `matrix.py` play full aim (see below).
 
 ## Facts that cost time to find
 
@@ -68,6 +71,32 @@ Input script words: `wait S`, `key NAME`, `hold NAME S`, `click left|right|middl
 - A trailing `wait` in an input script is honoured now; before 2026-11-20 midday, captures after
   `run()` were taken too early.
 - The game often reports a crash on quit that is not the mod's: see [QUIT-CRASH.md](QUIT-CRASH.md).
+
+## Full aim (round 26, 2026-11-24)
+
+The right button alone is the game's **shoulder** aim. Full aim (the mod's `full_ads`, the controller's `controls[4]`,
+the log's `State: aim in`, View `ads=1` and the `Aim:` lines) is the game's other aim mode. On PC it is switched with
+the **middle** button while aiming (the default "switch aim mode" binding; the mod's aim watch treats a middle press as
+the aim-mode button, `src/wire_action.h`). The 26 harness soak logs 8 to 34 have 1,332 `Motion: action=aim` and one
+`State: aim in` (soak 22, 05:24:47, cause not known). The user's log 31 has 13. The game's `remember_aim_mode` is 0
+in every HellForge profile.
+
+What the harness does about it, as a spec:
+
+- `drive.py`: the script word `keep NAME` and `Input.held`; `Input.close()` lets go of what is held. `win_input.c`:
+  `k` lines; an interrupt or a vanished game window lets go of everything, kept or not.
+- `aim.py` `full_aim()`: `down right; keep right; wait 0.35`, then `click middle`, then read the log for
+  `State: aim in` for 1.5 s; one more `click middle` where it did not come; the phase's action; the hold; `up right`
+  always. A result says reached, presses, seconds to full aim, and lost (out before the harness let go).
+- `aim.py` `zoom_cycle()`: in full aim, `down r; wait 0.6; key DIRECTION; wait 0.2; up r` for each arrow in turn
+  until an `Aim: changed` line has another `fov` (0.5 degrees or more), then that direction once more.
+- `matrix.py` `AIMED`: aim, aim-fire, aim-walk, pistol-aim, aim-full, aim-scope-zoom go through `full_aim()` and fail
+  without full aim (`aim.verdict()`). `soak.py` plays them so too (not aim-scope-zoom) and counts reached aims.
+- Offline proof: `tests/test_harness_aim.py`. It covers the event lines, the helper built against
+  `tests/harness_win_stub/windows.h` (a kept button is not let go, an unkept one is), the sequence against a fake game
+  that writes the log, the reading of the `Aim:` lines, and the counts above. Not proven offline: that the game goes
+  into full aim on the middle press, and which direction of the menu is the scope's range. `docs/guides/AIM-TEST.md`
+  "The harness" says what the next run must show.
 
 ## First-person rig probe, 2026-11-20
 

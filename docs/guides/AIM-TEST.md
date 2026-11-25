@@ -89,3 +89,68 @@ In pass C, per range: `wanted 0.150`, `closer` = sight - 0.15 (at most 0.25), `n
 
 In pass B: `corrected` above 0 only in seconds where `changed K times` is large; `step` lower than pass A's at the same
 range if the gate flips. If the gate never flips, pass B looks like pass A and that is the answer.
+
+## The harness (round 26)
+
+The harness now runs the aim test itself, without a player. Until round 26 it never reached full aim: its right
+button gave the game's shoulder aim only. In the 26 harness soak logs 8 to 34 there are 1,332 `Motion: action=aim`
+lines and 538 `shoulder=1`, but 1 `State: aim in`, 1 `View:` second with `ads=1` and 0 `Aim:` lines. The user's own
+log 31 has 13 `State: aim in`. Full aim (the sights on the eye) is the game's other aim mode. On PC you switch to it
+with the middle mouse button while holding aim: the game's "switch aim mode" binding, which the mod's aim watch
+calls the aim-mode button (`src/wire_action.h`). No harness script pressed it. The right button did reach the game;
+the shoulder aim shows that. Holding it longer would not have helped either: the phases held it 0.7 to 1.5 s.
+
+How a full aim is played now (`tools/harness/aim.py`, `full_aim()`):
+
+1. `down right; keep right; wait 0.35`: raise the aim. `keep` leaves the button down when the input helper ends.
+   Before, each helper let go of everything it held, so an aim could not last across two runs.
+2. `click middle`: switch the aim mode.
+3. Read the mod's log for up to 1.5 s until it says `State: aim in`. If it does not, press the middle button once
+   more: if the game remembered first person for this weapon, the first press took the aim out of it. Two presses
+   without it means the phase fails with "the game did not go into full aim".
+4. The phase's action in full aim (a shot for aim-fire, a walk for aim-walk, the zoom for aim-scope-zoom), then the
+   hold: 2 s for aim-full.
+5. `up right`. The button is let go even if the action or the input fails, and `Input.close()` lets go of anything
+   still kept.
+
+Phases (`tools/harness/matrix.py OUT_DIR PHASE ...`):
+
+| Phase | What it does | Passes when |
+| --- | --- | --- |
+| `aim-full` | full aim, then 2 s | the camera judge passes, `State: aim in` came, no `State: aim out` before the harness let go, an `Aim: in` line, an `Aim: out after` at least 2.0 s |
+| `aim-scope-zoom` | full aim, then the scope's range: hold R (the weapon functions menu), press a direction, let go of R; the directions are tried in the order right, left, up, down until an `Aim: changed` line shows another `fov`; that direction is pressed once more; then 1 s | as aim-full (1 s), and at least two zoom levels in the `Aim:` lines |
+| `aim`, `aim-fire`, `aim-walk`, `pistol-aim` | as before, but in full aim | as before, and as aim-full with their own hold |
+
+The phase line prints `full aim after T s (N aim-mode presses)` or `NO full aim`, the `Aim:` lines counted by kind
+and the zoom levels seen; aim-scope-zoom adds `zoom key K` or `not found` and the keys tried. `matrix.json` has all
+of it under `aim`. The soak (`soak.py`) plays its aim actions the same way, prints the same line for each, and
+its summary counts how many reached full aim. It leaves out aim-scope-zoom.
+
+`python3 tools/harness/aim.py full` and `aim.py zoom` play one aim outside the matrix; `aim.py --log LOG` counts what
+a log says of aiming (the numbers above).
+
+Before aim-scope-zoom: have a scoped rifle with ranges as the primary (the R-4 Hyena, or another with 25 / 50 / 100
+m) and the view on. With iron sights it fails with "one zoom level seen".
+
+### What the next game run must show
+
+Run `matrix.py OUT aim-full aim-scope-zoom aim aim-fire pistol-aim` with a scoped rifle as the primary.
+
+- aim-full: `full aim after` about 0.4 to 1.0 s with **1** aim-mode press. In the log, after `State: aim in`: View
+  lines with `ads=1`, `Motion: action=ads`, one `Aim: in`, one or two `Aim: second`, `Aim: out after 2.x s`, and no
+  `Aim: release not kept`. If it always takes **2** presses, the game remembers the aim mode per weapon (the profile's
+  `remember_aim_mode`): say so here and start with the second press's state. **NO full aim** after both presses means
+  the middle button is not the aim-mode binding in this profile, or the game does not hear it. Then check that
+  `drive.py run "click middle"` pings or marks anything in the game.
+- aim-scope-zoom: `zoom key K` with K one of the arrows. Write it down here, and put that key first in `ZOOM_KEYS`.
+  Expect two or three zoom levels (about 30.8, 15.0 and 7.5 for 25 / 50 / 100 m) and the `Aim: out` line listing
+  each with its sight and depth. `zoom key not found` with full aim kept means the menu takes another input; to see
+  the menu:
+  `drive.py run "down right; keep right; wait 0.35; click middle; wait 1; down r; keep r; wait 1"`, then
+  `drive.py shot menu.png`, then `drive.py run "up r; up right"`. `full aim was lost before the zoom key ...` means
+  holding R ends full aim: then the zoom can only be set before aiming.
+- The aim phases pass with the view in first person the whole time (`+0 missed`). This is the first harness run of
+  the Aim field of view and of the near clip in full aim, so judge their captures too.
+
+Not done by the harness: the editor in aim (step 5 of pass A; it needs the placement editor's mouse drags), passes
+B and C (a test file and a menu change, each needing a restart of the game).
