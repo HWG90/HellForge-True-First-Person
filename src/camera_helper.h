@@ -187,6 +187,16 @@ void tfp_camera_down_stats(TfpCameraDownStats *out);
  * head hiding asks in place of the on-foot answer (src/head_visibility.h held_off_foot). */
 uint32_t tfp_camera_lock_off_foot_body(void);
 uint64_t tfp_camera_lock_frames(void); /* frames the lock has held so far: rising while the view is shown */
+/* Round 37 (src/camera_vehicle.h): under the lock, a frame of a body that is seated, off foot and not in physics (an
+ * exosuit's or a vehicle's seat) is handed to the game's own camera, as retail's refusal of a body that is not on foot
+ * does, but over a glide from where the view was; leaving the seat glides back to the head camera. Such frames are not
+ * held (tfp_camera_lock_frames), not missed and not the shown view (tfp_camera_view_frames), and head hiding lets go.
+ * frames: seat frames; glided: those of them the glide wrote; entries, exits: seats begun and left; cuts: entries
+ * with no glide (the game's camera over 8 m away, or nothing shown within the last 250 ms to start from). Of the last
+ * entry: the camera kind, the request record's weapon, the glide's length (0: a cut) and the way it had to go; of the
+ * last exit: the glide back (0: none, the head camera at once or not shown). seated: the last frame was a seat. */
+typedef struct TfpCameraSeatStats { uint64_t frames, glided, entries, exits, cuts; uint32_t in_kind, in_weapon, in_ms, out_ms, seated; float in_metres, out_metres; } TfpCameraSeatStats;
+void tfp_camera_seat_stats(TfpCameraSeatStats *out);
 /* Frames the view was shown so far (the head camera or the native view, or any camera the lock holds), with the
  * camera lock on or off. What the field-of-view lock follows. */
 uint64_t tfp_camera_view_frames(void);
