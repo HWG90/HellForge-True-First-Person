@@ -16,7 +16,7 @@ python3 harness.py mission --difficulty 1  # solo mission, player in control (ab
 
 cd ~/Projects/HellForge/Backports/true-first-person/tools/harness
 python3 drive.py focus                     # bring the game to the front
-python3 drive.py run "key f11; wait 1; hold w 1.5; click left 0.5; key r"
+python3 drive.py run "key u; wait 1; hold w 1.5; click left 0.5; key r"
 python3 drive.py shot /path/out.png
 python3 probe_rig.py OUT_DIR idle walk fire reload aim swap
 
@@ -49,7 +49,7 @@ when the helper ends; without it the helper lets go of everything it holds, so n
   `stingray.Window.has_focus()` is false, and only the compositor can capture the window. So a run takes
   the keyboard and mouse: `drive.py` puts the window in front first and refuses to send input otherwise.
 - Posted window messages (`PostMessage`) move the player but are invisible to `GetAsyncKeyState`, which is
-  how the mod reads F11 and the aim button. `SendInput` from a process in the same prefix reaches both.
+  how the mod reads its toggle key (U; `drive.TOGGLE`, F11 until round 36, which is now HellForge's Armor LUT editor) and the aim button. `SendInput` from a process in the same prefix reaches both.
 - `/dev/uinput` is not usable after a kernel package update until the next reboot (the running kernel's
   modules are gone), so the helper does not depend on it.
 - The harness's own `shot` needs X11 and fails here; use `drive.py shot`.

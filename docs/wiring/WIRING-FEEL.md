@@ -83,7 +83,7 @@ All four effect tables: `tools/verify_effects_constants.py` (62 checks against t
 
 ## 5. Not proven until it runs in the game (ranked)
 
-1. **Nothing of this build has executed on Windows.** The join was run only with no game (every read failing, `tests/wire_feel_test.c`). First F11 exercises the pose helper's five Unit API slots, which carry every unit's calls on unknown threads.
+1. **Nothing of this build has executed on Windows.** The join was run only with no game (every read failing, `tests/wire_feel_test.c`). First U exercises the pose helper's five Unit API slots, which carry every unit's calls on unknown threads.
 2. **Where HellForge's tick falls in the frame.** The sleeves and grips read the previous animation evaluation and write local poses; retail does this inside the script update. If the tick is on the wrong side of animation, sleeves lag a frame or grip writes are lost: `corr` high every second with visible hand jitter, or `wjump` clean while the arms visibly snap.
 3. **`World.link_unit` and `Unit.set_local_pose` were never called on this build.** The link readback guards the argument order; a wrong link is undone and the module refuses.
 4. **The pose helper's layout constants** (weapon definition, depth pin) rest on translation notes: `Refused: pose: read-only validation … native code N` before any write if wrong.
@@ -103,15 +103,15 @@ Install only on the user's word (game and HellForge closed; First Person Control
 | # | Do | Expect in the log |
 |---|---|---|
 | 1 | Start, reach the ship | the view build's banner / `Image:` / `Pins:` lines, then `Ready: settings from …settings.json: 19 weapon placement profiles …`, `Ready: pose helper bound …`, `Ready: motion bound …`, `Ready: model shadows …`, `Ready: pose slots: …`, `Ready: markers …`, `Ready: aimopt …`, within seconds `Ready: head visibility: N engine functions are build 25480438's own …`, the same for arm pieces and grip hand, `Ready: dof`, `Ready: vignette`, `Ready: movement`. No `Refused:` except `look gain` later |
-| 2 | Mission, weapon in hand, F11 | the view build's entry lines; `Weapon: key=… placement=imported(own) …` for a weapon you placed in retail; `Ready: pose: the helper's read-only validation passed`, `Pose: begin generation 1 …`; the `Check: head visibility: … ok` lines and `Ready: head visibility: the in-game checks passed`; `Check: arm pieces / grip hand …` and their `Ready:`; `Hook: pose …` lines; each second `View:` and `Feel:` |
+| 2 | Mission, weapon in hand, U | the view build's entry lines; `Weapon: key=… placement=imported(own) …` for a weapon you placed in retail; `Ready: pose: the helper's read-only validation passed`, `Pose: begin generation 1 …`; the `Check: head visibility: … ok` lines and `Ready: head visibility: the in-game checks passed`; `Check: arm pieces / grip hand …` and their `Ready:`; `Hook: pose …` lines; each second `View:` and `Feel:` |
 | 3 | Stand still 10 s | `Feel:` with `pose=armed err=0`, `writes` rising, `wjump` below a millimetre, `head=active:N`, `sleeves=linked:N` steady, `corr` low |
 | 4 | Walk, turn, sprint, crouch, prone | `Motion: action=…` on each change; `wjump` a few millimetres, no centimetre spikes; `refused=0` |
 | 5 | Aim and release; scoped weapon | view build rows 5-6; `blend` to 0 and back; `wjump` about 1-2 cm during the 150 ms ease only; `dof=owned`, `markers=hidden` while the view is on; once `Refused: look gain: …` |
 | 6 | Swap weapons, then stim / grenade / dive | `Pose: finish …`, `Weapon: key=<new> placement=…`, `Pose: begin generation N+1`; sleeves relink (`sleeves=` changes and returns); the `wjump` and `corr max` of those seconds are the snap to judge |
-| 7 | F11 off | `Pose: finish`, `State: exit complete`; the `Feel:` lines stop; third person looks as before (head, shadows, depth of field, crosshair) |
+| 7 | U off | `Pose: finish`, `State: exit complete`; the `Feel:` lines stop; third person looks as before (head, shadows, depth of field, crosshair) |
 | 8 | Quit with the view on | `Session end: N dispatch slot(s) put back` (up to 9) |
 
-Bad session: any `Refused: <module>: <check> observed=…` (send the line: it has the observed values); `err` not 0 while `pose=armed`; `wjump` or `corr max` in centimetres outside entry / swap / aim; `refused=` rising on the motion fragment; a body part still hidden or the crosshair missing after F11 off.
+Bad session: any `Refused: <module>: <check> observed=…` (send the line: it has the observed values); `err` not 0 while `pose=armed`; `wjump` or `corr max` in centimetres outside entry / swap / aim; `refused=` rising on the motion fragment; a body part still hidden or the crosshair missing after U off.
 
 ## 7. Tests
 
@@ -166,11 +166,11 @@ Proof: `tests/vectors/controller_vectors.h` (18,473 operations in 9 runs, retail
 | Do | Expect in the log |
 | --- | --- |
 | Load the mod, do nothing | no "Placement …" refusal and no raise from `on_enable` (its `set_placement` of the default answered true) |
-| F11 on a firearm, wait for the view, read the diagnostics / status row | status ends "…; camera6/aimfalse observations=N; arms/weapon offset updates=N; hip blend=1; aim transitions=N" (hip blend 1 at rest; updates rise while the rig hook writes) |
+| U on a firearm, wait for the view, read the diagnostics / status row | status ends "…; camera6/aimfalse observations=N; arms/weapon offset updates=N; hip blend=1; aim transitions=N" (hip blend 1 at rest; updates rise while the rig hook writes) |
 | Hold aim, release | "aim transitions" goes up by 2; "hip blend" moves away from 1 while aiming and returns |
 | With the view up, change a placement in the editor (or the debug `placement` entry) by a few centimetres | accepted (no refusal line); the arms / weapon move; the placement row shows the new x/y/z and yaw/pitch/roll |
 | Enter a placement beyond 0.5 m or 90 degrees through the debug entry | "Placement must be finite XYZ within 0.5 metres" / "Angles must be within90degrees"; nothing moves |
-| F11 off, then set a placement | accepted through the defaults (no lease); the next F11 entry starts at that placement |
+| U off, then set a placement | accepted through the defaults (no lease); the next U entry starts at that placement |
 | Swap weapons with the view up | the placement target (weapon key) changes with the weapon; no "Pose placement lease is not active or owned" once the new view is up |
 
 ## 9. Pose helper (weapon and arm placement)
@@ -251,14 +251,14 @@ Every other caller is forwarded untouched. These five slots carry the calls of e
 | Do | Expect in the log |
 |---|---|
 | Start a session, reach the ship | `Ready: pose helper bound (placement, ADS placement, motion, transitions, draw and entry blend, zoom depth); look gain asked for as retail does (the helper decides)`, and (from `tfp_win_pose_check`) a line that UnitAPI `+0x38, +0x48, +0x40, +0x00 and +0x90 hold the five pinned functions`. No `Refused: pose` |
-| In a mission, weapon in hand, standing: F11 | `Ready: pose: the helper's read-only validation passed …` (first time only), `Pose: begin generation 1, steady entry …, placement (0.150, 0.000, -0.120) = 0.1921 m, duration 0 ms, blend 150 ms`, then `Hook: pose position (UnitAPI+0x38) first fired …`, and each second `pose=armed blend=1.00 wjump=0.0000m/0.00deg placements=0 motion=0 err=0 writes=N look=refused(2)` with `writes` rising. The weapon and arms are shifted by the placement instead of sitting where the view build left them |
+| In a mission, weapon in hand, standing: U | `Ready: pose: the helper's read-only validation passed …` (first time only), `Pose: begin generation 1, steady entry …, placement (0.150, 0.000, -0.120) = 0.1921 m, duration 0 ms, blend 150 ms`, then `Hook: pose position (UnitAPI+0x38) first fired …`, and each second `pose=armed blend=1.00 wjump=0.0000m/0.00deg placements=0 motion=0 err=0 writes=N look=refused(2)` with `writes` rising. The weapon and arms are shifted by the placement instead of sitting where the view build left them |
 | Two seconds later | once: `Refused: look gain: the look evaluator's code proof is not established on build 25480438 (input reason 2, code unavailable). Retail's two extra hooks are installed, …` |
 | Stand still, then walk and turn | `err=0`; `wjump` small and of the same size second after second (with the motion module bound, `motion=N` is above 0; note the usual value in the first session: it is the baseline a snap is judged against) |
 | Aim (right mouse), release | `blend` falls to 0.00 while aiming and returns to 1.00; `wjump` in those seconds about 0.01 to 0.02 m (the 150 ms ease of 19 cm), not 0.19; no `Pose: finish` in between |
 | Aim with a scoped weapon, change zoom | `look=refused(2)` stays; the look speed in the scope and at the hip is the game's own |
 | Swap weapons | `Pose: finish generation N: … shifted rig writes, … restores, helper error E (meaning)` (0, or an owner / weapon change such as 7 or 8, which is the swap itself), then `Pose: begin generation N+1, steady entry …` for the new weapon. `pose=none` or `unarmed` for the seconds in between |
 | Stim, grenade, dive | as the swap: finish, then begin again when the view returns; a `blended entry` after an aim-out return |
-| F11 off | `Pose: finish generation N: …`; afterwards `pose=none`; the five slots hold the game's functions again (a second F11 on must begin cleanly) |
+| U off | `Pose: finish generation N: …`; afterwards `pose=none`; the five slots hold the game's functions again (a second U on must begin cleanly) |
 | Quit with the view on | `Session end: N dispatch slot(s) put back` counts up to 5 more for the pose slots |
 
 A session is bad when: any `Refused: pose:` other than a single refusal around a swap or death; `err` other than 0 on a `pose=armed` line; `writes` not rising while `pose=armed` in first person (the rig hook does not match its call site); `wjump` above a few centimetres in a second without an edit, a swap or an entry; `Refused: the pose … slot was not swapped`; `look=on` (the gain must not be active in this build).

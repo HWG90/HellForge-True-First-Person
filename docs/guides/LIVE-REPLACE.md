@@ -11,7 +11,7 @@ may take it out of a running game and set a new build up in its place. HellForge
 1. Once: switch on HellForge Settings > Experimental > Change mods without restarting (`liveChanges` in
    `launcher-settings.json`; `HellForge.Cli settings --live-changes yes`). It is read when a session starts, so it
    applies from the next session. It was off on 2026-11-17.
-2. Be on the ship (or the title screen), solo, with the view **off** (F11).
+2. Be on the ship (or the title screen), solo, with the view **off** (U).
 3. Put the new build's files in `mods/true-first-person`, then switch the mod off and on again on the launcher's Mods
    page (the SDK docs say saving a change to a mod's files also goes to the running game).
 4. Read the session's `mod-goose.true-first-person.log`, `modloader.log` and `backend/live-mods.log`: they say whether
@@ -31,7 +31,7 @@ helper call. It:
 
    | Held | Read from |
    |---|---|
-   | the view is on (F11 on, running or waiting) | `controller.enabled` |
+   | the view is on (toggled on with U, running or waiting) | `controller.enabled` |
    | the view's cleanup is pending, or it has not finished switching off | `controller.phase` |
    | a native-view lease | `tfp_wire_held` |
    | a recovery row (a failed part being cleaned up or retried) | `tfp_wire_recovery_busy` |

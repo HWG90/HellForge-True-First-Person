@@ -3,7 +3,7 @@
   "id": "goose.true-first-person",
   "name": "True First Person",
   "version": "0.6.0-view.1",
-  "description": "F11 toggles the game's own first-person camera, driven as the retail mod drives it (eye position, field of view, near clip, scope blur). View only in this build: no arm or weapon placement, sleeves, motion or effects yet. Switch the First Person Controller off: the two cannot run together.",
+  "description": "U (F11 is HellForge's Armor LUT editor) toggles the game's own first-person camera, driven as the retail mod drives it (eye position, field of view, near clip, scope blur). View only in this build: no arm or weapon placement, sleeves, motion or effects yet. Switch the First Person Controller off: the two cannot run together.",
   "gameplay": false,
   "code": {"dll": "goose_true_first_person.dll", "sdk": 16, "prebuilt": true, "game": "25480438"}
 }
