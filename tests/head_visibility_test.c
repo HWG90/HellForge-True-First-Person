@@ -203,6 +203,12 @@ static bool watch_ok(const char *call, bool ok, size_t i) {
   watched.again += w.on_again; watched.again_head += w.on_again_head; watched.left += w.left_on; watched.put_back += w.put_back; watched.off += w.turned_off;
   return true;
 }
+/* Round 38: an exosuit seat. The replay hands the module these two answers too, always "not a seat": every retail
+ * vector must come out the same with them present. seat_cases() turns them on. Neither is a call the scripted world
+ * records (the vectors' checksums count every recorded call). */
+static bool seat_on; static double cockpit_unit;
+static bool seat_answer(void *user, const TfpVisSnapshot *s) { (void)user; (void)s; return seat_on; }
+static bool cockpit_answer(void *user, const TfpVisSnapshot *s, double *unit) { (void)user; (void)s; *unit = cockpit_unit; return cockpit_unit > 0; }
 static size_t replay(bool here) {
   size_t count = sizeof head_visibility_vectors / sizeof head_visibility_vectors[0], failures = 0, done = 0;
   const char *dump = getenv("VIS_DUMP");
@@ -220,7 +226,7 @@ static size_t replay(bool here) {
       hio = (TfpHeadIo){NULL, vf_read, vf_ptr, vf_alignment_executable, vf_player_snapshot, vf_pin_player_snapshot, vf_backpack,
                         vf_action_state, vf_on_foot, vf_foreign_camera, vf_userdata_address, vf_clock, vf_log, vf_controller_result,
                         vf_controller_is_enabled, vf_fallback_ready, vf_pinned_ready, vf_full_body, vf_hide_torso, vf_show_torso,
-                        vf_seated_head};
+                        vf_seated_head, seat_answer, cockpit_answer};   /* round 38: never a seat here; nothing changes */
       vf_start_run(head_visibility_runs[run].header, &options);
       if (options.nolog) hio.log = NULL;
       tfp_head_free(head);
@@ -257,6 +263,305 @@ static size_t replay(bool here) {
   free(out.data);
   return failures ? 0 : done;
 }
+
+/* ---- Round 38: an exosuit seat (src/head_visibility.h TfpHeadIo.seat and .cockpit) ----
+ * The scripted world of the run "gates" up to its first seated frame in camera kind 4 (the valve: seated, the seated
+ * head on): the module hides the head, torso, shoulders and backpack. Then the seat answer is turned on: every one of
+ * the 30 appearance slots, the body's own meshes and the backpack lose their camera and shadow passes; off again,
+ * every mask is as it was. Then an exosuit unit is put into the world, and its four body meshes (not its shadow mesh)
+ * lose only their camera pass while seated, and get it back on leaving, with the option off, on a stop, and never
+ * when the unit is not the suit (other resource, other world, gone). Retail layout and table. */
+static int seat_checks, seat_failed;
+#define SCHECK(c) do { ++seat_checks; if (!(c)) { ++seat_failed; fprintf(stderr, "seat: FAILED line %d: %s\n", __LINE__, #c); } } while (0)
+#define REGISTRY_RETAIL 0x1ab76f8
+static double registry_field(size_t offset) { return vf_rawptr(vf_rawptr(V(exe) + REGISTRY_RETAIL) + 0x88 + (double)offset); }
+static double object_of(double ref) { return vf_rawptr(registry_field(0) + vf_mod(ref, 0x400000) * 8); }
+typedef struct SeatMesh { double ref, mesh; int mask; } SeatMesh;
+static size_t meshes_of(double ref, SeatMesh *out, size_t room, size_t n) {
+  if (ref == 0 || ref == 4294967295.0) return n;
+  for (size_t i = 0; i < n; i++) if (out[i].ref == ref) return n;
+  double object = object_of(ref);
+  if (!object) return n;
+  double count = vf_rawu32(object + 0xC8), array = vf_rawptr(object + 0xD0);
+  for (double i = 0; i < count && n < room; i++) {
+    double mesh = vf_rawptr(array + i * 16);
+    out[n++] = (SeatMesh){ref, mesh, vf_byte(mesh + 0xDC)};
+  }
+  return n;
+}
+static double appearance_base(void) { return V(s_avatar_owner) + 0x546ab0 + V(s_avatar_index) * 0x1b8 + 0xdc; }
+/* Every mesh of the diver: the 30 slots, the body, the backpack. */
+static size_t diver_meshes(SeatMesh *out, size_t room) {
+  size_t n = 0;
+  for (int at = 0; at < 120; at += 4) n = meshes_of(vf_rawu32(appearance_base() + at), out, room, n);
+  n = meshes_of(V(s_body), out, room, n);
+  if (V(pack_mode) == 1) n = meshes_of(V(pack_ref), out, room, n);
+  return n;
+}
+static bool same_masks(const SeatMesh *a, size_t n) {
+  for (size_t i = 0; i < n; i++) if (vf_byte(a[i].mesh + 0xDC) != a[i].mask) { fprintf(stderr, "seat: mesh %.0f of unit %.0f is %d, was %d\n", a[i].mesh, a[i].ref, vf_byte(a[i].mesh + 0xDC), a[i].mask); return false; }
+  return true;
+}
+static bool all_out(const SeatMesh *a, size_t n) { /* no camera pass and no shadow pass left on any of them */
+  for (size_t i = 0; i < n; i++) if (vf_byte(a[i].mesh + 0xDC) & 3) { fprintf(stderr, "seat: mesh %.0f of unit %.0f still %d\n", a[i].mesh, a[i].ref, vf_byte(a[i].mesh + 0xDC)); return false; }
+  return true;
+}
+static char *seat_tokens[65536];
+static bool seat_step(const char *script, bool stop) {
+  char line[512];
+  snprintf(line, sizeof line, "%s", script);
+  vf_begin(line, seat_tokens, sizeof seat_tokens / sizeof seat_tokens[0]);
+  TfpVisText why = {0};
+  bool ok = stop ? tfp_head_stop(head, &why) : tfp_head_update(head, &why);
+  if (!ok || why.present) fprintf(stderr, "seat: %s answered %d %s\n", stop ? "stop" : "update", ok, why.present ? why.text : "");
+  return ok;
+}
+static size_t set_calls(const char *unit, const char *pass) { /* "set <unit> <index> F <pass>" in the last call */
+  char what[96];
+  snprintf(what, sizeof what, "set %s ", unit);
+  size_t n = 0;
+  for (const char *at = vf_ev.vis.data; at && (at = strstr(at, what)); at++) if (!pass || strncmp(strchr(at + strlen(what), ' ') + 3, pass, strlen(pass)) == 0) n++;
+  return n;
+}
+/* The exosuit: a renderer unit with the suit's resource, in the body's world, not linked to anything, with the four
+ * body meshes and the shadow mesh the game's combat_walker.unit has, all drawn (255). */
+static const uint8_t WALKER[8] = {0xe3, 0x45, 0x5e, 0xda, 0xd2, 0xb3, 0xe4, 0x79};
+static const struct { const char *name; double hash; } WALKER_MESHES[5] = {
+  {"g_combat_walker", 0x3f684f2a}, {"g_combat_walker_LOD1", 0x370e4756}, {"g_combat_walker_LOD2", 0x7231cf3d}, {"g_combat_walker_LOD3", 0x8ccfaaa2},
+  {"g_combat_walker_shadow", 0x0940e5cb}};
+#define WALKER_OBJECT 70368744177664.0   /* 0x400000000000: memory no script uses */
+static double walker_ref, walker_mesh[5], walker_index;
+static void poke(double at, const void *bytes, size_t n) { for (size_t i = 0; i < n; i++) vf_poke_byte(at + (double)i, ((const uint8_t *)bytes)[i]); }
+static void poke64(double at, uint64_t v) { poke(at, &v, 8); }
+static void poke32(double at, uint32_t v) { poke(at, &v, 4); }
+static void make_walker(void) {
+  const double capacity = vf_rawu32(vf_rawptr(V(exe) + REGISTRY_RETAIL) + 0x88 + 16);
+  walker_index = capacity - 7;
+  walker_ref = walker_index + 0x400000;   /* generation 1 */
+  const double body = object_of(V(s_body));
+  for (int i = 0; i < 0x400; i++) vf_poke_byte(WALKER_OBJECT + i, vf_byte(body + i));   /* the renderer type and world of the body */
+  poke32(WALKER_OBJECT + 8, (uint32_t)walker_ref);
+  poke64(WALKER_OBJECT + 0x1D0, 0);
+  poke(WALKER_OBJECT + 0x358, WALKER, 8);
+  poke32(WALKER_OBJECT + 0xC8, 5);
+  poke64(WALKER_OBJECT + 0xD0, (uint64_t)(WALKER_OBJECT + 0x1000));
+  for (int i = 0; i < 5; i++) {
+    walker_mesh[i] = WALKER_OBJECT + 0x2000 + i * 0x100;
+    poke64(WALKER_OBJECT + 0x1000 + i * 16, (uint64_t)walker_mesh[i]);
+    vf_poke_byte(walker_mesh[i] + 0xDC, 255);
+    char token[160];
+    snprintf(token, sizeof token, "M%s,%.0f,%.0f,%d,1,0,%.0f", WALKER_MESHES[i].name, walker_mesh[i], WALKER_MESHES[i].hash, 200 + i, walker_ref * 4);
+    char *one[1] = {token};
+    vf_apply(one, 1);
+  }
+  vf_poke_byte(registry_field(24) + walker_index, 1);
+  poke64(registry_field(0) + walker_index * 8, (uint64_t)WALKER_OBJECT);
+  vf.units = realloc(vf.units, (vf.unit_count + 1) * sizeof *vf.units);
+  vf.units[vf.unit_count++] = walker_ref * 4;
+}
+static int walker_mask(int i) { return vf_byte(walker_mesh[i] + 0xDC); }
+static bool walker_drawn(void) { for (int i = 0; i < 5; i++) if (walker_mask(i) != 255) return false; return true; }
+static bool walker_seen_through(void) { for (int i = 0; i < 4; i++) if (walker_mask(i) != 254) return false; return walker_mask(4) == 255; }
+
+/* Round 38: once the first of the suit's meshes is written and read back, the suit's resource is changed: the write
+ * arms it (flip_walker), the read of that mesh's mask that follows it does it (flip_read). */
+static bool flip_after_walker, flip_armed; static int flipped;
+static void flip_walker(double unit) { if (flip_after_walker && unit == walker_ref * 4) { flip_after_walker = false; flip_armed = true; } }
+static bool flip_read(void *user, double at, size_t n, uint8_t *out, TfpVisText *why) {
+  const bool ok = vf_read(user, at, n, out, why);
+  for (int i = 0; flip_armed && i < 4; i++) if (at == walker_mesh[i] + 0xDC) { flip_armed = false; flipped += 1; vf_poke_byte(WALKER_OBJECT + 0x358, 0); }
+  return ok;
+}
+static bool seat_step_why(const char *script, TfpVisText *why) {
+  char line[512];
+  snprintf(line, sizeof line, "%s", script);
+  vf_begin(line, seat_tokens, sizeof seat_tokens / sizeof seat_tokens[0]);
+  return tfp_head_update(head, why);
+}
+static bool prepare(const char *name, size_t last) {
+  size_t count = sizeof head_visibility_vectors / sizeof head_visibility_vectors[0];
+  int run = -1;
+  VfOptions options;
+  VfBuf out = {0};
+  layout_25480438(false);
+  for (size_t i = 0; i < count && i <= last; i++) {
+    const HeadVisibilityVector *v = &head_visibility_vectors[i];
+    if (strcmp(head_visibility_runs[v->run].name, name)) continue;
+    if (v->run != run) {
+      run = v->run;
+      hio = (TfpHeadIo){NULL, vf_read, vf_ptr, vf_alignment_executable, vf_player_snapshot, vf_pin_player_snapshot, vf_backpack,
+                        vf_action_state, vf_on_foot, vf_foreign_camera, vf_userdata_address, vf_clock, vf_log, vf_controller_result,
+                        vf_controller_is_enabled, vf_fallback_ready, vf_pinned_ready, vf_full_body, vf_hide_torso, vf_show_torso,
+                        vf_seated_head, seat_answer, cockpit_answer};
+      vf_start_run(head_visibility_runs[run].header, &options);
+      if (options.nolog) hio.log = NULL;
+      tfp_head_free(head);
+      tfp_model_shadow_free(&model);
+      tfp_model_shadow_init(&model, &mio, TFP_VIS_APPEARANCE_RETAIL);
+      head = tfp_head_new(&hio, options.sr ? &engine : NULL, options.models ? &model : NULL, &tfp_head_build_retail);
+    }
+    char *line = malloc(strlen(v->script) + 1);
+    strcpy(line, v->script);
+    char *call = vf_begin(line, seat_tokens, sizeof seat_tokens / sizeof seat_tokens[0]);
+    TfpVisText why = {0};
+    bool ok = !strcmp(call, "update") ? tfp_head_update(head, &why) : !strcmp(call, "stop") ? tfp_head_stop(head, &why) : tfp_head_shutdown(head, &why);
+    vf_clear(&out);
+    vf_printf(&out, "%s ret=%s,", call, ok ? "T" : "F");
+    text(&out, &why);
+    head_state(&out);
+    vf_events(&out);
+    int differs = vf_compare("head visibility (seat preparation)", i, name, v->script, v->expect, &out);
+    free(line);
+    if (differs) { free(out.data); return false; }
+  }
+  free(out.data);
+  return true;
+}
+static bool seat_cases(void) {
+  if (!prepare("gates", 318)) return false;
+  TfpHeadResult r0, r;
+  tfp_head_result(head, &r0);
+  SCHECK(r0.phase == TFP_HEAD_ACTIVE && r0.hidden == 8 && r0.hidden_head == 1 && r0.hidden_torso == 1 && r0.hidden_shoulders == 5 && r0.hidden_backpack == 1);
+  SCHECK(r0.hidden_limbs == 0 && r0.hidden_cockpit == 0 && !r0.seat);
+  static SeatMesh diver[512];
+  const size_t n = diver_meshes(diver, 512);
+  SCHECK(n >= 10);
+  /* The valve, again: a seated frame that is no seat changes nothing. */
+  SCHECK(seat_step("Vtick=103700 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.hidden == r0.hidden && r.writes == r0.writes && same_masks(diver, n));
+
+  /* 1. In the seat: everything of the diver goes, camera and shadow. */
+  seat_on = true;
+  SCHECK(seat_step("Vtick=103720 !update", false));
+  tfp_head_result(head, &r);
+  SCHECK(r.phase == TFP_HEAD_ACTIVE && r.seat && r.hidden_head >= 1 && r.hidden_torso >= 1 && r.hidden_limbs >= 5 && r.hidden_backpack == 1 && r.hidden_body >= 1);
+  SCHECK(all_out(diver, n));
+  SCHECK(set_calls("16777224", NULL) == 2);   /* the rig's two shoulder pads given back: the seat does not own the rig */
+  const double writes = r.writes;
+  SCHECK(seat_step("Vtick=103740 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.writes == writes && all_out(diver, n));   /* held: nothing written again */
+  /* the glide out of the seat: the diver is no longer seated, the seat answer still yes: the diver stays hidden */
+  SCHECK(seat_step("Vs_seated=0 Vtick=103750 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.phase == TFP_HEAD_ACTIVE && r.seat && all_out(diver, n));
+  /* the glide out running in the native view (camera kind 6, the round 38 check of 2026-11-25): the eye still up to
+   * 3 m away in the cockpit, so the diver (and the first-person rig's clothing) stays hidden whatever the camera kind */
+  SCHECK(seat_step("Vs_kind=6 Vtick=103751 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.phase == TFP_HEAD_ACTIVE && r.seat && all_out(diver, n));
+  SCHECK(seat_step("Vs_kind=4 Vtick=103752 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.phase == TFP_HEAD_ACTIVE && r.seat && all_out(diver, n));
+  SCHECK(seat_step("Vs_seated=1 Vtick=103755 !update", false));
+  /* the seated head option off: the seat hides all the same */
+  SCHECK(seat_step("Vseated_head=0 Vtick=103760 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.phase == TFP_HEAD_ACTIVE && r.seat && all_out(diver, n));
+
+  /* 2. Out of the seat (the valve's frame again): the ordinary set, every mask as it was. */
+  seat_on = false;
+  SCHECK(seat_step("Vseated_head=1 Vtick=103780 !update", false));
+  tfp_head_result(head, &r);
+  SCHECK(r.phase == TFP_HEAD_ACTIVE && !r.seat && r.hidden == 8 && r.hidden_head == 1 && r.hidden_torso == 1 && r.hidden_shoulders == 5 && r.hidden_limbs == 0);
+  SCHECK(same_masks(diver, n));
+
+  /* 3. Show torso on: drawn in the ordinary view once steady, hidden in the seat, drawn again after it. */
+  SCHECK(seat_step("Vshow_torso=1 Vtick=103800 !update", false));
+  SCHECK(seat_step("Vtick=104600 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.hidden_torso == 0 && r.hidden_head == 1);
+  seat_on = true;
+  SCHECK(seat_step("Vtick=104620 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.seat && r.hidden_torso >= 1 && all_out(diver, n));
+  seat_on = false;
+  SCHECK(seat_step("Vtick=104640 !update", false));
+  tfp_head_result(head, &r); SCHECK(!r.seat && r.hidden_torso == 0 && r.hidden_head == 1 && r.hidden_limbs == 0);
+  SCHECK(seat_step("Vshow_torso=0 Vtick=104660 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.hidden == 8 && same_masks(diver, n));
+
+  /* 4. The exosuit's cockpit seen through: its four body meshes lose the camera pass only, the shadow mesh stays. */
+  make_walker();
+  char walker[32];
+  snprintf(walker, sizeof walker, "%.0f", walker_ref * 4);
+  cockpit_unit = walker_ref;
+  SCHECK(seat_step("Vtick=104680 !update", false));   /* not seated: the suit is not asked about */
+  tfp_head_result(head, &r); SCHECK(!r.seat && r.hidden_cockpit == 0 && walker_drawn() && set_calls(walker, NULL) == 0);
+  seat_on = true;
+  SCHECK(seat_step("Vtick=104700 !update", false));
+  tfp_head_result(head, &r);
+  SCHECK(r.seat && r.hidden_cockpit == 4 && r.cockpit_unit == walker_ref && walker_seen_through() && all_out(diver, n));
+  SCHECK(set_calls(walker, "default") == 4 && set_calls(walker, "shadow_caster") == 0);
+  SCHECK(seat_step("Vtick=104720 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.hidden_cockpit == 4 && walker_seen_through() && set_calls(walker, NULL) == 0);
+  /* the option off in the seat: the suit drawn again, the diver still hidden */
+  cockpit_unit = 0;
+  SCHECK(seat_step("Vtick=104740 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.seat && r.hidden_cockpit == 0 && walker_drawn() && all_out(diver, n));
+  cockpit_unit = walker_ref;
+  SCHECK(seat_step("Vtick=104760 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.hidden_cockpit == 4 && walker_seen_through());
+  /* leaving the seat: the suit drawn, the diver as before */
+  seat_on = false;
+  SCHECK(seat_step("Vtick=104780 !update", false));
+  tfp_head_result(head, &r); SCHECK(!r.seat && r.hidden_cockpit == 0 && walker_drawn() && r.hidden == 8 && same_masks(diver, n));
+  /* The suit stops being the suit between the look and the hides (its resource gone after its first mesh was written,
+   * the check before each hide, beyond retail): refused as an owner that changed before the hide, not left to the
+   * mesh lookup after it; nothing more of the suit is written. */
+  flip_after_walker = true; vf_after_set = flip_walker; hio.read = flip_read;
+  seat_on = true;
+  TfpVisText why = {0};
+  SCHECK(seat_step_why("Vtick=104790 !update", &why));
+  vf_after_set = NULL; hio.read = vf_read;
+  tfp_head_result(head, &r);
+  SCHECK(flipped == 1 && why.present && strstr(why.text, "Head owner changed before hide") && set_calls(walker, "default") == 1 && r.hidden_cockpit == 0);
+  if (!(why.present && strstr(why.text, "Head owner changed before hide"))) fprintf(stderr, "seat: the suit changed before the hide: %s\n", why.present ? why.text : "(nothing)");
+  vf_poke_byte(WALKER_OBJECT + 0x358, WALKER[0]);
+  for (int i = 0; i < 5; i++) vf_poke_byte(walker_mesh[i] + 0xDC, 255);
+  seat_on = false;
+  SCHECK(seat_step("Vtick=104795 !update", false));
+  tfp_head_result(head, &r); SCHECK(!r.seat && r.hidden_cockpit == 0 && walker_drawn());
+  /* switched off (a stop) in the seat: everything given back */
+  seat_on = true;
+  SCHECK(seat_step("Vtick=104800 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.hidden_cockpit == 4 && walker_seen_through());
+  SCHECK(seat_step("Vtick=104820", true));
+  tfp_head_result(head, &r); SCHECK(r.phase == TFP_HEAD_IDLE && r.hidden == 0 && walker_drawn() && tfp_head_is_clean(head));
+  SCHECK(seat_step("Vtick=104840 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.hidden_cockpit == 4 && walker_seen_through() && all_out(diver, n));
+  /* the suit destroyed in the seat (its reference retired): never written again; the diver stays hidden */
+  vf_poke_byte(registry_field(24) + walker_index, 2);
+  SCHECK(seat_step("Vtick=104860 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.seat && r.hidden_cockpit == 0 && set_calls(walker, NULL) == 0 && all_out(diver, n));
+  vf_poke_byte(registry_field(24) + walker_index, 1);
+  for (int i = 0; i < 5; i++) vf_poke_byte(walker_mesh[i] + 0xDC, 255);
+  SCHECK(seat_step("Vtick=105400 !update", false));   /* a suit that failed is looked at again after half a second */
+  tfp_head_result(head, &r); SCHECK(r.hidden_cockpit == 4 && walker_seen_through());
+  /* a unit that is not the suit (another resource): not touched, the rows held are let go without a write */
+  vf_poke_byte(WALKER_OBJECT + 0x358, 0);
+  SCHECK(seat_step("Vtick=105420 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.hidden_cockpit == 0 && set_calls(walker, NULL) == 0 && all_out(diver, n));
+  for (int i = 0; i < 5; i++) vf_poke_byte(walker_mesh[i] + 0xDC, 255);
+  SCHECK(seat_step("Vtick=105440 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.hidden_cockpit == 0 && walker_drawn() && set_calls(walker, NULL) == 0);
+  vf_poke_byte(WALKER_OBJECT + 0x358, WALKER[0]);
+  /* in another world: not touched */
+  const double world = vf_rawptr(WALKER_OBJECT + 0x18);
+  poke64(WALKER_OBJECT + 0x18, (uint64_t)(world + 0x1000));
+  SCHECK(seat_step("Vtick=105460 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.hidden_cockpit == 0 && walker_drawn() && set_calls(walker, NULL) == 0 && all_out(diver, n));
+  poke64(WALKER_OBJECT + 0x18, (uint64_t)world);
+  /* the suit's reference is the body's: refused, the diver as in any seat */
+  cockpit_unit = V(s_body);
+  SCHECK(seat_step("Vtick=105480 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.seat && r.hidden_cockpit == 0 && all_out(diver, n));
+  cockpit_unit = walker_ref;
+  SCHECK(seat_step("Vtick=106000 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.hidden_cockpit == 4 && walker_seen_through());
+  /* the seat lost (dead in it: the seat rule says no): all back */
+  seat_on = false;
+  SCHECK(seat_step("Vtick=107020 !update", false));
+  tfp_head_result(head, &r); SCHECK(!r.seat && r.hidden_cockpit == 0 && walker_drawn() && same_masks(diver, n));
+  cockpit_unit = 0;
+  tfp_head_free(head); head = NULL;
+  tfp_model_shadow_free(&model);
+  printf("head visibility: seat: %d checks, %d failed\n", seat_checks, seat_failed);
+  return seat_failed == 0;
+}
 int main(void) {
   if (!agrees_with_project()) {
     fprintf(stderr, "head visibility: tfp_head_build_25480438 disagrees with feature_contract.h, profile.h or its own displacements\n");
@@ -264,6 +569,7 @@ int main(void) {
   }
   size_t retail = replay(false), here = retail ? replay(true) : 0;
   if (!retail || !here) return 1;
+  if (!seat_cases()) return 1;
   if (!(watched.again > 0 && watched.again_head > 0 && watched.left > 0 && watched.put_back > 0 && watched.off > 0)) {
     fprintf(stderr, "head watch: the replay never counted one of: drawn again %g (head %g), left drawn %g, put back %g, switched off %g\n",
             watched.again, watched.again_head, watched.left, watched.put_back, watched.off);

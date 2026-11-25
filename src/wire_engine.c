@@ -8,6 +8,7 @@
 #include "head_visibility.h"
 #include "arm_pieces.h"
 #include "grip_hand.h"
+#include "cockpit_find.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -138,6 +139,9 @@ typedef struct TfpWireEngine {
   /* the session log */
   double grip_frames_seen, grip_corr, grip_max_m, grip_max_deg;
   uint32_t head_kind; /* the camera kind of the snapshot the head module took in its last update, 0: none (the "Head:" line) */
+  /* Round 38 (tfp_wire_engine_set_seat): the seated body, the suit found for it and how, the next frame a search may
+   * be made, and what the last search saw; the seat and the suit as last said in the log. */
+  struct { uint32_t body, suit, next, searches, looked, suits, said_body, said_suit; uint64_t object; int how; float distance; bool said_seat; } cockpit;
   char result_tag[3];
 } St;
 #define ST(w) ((St *)(w)->ext[TFP_WIRE_EXT_ENGINE])
@@ -1203,9 +1207,25 @@ static int io_backpack(void *user, const TfpVisSnapshot *s, TfpHeadBackpack *out
  * replaced, stands in for the action state's owner and the on-foot answer. */
 static uint32_t (*held_body)(void);
 void tfp_wire_engine_set_held_body(uint32_t (*body)(void)) { held_body = body; }
+static uint32_t (*seat_body)(void);
+static bool (*see_through)(void);
+void tfp_wire_engine_set_seat(uint32_t (*body)(void), bool (*option)(void)) { seat_body = body; see_through = option; }
 static bool held_off_foot(const TfpOpsSnapshot *ops) {
-  const uint32_t body = held_body ? held_body() : 0;
+  const uint32_t body = held_body ? held_body() : 0, seated = seat_body ? seat_body() : 0;
+  return ops && ((body && ops->body == body) || (seated && ops->body == seated));
+}
+/* Round 38: TfpHeadIo.seat and .cockpit. */
+static bool io_seat(void *user, const TfpVisSnapshot *s) {
+  const TfpOpsSnapshot *ops = recalled(user, s);
+  const uint32_t body = seat_body ? seat_body() : 0;
   return body && ops && ops->body == body;
+}
+static bool io_cockpit(void *user, const TfpVisSnapshot *s, double *unit) {
+  St *st = user;
+  const TfpOpsSnapshot *ops = recalled(st, s);
+  if (!ops || !st->cockpit.suit || ops->body != st->cockpit.body || !see_through || !see_through()) return false;
+  *unit = st->cockpit.suit;
+  return true;
 }
 static bool io_action_state(void *user, const TfpVisSnapshot *s, TfpHeadActionState *out) {
   St *st = user;
@@ -1414,11 +1434,99 @@ static bool head_call(TfpRtHost *h, HeadCall call, V *o1, V *o2) {
   *o2 = why.present ? tfp_wire_text(tfp_wire_keep(st->w, why.text)) : nil();
   return true;
 }
+/* ---- round 38: the exosuit the diver sits in (src/cockpit_find.h) ----------------------------------------------- */
+static bool cockpit_read(void *user, uint64_t at, void *out, size_t size) { return mread(user, at, out, size); }
+static const char *cockpit_how(int how) { return how == TFP_COCKPIT_LINKED ? "the body's link to it" : how == TFP_COCKPIT_NEAR ? "its seat at the body" : "none"; }
+static void cockpit_forget(St *st) {
+  if (st->cockpit.said_suit) sayf(st, "Seat: cockpit: the suit %#x is drawn again", st->cockpit.said_suit);
+  memset(&st->cockpit, 0, sizeof st->cockpit);
+}
+/* Before head visibility's update, outside it (World.units lets go of the inventory's handles; head visibility's own
+ * are kept): keeps st->cockpit.suit the suit the seated body is in, or 0. Guarded reads only, and the unit inventory
+ * at most every 60 frames while no suit is known. */
+static void cockpit_refresh(St *st) {
+  const uint32_t body = seat_body ? seat_body() : 0;
+  const bool wanted = body && see_through && see_through();
+  if (body && !st->cockpit.said_seat) {
+    st->cockpit.said_seat = true;
+    sayf(st, "Seat: in a vehicle's seat (an exosuit's, an FRV's): first person kept; the eye at the helmet, fixed to the seat, looking where the "
+             "game's camera aims; the diver hidden whole (helmet, armour, arms, backpack, shadow) until the view is back at the head; the "
+             "first-person arm rig is the game's own and not drawn in the seat's camera; see-through cockpit %s (an exosuit's only)",
+         wanted ? "on" : "off");
+  } else if (!body && st->cockpit.said_seat) {
+    cockpit_forget(st);
+    sayf(st, "Seat: left the seat: the diver and the vehicle as the game draws them; first person on foot as before");
+    return;
+  }
+  if (!wanted) { if (st->cockpit.suit) { cockpit_forget(st); st->cockpit.said_seat = body != 0; } return; }
+  TfpOpsSnapshot s;
+  TfpOpsText why;
+  TfpOpsContext context;
+  if (tfp_ops_player_snapshot(&st->w->ops, &s, &why) != TFP_OPS_TRUE || s.body != body) return;
+  why.present = false, why.text[0] = 0;
+  if (!tfp_ops_alignment_context(&st->w->ops, body, true, s.avatar_owner, true, s.avatar_index, false, &context, &why)) return;
+  TfpCockpitMemory memory = {cockpit_read, st, context.units, context.generations, 0};
+  if (!mread(st, context.registry + 0x88 + 16, &memory.capacity, 4) || !memory.capacity || memory.capacity > 0x400000) return;
+  TfpCockpitBody seated;
+  if (!tfp_cockpit_body(&memory, body, &seated)) return;
+  if (st->cockpit.body != body) { const bool said = st->cockpit.said_seat; memset(&st->cockpit, 0, sizeof st->cockpit); st->cockpit.said_seat = said; st->cockpit.body = body; }
+  TfpCockpitFound found;
+  memset(&found, 0, sizeof found);
+  if (st->cockpit.suit) { /* still the one: alive, the suit's resource, the body's world, linked or at the seat */
+    if (tfp_cockpit_check(&memory, &seated, st->cockpit.suit, &found) && found.object == st->cockpit.object) { st->cockpit.distance = found.distance; return; }
+    sayf(st, "Seat: cockpit: the suit %#x is no longer the one the diver sits in (gone, or moved away from the seat)", st->cockpit.suit);
+    st->cockpit.suit = 0; st->cockpit.object = 0; st->cockpit.said_suit = 0; st->cockpit.how = TFP_COCKPIT_NONE;
+  }
+  if (st->frame < st->cockpit.next) return;
+  st->cockpit.next = st->frame + 60;
+  st->cockpit.searches++;
+  const void *world = NULL;
+  const TfpEngineUnit *units = NULL;
+  size_t count = 0;
+  char text[200] = "";
+  TfpEngineError error = {{0}};
+  uint32_t *refs = NULL;
+  if (main_world(st, &world, text, sizeof text) && world && hi_units(st, world, &units, &count, &error) && units && count <= UNITS_MAX) {
+    refs = malloc((count ? count : 1) * sizeof *refs);
+    for (size_t i = 0; refs && i < count; i++) {
+      const Slot *slot = slot_of(st, units[i]);
+      refs[i] = slot ? (uint32_t)(slot->pointer / 4) : 0;
+    }
+  } else count = 0;
+  const bool ok = tfp_cockpit_search(&memory, &seated, refs, refs ? count : 0, &found);
+  free(refs);
+  st->cockpit.looked = found.looked; st->cockpit.suits = found.suits;
+  if (!ok) {
+    if (st->cockpit.searches == 1 || st->cockpit.searches % 20 == 0)
+      sayf(st, "Seat: cockpit: no suit proven to be the one the diver sits in (search %u: %u units read, %u suits among them%s); the suit stays drawn",
+           st->cockpit.searches, found.looked, found.suits, found.suits > 1 && found.ref == 0 ? ", more than one at the seat or none near" : "");
+    return;
+  }
+  st->cockpit.suit = found.ref; st->cockpit.object = found.object; st->cockpit.how = found.how; st->cockpit.distance = found.distance;
+  st->cockpit.said_suit = found.ref;
+  sayf(st, "Seat: cockpit: seen through: the suit %#x, found by %s (its seat %.2f m from the body's root; %u units read, %u suits); its body mesh "
+           "and levels of detail are hidden from your camera only, the shadow and the weapons stay", found.ref, cockpit_how(found.how),
+       (double)found.distance, found.looked, found.suits);
+}
 static bool rt_head_update(TfpRtHost *h, V *o1, V *o2) {
   SH(h)->head_kind = 0; /* an update that stops before it takes a snapshot has no kind to tell */
   St *st = SH(h);
   if (st->state[TFP_WE_HEAD] == TFP_WE_RESOLVED && st->head) head_preflight(st);
+  if (head_on(st)) cockpit_refresh(st);   /* round 38: before the update, never inside it */
   return head_on(st) ? head_call(h, tfp_head_update, o1, o2) : st->off.head_update(h, o1, o2);
+}
+bool tfp_wire_engine_seat(const TfpWire *w, TfpWireSeat *out) {
+  const St *st = ST(w);
+  memset(out, 0, sizeof *out);
+  if (!st) return false;
+  TfpHeadResult r;
+  memset(&r, 0, sizeof r);
+  if (st->head && st->state[TFP_WE_HEAD] == TFP_WE_READY) tfp_head_result(st->head, &r);
+  out->seat = r.seat; out->see_through = see_through && see_through(); out->body = st->cockpit.body; out->suit = st->cockpit.suit;
+  out->how = st->cockpit.how; out->distance = st->cockpit.distance; out->searches = st->cockpit.searches;
+  out->looked = st->cockpit.looked; out->suits = st->cockpit.suits;
+  out->hidden = r.hidden; out->limbs = r.hidden_limbs; out->cockpit = r.hidden_cockpit;
+  return true;
 }
 static bool rt_head_stop(TfpRtHost *h, V *o1, V *o2) { return head_on(SH(h)) ? head_call(h, tfp_head_stop, o1, o2) : SH(h)->off.head_stop(h, o1, o2); }
 static bool rt_head_shutdown(TfpRtHost *h, V *o1, V *o2) {
@@ -1731,7 +1839,7 @@ bool tfp_wire_engine_bind(TfpWire *w, const TfpWireEngineApi *api, const TfpWire
                                      hi_mesh_has_material};
   st->head_io = (TfpHeadIo){st, io_read, io_ptr, io_executable, io_player_snapshot, io_pin_player_snapshot, io_backpack, io_action_state, io_on_foot,
                             io_foreign_camera, io_address, io_clock, io_log, io_pose_offset, io_enabled, io_fallback_ready, io_pinned_ready, io_full_body,
-                            io_hide_torso, io_show_torso, io_seated_head};
+                            io_hide_torso, io_show_torso, io_seated_head, io_seat, io_cockpit};
   st->models_io = (TfpModelShadowIo){st, io_full_snapshot, io_alignment_context, io_read, io_ptr, io_u32, io_u8, io_descriptor, io_models_foreign_camera};
   st->arm_backend = (TfpArmBackend){st, ab_object, ab_read, ab_ptr, ab_u32, ab_clock};
   for (int m = TFP_WE_SLEEVES; m <= TFP_WE_GRIP; m++) {

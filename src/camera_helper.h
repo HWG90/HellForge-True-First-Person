@@ -187,6 +187,29 @@ void tfp_camera_down_stats(TfpCameraDownStats *out);
  * head hiding asks in place of the on-foot answer (src/head_visibility.h held_off_foot). */
 uint32_t tfp_camera_lock_off_foot_body(void);
 uint64_t tfp_camera_lock_frames(void); /* frames the lock has held so far: rising while the view is shown */
+/* Round 38 (src/camera_vehicle.h): under the lock, a frame of a body that is seated, off foot and not in physics (an
+ * exosuit's or a vehicle's seat) stays first person. The eye is fixed in the body root's frame (the head's offset,
+ * frozen once it has settled, plus the configured forward step along the root's level forward and the up step); the
+ * direction is the game's own on that frame, with no ease and no kick; no veil. Entering glides from the last view
+ * shown to the seat's eye and the game's direction; leaving glides from the seat's eye to the head camera's. Seat
+ * frames count as held (tfp_camera_lock_frames) and as the shown view.
+ * frames: seat frames shown; refused: seat frames whose proof failed (the game's own frame was shown); glided: seat
+ * frames the entry glide wrote; entries, exits: seats begun and left; cuts: entries with no glide (nothing shown in
+ * the last 250 ms to start from, or over 8 m away). Of the last entry: the camera kind, the glide's length (0: a cut)
+ * and the way it had to go (-1: nothing to start from); of the last exit: the same (0 ms: none). seated: the last
+ * frame was a seat; settled: the eye's anchor is frozen; gliding: 0 none, 1 into the seat, 2 out of it.
+ * offset: the shown eye from the root (right, forward, up), m. hands: bit 0 the body's left hand node was read, bit 1
+ * the right; left, right: each from the shown eye along the root's axes, m (what the diver's own hands do in the
+ * cockpit). */
+typedef struct TfpCameraSeatStats {
+  uint64_t frames, refused, glided, entries, exits, cuts;
+  uint32_t in_kind, in_ms, out_ms, seated, settled, gliding, hands;
+  float in_metres, out_metres, offset[3], left[3], right[3];
+} TfpCameraSeatStats;
+void tfp_camera_seat_stats(TfpCameraSeatStats *out);
+/* The body reference the lock shows from a seat, or is gliding out of one from, within the last 250 ms; 0
+ * otherwise. What head hiding hides the whole diver for (src/head_visibility.h TfpHeadIo.seat). */
+uint32_t tfp_camera_lock_seat_body(void);
 /* Frames the view was shown so far (the head camera or the native view, or any camera the lock holds), with the
  * camera lock on or off. What the field-of-view lock follows. */
 uint64_t tfp_camera_view_frames(void);

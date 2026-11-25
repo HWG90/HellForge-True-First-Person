@@ -111,6 +111,12 @@ static const Control CONTROLS[] = {
       .note = "Comes from your character's own animation while Animated arms is on.", .inert = true),
   ROW("put_away", TFP_MK_TOGGLE, "Weapon put-away", 2, L(put_away), TIP("Keep first person while the weapon is put away for a swap, grenade or stim.")),
   ROW("smooth_eye", TFP_MK_TOGGLE, "Smooth eye", 2, L(smooth_eye), TIP("No camera pops when the game changes its camera.")),
+  /* round 38 (docs/design/specs/2026-11-25-exosuit-seat.md) */
+  ROW("see_through_cockpit", TFP_MK_TOGGLE, "See through the exosuit cockpit", 2, L(see_through_cockpit),
+      TIP("In an exosuit, first person looks out from your helmet. With this on, the suit's body is hidden from your own view, so you see "
+          "the world around you, the suit's weapons and its shadow. The cockpit's console and sticks are part of the suit's body and go "
+          "with it (they are one mesh in the game's data). Other vehicles' seats keep first person but are never seen through. "
+          "Others still see your suit.")),
 };
 #undef ROW
 #undef NONE

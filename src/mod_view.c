@@ -990,6 +990,26 @@ static bool fields_ready(void) {
 #endif
   return true;
 }
+#ifdef TFP_FEEL
+#include "seat_log.h"
+/* Round 38 (src/seat_log.h): once a second while the lock shows first person from an exosuit's seat or glides out. */
+static bool see_through_cockpit_now(void) { return tfp_locked_view_see_through_cockpit(&wire); }
+static void seat_note(void) {
+  static TfpCameraSeatStats told; static TfpArmDriveStats arms_told;
+  TfpCameraSeatStats c; tfp_camera_seat_stats(&c);
+  TfpArmDriveStats a; tfp_arm_drive_stats(&a);
+  TfpWireSeat w;
+  if (c.frames != told.frames && tfp_wire_engine_seat(&wire, &w)) {
+    TfpSeatLine l = {c.frames - told.frames, c.refused - told.refused, c.glided - told.glided, c.settled, c.gliding, c.hands,
+                     {c.offset[0], c.offset[1], c.offset[2]}, {c.left[0], c.left[1], c.left[2]}, {c.right[0], c.right[1], c.right[2]},
+                     w.see_through, w.suit, w.how, w.searches, w.hidden, w.limbs, w.cockpit, a.frames - arms_told.frames, a.idle - arms_told.idle};
+    char line[700];
+    tfp_seat_line(line, sizeof line, &l);
+    say("%s", line);
+  }
+  told = c; arms_told = a;
+}
+#endif
 static void start(void) {
   TfpOpsHost memory;
   TfpWirePlatform platform;
@@ -1118,6 +1138,7 @@ static void start(void) {
 #ifdef TFP_FEEL
   tfp_wire_engine_set_held_body(tfp_camera_lock_off_foot_body); /* head hiding stays on while the lock holds a body that is off foot */
   tfp_wire_engine_set_lock_view(lock_view_now);                 /* and while the game presents the lease's own first-person request (a stim) */
+  tfp_wire_engine_set_seat(tfp_camera_lock_seat_body, see_through_cockpit_now); /* round 38: the whole diver hidden in an exosuit, the suit seen through */
 #endif
   say(lock_wanted ? "Ready: camera lock: the view stays first person through every action and camera of your own character, death included; "
                     "the camera style is Stable unless Bodycam is switched on in the panel: in Bodycam body movement kicks the view (35 %% up to 8 degrees "
@@ -1299,6 +1320,9 @@ static void lock_note(void) { /* once a second while the view is on: frames by c
     say(bodycam ? "Camera style: Bodycam (the view moves with the head: the kick sliders and camera damping apply)"
                 : "Camera style: Stable (no view kick on foot; a thrown body sways the view at half the thrown strength; the head camera follows the head slowly)");
   }
+#ifdef TFP_FEEL
+  seat_note();
+#endif
   TfpCameraLockStats s; tfp_camera_lock_stats(&s);
   if (s.frames == told_frames && s.missed == told_missed) return;
   /* The kind and error are the last missed frame's: 0 in a second without one. tools/harness/matrix.py reads this line. */

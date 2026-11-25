@@ -486,11 +486,13 @@ static bool vf_units(void *user, TfpEngineWorld world, const TfpEngineUnit **uni
   *units = vf_unit_list; *count = vf.unit_count;
   return true;
 }
+static void (*vf_after_set)(double unit);   /* NULL: nothing; set by a test only */
 static bool vf_set_mesh_visibility(void *user, TfpEngineUnit unit, int index, bool visible, const char *pass, TfpEngineError *error) {
   (void)user; vf_evis("set %s %d %s %s", vf_num(vf_address(unit)), index, visible ? "T" : "F", pass);
   int g = vf_gate(VF_SET);
   if (g == 1) return vf_engine_fail(error, 3, "");
   if (g != 3) vf_set_mask(vf_address(unit), index, visible, pass);
+  if (vf_after_set) vf_after_set(vf_address(unit));   /* round 38 test hook: the world changes between two writes */
   if (g == 2) return vf_engine_fail(error, 3, " late");
   return true;
 }
