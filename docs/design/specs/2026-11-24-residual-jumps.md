@@ -828,11 +828,8 @@ changed except after a backpack. Support-weapon pick-ups run on mask 2 through t
   a change of mask into, out of or within the traversal masks opens no window (weapon, request, camera and the
   binder's events still do); the head camera's eye damping is let go (40 ms, as at full aim) in a traversal and for
   600 ms after the mask leaves the bit (the stand-up).
-- `src/camera_continuity.h` THE CLIMB: a run of jumps whose time is over in a clamber's head-camera frame hands no
-  speed to the curve. Tried in the native view held through a vault too: soaks 20, 23, 24 and 25 had 6 frames worse by
-  over 0.02 m (up to 0.118 -> 0.154 m, soak 25 10:13:51.545): there the run is the rig's re-seat and its speed keeps
-  the eye from stopping short. Head camera only.
-- `src/camera_continuity.h` THE SETTLE: after the binder's `tfp_camera_settle_arm` (mod_view.c, on a leave of the
+- `src/camera_continuity.h` THE SETTLE, a test switch, OFF by default (settle_on.txt beside the DLL;
+  `tfp_camera_set_settle`; replay.py `--settle`). With the file absent the filter is main's frame for frame. On: after the binder's `tfp_camera_settle_arm` (mod_view.c, on a leave of the
   native view for "Native camera request or firearm changed"), the next change of camera into the native view on mask
   0 within 2 s, of 0.10 m or more, holds the shown eye fixed against the root until the rig's step against the root is
   no jump against the one before for 3 frames (or 350 ms), then eases once, the curve starting against the rig's own
@@ -840,8 +837,14 @@ changed except after a backpack. Support-weapon pick-ups run on mask 2 through t
   start. Tried and left: allowed at every entry on mask 0 (soaks 8-31: 554 frames worse, floats up to 1.05 m);
   "steady" as under 0.5 m/s (the climb at 20:32:10 never was; the one ease was 0.28 m); an ease from rest at the
   release (at 50 ms a frame a step change of 0.074 m for the rig's own 0.046 m); ending the hold with that ease when
-  the rig goes away (soak 14 04:02:13.232, a first step of 0.196 m).
-- In camera_helper.c only `smooth_detect`, `smooth_present` (the filter's hints, the settle arm) and `lock_damp_eye`
+  the rig goes away (soak 14 04:02:13.232, a first step of 0.196 m). Why it is off (the round-24 review): on, it makes
+  frames in soaks 14, 19, 21, 24, 25, 27, 30 and 31 worse by up to 0.05 m of step change, holds the eye fixed for 170 ms
+  while the rig moves 0.9 m (soak 14, 04:02:13; float 0.271 -> 0.375 m), is armed by every weapon swap (4 to 33 times
+  a soak), and buys only the regrowth at 20:32:10 (0.154 -> 0.045 m), whose mechanism is still not proven.
+- THE CLIMB (a run of jumps ending in a clamber's head-camera frame handing no speed to the curve) was tried and
+  removed: switched off, the replay windows and soaks 8-31 came out frame for frame the same; the detect-off rule in
+  camera_traversal.h already covers it.
+- In camera_helper.c only `smooth_detect`, `smooth_present` (the settle switch and arm) and `lock_damp_eye`
   change; the eye-return and hold code that round19-hold-release works on is not touched.
 - Log: the Trace line ends with `turn=(x y z)`, the direction the frame is shown with (the forward axis of the
   rotation handed to the game, in the world), and says `settle` in taken= while THE SETTLE holds; the Head line says
@@ -860,42 +863,56 @@ changed except after a backpack. Support-weapon pick-ups run on mask 2 through t
   0.69 to 1.0 m from the head camera's eye (0.37 to 0.74 m once the root stopped). Now 0.083 m at most and 0.060 m once
   the root stopped (the head camera's own smoothing). It also checks the head-camera rows' `turn`.
 - camera_traversal_test: the rules, the root's motion and the linger at the four frame times.
-- camera_continuity_test: THE CLIMB (a run that turns, carried once still 0.405-0.784 m against 0.767-1.108 m
-  without) and THE SETTLE (a made-up backpack return at the four frame times: no regrowth either way, the step change
-  0.006 / 0.015 / 0.016 / 0.040 m against 0.007 / 0.013 / 0.025 / 0.046 m without, let go 100 to 300 ms later).
+- camera_smooth_test scenario 29: in the helper, a change of mask 0x20 -> 0x22 in the head camera (root still, no
+  event for 1.3 s) opens no window (0 of 5 frames looked at); 2 -> 0 still does (5 of 5). The old rule put back
+  (any change of mask opens the window) fails it.
+- camera_smooth_test scenario 30: THE SETTLE's switch and gate in the helper. A native entry 0.3 m off after the
+  binder's arm is held only with the switch on, the arm given and mask 0 (3 of 4 frames say +settle); switch off,
+  mask 2 or no arm: none.
+- camera_continuity_test: THE SETTLE (a made-up backpack return at the four frame times: no regrowth either way, the step change
+  0.006 / 0.015 / 0.016 / 0.040 m against 0.007 / 0.013 / 0.025 / 0.046 m without, let go 100 to 300 ms later); its
+  time limit and exit at the four frame times: a rig that stands is held exactly 3 frames, one that re-seats every
+  frame is let go at 350 ms, one that goes 0.15 m further away is let go in that frame, and none is held where the
+  caller does not allow it. Mutants of the 3 frames, the 350 ms (3500), the exit, the mask-0 gate, the switch and
+  the arm are all caught.
 - test_harness_round24: the float and the context readers, the matrix's float, and the replay windows of the user's
-  log (skipped without it).
+  log (skipped without it): with THE SETTLE off the backpack windows are main's (0bfdc37) frame for frame; with it on
+  the regrowth is at most 0.10 m.
+- Not tested beyond the replay: THE SETTLE during real motion in the hold (a fall, a dive, a throw); it is off.
 
-### The replay windows (the user's log; logged filter cc0a95f -> this branch)
+### The replay windows (the user's log; current main 0bfdc37 -> this branch, THE SETTLE off; in brackets with it on)
 
 | window | offset from the raw target | once the root stopped | float (300 ms) | regrowth |
 |---|---|---|---|---|
 | 20:27:42.7-43.4 clamber | 0.885 -> 0.218 m | 0.577 -> 0.000 m | 0.373 -> 0.000 m | 0.193 -> 0.000 m |
 | 20:27:50.4-51.1 clamber | 0.860 -> 0.249 m | 0.513 -> 0.000 m | 0.376 -> 0.000 m | 0.177 -> 0.000 m |
 | 20:28:13.1-14.8 clamber | 0.720 -> 0.240 m | 0.467 -> 0.052 m | 0.367 -> 0.000 m | 0.089 -> 0.000 m |
-| 20:32:10.2-10.8 backpack | 0.449 -> 0.479 m | - | 0.068 -> 0.055 m | 0.154 -> 0.045 m |
-| 20:27:07.0-07.7 backpack | 0.258 -> 0.258 m | - | 0.076 -> 0.115 m | 0 -> 0 |
-| 20:34:19.6-20.4 backpack | 0.508 -> 0.508 m | - | 0.093 -> 0.166 m | 0 -> 0 |
+| 20:32:10.2-10.8 backpack | 0.449 -> 0.449 m (0.479) | - | 0.068 -> 0.068 m (0.055) | 0.154 -> 0.154 m (0.045) |
+| 20:27:07.0-07.7 backpack | 0.258 -> 0.258 m (0.258) | - | 0.076 -> 0.076 m (0.115) | 0 -> 0 (0) |
+| 20:34:19.6-20.4 backpack | 0.508 -> 0.508 m (0.508) | - | 0.093 -> 0.093 m (0.166) | 0 -> 0 (0) |
 
-The offset at the clambers is the change of camera at the hand-off (0.218 m) or the native return; the backpacks'
-largest offset is the change of camera itself, now held and eased once.
+The offset at the clambers is the change of camera at the hand-off (0.218 m) or the native return. With THE SETTLE
+off the backpack windows are main's to the digit: the drift at 20:32:10 (0.154 m) is not fixed by this round.
 
-### The soaks through the filter (8 to 31, main's filter -> this branch's, with its rules)
+### The soaks through the filter (8 to 31, current main's filter 0bfdc37 -> this branch's, with its rules)
 
-Filter's steps 389 -> 388; metre-frames 4707.0 -> 4684.2; frames whose step change is worse by more than 0.02 m: 20,
-better: 31. Soaks 8 to 13, 15, 17, 18, 20, 22, 23, 28, 29 no frame worse. Soak 31: 23 -> 19 steps, 88.6 -> 62.7
-metre-frames, float 0.376 -> 0.181 m, 8 worse (the largest 20:28:14.010, 0.005 -> 0.089 m: the stand-up's own 0.19 m
-root drop, which Stable's damping had absorbed and now shows), 21 better. The other worse frames are 0.03 to 0.09 m:
-soak 14 04:02:13.131 (a settle after a firearm change, float 0.271 -> 0.375 m), soak 19 07:09:34.002, soak 24
-08:38:58.377 and 08:37:26.263, soak 27 12:52:24.585, soak 30 16:38:33.635. Against the logged filters (all rounds
-since): 385 -> 388 steps, 4705.3 -> 4692.9 metre-frames, 61 worse, 133 better (most of both from rounds before this).
+THE SETTLE off (the default): soaks 8 to 30 are main's frame for frame (every presented eye identical). Soak 31:
+23 -> 18 steps, 94.4 -> 68.4 metre-frames, float 0.376 -> 0.181 m, 5 frames worse by more than 0.02 m of step change,
+18 better. The worse ones are Part A's real motion now shown: 20:28:14.010 (0.005 -> 0.089 m, the stand-up's own
+0.19 m root drop that Stable's damping had absorbed), and the head's bob in the climbs no longer smoothed
+(20:27:50.776 +0.043, 20:28:13.189 +0.034, 20:27:42.798 +0.029, 20:27:50.680 +0.024 m). All soaks: 405 -> 400 steps,
+5009.3 -> 4983.3 metre-frames, 5 worse, 18 better.
+
+THE SETTLE on (settle_on.txt): 20 worse, 31 better; the 15 more worse frames are all mask-0 native entries in soaks 14,
+19, 21, 24, 25, 27, 30 and 31 (up to +0.050 m, soak 30 16:38:33.635); soak 14's float 0.271 -> 0.375 m.
 
 ### What only the game can show
 
 - Whether the clamber now reads as the body climbing: the shown eye follows the head with no float, and Stable no
   longer smooths the head's bob in a climb or the 600 ms after it (the stand-up's 0.19 m drop is now seen).
-- Whether the backpack return looks better held and eased once than drifting; and how it looks with the arms drawn
-  at a rig up to 0.48 m from the shown eye for up to 350 ms.
+- Backpacks: the drift after the return is as in main. With settle_on.txt: whether the return looks better held and
+  eased once than drifting, and how it looks with the arms drawn at a rig up to 0.48 m from the shown eye for up to
+  350 ms.
 - The clamber-low / clamber-high matrix phases have not been run (they need the body facing a ledge), nor in Bodycam:
   the user's log has no Bodycam clamber.
 - Whether the direction snaps at the head-camera hand-off (now logged as `turn=`), and whether the helmet is seen in
