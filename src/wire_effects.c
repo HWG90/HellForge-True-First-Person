@@ -42,6 +42,17 @@ const TfpFxConstants tfp_fx_constants[TFP_FX_MODULES] = {
 };
 
 TfpFx *tfp_wire_effects_of(TfpWire *w) { return w->ext[TFP_WIRE_EXT_EFFECTS]; }
+/* Round 28: the time the depth of field and the vignette take, for the Perf line (logging only). The platform's
+ * perf_ticks (QueryPerformanceCounter in the mod; NULL in the tests that do not time) is read around each entry. */
+static int64_t perf_now(const TfpFx *fx) { return fx->platform.perf_ticks ? fx->platform.perf_ticks(fx->platform.user) : 0; }
+void tfp_wire_effects_take_spent(TfpWire *w, int64_t *dof, int64_t *vignette) {
+  TfpFx *fx = tfp_wire_effects_of(w);
+  *dof = *vignette = 0;
+  if (!fx) return;
+  *vignette = fx->spent.vignette, *dof = fx->spent.dof - fx->spent.vignette;
+  if (*dof < 0) *dof = 0;
+  fx->spent.dof = fx->spent.vignette = 0;
+}
 
 /* ---- texts and the runtime's entries ------------------------------------------------------- */
 /* A text for a unit: every unit copies an error text before its next host call. */
@@ -270,7 +281,7 @@ static void dof_controller(void *u, TfpDofControllerState *out) { out->pose_offs
  * on it is what an idle vignette is: update true, nothing owned. */
 static bool vignette_on(const TfpFx *fx) { return fx->state[TFP_FX_VIGNETTE] == TFP_FX_READY; }
 static TfpDofAnswer glue(bool done) { return done ? TFP_DOF_TRUE : TFP_DOF_FALSE; }
-static TfpDofAnswer dv_update(void *u, const TfpDofCompat *compat, const char **why) {
+static TfpDofAnswer dv_update_work(void *u, const TfpDofCompat *compat, const char **why) {
   TfpFx *fx = u;
   (void)compat; /* the vignette's own host asks the same compat object (v_compat_foreign) */
   *why = NULL;
@@ -300,13 +311,20 @@ static bool vignette_held(TfpFx *fx) {
 /* A stop that is asked for stops at once: the hold is only in what the two take for "the view is there"
  * (tfp_wire_effects_vignette_view, tfp_wire_effects_dof_view). A swap never comes here: the runtime updates the
  * depth of field through it and stops it only for a manual stop and for the new-body recovery. */
-static TfpDofAnswer dv_stop(void *u, const char **why) {
+static TfpDofAnswer dv_stop_work(void *u, const char **why) {
   TfpFx *fx = u;
   *why = NULL;
   fx->vignette_away_since = 0;
   return glue(tfp_vignette_stop(&fx->vignette, why));
 }
-static TfpDofAnswer dv_shutdown(void *u, const char **why) { *why = NULL; ((TfpFx *)u)->vignette_away_since = 0; return glue(tfp_vignette_shutdown(&((TfpFx *)u)->vignette, why)); }
+static TfpDofAnswer dv_shutdown_work(void *u, const char **why) { *why = NULL; ((TfpFx *)u)->vignette_away_since = 0; return glue(tfp_vignette_shutdown(&((TfpFx *)u)->vignette, why)); }
+/* the three above, timed (the vignette's share of the depth of field's time) */
+#define TIMED_V(call) \
+  { TfpFx *fx = u; const int64_t t0 = perf_now(fx); const TfpDofAnswer a = call; fx->spent.vignette += perf_now(fx) - t0; return a; }
+static TfpDofAnswer dv_update(void *u, const TfpDofCompat *compat, const char **why) TIMED_V(dv_update_work(u, compat, why))
+static TfpDofAnswer dv_stop(void *u, const char **why) TIMED_V(dv_stop_work(u, why))
+static TfpDofAnswer dv_shutdown(void *u, const char **why) TIMED_V(dv_shutdown_work(u, why))
+#undef TIMED_V
 static bool dv_is_clean(void *u) { return tfp_vignette_is_clean(&((TfpFx *)u)->vignette); }
 static void dv_result(void *u, TfpDofVignetteResult *out) {
   TfpVignetteResult r;
@@ -654,7 +672,7 @@ static bool rt_dof_new(TfpRtHost *h) {
   fx->made[TFP_FX_DOF] = fx->made[TFP_FX_VIGNETTE] = true;
   return true;
 }
-static bool rt_dof_update(TfpRtHost *h, V *o1, V *o2) {
+static bool rt_dof_update_work(TfpRtHost *h, V *o1, V *o2) {
   TfpFx *fx = FXH(h);
   const char *why = NULL;
   if (!fx->made[TFP_FX_DOF]) return fx->off.dof_update(h, o1, o2);
@@ -662,18 +680,25 @@ static bool rt_dof_update(TfpRtHost *h, V *o1, V *o2) {
   if (tfp_dof_is_clean(&fx->dof)) return fx->off.dof_update(h, o1, o2);
   { TfpDofAnswer a = tfp_dof_stop(&fx->dof, &why); return answer(h, a, why, o1, o2); } /* refused while it owned: give back what it can */
 }
-static bool rt_dof_stop(TfpRtHost *h, V *o1, V *o2) {
+static bool rt_dof_stop_work(TfpRtHost *h, V *o1, V *o2) {
   TfpFx *fx = FXH(h);
   const char *why = NULL;
   if (!fx->made[TFP_FX_DOF]) return fx->off.dof_stop(h, o1, o2);
   { TfpDofAnswer a = tfp_dof_stop(&fx->dof, &why); return answer(h, a, why, o1, o2); }
 }
-static bool rt_dof_shutdown(TfpRtHost *h, V *o1, V *o2) {
+static bool rt_dof_shutdown_work(TfpRtHost *h, V *o1, V *o2) {
   TfpFx *fx = FXH(h);
   const char *why = NULL;
   if (!fx->made[TFP_FX_DOF]) return fx->off.dof_shutdown(h, o1, o2);
   { TfpDofAnswer a = tfp_dof_shutdown(&fx->dof, &why); return answer(h, a, why, o1, o2); }
 }
+/* the three above, timed (the vignette inside included; tfp_wire_effects_take_spent takes it out) */
+#define TIMED_D(call) \
+  { TfpFx *fx = FXH(h); const int64_t t0 = perf_now(fx); const bool done = call; fx->spent.dof += perf_now(fx) - t0; return done; }
+static bool rt_dof_update(TfpRtHost *h, V *o1, V *o2) TIMED_D(rt_dof_update_work(h, o1, o2))
+static bool rt_dof_stop(TfpRtHost *h, V *o1, V *o2) TIMED_D(rt_dof_stop_work(h, o1, o2))
+static bool rt_dof_shutdown(TfpRtHost *h, V *o1, V *o2) TIMED_D(rt_dof_shutdown_work(h, o1, o2))
+#undef TIMED_D
 static bool rt_dof_is_clean(TfpRtHost *h, V *o1) {
   TfpFx *fx = FXH(h);
   if (!fx->made[TFP_FX_DOF]) return fx->off.dof_is_clean(h, o1);

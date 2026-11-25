@@ -860,6 +860,19 @@ int main(void) {
   CHECK(!head_tick.rows && !head_tick.head && !head_tick.camera_rows && !head_tick.on_again && !head_tick.left_on && !head_tick.put_back && !head_tick.view);
   CHECK(!strstr(second, "waiting") && !strstr(calls, "set_") && !strstr(calls, "link_unit") && ktop == 0);
 
+  { /* round 28: the Perf line's count of protected calls: one eng_call is one; a path that does not resolve is none */
+    uint64_t calls0 = 0, logs0 = 0, calls1 = 0, logs1 = 0;
+    EngRef main_world = 0;
+    eng_counts(&calls0, &logs0);
+    CHECK(eng_call("Application.main_world", ">r", &main_world) && main_world);
+    eng_unref(&main_world);
+    eng_counts(&calls1, &logs1);
+    CHECK(calls1 == calls0 + 1 && logs1 == logs0);
+    CHECK(!eng_call("Application.no_such_function", ">r", &main_world) && !main_world);
+    eng_counts(&calls1, &logs1);
+    CHECK(calls1 == calls0 + 1 && calls0 > 0);
+  }
+
   printf("Engine binder: %d checks: the bridge's marshalling over a stand-in Lua state (%zu functions compared with build 25480438's), the handle table across "
          "inventories and Lua states, every in-game check passing and failing, the link readback and its undo, the runtime adapters off and bound\n",
          checks, (tfp_wire_engine_functions(&count), count));

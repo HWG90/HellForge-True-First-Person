@@ -184,12 +184,13 @@ static bool identity(EngRef value, uint64_t *id, int *type) {
 }
 /* How long reading the last entity list took (four bridge calls per entry, once a second while the
  * vignette is held): the cost retail does not have, since its Lua keeps the engine's table. */
-static struct { uint32_t entries, microseconds, worst; } scan;
+static struct { uint32_t entries, microseconds, worst, lists; } scan;
 static uint64_t ticks(void);
 bool tfp_win_effects_last_scan(uint32_t *entries, uint32_t *microseconds, uint32_t *worst) {
   *entries = scan.entries, *microseconds = scan.microseconds, *worst = scan.worst;
   return scan.entries != 0;
 }
+uint32_t tfp_win_effects_scans(void) { return scan.lists; }
 static bool p_world_entities(void *u, uint64_t world, uint64_t *entities, uint32_t capacity, TfpVignetteList *kind, uint32_t *count,
                              const char **error) {
   EngRef list = 0;
@@ -230,7 +231,7 @@ static bool p_world_entities(void *u, uint64_t world, uint64_t *entities, uint32
     entities[i] = held.ids[i] = id;
     held.list_count = i + 1;
   }
-  scan.entries = held.list_count, scan.microseconds = (uint32_t)(ticks() - started);
+  scan.entries = held.list_count, scan.microseconds = (uint32_t)(ticks() - started), scan.lists++;
   if (scan.microseconds > scan.worst) scan.worst = scan.microseconds;
   return true;
 }
@@ -386,20 +387,27 @@ static bool p_show_cursor(void *u, bool *shown, const char **error) {
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include "wire_win.h" /* tfp_win_query, tfp_win_count: the Perf line's counts */
 _Static_assert(sizeof(MEMORY_BASIC_INFORMATION) == 48, "NativeADS_Region is MEMORY_BASIC_INFORMATION");
 static uint64_t ticks(void) { /* microseconds */
   LARGE_INTEGER now, rate;
   if (!QueryPerformanceFrequency(&rate) || !QueryPerformanceCounter(&now) || rate.QuadPart <= 0) return 0;
   return (uint64_t)(now.QuadPart / rate.QuadPart) * 1000000u + (uint64_t)(now.QuadPart % rate.QuadPart) * 1000000u / (uint64_t)rate.QuadPart;
 }
+static int64_t p_perf_ticks(void *u) { /* round 28: the Perf line's dof and vignette times */
+  LARGE_INTEGER now;
+  (void)u;
+  return QueryPerformanceCounter(&now) ? (int64_t)now.QuadPart : 0;
+}
 static size_t p_query(void *u, uint64_t address, void *region, size_t size) {
   (void)u;
-  return VirtualQuery((const void *)(uintptr_t)address, (MEMORY_BASIC_INFORMATION *)region, size);
+  return tfp_win_query(address, region, size); /* src/wire_win.c: VirtualQuery, counted for the Perf line */
 }
 /* retail: WriteProcessMemory(GetCurrentProcess(), address, bytes, size, &count) (first_person_movement.lua:98-103, memory.lua:197). */
 static int p_write(void *u, uint64_t address, const uint8_t *bytes, size_t size, size_t *written) {
   SIZE_T count = 0;
   (void)u;
+  tfp_win_count(TFP_WIN_COUNT_PROCESS_WRITE); /* game memory: stays on WriteProcessMemory (round 28 changed host_write only) */
   int done = WriteProcessMemory(GetCurrentProcess(), (void *)(uintptr_t)address, bytes, size, &count) != 0;
   *written = (size_t)count;
   return done;
@@ -437,5 +445,6 @@ void tfp_win_effects_platform(TfpFxPlatform *out, uint64_t exe) {
   out->window_mouse_focus = p_mouse_focus, out->window_show_cursor = p_show_cursor;
 #ifdef _WIN32
   out->virtual_query = p_query, out->write_process_memory = p_write, out->set_widget_shown = p_widget;
+  out->perf_ticks = p_perf_ticks;
 #endif
 }

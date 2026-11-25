@@ -45,6 +45,9 @@ bool eng_callv(const char* path, const char* sig, va_list args); /* eng_call wit
 /* A method of a userdata (a Matrix4x4Box's unbox): object:method(...) with the same signatures. */
 bool eng_method(EngRef object, const char* method, const char* sig, ...);
 bool eng_has(const char* path); /* stingray.<path> is a function (or a table) */
+/* Round 28: how many protected calls eng_call / eng_method made (counted when the call starts, failed ones too)
+ * and how many lines the bridge logged, since the start. Cumulative; the Perf line logs the difference a second. */
+void eng_counts(uint64_t* calls, uint64_t* logs);
 uintptr_t eng_cfunction(const char* path); /* the C function behind stingray.<path> (its binding's address), or 0 */
 /* Read-only raw SDK table census. No SDK function or metatable is invoked.
  * Bounds and omitted/aliased branches are explicit; caller is game-thread only. */

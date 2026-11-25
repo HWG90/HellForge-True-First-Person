@@ -116,7 +116,7 @@ static bool host_cas32(void *u, uint64_t at, uint32_t expected, uint32_t desired
 static bool host_region(void *u, uint64_t at, uint64_t *base, uint64_t *size, bool *is_free) { /* cpp:726-730 */
   MEMORY_BASIC_INFORMATION r;
   (void)u;
-  if (VirtualQuery((const void *)(uintptr_t)at, &r, sizeof r) != sizeof r) return false;
+  if (tfp_win_query(at, &r, sizeof r) != sizeof r) return false;
   *base = (uint64_t)(uintptr_t)r.BaseAddress, *size = (uint64_t)r.RegionSize, *is_free = r.State == MEM_FREE;
   return true;
 }

@@ -76,10 +76,15 @@ static char g_error[512];
 static char g_status[256] = "waiting for the engine's Lua state";
 static EngRef g_stingray; /* the stingray table */
 static uint64_t g_refGeneration;
+/* Round 28: protected engine calls (CallV: eng_call and eng_method) and log lines, counted for the Perf line. Game
+ * thread only, as every eng_ call; plain counters. */
+static uint64_t s_countCalls, s_countLogs;
+void eng_counts(uint64_t* calls, uint64_t* logs) { *calls = s_countCalls, *logs = s_countLogs; }
 
 static void Log(const char* format, ...)
 {
     char line[1024];
+    s_countLogs++;
     va_list args;
     va_start(args, format);
     vsnprintf(line, sizeof line, format, args);
@@ -439,6 +444,7 @@ static bool ReadQuaternion(lua_State* L, int index, float out[4])
 static bool CallV(lua_State* L, const char* what, const char* sig, int prepushed, va_list args)
 {
     int base = L_.gettop(L) - prepushed; /* the function is at base, then `prepushed` arguments already on the stack */
+    s_countCalls++;
     const char* s = sig;
     int nargs = prepushed;
     for (; *s && *s != '>'; s++)
