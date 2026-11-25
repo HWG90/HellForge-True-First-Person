@@ -50,13 +50,19 @@ class FakeLog:
 
 
 class FakeGame:
-    """Records every script; `react(script, log)` writes what the game would log after it."""
+    """Records every script; `react(script, log)` writes what the game would log after it. With a Clock, a script
+    takes its own time on it (drive.events: the real helper blocks for the whole script), and `times` keeps each
+    script's (start, end)."""
 
-    def __init__(self, log, react=None):
-        self.log, self.react, self.scripts = log, react, []
+    def __init__(self, log, react=None, clock=None):
+        self.log, self.react, self.scripts, self.clock, self.times = log, react, [], clock, []
 
     def run(self, script):
         self.scripts.append(script)
+        begun = self.clock() if self.clock else 0.0
+        if self.clock:
+            self.clock.now += drive.events(script)[1]
+        self.times.append((begun, self.clock() if self.clock else 0.0))
         if self.react:
             self.react(script, self.log, len(self.scripts))
         return ""
@@ -248,11 +254,20 @@ class ZoomCycle(unittest.TestCase):
         self.log, self.clock = FakeLog(self), Clock()
 
     def zoom(self, react):
-        game = FakeGame(self.log, react)
+        self.game = game = FakeGame(self.log, react, self.clock)
         tail = aim.LogTail(self.log.path)
         result = aim.scope_zoom(game, tail, sleep=self.clock.sleep, clock=self.clock)
         tail.read()
         return game.scripts, result, tail
+
+    def free_holds(self, step):
+        """For each run of `step`: the seconds from its end (R let go: the menu shut) to the next script."""
+        times, scripts = self.game.times, self.game.scripts
+        return [round(times[i + 1][0] - times[i][1], 3) for i, s in enumerate(scripts) if s == step]
+
+    def test_the_hold_is_two_seconds(self):
+        # the brief: each range held at least 2 s in full aim (the testers' shake is in a range held)
+        self.assertEqual(aim.ZOOM_HOLD_S, 2.0)
 
     def test_each_range_in_full_aim_is_held_and_the_ranges_come_round(self):
         fovs = iter([20.0, 10.0, 30.8])
@@ -273,7 +288,11 @@ class ZoomCycle(unittest.TestCase):
                          [(30.8, 20.0, True), (20.0, 10.0, True), (10.0, 30.8, True)])
         self.assertTrue(result["zoom_steps"][0]["seat_moved"])          # 0.220 -> 0.350 m: the game reseated the sight
         self.assertTrue(all(z["full_aim"] for z in result["zoom_steps"]))
-        self.assertGreaterEqual(self.clock.now, 3 * aim.ZOOM_HOLD_S)    # every range held 2 s
+        # every range, the last too, held 2 s of free full aim after R is let go: the menu's own time is not the hold
+        # (round 30's review: begun before the step left 0.77 s with the menu shut, the last range 1.1 s)
+        holds = self.free_holds(aim.ZOOM_STEP)
+        self.assertEqual(len(holds), 3)
+        self.assertTrue(all(h >= 2.0 for h in holds), holds)
         self.assertEqual(aim.zoom_levels(tail.lines), [10.0, 20.0, 30.8])
         self.assertTrue(aim.verdict(result, tail.lines, aim.ZOOM_HOLD_S, zoom=True)["pass"])
 

@@ -206,9 +206,11 @@ def full_aim(device, tail, hold=HOLD_S, during=None, sleep=time.sleep, clock=tim
 
 
 def _step(device, tail, result, where, before, seat, sleep, clock, capture=None):
-    """One range on (ZOOM_STEP) and ZOOM_HOLD_S held; the step's record, appended to result["zoom_steps"]."""
-    start, begun = len(tail.lines), clock()
-    device.run(ZOOM_STEP)
+    """One range on (ZOOM_STEP) and ZOOM_HOLD_S held from the moment R is let go (the weapon functions menu shut: the
+    hold is free full aim, not the menu's time); the step's record, appended to result["zoom_steps"]."""
+    start = len(tail.lines)
+    device.run(ZOOM_STEP)   # blocks until R is up (~1.26 s with the real helper)
+    begun = clock()
     changed = wait_for(tail, lambda lines: _zoomed(lines[start:], before), ZOOM_WAIT_S, sleep, clock)
     sleep(max(0.0, ZOOM_HOLD_S - (clock() - begun)))
     tail.read()
