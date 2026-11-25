@@ -60,7 +60,7 @@ static const HfApi *hf;
 static HfMod *owner;
 static TfpWire wire;
 static enum { WAIT_MODULES, WAIT_PINS, RUNNING, REFUSED } stage;
-static bool told_waiting, told_tick_thread, hook_told[TFP_WIN_HOOKS];
+static bool told_waiting, told_fields_waiting, told_tick_thread, hook_told[TFP_WIN_HOOKS];
 #ifdef TFP_FEEL
 /* The two bound keys' presses. A key bound in the menu is still down at the next tick: it acts only once it has been let go. */
 static TfpKeyEdge toggle_edge, editor_edge;
@@ -920,6 +920,30 @@ static void arms_tick(void) {
 }
 #endif
 
+/* The entity records, the entity maps and the player fields, read once from the game's code before anything reads
+ * them (src/entity_fields.h): HellForge 0.5 moves the records out of the EntityManager, a mod may move the player
+ * lists. A cold page waits; an instruction that is not the reviewed one, or values that do not hold together, refuse
+ * the session: nothing reads those fields at a guessed place. */
+static bool fields_ready(void) {
+  char why[200], line[400];
+  TfpFieldsResult r = tfp_win_resolve_fields(why, sizeof why);
+  if (r == TFP_FIELDS_UNREADABLE) {
+    if (!told_fields_waiting) told_fields_waiting = true, say("Waiting: %s", why);
+    return false;
+  }
+  if (r != TFP_FIELDS_OK) {
+    char text[320];
+    snprintf(text, sizeof text, "the entity and player fields could not be read from the game's code: %s", why);
+    refuse(text);
+    return false;
+  }
+  tfp_fields_describe(tfp_win_fields(), line, sizeof line);
+  say("Ready: fields read from the game's code: %s", line);
+#ifdef TFP_FEEL
+  tfp_pose_set_entity_fields(tfp_win_fields());
+#endif
+  return true;
+}
 static void start(void) {
   TfpOpsHost memory;
   TfpWirePlatform platform;
@@ -1373,6 +1397,7 @@ static void tick_body(void) {
       say("Waiting: some pinned code pages are not readable yet (they are once a player exists)");
     }
     if (pins <= 0) return;
+    if (!fields_ready()) return;
     start();
     if (stage != RUNNING) return;
   }

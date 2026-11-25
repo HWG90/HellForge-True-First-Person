@@ -2,7 +2,7 @@
 #include "feature_contract.h"
 #include "preferences.h"
 static unsigned writes;static bool late_failure;
-static bool store(void *unused,uintptr_t at,uint8_t expected,uint8_t value){(void)unused;uint8_t current=2;if(!fp_read(&(FpMemory){read_fake,&f,0,0},at,&current,1)||current!=expected)return false;put(at,&value,1);writes++;return !late_failure;}
+static bool store(void *unused,uintptr_t at,uint8_t expected,uint8_t value){(void)unused;uint8_t current=2;if(!fp_read(&(FpMemory){read_fake,&f,0,0,NULL},at,&current,1)||current!=expected)return false;put(at,&value,1);writes++;return !late_failure;}
 static void seed(const FpMemory *m,FpFeature feature){
  for(unsigned i=0;i<sizeof fp_feature_sites/sizeof *fp_feature_sites;i++){const FpFeatureSite *s=fp_feature_sites+i;if(s->feature!=feature)continue;uint8_t b[128];unsigned n=0;for(;s->hex[n*2];n++){unsigned x;assert(sscanf(s->hex+n*2,"%2x",&x)==1);b[n]=(uint8_t)x;}put((s->exe?m->exe:m->game)+s->rva,b,n);}
 }

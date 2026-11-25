@@ -28,7 +28,7 @@
 #undef B_PIN_9
 #define B_PIN_9 UINT32_C(0xf00100)
 #undef B_PIN_9_FNV
-#define B_PIN_9_FNV UINT64_C(0x91b780e54d5bb826)
+#define B_PIN_9_FNV UINT64_C(0xa5ff70bd20fb7378) /* retail's bytes with B_PIN_9_MASKS zeroed (whole 0x91b780e54d5bb826) */
 #undef B_PIN_EXIT_FNV
 #define B_PIN_EXIT_FNV UINT64_C(0x1a26ca7b7bbba077)
 #undef B_PIN_12

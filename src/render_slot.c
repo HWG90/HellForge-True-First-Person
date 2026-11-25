@@ -242,6 +242,7 @@ void tfp_render_slot_setup(const HfApi *api) {
   hf = api;
   memset(&host, 0, sizeof host);
   host.memory.read = host_read, host.memory.game = (uintptr_t)tfp_win_game(), host.memory.exe = (uintptr_t)tfp_win_exe();
+  host.memory.fields = tfp_win_fields(); /* src/entity_fields.h, read from the game's code at start */
   host.executable = host_executable, host.set_local = host_set_local, host.update_unit = host_update_unit;
   tfp_arm_drive_set_host(&host);
 }

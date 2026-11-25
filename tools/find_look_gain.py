@@ -59,7 +59,7 @@ ESTABLISHED = {
     "B_PIN_EXP_FNV": 0xfa3d329f82edb886,
     "B_PIN_6": 0x1277780, "B_PIN_6_FNV": 0x36566b360cb60898,
     "B_PIN_7": 0x1279970, "B_PIN_7_FNV": 0xcb8c325895c1bf1d,
-    "B_PIN_9": 0xfd9ba0, "B_PIN_9_FNV": 0x29608cd098aef135,
+    "B_PIN_9": 0xfd9ba0, "B_PIN_9_FNV": 0x4f44abd28dfd84fa,  # masked: B_PIN_9_MASKS zeroed (whole 0x29608cd098aef135)
     "B_PIN_12": 0x1fd190, "B_PIN_12_FNV": 0x2d9df1a66a439fb6,
     "B_PIN_13": 0x1fd1d0, "B_PIN_13_FNV": 0xe99ec6ca69868d09,
     "B_CONST_ONE": 0x23c6d70, "B_CONST_MINUS_ONE": 0x23c800c, "B_CONST_RAD_TO_DEG": 0x23c7730,
@@ -363,7 +363,12 @@ def main():
         report("B_PIN_9", ok, here, f"{note}; the steering pin's call goes to it; field changes are B_WORLD_ENTITY_MAP (0xf22ec8..) and B_WORLD_ENTITY_AVATAR (0x1e65e4*8 = 0xf32f20)")
         evidence(f"retail first 24 bytes {hexat('retail_game', 0xe69ca0, 24)}")
         evidence(f"here   first 24 bytes {hexat('here_game', here, 24)}")
-        report("B_PIN_9_FNV", ok, fnv(image("here_game")[here:here + 0xdc]), "FNV-1a 64 over 0xdc bytes")
+        # The five changed displacements are hashed as zeros (src/pose_helper.c B_PIN_9_MASKS): HellForge 0.5 moves the
+        # entity records, so the pin proves the instructions and src/entity_fields.h reads the displacements.
+        masked = bytearray(image("here_game")[here:here + 0xdc])
+        for at in (0x2c, 0x3a, 0x5c, 0x63, 0xb3):
+            masked[at:at + 4] = bytes(4)
+        report("B_PIN_9_FNV", ok, fnv(bytes(masked)), "FNV-1a 64 over 0xdc bytes, the five moved-field displacements as zeros")
     else:
         report("B_PIN_9_FNV", False, None, "no address")
 

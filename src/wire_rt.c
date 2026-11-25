@@ -1134,10 +1134,11 @@ void tfp_wire_init(TfpWire *w, const TfpOpsHost *memory, const TfpWirePlatform *
 
   w->memory = *memory;
   w->ops_host = (TfpOpsHost){w, memory->wine, mem_module, mem_read, mem_write, mem_query, mem_call, mem_clock, mem_log,
-                             NULL, NULL, NULL, NULL, NULL, NULL};
+                             NULL, NULL, NULL, NULL, NULL, NULL, NULL};
   w->ops_host.foreign_camera = hook_foreign_camera;
   w->ops_host.camera_before_entry = hook_camera_before_entry;
   w->ops_host.placement_resolver = hook_placement_resolver;
+  w->ops_host.fields = memory->fields; /* src/entity_fields.h: the host's, read from the game's code */
   w->ops_host.presentation_transition = hook_presentation_transition;
   w->ops_host.load_pose = NULL; /* the stand-in is handed to tfp_ops_init, as Backend.new(log, io, alignment, pose) takes it */
   w->ops_host.load_alignment = no_alignment;

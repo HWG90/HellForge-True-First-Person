@@ -177,7 +177,7 @@ int main(int argc, char **argv) {
   for (unsigned i = 0; i < count; i++) {
     const LSStep *v = ls_steps + i;
     World world = {ls_images + v->origin, v, true, 0, 0xcbf29ce484222325ULL};
-    FpMemory memory = {world_read, &world, (uintptr_t)0x100000000ULL, (uintptr_t)v->exe};
+    FpMemory memory = {world_read, &world, (uintptr_t)0x100000000ULL, (uintptr_t)v->exe, NULL};
     Host host = {&world, &memory, reader, {&memory, &host, host_player_snapshot, host_alignment_context}};
     TfpLocomotionBackend backend = {&memory, &host, host_player_snapshot, host_alignment_executable, host_action_state, host_on_foot};
     TfpSnapshot origin, fresh;

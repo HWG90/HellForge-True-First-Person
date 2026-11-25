@@ -228,7 +228,7 @@ __declspec(dllexport) int hellforge_mod_init(const HfApi *api, HfMod *mod) {
     hf->log(
         mod,
         "Settings file was invalid; valid values and defaults were retained");
-  FpMemory memory = {sdk_read, NULL, 0, 0};
+  FpMemory memory = {sdk_read, NULL, 0, 0, NULL};
   fp_runtime_init(&runtime, &memory, &settings);
   hf->on(mod, HF_EVENT_SESSION_END, session_end, NULL);
   return hf->on(mod, HF_EVENT_GAME_LOADED, game_loaded, NULL);

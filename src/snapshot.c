@@ -107,6 +107,8 @@ bool tfp_snapshot(const FpMemory *m, TfpSnapshotScope scope, TfpSnapshot *out, c
   uint32_t queue[2], request[5], d[6], count = 0, index = 0;
   uint8_t entry[20];
   bool ok = false;
+  TfpEntityFields own;
+  const TfpEntityFields *f = NULL;
   if (!m || !out) return false;
   do {
     if (!module_identity(&r)) break; /* :168 */
@@ -129,11 +131,13 @@ bool tfp_snapshot(const FpMemory *m, TfpSnapshotScope scope, TfpSnapshot *out, c
     s.controller_active = s.controller_bytes[4] != 0;
     s.blocked = s.mask != 0 || s.controller_bytes[5] != 0;
     /* local avatar, :174-181 */
-    if (!ptr(&r, m->game + FP_PLAYER, &s.player) || !u32(&r, s.player + 0x88, &count)) break;
+    /* The player fields and the entity records where the game's code has them now (src/entity_fields.h). */
+    if (!(f = tfp_fields_use(m->fields, &own))) { refuse(&r, "Entity fields unresolved"); break; }
+    if (!ptr(&r, m->game + FP_PLAYER, &s.player) || !u32(&r, s.player + f->player_live, &count)) break;
     if (!count) { refuse(&r, "Local player unavailable"); break; }
-    if (!u32(&r, s.player + 0x3a8, &s.local_entity) ||
-        !map(&r, s.world + FP_LIGHT_MAP, s.local_entity, 1048576, &index) ||
-        !bytes(&r, s.world + FP_ENTITY_ROWS + (uintptr_t)index * 24, d, sizeof d)) break;
+    if (!u32(&r, s.player + f->player_network, &s.local_entity) ||
+        !map(&r, s.world + f->network_map, s.local_entity, 1048576, &index) ||
+        !bytes(&r, tfp_fields_record(s.world, f, index), d, sizeof d)) break;
     if (d[4] != s.local_entity || !(d[5] & 1)) { refuse(&r, "Local player generation unavailable"); break; }
     if (!valid_id(d[2])) { refuse(&r, "Local avatar unavailable"); break; }
     s.avatar = d[2];
@@ -175,8 +179,8 @@ bool tfp_snapshot(const FpMemory *m, TfpSnapshotScope scope, TfpSnapshot *out, c
     if (!ptr(&r, wield + 0x60, &rows) || !u32(&r, rows + (uintptr_t)index * 0x1d0, &s.weapon)) break;
     if (!valid_id(s.weapon)) { refuse(&r, "Equip a firearm before starting the camera test"); break; }
     /* _descriptor, :151, then the weapon component, :253-261 */
-    if (!map(&r, s.world + FP_ENTITY_MAP, s.weapon, 1048576, &index) ||
-        !bytes(&r, s.world + FP_ENTITY_ROWS + (uintptr_t)index * 24, wd, sizeof wd)) break;
+    if (!map(&r, s.world + f->entity_map, s.weapon, 1048576, &index) ||
+        !bytes(&r, tfp_fields_record(s.world, f, index), wd, sizeof wd)) break;
     if (wd[2] != s.weapon || !(wd[5] & 1)) { refuse(&r, "Entity generation unavailable"); break; }
     if (!ptr(&r, m->game + FP_WEAPONS, &pool) || !map(&r, pool + 0x30, s.weapon, 4096, &index) ||
         !ptr(&r, pool + 0x48, &rows) || !ptr(&r, rows + (uintptr_t)index * 8, &s.weapon_component_descriptor) ||

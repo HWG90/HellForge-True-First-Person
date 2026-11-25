@@ -147,9 +147,11 @@
 #define B_PIN_7             UINT32_C(0x1279970)  /* retail game+0x110b830, 0x5b0 bytes, 0xd77b549041450f76; image: only match; like retail's it starts 2 bytes before an instruction boundary; differs in B_GAME_PRESETS+0x8c and its own jump table */
 #define B_PIN_7_FNV         UINT64_C(0xcb8c325895c1bf1d)/* computed from the image */
 #define B_PIN_STEERING      UINT32_C(0x128d820)  /* retail 0x111f860; input-json steering_addition (292 bytes, 68 instructions both builds) */
-#define B_PIN_STEERING_FNV  UINT64_C(0xba858f4fe27538d8) /* retail 0x23ae2b71a5e0f871; computed from the image */
+#define B_PIN_STEERING_FNV  UINT64_C(0xf4122f2d563e703f) /* over the image's bytes with B_PIN_STEERING_MASKS zeroed (whole: 0xba858f4fe27538d8; retail whole 0x23ae2b71a5e0f871, masked 0x5c2e011f17a4b33a) */
+#define B_PIN_STEERING_MASKS 0x16, 0x1f                  /* the displacements of PlayerManager's second count (+0x88) and network ids (+0x3a8): a mod may move them (src/entity_fields.h) */
 #define B_PIN_9             UINT32_C(0xfd9ba0)   /* retail game+0xe69ca0, 0xdc bytes, 0x91b780e54d5bb826; image: only match, and the callee of B_PIN_STEERING at game+0x128d848; differs in B_WORLD_ENTITY_MAP and B_WORLD_ENTITY_AVATAR */
-#define B_PIN_9_FNV         UINT64_C(0x29608cd098aef135)/* computed from the image */
+#define B_PIN_9_FNV         UINT64_C(0x4f44abd28dfd84fa)/* over the image's bytes with B_PIN_9_MASKS zeroed (whole: 0x29608cd098aef135; retail masked 0xa5ff70bd20fb7378) */
+#define B_PIN_9_MASKS       0x2c, 0x3a, 0x5c, 0x63, 0xb3 /* the displacements of the network-id map header (capacity, multiplier, buckets, empty key) and of the record's +8: HellForge 0.5 moves the records (src/entity_fields.h) */
 #define B_PIN_ENTER         UINT32_C(0x127de20)  /* retail 0x110fcf0; build_map; input-json constructor (2992 bytes, 665 instructions both builds) */
 #define B_PIN_ENTER_FNV     UINT64_C(0x4bed0e223589e85e) /* retail 0x32dc74e3dc6a26e9; computed from the image */
 #define B_PIN_EXIT          UINT32_C(0x127e9d0)  /* retail 0x11108a0; build_map; profile.h FP_EXIT */
@@ -875,24 +877,28 @@ static InputState input_state;
 /* cpp:582-601. Whole evaluator plus both outer preset consumers close the
  * synthetic-index domain. The second FOV copy cannot interpret the changed
  * gain fields. Same 16 rows in retail's order; lengths are retail's. */
-typedef struct InputPin { uint32_t offset, length; uint64_t fnv; bool exe; } InputPin;
+/* masks: offsets in the pin of 4-byte displacements hashed as zeros. They address fields that HellForge 0.5 or a
+ * mod may move; the helper reads those fields where src/entity_fields.h found them (tfp_pose_set_entity_fields), so
+ * the pin proves the instructions and leaves their displacements to that check. */
+typedef struct InputPin { uint32_t offset, length; uint64_t fnv; bool exe; const uint16_t *masks; unsigned mask_count; } InputPin;
+static const uint16_t PIN_9_MASKS[] = {B_PIN_9_MASKS}, PIN_STEERING_MASKS[] = {B_PIN_STEERING_MASKS};
 static const InputPin INPUT_PINS[] = {
-  {B_PIN_EVALUATOR, B_PIN_EVALUATOR_LEN, B_PIN_EVALUATOR_FNV, false},
-  {B_PIN_2, 24, B_PIN_2_FNV, false},
-  {B_PIN_3, 1724, B_PIN_3_FNV, false},
-  {B_GAME_EXP, 1013, B_PIN_EXP_FNV, false},
-  {B_PIN_SOLVER, 1328, B_PIN_SOLVER_FNV, false},
-  {B_PIN_6, 0x1a0, B_PIN_6_FNV, false},
-  {B_PIN_7, 0x5b0, B_PIN_7_FNV, false},
-  {B_PIN_STEERING, 0x124, B_PIN_STEERING_FNV, false},
-  {B_PIN_9, 0xdc, B_PIN_9_FNV, false},
-  {B_PIN_ENTER, 0xbb0, B_PIN_ENTER_FNV, false},
-  {B_PIN_EXIT, 0x1dd0, B_PIN_EXIT_FNV, false},
-  {B_PIN_12, 51, B_PIN_12_FNV, true},
-  {B_PIN_13, 76, B_PIN_13_FNV, true},
-  {B_EXE_WORLD_MATRIX, 47, B_PIN_WORLD_MATRIX_FNV, true},
-  {B_EXE_LOCAL_POSITION, 51, B_PIN_LOCAL_POSITION_FNV, true},
-  {B_EXE_GRAPH_GETTER, 5, B_PIN_GRAPH_GETTER_FNV, true}};
+  {B_PIN_EVALUATOR, B_PIN_EVALUATOR_LEN, B_PIN_EVALUATOR_FNV, false, NULL, 0},
+  {B_PIN_2, 24, B_PIN_2_FNV, false, NULL, 0},
+  {B_PIN_3, 1724, B_PIN_3_FNV, false, NULL, 0},
+  {B_GAME_EXP, 1013, B_PIN_EXP_FNV, false, NULL, 0},
+  {B_PIN_SOLVER, 1328, B_PIN_SOLVER_FNV, false, NULL, 0},
+  {B_PIN_6, 0x1a0, B_PIN_6_FNV, false, NULL, 0},
+  {B_PIN_7, 0x5b0, B_PIN_7_FNV, false, NULL, 0},
+  {B_PIN_STEERING, 0x124, B_PIN_STEERING_FNV, false, PIN_STEERING_MASKS, sizeof PIN_STEERING_MASKS / sizeof *PIN_STEERING_MASKS},
+  {B_PIN_9, 0xdc, B_PIN_9_FNV, false, PIN_9_MASKS, sizeof PIN_9_MASKS / sizeof *PIN_9_MASKS},
+  {B_PIN_ENTER, 0xbb0, B_PIN_ENTER_FNV, false, NULL, 0},
+  {B_PIN_EXIT, 0x1dd0, B_PIN_EXIT_FNV, false, NULL, 0},
+  {B_PIN_12, 51, B_PIN_12_FNV, true, NULL, 0},
+  {B_PIN_13, 76, B_PIN_13_FNV, true, NULL, 0},
+  {B_EXE_WORLD_MATRIX, 47, B_PIN_WORLD_MATRIX_FNV, true, NULL, 0},
+  {B_EXE_LOCAL_POSITION, 51, B_PIN_LOCAL_POSITION_FNV, true, NULL, 0},
+  {B_EXE_GRAPH_GETTER, 5, B_PIN_GRAPH_GETTER_FNV, true, NULL, 0}};
 typedef struct InputConstant { uint32_t offset, bits; } InputConstant;
 /* cpp:602-618. Every pin and constant is read from the running game; one
  * difference answers false, reason INPUT_CODE_UNAVAILABLE, as in retail. */
@@ -904,6 +910,9 @@ static bool input_code(const TfpPoseConfig *c) {
     while (done < pin->length) {
       uint8_t block[512]; uint32_t length = pin->length - done; if (length > sizeof block) length = sizeof block;
       if (!read((pin->exe ? c->exe : c->game) + pin->offset + done, block, length)) return false;
+      for (unsigned m = 0; m < pin->mask_count; ++m)
+        for (uint32_t i = 0; i < 4; ++i)
+          if (pin->masks[m] + i >= done && pin->masks[m] + i < done + length) block[pin->masks[m] + i - done] = 0;
       for (uint32_t i = 0; i < length; ++i) hash = (hash ^ block[i])*UINT64_C(0x100000001b3);
       done += length;
     }
@@ -950,22 +959,48 @@ static bool input_map(uint64_t owner, uint32_t offset, uint32_t key, uint32_t *r
   DepthProbe proof; memset(&proof, 0, sizeof proof); return depth_map(header, key, &proof, result) && *result != UINT32_MAX;
 }
 /* cpp:653-668 */
+/* The fields the steering follows (src/entity_fields.h): handed in once by the mod before the helper runs, from the
+ * game's code; no read in the game's call. Unset: the game's own, except in a shipped build, where the steering then
+ * refuses (the look gain stays the game's). */
+static _Atomic uint32_t pose_fields_set;
+static uint32_t pose_network_map = B_WORLD_ENTITY_MAP, pose_player_count = L_PLAYER_COUNT, pose_player_entity = L_PLAYER_ENTITY;
+static int64_t pose_entity_avatar = (int64_t)B_WORLD_ENTITY_AVATAR;
+uint32_t tfp_pose_set_entity_fields(const TfpEntityFields *f) {
+  if (!f || !f->resolved) return 0;
+  pose_network_map = f->network_map, pose_entity_avatar = f->records + 8, pose_player_count = f->player_live, pose_player_entity = f->player_network;
+  atomic_store_explicit(&pose_fields_set, 1, memory_order_release);
+  return 1;
+}
+static bool pose_fields_ready(void) {
+#ifdef TFP_FIELDS_REQUIRED
+  return atomic_load_explicit(&pose_fields_set, memory_order_acquire) != 0;
+#else
+  (void)atomic_load_explicit(&pose_fields_set, memory_order_acquire);
+  return true;
+#endif
+}
 static bool input_steering(const TfpPoseConfig *c, float *out) {
   uint64_t player = 0; uint32_t count = 0, avatar = 0, disabled = 0;
-  if (!pointer(c->game + B_GAME_PLAYER, &player) || !value(player + L_PLAYER_COUNT, count) || !value(c->game + B_GAME_NO_AVATAR, disabled)) return false;
+  if (!pose_fields_ready()) return false;
+  if (!pointer(c->game + B_GAME_PLAYER, &player) || !value(player + pose_player_count, count) || !value(c->game + B_GAME_NO_AVATAR, disabled)) return false;
   if (count) {
-    uint32_t entity = 0; if (!value(player + L_PLAYER_ENTITY, entity)) return false;
+    uint32_t entity = 0; if (!value(player + pose_player_entity, entity)) return false;
     if (entity == 0x7fff) { if (!value(c->game + B_GAME_HOST_AVATAR, avatar)) return false; }
     else {
       uint64_t world = 0; uint32_t row = 0;
-      if (!pointer(c->game + B_GAME_WORLD, &world) || !input_map(world, B_WORLD_ENTITY_MAP, entity, &row) || row > 0x100000
-          || !value(world + B_WORLD_ENTITY_AVATAR + (uint64_t)row*24, avatar)) return false;
+      if (!pointer(c->game + B_GAME_WORLD, &world) || !input_map(world, pose_network_map, entity, &row) || row > 0x100000
+          || !value(world + (uint64_t)pose_entity_avatar + (uint64_t)row*24, avatar)) return false;
     }
   } else if (!value(c->game + B_GAME_IDLE_AVATAR, avatar)) return false;
   if (avatar == disabled) { out[0] = out[1] = 0; return true; }
   uint32_t index = 0; if (avatar != c->avatar || !input_map(c->avatar_owner, L_AVATAR_MAP, avatar, &index) || index != c->avatar_index) return false;
   return read(c->avatar_owner + B_AVATAR_STEERING + (uint64_t)index*B_AVATAR_STRIDE, out, 2*sizeof(float));
 }
+#ifdef TFP_POSE_TEST_STEERING
+/* TEST ONLY (tests/run-pose-fields.sh): the look gain's steering read, alone. Never in a shipped build. */
+bool tfp_pose_steering_for_tests(const TfpPoseConfig *c, float out[2]);
+bool tfp_pose_steering_for_tests(const TfpPoseConfig *c, float out[2]) { return input_steering(c, out); }
+#endif
 /* cpp:669-673 */
 typedef struct InputSample {
   TfpGainInput math; uint32_t original; uint8_t preset[L_PRESET];
@@ -2165,6 +2200,9 @@ uint32_t tfp_pose_steady_take(TfpSteadySecond *out) {
 }
 void tfp_pose_set_host(const TfpPoseHost *h) { host = *h; }
 void tfp_pose_reset_for_tests(void) {
+  atomic_store(&pose_fields_set, 0); /* the entity fields back to the game's own (src/entity_fields.h) */
+  pose_network_map = B_WORLD_ENTITY_MAP, pose_entity_avatar = (int64_t)B_WORLD_ENTITY_AVATAR, pose_player_count = L_PLAYER_COUNT,
+  pose_player_entity = L_PLAYER_ENTITY;
   for (unsigned i = 0; i < SLOT_COUNT; ++i) { atomic_store(&originals[i], 0); slots[i] = 0; possible[i] = false; }
   atomic_store(&installed, 0); atomic_store(&armed, 0); atomic_store(&reserved, 0); atomic_store(&expired, 0); atomic_store(&last_error, 0);
   for (unsigned i = 0; i < 2; ++i) { atomic_store(&seen[i], 0); atomic_store(&forwarded[i], 0); }

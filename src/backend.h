@@ -3,8 +3,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "entity_fields.h"
 typedef bool (*FpRead)(void *user,uintptr_t address,void *out,size_t size);
-typedef struct FpMemory {FpRead read;void *user;uintptr_t game,exe;} FpMemory;
+/* fields: where the entity records, the entity maps and the player fields lie (src/entity_fields.h); NULL: the game's
+ * own, except in a shipped build, where a reader handed none refuses. */
+typedef struct FpMemory {FpRead read;void *user;uintptr_t game,exe;const TfpEntityFields *fields;} FpMemory;
 typedef struct FpSnapshot {
     uintptr_t context,camera,world,controller,player,avatar_owner,avatar_descriptor;
     uintptr_t request,weapon_descriptor;

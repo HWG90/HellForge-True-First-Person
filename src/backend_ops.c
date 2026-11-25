@@ -297,9 +297,17 @@ static bool map(TfpOps *b, uint64_t at, uint32_t id, uint32_t limit, uint32_t *i
   }
   return fail(b, "Entity lookup bound reached");
 }
+/* The entity records and maps, and the player fields, where the game's code has them now (src/entity_fields.h). */
+static const TfpEntityFields *fields(TfpOps *b, TfpEntityFields *own) {
+  const TfpEntityFields *f = tfp_fields_use(b->host->fields, own);
+  if (!f) fail(b, "Entity fields unresolved");
+  return f;
+}
 static bool descriptor(TfpOps *b, uint64_t world, uint32_t id, uint8_t d[24]) {
   uint32_t index, entity;
-  if (!map(b, world + FP_ENTITY_MAP, id, 1048576, &index) || !rd(b, world + FP_ENTITY_ROWS + (uint64_t)index * 24, d, 24)) return false;
+  TfpEntityFields own;
+  const TfpEntityFields *f = fields(b, &own);
+  if (!f || !map(b, world + f->entity_map, id, 1048576, &index) || !rd(b, tfp_fields_record(world, f, index), d, 24)) return false;
   memcpy(&entity, d + 8, 4);
   if (entity != id || !(d[20] & 1)) return fail(b, "Entity generation unavailable");
   return true;
@@ -383,10 +391,12 @@ static bool snapshot(TfpOps *b, bool player_only, const TfpOpsSnapshot *retiring
   memcpy(&mask, s.controller_bytes, 4);
   s.controller_active = s.controller_bytes[4] != 0;
   s.blocked = mask != 0 || s.controller_bytes[5] != 0;
-  if (!ptr(b, s.base + FP_PLAYER, &s.player) || !u32(b, s.player + 0x88, &count)) return false;
+  TfpEntityFields own;
+  const TfpEntityFields *f = fields(b, &own);
+  if (!f || !ptr(b, s.base + FP_PLAYER, &s.player) || !u32(b, s.player + f->player_live, &count)) return false;
   if (!count) return fail(b, "Local player unavailable");
-  if (!u32(b, s.player + 0x3a8, &s.local_entity) || !map(b, s.world + FP_LIGHT_MAP, s.local_entity, 1048576, &index) ||
-      !rd(b, s.world + FP_ENTITY_ROWS + (uint64_t)index * 24, d, sizeof d)) return false;
+  if (!u32(b, s.player + f->player_network, &s.local_entity) || !map(b, s.world + f->network_map, s.local_entity, 1048576, &index) ||
+      !rd(b, tfp_fields_record(s.world, f, index), d, sizeof d)) return false;
   if (d[4] != s.local_entity || !(d[5] & 1)) return fail(b, "Local player generation unavailable");
   s.avatar = d[2];
   memcpy(s.avatar_descriptor, d, 20);

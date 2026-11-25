@@ -9,6 +9,7 @@
  * with the test-only open constants (-DOPS_OPEN_CONSTANTS; every run). */
 #define _POSIX_C_SOURCE 200809L
 #include "backend_ops.h"
+#include "profile.h"
 #include "vectors/backend_ops_vectors.h"
 #include <math.h>
 #include <stdarg.h>
@@ -207,11 +208,35 @@ static uint64_t host_module(void *user, TfpOpsModule which) {
   (void)user;
   return which == TFP_OPS_GAME ? state.game : state.exe;
 }
+/* HellForge 0.5 (src/entity_fields.h): in the second pass every script runs with the entity records moved MOVED_RECORDS
+ * from the manager (before it). The scripts write them at the game's place; the fake process serves them at the moved
+ * place and denies the game's, so a read at the old place fails the run. Every answer must still be retail's. */
+#define MOVED_RECORDS (-INT64_C(0x2000000))
+#define RECORDS_SPAN (1048576u * 24u) /* every index the maps may name (their limit), not only 0.5's 4096 */
+static bool moved_pass;
+static TfpEntityFields moved_fields;
+static uint64_t record_view(uint64_t at, bool *denied) { /* the scripts' address of a byte the backend reads */
+  static uint64_t world; /* the last world the game's cell named: a script may unmap the cell after the backend read it */
+  uint8_t bytes[8];
+  bool readable = true;
+  *denied = false;
+  if (!moved_pass) return at;
+  for (unsigned i = 0; i < 8 && readable; i++) readable = peek(state.game + FP_WORLD + i, bytes + i);
+  if (readable) memcpy(&world, bytes, 8);
+  if (!world) return at;
+  const uint64_t moved = world + (uint64_t)MOVED_RECORDS, own = world + FP_ENTITY_ROWS;
+  if (at - moved < RECORDS_SPAN) return own + (at - moved);
+  if (at - own < RECORDS_SPAN) *denied = true;
+  return at;
+}
 static bool host_read(void *user, uint64_t at, void *out, size_t size) {
-  bool all = true;
+  bool all = true, denied = false;
   (void)user;
-  for (size_t i = 0; i < size && all; i++) all = peek(at + i, (uint8_t *)out + i);
-  sprung(at, size);
+  for (size_t i = 0; i < size && all; i++) {
+    const uint64_t from = record_view(at + i, &denied);
+    all = !denied && peek(from, (uint8_t *)out + i);
+  }
+  sprung(size ? record_view(at, &denied) : at, size);
   return all;
 }
 static bool host_write(void *user, uint64_t at, const void *bytes, size_t size) {
@@ -500,7 +525,7 @@ static const TfpOpsPoseHelper *load(int which, TfpOpsText *raised) {
 static const TfpOpsPoseHelper *load_pose(void *user, TfpOpsText *raised) { return (void)user, load(0, raised); }
 static const TfpOpsPoseHelper *load_alignment(void *user, TfpOpsText *raised) { return (void)user, load(1, raised); }
 static TfpOpsHost host = {NULL, false, host_module, host_read, host_write, host_query, host_call, NULL, host_log,
-                          NULL, NULL, NULL, NULL, load_pose, load_alignment};
+                          NULL, NULL, NULL, NULL, load_pose, load_alignment, NULL};
 
 /* ---- printing what retail's tables hold ---- */
 static const char *same_list(const TfpOpsSnapshot *s, bool player) {
@@ -953,6 +978,12 @@ int main(int argc, char **argv) {
   }
   unsigned run_count = sizeof ops_runs / sizeof *ops_runs, steps = 0, calls = 0, failures = 0, skipped = 0, natives = 0, writes = 0;
   memory = malloc(sizeof *memory * MEMORY_SLOTS);
+  moved_fields = tfp_fields_game();
+  moved_fields.records = MOVED_RECORDS, moved_fields.moved = TFP_FIELD_RECORDS;
+  unsigned moved_runs = 0;
+  for (unsigned pass = 0; pass < 2; pass++) {
+  moved_pass = pass == 1;
+  host.fields = moved_pass ? &moved_fields : NULL;
   for (unsigned n = 0; n < run_count; n++) {
     run = ops_runs + n;
 #ifndef OPS_OPEN_CONSTANTS
@@ -985,13 +1016,18 @@ int main(int argc, char **argv) {
       for (const char *p = trace; (p = strstr(p, "write ")); p++) writes += p == trace || p[-1] == '\n';
       if (strcmp(trace, s->expected)) {
         if (failures++ < 6)
-          fprintf(stderr, "run %s, step %u (%s): the C differs from retail\n--- C\n%s\n--- retail\n%s\n", run->name, i, s->op, trace, s->expected);
+          fprintf(stderr, "run %s%s, step %u (%s): the C differs from retail\n--- C\n%s\n--- retail\n%s\n", run->name, moved_pass ? " (records moved)" : "", i, s->op, trace, s->expected);
         break;
       }
     }
     for (unsigned i = 0; i < arena_count; i++) free(arena[i]);
     arena_count = 0;
+    moved_runs += moved_pass;
   }
+  if (!pass) steps = calls = natives = writes = 0, skipped = 0; /* counted once: the second pass repeats them */
+  }
+  moved_pass = false;
+  host.fields = NULL;
 #ifndef OPS_OPEN_CONSTANTS
   { /* the open constants: the production object must refuse, touching nothing */
     TfpOpsText why;
@@ -1280,6 +1316,8 @@ int main(int argc, char **argv) {
   printf("Backend operations (%s): %u runs, %u steps, %u method calls answered as retail's backend.lua (%s); %u engine calls and %u memory "
          "writes compared; %u runs with the presentation switch %s\n",
          object, run_count - skipped, steps, calls, BACKEND_OPS_VECTOR_COMMIT, natives, writes, skipped, presentation);
+  printf("Backend operations, HellForge 0.5 (not in retail): the %u runs again with the entity records %lld bytes from the manager, "
+         "the game's place denied: every answer retail's\n", moved_runs, (long long)MOVED_RECORDS);
   printf("Backend operations, hold view (not in retail): on %u first images: the player with a firearm, in an action, with empty hands, as a ragdoll\n",
          hold_worlds);
   printf("Backend operations, held release (not in retail): on %u first images: off as retail; on, the game's exit for the lease's own record "
