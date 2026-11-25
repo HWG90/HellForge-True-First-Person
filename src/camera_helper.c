@@ -13,6 +13,7 @@
 #include "camera_damp.h"
 #include "camera_traversal.h"
 #include "camera_glide.h"
+#include "camera_vehicle.h"
 #include "camera_math.h"
 #include "trace_edges.h"
 #include <stdatomic.h>
@@ -210,6 +211,18 @@ static _Atomic uint64_t lock_down_frames, lock_down_refused, lock_off_foot_at;
 static _Atomic uint32_t lock_missed_apart; /* a float's bits: space_why */
 static _Atomic uint32_t lock_missed_why, lock_down_kind, lock_down_error, lock_down_why, lock_body_ragdoll, lock_body_off_foot, lock_off_foot_body;
 static _Atomic uint32_t lock_body_distance, lock_down_distance, lock_down_head[3]; /* floats as their bits */
+/* Round 38 (camera_helper.h TfpCameraSeatStats, src/camera_vehicle.h): first person in an exosuit's or vehicle's seat.
+ * seat_in: the last frame of this camera was a seat. seat_glide runs into the seat (seat_glide_pending: it begins on
+ * the first seat frame that is shown) or, with seat_out, out of it. seat_from: the view last shown under the lock and
+ * its rotation (the head camera's eye, the seat's, or in the native view the camera as the engine drew it last): where
+ * a glide starts. seat_anchor: the head's offset in the root frame, frozen once settled. seat_hand_*: the body's hand
+ * nodes, looked up once per body graph. Policy lock. */
+static TfpSeatGlide seat_glide; static TfpSeatAnchor seat_anchor; static bool seat_in, seat_out, seat_glide_pending;
+static float seat_from[3]; static TfpQ seat_from_q = {0, 0, 0, 1}; static double seat_from_tick; static bool seat_from_known;
+static uint64_t seat_hand_hashes; static uint32_t seat_hand_node[2], seat_hand_count; static bool seat_hand_known;
+static _Atomic uint64_t seat_frames, seat_refused, seat_glided, seat_entries, seat_exits, seat_cuts, seat_body_at;
+static _Atomic uint32_t seat_in_kind, seat_in_ms, seat_out_ms, seat_now, seat_settled, seat_gliding, seat_hands, seat_body;
+static _Atomic uint32_t seat_in_metres, seat_out_metres, seat_offset[3], seat_hand[6]; /* floats as their bits */
 /* Beyond retail, and only in a frame the lock holds (policy.lock_now): the presented eye is kept continuous across
  * every change of camera and every one-frame move of the rig (camera_continuity.h; tfp_camera_set_continuity), and
  * the frames around a State edge are kept for the binder's "Trace:" lines (tfp_camera_trace_edge). All under the
@@ -1350,6 +1363,135 @@ static bool veil_apply(const float *head, const float *horizontal, const float *
   if (step > bits_float(atomic_load_explicit(&veil_largest, memory_order_relaxed))) atomic_store_explicit(&veil_largest, float_bits(step), memory_order_relaxed);
   return true;
 }
+/* ---- Round 38: first person in an exosuit's or vehicle's seat under the lock (src/camera_vehicle.h). Policy lock. ---- */
+static void seat_note(const float *eye, TfpQ q, double tick) {
+  if (!finite3(eye) || !tfp_q_valid(q)) { seat_from_known = false; return; }
+  memcpy(seat_from, eye, 12); seat_from_q = tfp_q_normalised(q); seat_from_tick = tick; seat_from_known = true;
+}
+static bool seat_from_fresh(const Policy *p, double tick) { return seat_from_known && tick >= seat_from_tick && tick-seat_from_tick <= p->c.max_gap_ms; }
+/* The native view: the camera in the world as the engine drew it last (its argument is the rig's, parent-local). */
+static void seat_note_rendered(const Policy *p, double tick) {
+  float world[16] = {0}; uint64_t g = 0, worlds = 0; uint32_t index = 0, count = 0; TfpQ q = tfp_q_identity();
+  if (pointer(p->c.camera + L_CAMERA_GRAPH, &g) && g == p->camera_object + L_UNIT_GRAPH && value(p->c.camera + L_CAMERA_NODE, index)
+      && value(g + L_GRAPH_COUNT, count) && count > 0 && count <= 512 && index < count && pointer(g + L_GRAPH_WORLDS, &worlds)
+      && read(worlds + (uint64_t)index*L_MATRIX, world, 64) && tfp_matrix_q(world, &q)) seat_note(world + L_MATRIX_POSITION/4, q, tick);
+  else seat_from_known = false;
+}
+/* The body publishes its seat for head hiding: from the first seat frame to the end of the glide out. */
+static void seat_body_note(const Policy *p, double tick) {
+  atomic_store_explicit(&seat_body, p->c.body, memory_order_relaxed); atomic_store_explicit(&seat_body_at, (uint64_t)tick, memory_order_relaxed);
+}
+static void seat_left_at_once(void) { /* left on a frame that is not the head camera's: no glide back */
+  seat_in = false; seat_out = false; seat_glide_pending = false; tfp_seat_glide_reset(&seat_glide); tfp_seat_anchor_reset(&seat_anchor);
+  atomic_store_explicit(&seat_out_ms, 0, memory_order_relaxed); atomic_store_explicit(&seat_out_metres, float_bits(-1), memory_order_relaxed);
+  atomic_store_explicit(&seat_now, 0, memory_order_relaxed); atomic_store_explicit(&seat_gliding, 0, memory_order_relaxed);
+  atomic_fetch_add_explicit(&seat_exits, 1, memory_order_relaxed);
+}
+static void seat_forget(void) {
+  seat_in = false; seat_out = false; seat_glide_pending = false; tfp_seat_glide_reset(&seat_glide); tfp_seat_anchor_reset(&seat_anchor);
+  seat_from_known = false; seat_hand_known = false;
+  atomic_store_explicit(&seat_now, 0, memory_order_relaxed); atomic_store_explicit(&seat_gliding, 0, memory_order_relaxed);
+}
+/* The body's hand nodes (named l_hand and r_hand like the rig's, src/arm_graft.h), and where they are from `eye` along
+ * the root's axes, for the Seat line: what the diver's own hands do in the cockpit. The log only. */
+static void seat_hands_note(const Policy *p, const float *basis, const float *eye) {
+  static const uint32_t names[2] = {UINT32_C(0x5c0c68d3), UINT32_C(0x248004f5)};
+  if (!seat_hand_known || seat_hand_hashes != p->hashes || seat_hand_count != p->count) {
+    seat_hand_known = true; seat_hand_hashes = p->hashes; seat_hand_count = p->count; seat_hand_node[0] = seat_hand_node[1] = UINT32_MAX;
+    for (uint32_t i = 0; i < p->count && i < 1024; ++i) {
+      uint32_t hash = 0; if (!value(p->hashes + (uint64_t)i*4, hash)) break;
+      for (unsigned h = 0; h < 2; ++h) if (hash == names[h] && seat_hand_node[h] == UINT32_MAX) seat_hand_node[h] = i;
+    }
+  }
+  uint32_t hands = 0;
+  for (unsigned h = 0; h < 2; ++h) {
+    float at[3] = {0}, local[3] = {0};
+    if (seat_hand_node[h] == UINT32_MAX || !read(p->sampled_worlds + (uint64_t)seat_hand_node[h]*L_MATRIX + L_MATRIX_POSITION, at, 12) || !finite3(at)) continue;
+    tfp_seat_local(basis, eye, at, local); hands |= 1u << h;
+    for (unsigned i = 0; i < 3; ++i) atomic_store_explicit(&seat_hand[h*3+i], float_bits(local[i]), memory_order_relaxed);
+  }
+  atomic_store_explicit(&seat_hands, hands, memory_order_relaxed);
+}
+/* A frame of a seat (tfp_vehicle_seat). The eye: the root's frozen head anchor plus the configured forward step along
+ * the root's level forward and the up step (tfp_seat_eye); the direction: the game's on this frame, untouched. On its
+ * first frame the head camera's state is let go (the continuity, the eye's smoothing, the held direction and the
+ * kick); a glide begins from the view last shown, and while it runs its eye and rotation are shown. The final proof
+ * a held frame has comes before anything is written. OK: `adjusted` is the eye to show (and, while gliding, the
+ * game's argument holds the glide's rotation); anything else: the proof that refused, and the game's frame is shown. */
+static uint32_t seat_present(Policy *p, uint32_t kind, const float *native, double tick, float *adjusted) {
+  float *argument_q = (float *)(uintptr_t)native + L_ARGUMENT_ROTATION/4;
+  if (!seat_in) {
+    seat_in = true; seat_out = false; seat_glide_pending = true;
+    smooth_forget(); reset(p, false); tfp_seat_glide_reset(&seat_glide); tfp_seat_anchor_reset(&seat_anchor);
+    atomic_store_explicit(&seat_in_kind, kind, memory_order_relaxed); atomic_fetch_add_explicit(&seat_entries, 1, memory_order_relaxed);
+  }
+  /* No kick, no held or eased direction in a seat: the head camera's rotation state starts again when it is left. */
+  lock_view_known = false; tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity(); lock_carry = tfp_q_identity(); lock_was_held = false; lock_first_known = false;
+  lock_tick = tick; veil_out_on = veil_carry_on = false;
+  p->tracking = false; /* the head camera's eye starts again when the seat is left */
+  atomic_store_explicit(&seat_now, 1, memory_order_relaxed);
+  float root[3] = {0}, head[3] = {0}, basis[9] = {0}, relative[3] = {0}, offset[3] = {0}, eye[3] = {0}; TfpQ game_q = tfp_q_identity();
+  uint32_t failure = POSE_INVALID;
+  if (!read((uint64_t)(uintptr_t)native, adjusted, 16) || !finite3(adjusted) || !read((uint64_t)(uintptr_t)argument_q, &game_q, 16) || !tfp_q_valid(game_q)) failure = POSE_INVALID;
+  else if (!unparented(p)) failure = SPACE_INVALID;
+  else if (!points(p, root, head, basis, true) || p->head_far) failure = GRAPH_MISMATCH;
+  else if (tfp_seat_local(basis, root, head, relative), !tfp_seat_anchor_step(&seat_anchor, relative, tick, offset)
+      || !tfp_seat_eye(root, basis, offset, p->c.forward, p->c.up, eye)) failure = POSE_INVALID;
+  else if (commit_current(p, kind, &failure)) failure = OK;
+  if (failure != OK) { atomic_fetch_add_explicit(&seat_refused, 1, memory_order_relaxed); return failure; }
+  game_q = tfp_q_normalised(game_q);
+  if (seat_glide_pending) {
+    seat_glide_pending = false;
+    const bool from = seat_from_fresh(p, tick);
+    const bool glide = from && tfp_seat_glide_begin(&seat_glide, seat_from, seat_from_q, eye, tick);
+    if (!glide) atomic_fetch_add_explicit(&seat_cuts, 1, memory_order_relaxed);
+    atomic_store_explicit(&seat_in_ms, glide ? (uint32_t)seat_glide.ms : 0, memory_order_relaxed);
+    atomic_store_explicit(&seat_in_metres, float_bits(from ? distance(seat_from, eye) : -1), memory_order_relaxed);
+  }
+  TfpQ q = game_q; memcpy(adjusted, eye, 12);
+  const bool glided = seat_glide.active && !seat_out && tfp_seat_glide_apply(&seat_glide, eye, game_q, tick, adjusted, &q);
+  if (glided) { memcpy(argument_q, &q, 16); atomic_fetch_add_explicit(&seat_glided, 1, memory_order_relaxed); }
+  else if (!seat_out) tfp_seat_glide_reset(&seat_glide);
+  atomic_store_explicit(&seat_gliding, glided ? 1u : 0u, memory_order_relaxed);
+  seat_note(adjusted, q, tick);
+  memcpy(veil_eye_last, adjusted, 12); veil_eye_tick = tick; veil_eye_known = true; memcpy(p->last_head_world, adjusted, 12);
+  float shown[3] = {0}; tfp_seat_local(basis, root, adjusted, shown);
+  for (unsigned i = 0; i < 3; ++i) atomic_store_explicit(&seat_offset[i], float_bits(shown[i]), memory_order_relaxed);
+  atomic_store_explicit(&seat_settled, seat_anchor.settled ? 1u : 0u, memory_order_relaxed);
+  seat_hands_note(p, basis, adjusted);
+  seat_body_note(p, tick);
+  /* Held frames: the lock's count and the body's state for the Lock and Body lines and head hiding. */
+  atomic_fetch_add_explicit(&lock_frames, 1, memory_order_relaxed); atomic_store_explicit(&lock_last_kind, kind, memory_order_relaxed);
+  lock_body_shown(p, kind, head, tick);
+  atomic_fetch_add_explicit(&seat_frames, 1, memory_order_relaxed);
+  return OK;
+}
+/* A head-camera frame under the lock, with its eye and rotation final: the first after a seat begins the glide back
+ * from the seat's last view, and while that runs it is what is shown; the continuity's state is let go at its end, so
+ * nothing it carried is eased in twice. `eye` is the frame's eye. */
+static void seat_back(const Policy *p, const float *native, double tick, float *eye) {
+  float *argument_q = (float *)(uintptr_t)native + L_ARGUMENT_ROTATION/4;
+  TfpQ q = tfp_q_identity();
+  const bool readable = read((uint64_t)(uintptr_t)argument_q, &q, 16) && tfp_q_valid(q) && finite3(eye);
+  if (readable) q = tfp_q_normalised(q);
+  if (seat_in) {
+    seat_in = false; seat_glide_pending = false; tfp_seat_anchor_reset(&seat_anchor); atomic_store_explicit(&seat_now, 0, memory_order_relaxed);
+    const bool from = readable && seat_from_fresh(p, tick);
+    seat_out = from && tfp_seat_glide_begin(&seat_glide, seat_from, seat_from_q, eye, tick);
+    if (!seat_out) tfp_seat_glide_reset(&seat_glide);
+    atomic_store_explicit(&seat_out_ms, seat_out ? (uint32_t)seat_glide.ms : 0, memory_order_relaxed);
+    atomic_store_explicit(&seat_out_metres, float_bits(from ? distance(seat_from, eye) : -1), memory_order_relaxed);
+    atomic_fetch_add_explicit(&seat_exits, 1, memory_order_relaxed);
+  }
+  if (seat_out) {
+    TfpQ glided = q;
+    if (readable && tfp_seat_glide_apply(&seat_glide, eye, q, tick, eye, &glided)) {
+      memcpy(argument_q, &glided, 16); q = glided; memcpy(veil_eye_last, eye, 12); seat_body_note(p, tick);
+      atomic_store_explicit(&seat_gliding, 2, memory_order_relaxed);
+    } else { seat_out = false; tfp_seat_glide_reset(&seat_glide); smooth_forget(); atomic_store_explicit(&seat_gliding, 0, memory_order_relaxed); }
+  }
+  if (readable) seat_note(eye, q, tick); else seat_from_known = false;
+}
 /* The original setter, called as retail calls it (cpp:751, 1020). */
 static void call_original(void *camera, uint32_t unit, const float *output) {
   const uintptr_t target = atomic_load_explicit(&original, memory_order_acquire);
@@ -1369,6 +1511,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
   bool veil_frame = false, veil_clear = false; /* beyond retail, round 14: this frame is drawn while the veil is open; its eye is in front of the head */
   bool veil_deferred = false; /* round 30: a leave whose veil waits for this frame's control mask (veil_same_frame_leave) */
   bool veil_kept = false; /* round 32: that leave kept pending (veil_clamp_kept) */
+  bool seat_frame = false; /* round 38: this frame is an exosuit's or vehicle's seat (seat_present) */
   const float seen_before[3] = {veil_eye_last[0], veil_eye_last[1], veil_eye_last[2]}; /* round 32: the eye the last frame handed over */
   const double seen_before_tick = veil_eye_tick; const bool seen_before_known = veil_eye_known;
   double frame_tick = 0; policy.why = TFP_CAMERA_WHY_NONE; policy.lock_down = false; policy.head_far = false; policy.lock_ragdoll = false;
@@ -1485,6 +1628,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
         }
         /* cpp:823 observe_camera_parent(policy,tick): retired, dropped. */
         lock_rotation(&policy, native, kind, tick); lock_shown = true;
+        if (policy.lock_now) seat_note_rendered(&policy, tick); /* round 38: where a glide into a seat starts */
         error(OK); }
     } else {
       const uint32_t current = owner_status(&policy, false);
@@ -1497,9 +1641,17 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
               && tick >= policy.last_view_tick && tick-policy.last_view_tick <= 250.0)) { reset(&policy, false); }
       /* on_foot also samples what the final proof compares, so it runs under the lock too; only its answer is set aside. */
       else if ((policy.lock_off_foot = !on_foot(&policy)) && !policy.lock_now) { reset(&policy, false); error(ON_FOOT_REQUIRED); }
+      /* Round 38: under the lock, a body seated, off foot and not in physics is in an exosuit's or a vehicle's seat:
+       * first person kept, the eye fixed in the root's frame and the game's direction (src/camera_vehicle.h). lock_body
+       * reads the ragdoll flag (and the animation chain the final proof compares) for every frame the lock may hold. */
+      else if (policy.lock_now && (lock_body(&policy), tfp_vehicle_seat(policy.seated_now, policy.lock_off_foot, policy.lock_ragdoll))) {
+        seat_frame = true;
+        const uint32_t seat_error = seat_present(&policy, kind, native, tick, adjusted);
+        if (seat_error == OK) { output = adjusted; lock_shown = true; atomic_fetch_add_explicit(&replaced, 1, memory_order_relaxed); error(OK); }
+        else { reset(&policy, false); error(seat_error); }
+      }
       else {
         float root[3] = {0}, head[3] = {0}, forward[3] = {0}, up[3] = {0}, root_basis[9] = {0};
-        if (policy.lock_now) lock_body(&policy);
         /* A seated interaction (turning a valve): with cut-hold bit 3 the view stays at the head. */
         const bool seated_view = policy.hold_seated && policy.seated_now && policy.presentation_enabled;
         if (!seated_view) policy.seated_q_valid = false;
@@ -1752,6 +1904,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
               } else if (policy.presentation_enabled) ease_normal_rotation(&policy, native, tick, from_native);
               lock_rotation(&policy, native, kind, tick); lock_shown = true;
               if (policy.lock_now) lock_body_shown(&policy, kind, head, tick);
+              if (policy.lock_now) seat_back(&policy, native, tick, adjusted); /* round 38: out of a seat, and where a glide into one starts */
               output = adjusted; atomic_fetch_add_explicit(&replaced, 1, memory_order_relaxed); error(OK); }
           }
         }
@@ -1759,6 +1912,13 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
     }
   }
   if (diagnostics_changed && !eye_damped) tfp_eye_damp_reset(&lock_eye_damp); /* any other frame of this camera: the damping starts again */
+  /* Round 38: a seat left on a frame that is not the head camera's has no glide back; any frame the lock did not show
+   * is no start for a glide; without the lock nothing of a seat is kept. */
+  if (diagnostics_changed) {
+    if (seat_in && !seat_frame) seat_left_at_once();
+    if (!lock_shown) seat_from_known = false;
+    if (!policy.lock_now) { seat_out = false; tfp_seat_glide_reset(&seat_glide); seat_from_known = false; atomic_store_explicit(&seat_gliding, 0, memory_order_relaxed); }
+  }
   /* Serialize actual adjusted call with End, not just the calculation. */
   if (lock_asked && !lock_shown) { /* a frame of the view that was not first person: what the test matrix counts */
     atomic_fetch_add_explicit(&lock_missed, 1, memory_order_relaxed); atomic_store_explicit(&lock_missed_kind, lock_kind, memory_order_relaxed);
@@ -1872,7 +2032,7 @@ static uint32_t begin_locked(const TfpCameraConfig *input, uint64_t *output) {
   const bool stable = current == OK && top(&next, &kind) && (kind == 4 || kind == 6) && next.safe && graph(&next, false) && dispatch_owned(&next)
       && (kind != 4 || unparented(&next));
   if (stable) {
-    smooth_forget(); veil_forget();
+    smooth_forget(); veil_forget(); seat_forget();
     policy = next; atomic_store(&seen, 0); atomic_store(&forwarded, 0); atomic_store(&replaced, 0); atomic_store(&native6_forwarded, 0); atomic_store(&resets, 0);
     publish_diagnostics(&policy);
     atomic_store_explicit(&return_address, c.game + B_GAME_CALL + 4, memory_order_relaxed);
@@ -1889,7 +2049,7 @@ static uint32_t end_locked(uint64_t generation) {
   if (!generation) return reject(TOKEN_MISMATCH);
   if (!atomic_load(&reserved)) { if (generation != retired_generation) return reject(TOKEN_MISMATCH); error(OK); return 1; }
   if (generation != owned_generation) return reject(TOKEN_MISMATCH);
-  atomic_store_explicit(&armed, 0, memory_order_release); atomic_store_explicit(&callback_generation, 0, memory_order_release); policy_acquire(); reset(&policy, false); smooth_forget(); veil_forget(); publish_diagnostics(&policy); policy_release();
+  atomic_store_explicit(&armed, 0, memory_order_release); atomic_store_explicit(&callback_generation, 0, memory_order_release); policy_acquire(); reset(&policy, false); smooth_forget(); veil_forget(); seat_forget(); publish_diagnostics(&policy); policy_release();
   if (!restore_slot()) return reject(CLEANUP_PENDING);
   error(OK); return 1;
 }
@@ -2129,6 +2289,24 @@ void tfp_camera_down_stats(TfpCameraDownStats *out) {
   for (unsigned i = 0; i < 3; ++i) out->head[i] = bits_float(atomic_load(&lock_down_head[i]));
   out->head_distance = bits_float(atomic_load(&lock_down_distance));
 }
+void tfp_camera_seat_stats(TfpCameraSeatStats *out) {
+  if (!out) return;
+  memset(out, 0, sizeof *out);
+  out->frames = atomic_load(&seat_frames); out->refused = atomic_load(&seat_refused); out->glided = atomic_load(&seat_glided);
+  out->entries = atomic_load(&seat_entries); out->exits = atomic_load(&seat_exits); out->cuts = atomic_load(&seat_cuts);
+  out->in_kind = atomic_load(&seat_in_kind); out->in_ms = atomic_load(&seat_in_ms); out->out_ms = atomic_load(&seat_out_ms);
+  out->seated = atomic_load(&seat_now); out->settled = atomic_load(&seat_settled); out->gliding = atomic_load(&seat_gliding); out->hands = atomic_load(&seat_hands);
+  out->in_metres = bits_float(atomic_load(&seat_in_metres)); out->out_metres = bits_float(atomic_load(&seat_out_metres));
+  for (unsigned i = 0; i < 3; ++i) {
+    out->offset[i] = bits_float(atomic_load(&seat_offset[i])); out->left[i] = bits_float(atomic_load(&seat_hand[i])); out->right[i] = bits_float(atomic_load(&seat_hand[3+i]));
+  }
+}
+uint32_t tfp_camera_lock_seat_body(void) {
+  const uint32_t body = atomic_load(&seat_body);
+  if (!body || !host.now) return 0;
+  const double tick = now(), at = (double)atomic_load(&seat_body_at);
+  return tick >= at && tick-at <= LOCK_OFF_FOOT_MS+1 ? body : 0; /* 250 ms, as the off-foot body */
+}
 uint32_t tfp_camera_lock_off_foot_body(void) {
   const uint32_t body = atomic_load(&lock_off_foot_body);
   if (!body || !host.now) return 0;
@@ -2161,6 +2339,13 @@ void tfp_camera_reset_for_tests(void) {
   atomic_store(&lock_off_foot_body, 0); atomic_store(&lock_off_foot_at, 0); atomic_store(&lock_body_distance, 0); atomic_store(&lock_down_distance, 0);
   lock_carry = tfp_q_identity(); lock_was_held = false; lock_down_until = 0; lock_view_known = false; lock_first_known = false; lock_tick = 0; tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity();
   lock_damp_ms = 0; atomic_store(&lock_bodycam, 1); tfp_eye_damp_reset(&lock_eye_damp);
+  seat_forget(); seat_from_tick = 0; seat_from_q = tfp_q_identity(); seat_hand_hashes = 0; seat_hand_count = 0;
+  atomic_store(&seat_frames, 0); atomic_store(&seat_refused, 0); atomic_store(&seat_glided, 0); atomic_store(&seat_entries, 0);
+  atomic_store(&seat_exits, 0); atomic_store(&seat_cuts, 0); atomic_store(&seat_body_at, 0); atomic_store(&seat_body, 0);
+  atomic_store(&seat_in_kind, 0); atomic_store(&seat_in_ms, 0); atomic_store(&seat_out_ms, 0); atomic_store(&seat_settled, 0); atomic_store(&seat_hands, 0);
+  atomic_store(&seat_in_metres, 0); atomic_store(&seat_out_metres, 0);
+  for (unsigned i = 0; i < 3; ++i) atomic_store(&seat_offset[i], 0);
+  for (unsigned i = 0; i < 6; ++i) atomic_store(&seat_hand[i], 0);
   memset(&smooth, 0, sizeof smooth); memset(&trace, 0, sizeof trace); memset(&trace_self, 0, sizeof trace_self); eye_watch_known = false; eye_unsettled_until = 0;
   memset(&smooth_watch, 0, sizeof smooth_watch); atomic_store(&smooth_event, 0); memset(&trace_damp, 0, sizeof trace_damp); memset(&smooth_root, 0, sizeof smooth_root); memset(&damp_climb, 0, sizeof damp_climb);
   atomic_store(&settle_arm, 0); atomic_store(&settle_on, 0); settle_armed_at = 0;
