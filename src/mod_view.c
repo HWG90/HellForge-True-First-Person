@@ -94,6 +94,9 @@ static void perf_effects(int from) {
 /* After the tick: what is left is rest; each section into the second's sums. */
 /* Round 32: the frame's laps (src/perf_line.h TFP_LAP_*, timed by the wire), per tick into the second's sums. */
 static int64_t lap_total[TFP_LAPS], lap_most[TFP_LAPS];
+/* Round 35: on_update's parts (TFP_UPD_*) and the backend's snapshot calls (every caller), per tick into the second's sums. */
+static int64_t part_total[TFP_UPDS], part_most[TFP_UPDS], snap_total, snap_most;
+static uint64_t snap_told;
 static void perf_laps_close(void) {
   int64_t lap[TFP_LAPS];
   memcpy(lap, wire.laps.tick, sizeof lap);
@@ -103,6 +106,16 @@ static void perf_laps_close(void) {
     lap_total[i] += lap[i];
     if (lap[i] > lap_most[i]) lap_most[i] = lap[i];
   }
+  for (int i = 0; i < TFP_UPDS; i++) {
+    part_total[i] += wire.laps.part[i];
+    if (wire.laps.part[i] > part_most[i]) part_most[i] = wire.laps.part[i];
+  }
+  memset(wire.laps.part, 0, sizeof wire.laps.part);
+  const uint64_t now = wire.ops.perf.snapshot_ticks; /* a backend made anew starts at 0 again */
+  const int64_t snap = (int64_t)(now >= snap_told ? now - snap_told : now);
+  snap_told = now;
+  snap_total += snap;
+  if (snap > snap_most) snap_most = snap;
 }
 /* Round 32: a running count's growth since the last line (a backend made anew starts its counts at 0 again). */
 static uint32_t perf_delta(uint64_t now, uint64_t *told) {
@@ -891,9 +904,23 @@ static void arms_tick(void) {
       tfp_perf_frame_line(line, sizeof line, mean, most);
       say("%s", line);
     }
-    { /* round 32: what the backend did in the second, and the shadow memo (src/backend_ops.h TfpOpsPerf) */
+    { /* round 35: on_update in parts, and every snapshot call's time, over the same ticks */
+      double mean[TFP_UPDS], most[TFP_UPDS];
+      for (int i = 0; i < TFP_UPDS; i++) {
+        mean[i] = tick_cost_count ? (double)part_total[i] * us / (double)tick_cost_count : 0;
+        most[i] = (double)part_most[i] * us;
+        part_total[i] = part_most[i] = 0;
+      }
+      tfp_perf_update_line(line, sizeof line, mean, most, tick_cost_count ? (double)snap_total * us / (double)tick_cost_count : 0,
+                           (double)snap_most * us);
+      snap_total = snap_most = 0;
+      say("%s", line);
+    }
+    { /* round 32: what the backend did in the second, and the shadow memo (src/backend_ops.h TfpOpsPerf); round 35: the
+       * memo live with memo_on.txt */
       static uint64_t told_reads, told_takes[3], told_tables, told_invokes, told_bodies, told_memo[3][3], told_moved;
-      static bool told_mismatch;
+      static uint64_t told_served[3], told_checked[3], told_saved;
+      static bool told_mismatch, told_off;
       const TfpOpsPerf *o = &wire.ops.perf;
       TfpPerfSnapshots n;
       memset(&n, 0, sizeof n);
@@ -907,8 +934,22 @@ static void arms_tick(void) {
       n.tables = perf_delta(wire.snap_next, &told_tables);
       n.invokes = perf_delta(o->invokes, &told_invokes), n.invoke_bodies = perf_delta(o->invoke_bodies, &told_bodies);
       n.moved = perf_delta(o->memo_moved, &told_moved);
+      n.memo = tfp_wire_memo_state(&wire);
+      if (n.memo != TFP_PERF_MEMO_SHADOW) {
+        for (int m = 0; m < 3; m++)
+          n.served[m] = perf_delta(o->memo_served[m], &told_served[m]), n.checked[m] = perf_delta(o->memo_checked[m], &told_checked[m]);
+        n.saved_reads = perf_delta(o->memo_saved_reads, &told_saved);
+      }
       tfp_perf_snapshots_line(line, sizeof line, &n);
       say("%s", line);
+      if (wire.memo_on && !told_off && (o->off.has || wire.memo_off)) { /* round 35: the check that turned it off, once */
+        told_off = told_mismatch = true;
+        if (o->off.has) tfp_perf_memo_off_line(line, sizeof line, o->off.mode, o->off.moved, o->off.field, o->off.offset, o->off.epoch);
+        else
+          tfp_perf_memo_off_line(line, sizeof line, wire.memo_off_cause.mode, wire.memo_off_cause.moved, wire.memo_off_cause.field,
+                                 wire.memo_off_cause.offset, wire.memo_off_cause.epoch);
+        say("%s", line);
+      }
       if (o->first.has && !told_mismatch) {
         told_mismatch = true;
         tfp_perf_mismatch_line(line, sizeof line, o->first.mode, o->first.field, o->first.offset, o->first.epoch);
@@ -992,6 +1033,14 @@ static void start(void) {
         FILE *panel_file = fopen(parts_path, "r");
         if (panel_file) fclose(panel_file);
         panel_wanted = panel_file != NULL;
+        /* Round 35 (docs/design/specs/2026-11-25-performance.md section 6): the snapshot memo live. Off by default: the memo
+         * then only compares, as in round 32. */
+        strcpy(slash + 1, "memo_on.txt");
+        FILE *memo_file = fopen(parts_path, "r");
+        if (memo_file) fclose(memo_file);
+        tfp_wire_set_memo(&wire, memo_file != NULL);
+        if (memo_file) say("Test: memo_on.txt: a snapshot asked for again in the same frame epoch answers the one already taken; the first "
+                           "and every 16th such answer is still taken fresh and compared, and a difference turns the memo off for the session");
 #ifdef TFP_FEEL
         static const char *const arm_files[] = {"arms_live_keep.txt", "arms_live_restore.txt", "arm_bend.txt", "rest_trace.txt", "grip_off.txt"};
         bool *const arm_switches[] = {&arms_keep, &arms_restore, &arms_bend, &arms_rest_trace, &grip_off};

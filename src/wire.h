@@ -163,7 +163,18 @@ typedef struct TfpWire {
     int64_t (*clock)(void);
     int64_t tick[TFP_LAPS];
     bool (*update[7])(TfpRtHost *h, TfpRtValue *out1, TfpRtValue *out2);
+    /* Round 35 (src/perf_line.h TFP_UPD_*): on_update in exclusive parts, summed over the tick (the caller reads and
+     * zeroes part[]); they add up to tick[TFP_LAP_UPDATE]. current: the part the time since mark goes to; in_update:
+     * within tfp_wire_frame's on_update call (outside it nothing is charged). */
+    int64_t part[TFP_UPDS];
+    int64_t mark;
+    int current;
+    bool in_update;
   } laps;
+  /* Round 35: the snapshot memo's test switch (memo_on.txt; tfp_wire_set_memo) and, once a check turned the memo off in
+   * this session, what did (every backend made after it starts with the memo off). */
+  bool memo_on, memo_off;
+  struct { bool moved; int mode; size_t offset; const char *field; uint64_t epoch; } memo_off_cause;
 } TfpWire;
 /* Round 32: the clock's now (0 without one), and the time since *mark added to lap (mark moved to now). */
 static inline int64_t tfp_wire_lap_now(const TfpWire *w) { return w->laps.clock ? w->laps.clock() : 0; }
@@ -176,6 +187,11 @@ static inline void tfp_wire_lap(TfpWire *w, int lap, int64_t *mark) {
  * functions (FOV, blur, camera, head, movement, near, depth of field) in w->host so each is timed. Call once, after every
  * binder has set its pointers and before on_enable; a second call changes only the clock. */
 void tfp_wire_laps_start(TfpWire *w, int64_t (*clock)(void));
+/* Round 35: the snapshot memo live (src/backend_ops.h tfp_ops_set_memo) on this backend and every one made after it, until
+ * a check turns it off for the session. Off after tfp_wire_init. */
+void tfp_wire_set_memo(TfpWire *w, bool on);
+/* Round 35: the memo's state for the Perf snapshots line (TFP_PERF_MEMO_*). */
+int tfp_wire_memo_state(const TfpWire *w);
 
 /* Builds the host (off answers first, then the wired view) and the runtime's start state. The
  * TfpOpsHost's four hook pointers are filled in here; its other members are the caller's. */

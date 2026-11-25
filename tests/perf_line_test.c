@@ -72,9 +72,11 @@ int main(void) {
          "memo (shadow) calls 540/180/30, hits 480/120/0, mismatches 3/0/0, moved 1";
   if (strcmp(line, want)) { printf("got:  %s\nwant: %s\n", line, want); return 1; }
   memset(&s, 0xff, sizeof s);
+  s.memo = TFP_PERF_MEMO_SHADOW; /* no memo_on.txt */
   n = tfp_perf_snapshots_line(line, sizeof line, &s);
-  assert(n > 0 && n < (int)sizeof line && (size_t)n == strlen(line) && strstr(line, "moved 4294967295"));
-  const int largest_snapshots = n;
+  assert(n > 0 && n < (int)sizeof line && (size_t)n == strlen(line) && strstr(line, "moved 4294967295") && strstr(line, "memo (shadow)"));
+  const int largest_shadow = n;
+  int largest_snapshots = n;
 
   /* the first mismatch, once */
   n = tfp_perf_mismatch_line(line, sizeof line, 0, "controller_bytes", 0x8c, 1234);
@@ -87,8 +89,62 @@ int main(void) {
   assert(n > 0 && n < (int)sizeof line && strstr(line, "a ? snapshot"));
   const int largest_mismatch = n;
 
+  /* Round 35: the memo live, then turned off; the shadow's text above is round 32's byte for byte */
+  memset(&s, 0, sizeof s);
+  s.memo = TFP_PERF_MEMO_LIVE;
+  s.reads = 2100, s.takes[0] = 60, s.takes[1] = 75, s.takes[2] = 30, s.tables = 120;
+  s.calls[0] = 540, s.calls[1] = 180, s.calls[2] = 30, s.hits[0] = 480, s.hits[1] = 120, s.served[0] = 450, s.served[1] = 105;
+  s.checked[0] = 30, s.checked[1] = 15, s.saved_reads = 52000;
+  n = tfp_perf_snapshots_line(line, sizeof line, &s);
+  want = "Perf snapshots: per second: guarded reads 2100; snapshots full 60, player 75, pin 30; tables 120; invoke 0, invoke_body 0; "
+         "memo (live, the first and every 16th hit checked) calls 540/180/30, hits 480/120/0, served 450/105/0, checked 30/15/0, "
+         "mismatches 0/0/0, moved 0; saved reads 52000";
+  if (strcmp(line, want)) { printf("got:  %s\nwant: %s\n", line, want); return 1; }
+  s.memo = TFP_PERF_MEMO_TURNED_OFF;
+  n = tfp_perf_snapshots_line(line, sizeof line, &s);
+  assert(strstr(line, "memo (turned off by a check, shadow again) calls 540/180/30,"));
+  memset(&s, 0xff, sizeof s);
+  for (int state = TFP_PERF_MEMO_LIVE; state <= TFP_PERF_MEMO_TURNED_OFF; state++) {
+    s.memo = state;
+    n = tfp_perf_snapshots_line(line, sizeof line, &s);
+    assert(n > 0 && n < (int)sizeof line && (size_t)n == strlen(line) && strstr(line, "saved reads 4294967295"));
+    if (n > largest_snapshots) largest_snapshots = n;
+  }
+  n = tfp_perf_memo_off_line(line, sizeof line, 0, false, "controller_bytes", 0x8c, 1234);
+  want = "Memo: off for the session: a check of a full snapshot in frame epoch 1234 found the stored answer differs from a fresh take, "
+         "first at controller_bytes (+0x8c); every answer is fresh from here (memo_on.txt is still read at the next start)";
+  if (strcmp(line, want)) { printf("got:  %s\nwant: %s\n", line, want); return 1; }
+  n = tfp_perf_memo_off_line(line, sizeof line, 1, true, "state", 0, 7);
+  want = "Memo: off for the session: a check of a player snapshot in frame epoch 7 found that a fresh take changed the backend's own "
+         "state, which a served hit skips; every answer is fresh from here (memo_on.txt is still read at the next start)";
+  if (strcmp(line, want)) { printf("got:  %s\nwant: %s\n", line, want); return 1; }
+  int largest_off = 0;
+  for (int moved = 0; moved < 2; moved++) {
+    n = tfp_perf_memo_off_line(line, sizeof line, 9, moved, long_field, SIZE_MAX, UINT64_MAX);
+    assert(n > 0 && n < (int)sizeof line && (size_t)n == strlen(line) && strstr(line, "a ? snapshot"));
+    if (n > largest_off) largest_off = n;
+  }
+
+  /* Round 35: on_update in parts */
+  double upd_mean[TFP_UPDS], upd_most[TFP_UPDS];
+  for (int i = 0; i < TFP_UPDS; i++) upd_mean[i] = i + 0.4, upd_most[i] = 10 * i;
+  n = tfp_perf_update_line(line, sizeof line, upd_mean, upd_most, 61.5, 140);
+  want = "Perf update: per tick mean/largest us, on_update in parts: targets 14/140, controller 5/50, managed 8/80, recovery 4/40, "
+         "owner 2/20, presentation 3/30, stops 7/70, clean poll 9/90, editor+motion 6/60, entry 1/10, menu 10/100, ready 11/110, "
+         "aim markers 12/120, diagnostics 13/130, frame 0/0; all snapshot calls 62/140";
+  if (strcmp(line, want)) { printf("got:  %s\nwant: %s\n", line, want); return 1; }
+  for (int i = 0; i < TFP_UPDS; i++) upd_mean[i] = 1e300, upd_most[i] = INFINITY;
+  n = tfp_perf_update_line(line, sizeof line, upd_mean, upd_most, INFINITY, 1e300);
+  assert(n > 0 && n < (int)sizeof line && (size_t)n == strlen(line) && strstr(line, "all snapshot calls 99999999/99999999"));
+  const int largest_update = n;
+  upd_mean[TFP_UPD_MENU] = NAN, upd_most[TFP_UPD_MENU] = -1;
+  tfp_perf_update_line(line, sizeof line, upd_mean, upd_most, NAN, -3);
+  assert(strstr(line, "menu 0/0,") && strstr(line, "all snapshot calls 0/0"));
+
   printf("Perf line: the sample second formats as documented; the largest line is %d of 700 bytes\n", largest);
   printf("Perf frame / Perf snapshots / Memo lines (round 32): as documented; the largest are %d, %d and %d of 700 bytes\n", largest_frame,
-         largest_snapshots, largest_mismatch);
+         largest_shadow, largest_mismatch);
+  printf("Perf update / the memo's Perf snapshots and Memo off lines (round 35): as documented; the largest are %d, %d and %d of 700 bytes\n",
+         largest_update, largest_snapshots, largest_off);
   return 0;
 }

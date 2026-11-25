@@ -98,7 +98,10 @@ static void first_image(void) {
   apply_records(run->init, run->init_count);
   state.game = run->game, state.exe = run->exe;
 }
+static TfpOps backend;
+static bool memo_vectors;
 static void apply_patch(int index) {
+  if (memo_vectors) tfp_ops_memo_forget(&backend); /* round 35: the scene changed inside the frame without a backend call */
   if (index >= 0) apply_records(run->patches[index].records, run->patches[index].count);
 }
 static struct { uint64_t at, size; int patch, count; } armed[64];
@@ -181,8 +184,20 @@ static void second(const Answer *a, TfpOpsText *why) {
 }
 
 /* ---- slots ---- */
-static TfpOps backend;
 static bool live;
+/* Round 35: TFP_OPS_MEMO=1 runs every vector with the memo live (tfp_ops_set_memo after each "new"); the counts of the
+ * backends the runs made are summed here for the summary line. */
+static uint64_t memo_served_total, memo_checked_total, memo_saved_total;
+static unsigned memo_off_backends;
+static void memo_tally(void) {
+  if (!memo_vectors || !live) return;
+  for (int m = 0; m < TFP_OPS_TAKES; m++) memo_served_total += backend.perf.memo_served[m], memo_checked_total += backend.perf.memo_checked[m];
+  memo_saved_total += backend.perf.memo_saved_reads;
+  memo_off_backends += backend.perf.off.has;
+  if (backend.perf.off.has && getenv("TFP_OPS_MEMO_WHY"))
+    fprintf(stderr, "memo off: run %s, mode %d, %s at %s (+0x%zx), epoch %llu\n", run->name, backend.perf.off.mode,
+            backend.perf.off.moved ? "moved" : "mismatch", backend.perf.off.field, backend.perf.off.offset, (unsigned long long)backend.perf.off.epoch);
+}
 static TfpOpsSnapshot snaps[16];
 static bool has_snap[16];
 static TfpOpsLease *leases[63];
@@ -702,7 +717,9 @@ static void step(const OpsStep *s) {
     host.wine = state.wine;
     fake_init(fakes, 'P');
     fake_init(fakes + 1, 'A');
+    memo_tally();
     tfp_ops_init(b, &host, a[2] == 1 ? &fakes[1].api : NULL, a[1] == 1 ? &fakes[0].api : NULL);
+    if (memo_vectors) tfp_ops_set_memo(b, true);
     memset(has_snap, 0, sizeof has_snap);
     memset(leases, 0, sizeof leases);
     memset(tokens, 0, sizeof tokens);
@@ -739,6 +756,7 @@ static void step(const OpsStep *s) {
     else p->fifo[p->tail++ % 64] = entry;
   } else if (IS("hook")) {
     bool on = a[0] == 1;
+    if (memo_vectors) tfp_ops_memo_forget(b); /* round 35: a hook added or taken away inside the frame */
     if (!strcmp(s->text, "foreign_camera")) host.foreign_camera = on ? hook_foreign : NULL;
     else if (!strcmp(s->text, "camera_before_entry")) host.camera_before_entry = on ? hook_before_entry : NULL;
     else if (!strcmp(s->text, "placement_resolver")) host.placement_resolver = on ? hook_resolver : NULL;
@@ -747,6 +765,7 @@ static void step(const OpsStep *s) {
     else if (!strcmp(s->text, "P.transition")) fakes[0].api.transition = on ? fake_transition : NULL;
     else abort();
   } else if (IS("set")) {
+    if (memo_vectors) tfp_ops_memo_forget(b); /* round 35: the profile or the scene changed inside the frame */
     if (!strcmp(s->text, "region")) {
       state.region.state = (uint32_t)a[0], state.region.kind = (uint32_t)a[1], state.region.protect = (uint32_t)a[2];
       state.region.allocation = (int)a[3], state.region.answered = a[4] == 1;
@@ -977,6 +996,7 @@ int main(int argc, char **argv) {
     return 2;
   }
   unsigned run_count = sizeof ops_runs / sizeof *ops_runs, steps = 0, calls = 0, failures = 0, skipped = 0, natives = 0, writes = 0;
+  memo_vectors = getenv("TFP_OPS_MEMO") && !strcmp(getenv("TFP_OPS_MEMO"), "1");
   memory = malloc(sizeof *memory * MEMORY_SLOTS);
   moved_fields = tfp_fields_game();
   moved_fields.records = MOVED_RECORDS, moved_fields.moved = TFP_FIELD_RECORDS;
@@ -1020,6 +1040,7 @@ int main(int argc, char **argv) {
         break;
       }
     }
+    memo_tally();
     for (unsigned i = 0; i < arena_count; i++) free(arena[i]);
     arena_count = 0;
     moved_runs += moved_pass;
@@ -1304,6 +1325,112 @@ int main(int argc, char **argv) {
       failures++;
     }
   }
+  unsigned live_worlds = 0, live_nil_worlds = 0;
+  { /* round 35: the memo live (tfp_ops_set_memo): served hits answer as a fresh take would, a check catches a stale answer */
+    static TfpOpsHost quiet;
+    static TfpOps fresh_backend;
+    quiet = host;
+    quiet.log = NULL, quiet.camera_before_entry = NULL, quiet.placement_resolver = NULL, quiet.presentation_transition = NULL;
+    for (unsigned n = 0; n < run_count && !failures; n++) {
+      TfpOpsSnapshot full, again, alone, stored;
+      TfpOpsText why, why_alone;
+      const char *wrong = NULL;
+      run = ops_runs + n;
+      memset(&state, 0, sizeof state);
+      armed_count = 0;
+      first_image();
+      tfp_ops_init(&backend, &quiet, NULL, NULL);
+      tfp_ops_set_memo(&backend, true);
+      const TfpOpsPerf *p = &backend.perf;
+      if (!p->memo_on || !p->memo_live) wrong = "set_memo(true): on and live";
+      if (tfp_ops_snapshot(&backend, &full, &why) != TFP_OPS_TRUE || !full.safe) continue;
+      /* outside a frame: never served */
+      if (!wrong && (tfp_ops_snapshot(&backend, &again, &why) != TFP_OPS_TRUE || p->memo_hits[TFP_OPS_TAKE_FULL] || p->memo_served[TFP_OPS_TAKE_FULL] ||
+                     p->takes[TFP_OPS_TAKE_FULL] != 2))
+        wrong = "outside a frame: two takes, nothing served";
+      /* in a frame: the first call takes and stores, the first hit is checked, the next ones are served */
+      tfp_ops_begin_frame(&backend);
+      tfp_ops_init(&fresh_backend, &quiet, NULL, NULL);
+      tfp_ops_begin_frame(&fresh_backend);
+      if (!wrong && (tfp_ops_snapshot(&backend, &stored, &why) != TFP_OPS_TRUE || !p->memo[TFP_OPS_TAKE_FULL].reads ||
+                     tfp_ops_snapshot(&backend, &again, &why) != TFP_OPS_TRUE || memcmp(&stored, &again, sizeof again) ||
+                     p->memo_checked[TFP_OPS_TAKE_FULL] != 1 || p->memo_served[TFP_OPS_TAKE_FULL] || p->takes[TFP_OPS_TAKE_FULL] != 4))
+        wrong = "in a frame: a take, then a checked hit with the same answer";
+      const uint64_t reads = p->reads, per_take = p->memo[TFP_OPS_TAKE_FULL].reads;
+      for (int i = 0; i < 7 && !wrong; i++) {
+        memset(&again, 0x5a, sizeof again);
+        if (tfp_ops_snapshot(&backend, &again, &why) != TFP_OPS_TRUE || memcmp(&stored, &again, sizeof again) || why.present ||
+            tfp_ops_snapshot(&fresh_backend, &alone, &why_alone) != TFP_OPS_TRUE || memcmp(&alone, &again, sizeof alone))
+          wrong = "a served hit answers what a fresh take (and a backend without the memo) answers";
+      }
+      if (!wrong && (p->memo_served[TFP_OPS_TAKE_FULL] != 7 || p->reads != reads || p->takes[TFP_OPS_TAKE_FULL] != 4 ||
+                     p->memo_saved_reads != 7 * per_take || p->memo_hits[TFP_OPS_TAKE_FULL] != 8 || p->memo_mismatches[TFP_OPS_TAKE_FULL] ||
+                     p->memo_moved || p->off.has))
+        wrong = "served hits: counted, no read made, the reads they saved counted";
+      /* the other modes: a hit each, served the same way (their first live hit is a later one of the shared sample) */
+      for (int mode = TFP_OPS_TAKE_PLAYER; mode < TFP_OPS_TAKES && !wrong; mode++) {
+        TfpOpsResult (*take)(TfpOps *, TfpOpsSnapshot *, TfpOpsText *) = mode == TFP_OPS_TAKE_PLAYER ? tfp_ops_player_snapshot : tfp_ops_pin_player_snapshot;
+        TfpOpsResult first = take(&backend, &full, &why), second = take(&backend, &again, &why), alone_r = take(&fresh_backend, &alone, &why_alone);
+        if (first != second || second != alone_r || (first == TFP_OPS_TRUE && (memcmp(&full, &again, sizeof full) || memcmp(&alone, &again, sizeof alone))) ||
+            (first != TFP_OPS_TRUE && strcmp(why.text, why_alone.text)) || p->memo_served[mode] != 1)
+          wrong = "the player and pin modes: the hit served, the same answer";
+      }
+      /* the game's memory changes in the frame without an invalidate: served hits answer the stale snapshot until the next
+       * check (the 17th live hit), which finds the mismatch and turns the memo off; from then on every answer is fresh */
+      if (!wrong) {
+        poke(stored.controller, 2); /* an action */
+        unsigned stale = 0;
+        while (p->memo_live && stale < 2 * TFP_OPS_MEMO_CHECK_EVERY) {
+          const uint64_t checked = p->memo_checked[TFP_OPS_TAKE_FULL];
+          if (tfp_ops_snapshot(&backend, &again, &why) != TFP_OPS_TRUE) { wrong = "the stale run answers"; break; }
+          if (p->memo_checked[TFP_OPS_TAKE_FULL] == checked && memcmp(&stored, &again, sizeof again)) { wrong = "a served hit is the stored answer"; break; }
+          stale++;
+        }
+        if (!wrong && (p->memo_live || !p->memo_on || !p->off.has || p->off.moved || p->off.mode != TFP_OPS_TAKE_FULL ||
+                       strcmp(p->off.field, "controller_bytes") || p->off.offset != offsetof(TfpOpsSnapshot, controller_bytes) ||
+                       p->memo_mismatches[TFP_OPS_TAKE_FULL] != 1 || p->memo_live_hits != TFP_OPS_MEMO_CHECK_EVERY + 1 || again.safe))
+          wrong = "the check after the change: one mismatch at controller_bytes, the memo off, the fresh (unsafe) answer returned";
+        const uint64_t served = p->memo_served[TFP_OPS_TAKE_FULL], takes = p->takes[TFP_OPS_TAKE_FULL];
+        if (!wrong && (tfp_ops_snapshot(&backend, &again, &why) != TFP_OPS_TRUE || again.safe || p->memo_served[TFP_OPS_TAKE_FULL] != served ||
+                       p->takes[TFP_OPS_TAKE_FULL] != takes + 1))
+          wrong = "after the memo is off: fresh takes again";
+        tfp_ops_set_memo(&backend, true);
+        if (!wrong && p->memo_live) wrong = "turned off by a check: set_memo(true) does not make it live again on this backend";
+        poke(stored.controller, 0);
+      }
+      if (wrong) {
+        fprintf(stderr, "live memo, run %s: %s (\"%s\")\n", run->name, wrong, why.present ? why.text : "");
+        failures++;
+      }
+      live_worlds++;
+      /* a failure: a served NIL answers the fresh text and leaves the backend's why as the take did */
+      if (!failures) {
+        memset(&state, 0, sizeof state);
+        first_image();
+        tfp_ops_init(&backend, &quiet, NULL, NULL);
+        tfp_ops_set_memo(&backend, true);
+        tfp_ops_init(&fresh_backend, &quiet, NULL, NULL);
+        poke(full.controller, -1); /* unmapped */
+        tfp_ops_begin_frame(&backend);
+        tfp_ops_begin_frame(&fresh_backend);
+        TfpOpsResult r0 = tfp_ops_snapshot(&backend, &again, &why), r1 = tfp_ops_snapshot(&backend, &again, &why);
+        memcpy(backend.why, "something else", 15);
+        TfpOpsResult r2 = tfp_ops_snapshot(&backend, &again, &why), r3 = tfp_ops_snapshot(&fresh_backend, &alone, &why_alone);
+        if (r0 == TFP_OPS_TRUE) continue; /* the controller is not read in this image */
+        if (r0 != TFP_OPS_NIL || r1 != r0 || r2 != r0 || r3 != r0 || !why.present || strcmp(why.text, why_alone.text) ||
+            strcmp(backend.why, fresh_backend.why) || p->memo_served[TFP_OPS_TAKE_FULL] != 1 || p->off.has) {
+          fprintf(stderr, "live memo, run %s: a served failure answers the fresh text and why (\"%s\" / \"%s\")\n", run->name, why.text,
+                  why_alone.text);
+          failures++;
+        }
+        live_nil_worlds++;
+      }
+    }
+    if (!live_worlds && !failures) {
+      fprintf(stderr, "live memo: no run starts with a safe full snapshot\n");
+      failures++;
+    }
+  }
   if (failures) {
     fprintf(stderr, "%u runs differ from retail\n", failures);
     return 1;
@@ -1325,5 +1452,12 @@ int main(int argc, char **argv) {
          "player's snapshot can be had\n", held_releases);
   printf("Backend operations, shadow memo (round 32, logging only): on %u first images: hits only in a frame and the same epoch, the same answers "
          "as a backend without it, a change without an invalidate counted as a mismatch at its field\n", memo_worlds);
+  printf("Backend operations, live memo (round 35, memo_on.txt): on %u first images: served hits answer as a fresh take and a backend without "
+         "it and read nothing; a change without an invalidate is answered stale until the next check, which turns the memo off at its field; "
+         "on %u, a served failure answers the fresh text\n", live_worlds, live_nil_worlds);
+  if (memo_vectors)
+    printf("Backend operations, every vector with the memo live (TFP_OPS_MEMO=1): every answer retail's; %llu hits served, %llu checked, "
+           "%llu guarded reads saved; %u backends turned it off\n", (unsigned long long)memo_served_total, (unsigned long long)memo_checked_total,
+           (unsigned long long)memo_saved_total, memo_off_backends);
   return 0;
 }

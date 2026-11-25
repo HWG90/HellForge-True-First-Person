@@ -574,6 +574,7 @@ static size_t m_query(void *u, uint64_t address, TfpMovementRegion *region, size
 }
 static int m_write(void *u, uint64_t address, const uint8_t *bytes, size_t size, size_t *written) {
   TfpFx *fx = u;
+  tfp_ops_memo_wrote(&fx->w->ops); /* round 35: a snapshot memo must not outlive a game write */
   return P(fx)->write_process_memory(P(fx)->user, address, bytes, size, written);
 }
 static bool m_find(TfpFx *fx, bool index, const char *name, TfpMovementNumber *key, const char **error) {
@@ -635,6 +636,7 @@ TfpNativeAimCopy tfp_fx_memory_copy(TfpFx *fx, uint64_t address, uint8_t value, 
     *why = "Writes require committed private read-write memory";
     return TFP_NATIVE_AIM_COPY_REFUSED;
   }
+  tfp_ops_memo_wrote(&fx->w->ops); /* round 35: a snapshot memo must not outlive a game write */
   if (P(fx)->write_process_memory(P(fx)->user, address, &value, 1, &written) == 0 || written != 1) {
     *why = "Memory write failed or copied only part of the data";
     return TFP_NATIVE_AIM_COPY_REFUSED;

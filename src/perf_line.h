@@ -6,6 +6,7 @@
  * 700-byte buffer of say() with every field at its largest. */
 #ifndef TFP_PERF_LINE_H
 #define TFP_PERF_LINE_H
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -89,8 +90,51 @@ static inline int tfp_perf_frame_line(char *out, size_t size, const double mean_
 #undef TFP_LAP_
 }
 
-/* "Perf snapshots:": per second, what the backend (src/backend_ops.c TfpOpsPerf) did, and the shadow memo. Modes in the
- * order full, player, pin. */
+/* Round 35 (docs/design/specs/2026-11-25-performance.md, section 6): on_update in exclusive parts that add up to it, for
+ * the "Perf update:" line. The runtime marks where each part of its update begins (src/tfp_runtime.c PART, in the order
+ * TFP_RT_PART_* of src/tfp_runtime.h, the first fourteen here); the seven managed targets' own update calls (the timed
+ * wrappers of tfp_wire_laps_start) are one part, "targets", whatever part they are called from.
+ *  frame         the backend's frame begin and end, what runs before the first mark, the frame's fault text
+ *  entry         update_frame's start: the probe, compat, native aim, the Fird checks (their early outs too)
+ *  owner         recovery's reset on an enable change and the new-owner check (a full snapshot; on a new body, every
+ *                target's stop and clean poll)
+ *  presentation  observe_presentation: a full (or pin) snapshot, the alignment lease, the transition
+ *  recovery      the recovery policies' walk (action, proof with its full snapshot, revalidate) and blocks_view
+ *  controller    controller:update (the controller's own snapshots and lease work), or its retry cleanup
+ *  editor+motion the editor's update, the calibration check, motion:update
+ *  stops         the idle check and, with a foreign camera, every target's stop
+ *  managed       the managed updates around the targets: recovery's action, proof, success or failure for each target,
+ *                its result, and its stop and clean poll on a cleanup or a failure
+ *  clean poll    near:is_clean, the Fird warm check, the depth of field's result: whether the idle frame is clean
+ *  menu          menu:update (wherever update_frame ends)
+ *  ready, aim markers, diagnostics: update_body's three after the frame (the ready stance, aim markers, the record)
+ *  targets       the seven targets' own update functions (as the Perf frame line's seven laps, exclusive here) */
+enum { TFP_UPD_FRAME, TFP_UPD_ENTRY, TFP_UPD_OWNER, TFP_UPD_PRESENTATION, TFP_UPD_RECOVERY, TFP_UPD_CONTROLLER, TFP_UPD_EDITOR_MOTION,
+       TFP_UPD_STOPS, TFP_UPD_MANAGED, TFP_UPD_CLEAN, TFP_UPD_MENU, TFP_UPD_READY, TFP_UPD_AIM_MARKERS, TFP_UPD_DIAGNOSTICS, TFP_UPD_TARGETS,
+       TFP_UPDS };
+/* "Perf update:": each part's mean per tick and largest in the second, and (gross, inside the parts and the other laps) the
+ * time spent in the backend's public snapshot calls from every caller, served or taken. */
+static inline int tfp_perf_update_line(char *out, size_t size, const double mean_us[TFP_UPDS], const double most_us[TFP_UPDS],
+                                       double snapshots_mean_us, double snapshots_most_us) {
+  double m[TFP_UPDS], x[TFP_UPDS];
+  for (int i = 0; i < TFP_UPDS; i++) m[i] = tfp_perf_clamp(mean_us[i]), x[i] = tfp_perf_clamp(most_us[i]);
+#define TFP_UPD_(i) m[i], x[i]
+  return snprintf(out, size,
+                  "Perf update: per tick mean/largest us, on_update in parts: targets %.0f/%.0f, controller %.0f/%.0f, managed %.0f/%.0f, "
+                  "recovery %.0f/%.0f, owner %.0f/%.0f, presentation %.0f/%.0f, stops %.0f/%.0f, clean poll %.0f/%.0f, editor+motion %.0f/%.0f, "
+                  "entry %.0f/%.0f, menu %.0f/%.0f, ready %.0f/%.0f, aim markers %.0f/%.0f, diagnostics %.0f/%.0f, frame %.0f/%.0f; "
+                  "all snapshot calls %.0f/%.0f",
+                  TFP_UPD_(TFP_UPD_TARGETS), TFP_UPD_(TFP_UPD_CONTROLLER), TFP_UPD_(TFP_UPD_MANAGED), TFP_UPD_(TFP_UPD_RECOVERY),
+                  TFP_UPD_(TFP_UPD_OWNER), TFP_UPD_(TFP_UPD_PRESENTATION), TFP_UPD_(TFP_UPD_STOPS), TFP_UPD_(TFP_UPD_CLEAN),
+                  TFP_UPD_(TFP_UPD_EDITOR_MOTION), TFP_UPD_(TFP_UPD_ENTRY), TFP_UPD_(TFP_UPD_MENU), TFP_UPD_(TFP_UPD_READY),
+                  TFP_UPD_(TFP_UPD_AIM_MARKERS), TFP_UPD_(TFP_UPD_DIAGNOSTICS), TFP_UPD_(TFP_UPD_FRAME), tfp_perf_clamp(snapshots_mean_us),
+                  tfp_perf_clamp(snapshots_most_us));
+#undef TFP_UPD_
+}
+
+/* "Perf snapshots:": per second, what the backend (src/backend_ops.c TfpOpsPerf) did, and the memo. Modes in the order
+ * full, player, pin. */
+enum { TFP_PERF_MEMO_SHADOW, TFP_PERF_MEMO_LIVE, TFP_PERF_MEMO_TURNED_OFF };
 typedef struct TfpPerfSnapshots {
   uint32_t reads;              /* guarded reads of the backend */
   uint32_t takes[3];           /* snapshots built, by mode (the hold's are player ones) */
@@ -98,8 +142,25 @@ typedef struct TfpPerfSnapshots {
   uint32_t invokes, invoke_bodies;
   uint32_t calls[3], hits[3], mismatches[3]; /* the memo: public snapshot calls, those in the same frame epoch, those that differed */
   uint32_t moved;              /* hits whose own take changed the backend's state */
+  /* Round 35: TFP_PERF_MEMO_SHADOW (no memo_on.txt: the line is round 32's, byte for byte), _LIVE, or _TURNED_OFF (a check
+   * failed this session: the shadow again). With the switch: hits answered from the memo, live hits checked against a
+   * fresh take, and the guarded reads the served hits did not make. */
+  int memo;
+  uint32_t served[3], checked[3], saved_reads;
 } TfpPerfSnapshots;
 static inline int tfp_perf_snapshots_line(char *out, size_t size, const TfpPerfSnapshots *p) {
+  if (p->memo != TFP_PERF_MEMO_SHADOW)
+    return snprintf(out, size,
+                    "Perf snapshots: per second: guarded reads %u; snapshots full %u, player %u, pin %u; tables %u; invoke %u, invoke_body %u; "
+                    "memo (%s) calls %u/%u/%u, hits %u/%u/%u, served %u/%u/%u, checked %u/%u/%u, mismatches %u/%u/%u, moved %u; "
+                    "saved reads %u",
+                    (unsigned)p->reads, (unsigned)p->takes[0], (unsigned)p->takes[1], (unsigned)p->takes[2], (unsigned)p->tables,
+                    (unsigned)p->invokes, (unsigned)p->invoke_bodies,
+                    p->memo == TFP_PERF_MEMO_LIVE ? "live, the first and every 16th hit checked" : "turned off by a check, shadow again",
+                    (unsigned)p->calls[0], (unsigned)p->calls[1], (unsigned)p->calls[2], (unsigned)p->hits[0], (unsigned)p->hits[1],
+                    (unsigned)p->hits[2], (unsigned)p->served[0], (unsigned)p->served[1], (unsigned)p->served[2], (unsigned)p->checked[0],
+                    (unsigned)p->checked[1], (unsigned)p->checked[2], (unsigned)p->mismatches[0], (unsigned)p->mismatches[1],
+                    (unsigned)p->mismatches[2], (unsigned)p->moved, (unsigned)p->saved_reads);
   return snprintf(out, size,
                   "Perf snapshots: per second: guarded reads %u; snapshots full %u, player %u, pin %u; tables %u; invoke %u, invoke_body %u; "
                   "memo (shadow) calls %u/%u/%u, hits %u/%u/%u, mismatches %u/%u/%u, moved %u",
@@ -115,5 +176,20 @@ static inline int tfp_perf_mismatch_line(char *out, size_t size, int mode, const
                   "Memo: first mismatch: a %s snapshot taken again in the same frame epoch (%llu) differed from the one before it, first at "
                   "%.48s (+0x%llx); the memo stays a shadow (answers are always fresh)",
                   mode >= 0 && mode < 3 ? modes[mode] : "?", (unsigned long long)epoch, field ? field : "?", (unsigned long long)offset);
+}
+/* Round 35, once per session with memo_on.txt: a check turned the memo off. moved: the fresh take changed the backend's
+ * state (a served hit skips that work) rather than answering differently. */
+static inline int tfp_perf_memo_off_line(char *out, size_t size, int mode, bool moved, const char *field, size_t offset, uint64_t epoch) {
+  static const char *const modes[] = {"full", "player", "pin"};
+  const char *name = mode >= 0 && mode < 3 ? modes[mode] : "?";
+  if (moved)
+    return snprintf(out, size,
+                    "Memo: off for the session: a check of a %s snapshot in frame epoch %llu found that a fresh take changed the backend's "
+                    "own state, which a served hit skips; every answer is fresh from here (memo_on.txt is still read at the next start)",
+                    name, (unsigned long long)epoch);
+  return snprintf(out, size,
+                  "Memo: off for the session: a check of a %s snapshot in frame epoch %llu found the stored answer differs from a fresh take, "
+                  "first at %.48s (+0x%llx); every answer is fresh from here (memo_on.txt is still read at the next start)",
+                  name, (unsigned long long)epoch, field ? field : "?", (unsigned long long)offset);
 }
 #endif
