@@ -1,6 +1,7 @@
 /* The glide of the head camera's eye to the incoming weapon's eye at a swap (src/camera_glide.h). */
 #include "camera_glide.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include "reference/soak-6-steps.h"
 #include "reference/soak-19-glide.h"
 static int checks, failed;
@@ -381,6 +382,352 @@ static void logged(void) {
   }
 }
 
+/* ---- the held eye let go (round 19): tfp_eye_glide_release ---- */
+/* The judge's limit on a frame's change of step: 0.06 m at 30 frames a second (54 m/s^2 there), scaled by the square of
+ * the frame time or, where that is less, in proportion to it. */
+static double judge_limit(double ms) { const double r = ms/33.3; return .06*(r < r*r ? r : r*r); }
+static double release_ms(double size) {
+  const double ms = 1000*sqrt(2*size/(TFP_EYE_GLIDE_SHARE*TFP_EYE_RELEASE_ACCEL));
+  return ms < TFP_EYE_RELEASE_MIN_MS ? TFP_EYE_RELEASE_MIN_MS : ms > TFP_EYE_RELEASE_MAX_MS ? TFP_EYE_RELEASE_MAX_MS : ms;
+}
+static double release_down(double size) { const double t = release_ms(size)/1000; return 2*size/((1-TFP_EYE_GLIDE_SHARE)*t*t); }
+static void release(void) {
+  /* The time: 300 ms at least and 450 at most; the Scythe's 0.44 m is 404 ms, gathering way at 9 m/s^2 and losing it
+   * at 13.5 (under the 14 the swap's glide gathers way at, which the filter follows without taking anything up). */
+  CHECK(release_ms(.05) == 300 && fabs(release_ms(.44)-404.1) < .5 && release_ms(1.0) == 450);
+  CHECK(fabs(release_down(.44)-13.5) < .01 && release_down(1.0) < 25);
+  const float sizes[5] = {.05f, .10f, .30f, .44f, .60f};
+  for (unsigned s = 0; s < 5; ++s) for (unsigned f = 0; f < 4; ++f) {
+    const double dt = FRAMES[f]/1000;
+    TfpEyeGlide g; tfp_eye_glide_reset(&g);
+    float end[3], eye[3], step[3] = {0, 0, 0}, first = 0, largest = 0; end_of(sizes[s], end); memcpy(eye, START, 12);
+    double over = -1; bool toward = true; float before_left = apart(eye, end);
+    for (int i = 1; i*FRAMES[f] <= 700; ++i) {
+      float before[3], now[3], change[3]; memcpy(before, eye, 12);
+      tfp_eye_glide_release(&g, eye, end, (float)dt);
+      for (unsigned k = 0; k < 3; ++k) { now[k] = eye[k]-before[k]; change[k] = now[k]-step[k]; }
+      const float changed = sqrtf(change[0]*change[0]+change[1]*change[1]+change[2]*change[2]);
+      if (i == 1) first = apart(eye, before);
+      if (changed > largest) largest = changed;
+      /* the same place at the same time as the shape of the swap's glide, on the release's time */
+      CHECK(fabs(apart(eye, START)-sizes[s]*gone(i*FRAMES[f]/release_ms(sizes[s]))) < 2e-5);
+      if (apart(eye, end) > before_left+1e-6f) toward = false;
+      before_left = apart(eye, end);
+      if (over < 0 && same(eye, end)) over = i*FRAMES[f];
+      memcpy(step, now, 12);
+    }
+    /* from rest, to rest at the target itself, never back, and no frame's step changes by more than its slowing-down
+     * rate gives, which is well inside the judge's limit at every frame time */
+    CHECK(first <= .5*release_down(sizes[s])*(1-TFP_EYE_GLIDE_SHARE)/TFP_EYE_GLIDE_SHARE*dt*dt*1.001+1e-6);
+    CHECK(largest <= release_down(sizes[s])*dt*dt*1.001+2e-5 && largest <= judge_limit(FRAMES[f]));
+    CHECK(toward && over >= release_ms(sizes[s])-.01 && over < release_ms(sizes[s])+FRAMES[f]);
+  }
+  /* A new target while the release is under way (a hold that comes while letting go): from where the eye is with the
+   * speed it has, on the release's rates, to the new target itself. */
+  for (unsigned f = 0; f < 4; ++f) {
+    const double dt = FRAMES[f]/1000;
+    TfpEyeGlide g; tfp_eye_glide_reset(&g); float eye[3], end[3], other[3] = {.05f, .12f, -.02f}, last[3] = {0, 0, 0}, before[3], now[3];
+    end_of(.44f, end); memcpy(eye, START, 12); float largest = 0;
+    for (int i = 1; i*FRAMES[f] <= 900; ++i) {
+      memcpy(before, eye, 12); tfp_eye_glide_release(&g, eye, i*FRAMES[f] <= 150 ? end : other, (float)dt);
+      float change[3]; for (unsigned k = 0; k < 3; ++k) { now[k] = eye[k]-before[k]; change[k] = now[k]-last[k]; }
+      const float changed = sqrtf(change[0]*change[0]+change[1]*change[1]+change[2]*change[2]);
+      if (changed > largest) largest = changed;
+      memcpy(last, now, 12);
+    }
+    CHECK(largest <= judge_limit(FRAMES[f]) && same(eye, other));
+  }
+  /* The release is a glide like the others to the rest of the header: after it, tfp_eye_glide_lock_step to a new target
+   * begins anew (GATE), and an eye set anew begins from rest. */
+  {
+    TfpEyeGlide g; tfp_eye_glide_reset(&g); float eye[3], end[3], before[3]; end_of(.44f, end); memcpy(eye, START, 12);
+    for (int i = 0; i < 20; ++i) tfp_eye_glide_release(&g, eye, end, .0333f);
+    CHECK(same(eye, end) && g.release);
+    const float near[3] = {end[0]+.1f, end[1], end[2]}; memcpy(before, eye, 12);
+    CHECK(tfp_eye_glide_lock_step(&g, eye, near, .0333f) && !g.release && apart(eye, before) <= .5f*(float)rate_up(.1)*.0333f*.0333f*1.001f+1e-6f);
+    tfp_eye_glide_reset(&g); memcpy(eye, START, 12);
+    for (int i = 0; i < 4; ++i) tfp_eye_glide_release(&g, eye, end, .0333f);
+    const float anew[3] = {.3f, -.2f, .1f}; memcpy(eye, anew, 12); memcpy(before, eye, 12);
+    CHECK(tfp_eye_glide_release(&g, eye, end, .0333f) && apart(eye, before) < .006f);
+  }
+  /* A swap's glide that goes on from a release under way (tfp_eye_glide_lock_step to a new target while the eye is
+   * still being let go) is a swap's glide from then on, not taken for a release: tfp_eye_glide_releasing says no, so the
+   * helper does not send the next frames, or a later swap, through the release's rates (review of round 19, M6). */
+  {
+    TfpEyeGlide g; tfp_eye_glide_reset(&g); float eye[3], end[3]; end_of(.44f, end); memcpy(eye, START, 12);
+    for (int i = 0; i < 4; ++i) tfp_eye_glide_release(&g, eye, end, .0333f);
+    CHECK(tfp_eye_glide_releasing(&g));
+    const float near[3] = {eye[0]+.1f, eye[1], eye[2]};
+    CHECK(tfp_eye_glide_lock_step(&g, eye, near, .0333f) && g.active && !g.release && !tfp_eye_glide_releasing(&g));
+    for (int i = 0; i < 3; ++i) { tfp_eye_glide_lock_step(&g, eye, near, .0333f); CHECK(!tfp_eye_glide_releasing(&g)); }
+  }
+  /* No number, no time: nothing moves; no number forgets the glide. */
+  {
+    TfpEyeGlide g; tfp_eye_glide_reset(&g); float eye[3], end[3], before[3]; end_of(.44f, end); memcpy(eye, START, 12);
+    for (int i = 0; i < 4; ++i) tfp_eye_glide_release(&g, eye, end, .0333f);
+    memcpy(before, eye, 12);
+    CHECK(!tfp_eye_glide_release(&g, eye, end, 0) && same(eye, before));
+    CHECK(!tfp_eye_glide_release(&g, eye, end, NAN) && same(eye, before));
+    const float bad[3] = {0, NAN, 0};
+    CHECK(!tfp_eye_glide_release(&g, eye, bad, .0333f) && same(eye, before) && !g.active);
+  }
+}
+
+/* ---- the hold lapses while a swap's glide is under way (round 19 review: BLOCKING 1, IMPORTANT 2, MINOR 4) ---- */
+/* How far `p` is from the triangle a, b, c (from the nearest of its sides where it has no area): 0 inside it. */
+static float dot3(const float *x, const float *y) { return x[0]*y[0]+x[1]*y[1]+x[2]*y[2]; }
+static float to_side(const float *p, const float *x, const float *y) {
+  float d[3], q[3], r[3]; for (unsigned k = 0; k < 3; ++k) { d[k] = y[k]-x[k]; q[k] = p[k]-x[k]; }
+  const float l = dot3(d, d), s = l > 0 ? fminf(1, fmaxf(0, dot3(q, d)/l)) : 0;
+  for (unsigned k = 0; k < 3; ++k) r[k] = q[k]-s*d[k];
+  return sqrtf(dot3(r, r));
+}
+static float outside_span(const float *p, const float *a, const float *b, const float *c) {
+  const float sides = fminf(to_side(p, a, b), fminf(to_side(p, b, c), to_side(p, c, a)));
+  float u[3], v[3], w[3], n[3]; for (unsigned k = 0; k < 3; ++k) { u[k] = b[k]-a[k]; v[k] = c[k]-a[k]; w[k] = p[k]-a[k]; }
+  n[0] = u[1]*v[2]-u[2]*v[1]; n[1] = u[2]*v[0]-u[0]*v[2]; n[2] = u[0]*v[1]-u[1]*v[0];
+  const float area = dot3(n, n);
+  if (!(area > 1e-10f)) return sides;
+  const float uu = dot3(u, u), uv = dot3(u, v), vv = dot3(v, v), wu = dot3(w, u), wv = dot3(w, v), den = uu*vv-uv*uv;
+  const float s = (vv*wu-uv*wv)/den, t = (uu*wv-uv*wu)/den;
+  return s >= 0 && t >= 0 && s+t <= 1 ? fabsf(dot3(w, n))/sqrtf(area) : sides;
+}
+/* A swap's glide under the lock (tfp_eye_glide_lock_step) from `a` to `b`, `frames_in` frames under way when the hold
+ * lapses; then tfp_eye_glide_lapse to the head camera's own eye (0) until it is over. The swap's glide runs to its end
+ * (the gentle one: its own end; retail's: within TFP_EYE_GLIDE_SETTLED_M of its target), and the release begins from
+ * rest after it. Returns false when the swap's glide was over before the lapse (nothing to judge). */
+typedef struct LapseRun { float outside, over_bound, lapse_step, step_before, lapse_ms, late_ms; bool ended; } LapseRun;
+static bool lapse_run(const float *a, const float *b, int frames_in, double ms, LapseRun *r) {
+  const float dt = (float)(ms/1000), zero[3] = {0, 0, 0};
+  TfpEyeGlide g; tfp_eye_glide_reset(&g); float eye[3], before[3], step[3] = {0, 0, 0}; memcpy(eye, a, 12);
+  for (int i = 0; i < frames_in; ++i) {
+    memcpy(before, eye, 12); tfp_eye_glide_lock_step(&g, eye, b, dt);
+    for (unsigned k = 0; k < 3; ++k) step[k] = eye[k]-before[k];
+  }
+  if (!g.retail && !(g.active && g.elapsed < g.duration)) return false;
+  memset(r, 0, sizeof *r); r->outside = outside_span(eye, a, b, zero); r->over_bound = -1;
+  r->step_before = sqrtf(dot3(step, step));
+  int n = 0;
+  for (; n < 4000; ++n) {
+    memcpy(before, eye, 12);
+    const bool going = tfp_eye_glide_lapse(&g, eye, zero, dt);
+    float now[3], change[3]; for (unsigned k = 0; k < 3; ++k) { now[k] = eye[k]-before[k]; change[k] = now[k]-step[k]; }
+    const float changed = sqrtf(dot3(change, change)), had = sqrtf(dot3(step, step));
+    if (n == 0) r->lapse_step = sqrtf(dot3(now, now));
+    r->outside = fmaxf(r->outside, outside_span(eye, a, b, zero));
+    /* No frame's step changes by more than retail's own glide slows it in the frame, or than the gentle glides' rates
+     * give (the swap's 21 m/s^2 at most, the release's 25 for the longest ways), or than stopping retail's glide within
+     * TFP_EYE_GLIDE_SETTLED_M of its target. */
+    const float bound = fmaxf(fmaxf(had*(1-expf(-dt/.07f)), 25*dt*dt), TFP_EYE_GLIDE_SETTLED_M)+1e-5f;
+    r->over_bound = fmaxf(r->over_bound, changed-bound);
+    memcpy(step, now, 12);
+    if (!going) break;
+  }
+  r->lapse_ms = (float)((n+1)*ms); r->ended = same(eye, zero);
+  /* how much longer than the swap's glide (the gentle one's 250 ms at most; retail's to within TFP_EYE_GLIDE_SETTLED_M
+   * of its target, 70 ms * ln(way / 1 mm)) and the release's 450 ms, with two frames for the frame times */
+  const float swap_ms = apart(a, b) > TFP_EYE_GLIDE_FAR_M ? 70*logf(apart(a, b)/TFP_EYE_GLIDE_SETTLED_M) : TFP_EYE_GLIDE_MAX_MS;
+  r->late_ms = r->lapse_ms-(swap_ms+TFP_EYE_RELEASE_MAX_MS+2*(float)ms);
+  return true;
+}
+static void lapse_mid_swap(void) {
+  const float u[3] = {.36f, .80f, -.48f}, side[3] = {.80f, -.36f, 0}; /* the swap's way, and across it */
+  for (int retail = 0; retail < 2; ++retail) for (unsigned f = 0; f < 4; ++f) {
+    float outside = 0, over = -1, lapse_ms = 0, late = -1e9f; int runs = 0, ended = 0;
+    for (float sa = -.8f; sa <= .81f; sa += .1f) for (float sb = -.8f; sb <= .81f; sb += .1f) for (int across = 0; across < 2; ++across) {
+      float a[3], b[3];
+      for (unsigned k = 0; k < 3; ++k) { a[k] = sa*u[k]; b[k] = sb*u[k]+(across ? .06f*side[k] : 0); }
+      if ((apart(a, b) > TFP_EYE_GLIDE_FAR_M) != retail || apart(a, b) < .02f) continue;
+      for (int k = 1; k <= 40; ++k) {
+        LapseRun r; if (!lapse_run(a, b, k, FRAMES[f], &r)) break;
+        ++runs; if (r.ended) ++ended;
+        outside = fmaxf(outside, r.outside); over = fmaxf(over, r.over_bound); lapse_ms = fmaxf(lapse_ms, r.lapse_ms); late = fmaxf(late, r.late_ms);
+      }
+    }
+    if (getenv("TFP_LAPSE_TABLE")) printf("  lapse mid-%s glide, %4.1f ms a frame: %d runs, outside the span %.6f m, over the bound %+.6f m, longest %.0f ms\n",
+        retail ? "retail" : "gentle", FRAMES[f], runs, outside, over, lapse_ms);
+    /* within the span of the eye, the swap's target and the head camera's eye (to 0.05 mm, for float; 0.01 mm seen);
+     * no frame over the bound; at the head camera's eye at the end, within the swap's glide and the release's 450 ms */
+    CHECK(runs > 100 && ended == runs && outside <= 5e-5f && over <= 0 && late <= 0);
+  }
+  /* The lapse frame of a retail glide under way is no dead stop: the eye goes on by retail's own step (review of round
+   * 19, "B lapse": from rest it stopped dead, 0.05 m of step change at 33 ms a frame). */
+  for (unsigned f = 0; f < 4; ++f) for (int k = 1; k <= 3; ++k) {
+    float a[3], b[3]; memcpy(a, START, 12); end_of(.81f, b);
+    LapseRun r; CHECK(lapse_run(a, b, k, FRAMES[f], &r));
+    CHECK(fabsf(r.lapse_step-r.step_before*expf(-(float)FRAMES[f]/70)) < 1e-4f);
+  }
+  /* MINOR 4 of that review: a gentle swap glide whose target is at the head camera's eye or near it, under way when the
+   * hold lapses, does not overshoot it (a release that took over its speed went 0.05 to 0.085 m past). */
+  for (unsigned f = 0; f < 4; ++f) for (float near = 0; near <= .031f; near += .01f) for (int k = 1; k <= 12; ++k) {
+    const float a[3] = {.18f*u[0], .18f*u[1], .18f*u[2]}, b[3] = {near*u[0], near*u[1], near*u[2]};
+    LapseRun r; if (!lapse_run(a, b, k, FRAMES[f], &r)) break;
+    CHECK(r.outside <= 5e-5f && r.ended);
+  }
+  /* Nothing under way (no glide, a gentle one that is over, an eye set anew): the release from rest at once, its
+   * first step no more than half a frame of gathering way at TFP_EYE_RELEASE_ACCEL. */
+  {
+    const float FROM_REST = .5f*TFP_EYE_RELEASE_ACCEL*.0333f*.0333f*1.001f;
+    TfpEyeGlide g; tfp_eye_glide_reset(&g); float eye[3], before[3]; const float zero[3] = {0, 0, 0}; memcpy(eye, START, 12);
+    memcpy(before, eye, 12); CHECK(tfp_eye_glide_lapse(&g, eye, zero, .0333f) && tfp_eye_glide_releasing(&g) && apart(eye, before) <= FROM_REST);
+    float end[3]; end_of(.2f, end); tfp_eye_glide_reset(&g); memcpy(eye, START, 12);
+    for (int i = 0; i < 12; ++i) tfp_eye_glide_lock_step(&g, eye, end, .0333f);
+    CHECK(same(eye, end)); memcpy(before, eye, 12);
+    CHECK(tfp_eye_glide_lapse(&g, eye, zero, .0333f) && tfp_eye_glide_releasing(&g) && apart(eye, before) <= FROM_REST);
+    end_of(.2f, end); tfp_eye_glide_reset(&g); memcpy(eye, START, 12);
+    for (int i = 0; i < 3; ++i) tfp_eye_glide_lock_step(&g, eye, end, .0333f);
+    eye[0] += .05f; memcpy(before, eye, 12); /* set anew */
+    CHECK(tfp_eye_glide_lapse(&g, eye, zero, .0333f) && tfp_eye_glide_releasing(&g) && apart(eye, before) <= FROM_REST);
+    /* no number: nothing moves, and the glide is forgotten */
+    const float bad[3] = {0, NAN, 0}; memcpy(before, eye, 12);
+    CHECK(!tfp_eye_glide_lapse(&g, eye, bad, .0333f) && same(eye, before) && !g.active && !g.retail);
+  }
+}
+
+/* ---- a weapon drawn while the held eye is let go (round 19 review, BLOCKING 1): the take-over ---- */
+/* The review's scene, arithmetic alone: the held eye `held` metres along `dir` from the head camera's own (0), let go
+ * (tfp_eye_glide_release to 0); `draw_ms` into it the incoming weapon's eye `incoming` metres along `dir` (and `across`
+ * off that line) becomes the target, until the eye is there. Every frame: how far the eye is outside the span of the
+ * held eye, the incoming eye and the head camera's own, how far past the head camera's eye it is along the way the
+ * release went, and how far its change of step is over the judge's limit and the same frame of the release alone. */
+typedef struct TakeRun { float outside, past_head, over_bound, took_ms; bool ended, drawn; } TakeRun;
+static TakeRun take_run(const float *dir, float held, float incoming, float across, double draw_ms, double ms) {
+  const float dt = (float)(ms/1000), zero[3] = {0, 0, 0}, side[3] = {.80f, -.36f, 0};
+  float a[3], b[3], back[3]; for (unsigned k = 0; k < 3; ++k) { a[k] = held*dir[k]; b[k] = incoming*dir[k]+across*side[k]; back[k] = -a[k]/fabsf(held); }
+  enum { FRAMES_MAX = 4000 };
+  static float alone[FRAMES_MAX]; int alone_n = 0;
+  { /* the release alone, frame by frame */
+    TfpEyeGlide g; tfp_eye_glide_reset(&g); float eye[3], before[3], step[3] = {0, 0, 0}; memcpy(eye, a, 12);
+    for (; alone_n < FRAMES_MAX; ++alone_n) {
+      memcpy(before, eye, 12); tfp_eye_glide_release(&g, eye, zero, dt);
+      float now[3], change[3]; for (unsigned k = 0; k < 3; ++k) { now[k] = eye[k]-before[k]; change[k] = now[k]-step[k]; }
+      alone[alone_n] = sqrtf(dot3(change, change)); memcpy(step, now, 12);
+      if (!tfp_eye_glide_releasing(&g) && same(eye, zero)) break;
+    }
+  }
+  TakeRun r = {0, -1, -1, 0, false, false};
+  TfpEyeGlide g; tfp_eye_glide_reset(&g); float eye[3], before[3], step[3] = {0, 0, 0}; memcpy(eye, a, 12);
+  for (int i = 0; i < FRAMES_MAX; ++i) {
+    const bool drawn = i*ms >= draw_ms-.001;
+    if (drawn && !r.drawn && i > 0 && !tfp_eye_glide_releasing(&g)) return r; /* the release was over before the draw: nothing to judge */
+    r.drawn = r.drawn || drawn;
+    memcpy(before, eye, 12); tfp_eye_glide_release(&g, eye, drawn ? b : zero, dt);
+    float now[3], change[3]; for (unsigned k = 0; k < 3; ++k) { now[k] = eye[k]-before[k]; change[k] = now[k]-step[k]; }
+    const float changed = sqrtf(dot3(change, change));
+    r.outside = fmaxf(r.outside, outside_span(eye, a, b, zero));
+    r.past_head = fmaxf(r.past_head, dot3(eye, back));
+    const float bound = fmaxf((float)judge_limit(ms), i < alone_n ? alone[i] : 0)+1e-6f;
+    r.over_bound = fmaxf(r.over_bound, changed-bound);
+    memcpy(step, now, 12);
+    if (drawn && !tfp_eye_glide_releasing(&g)) { r.ended = same(eye, b); r.took_ms = (float)((i+1)*ms-draw_ms); break; }
+  }
+  return r;
+}
+static void take_over(void) {
+  const float line[3] = {.36f, .80f, -.48f}, fore[3] = {0, 1, 0};
+  const float *dirs[2] = {fore, line};
+  for (unsigned f = 0; f < 4; ++f) {
+    TakeRun worst = {0, -1, -1, 0, true, true}; int runs = 0;
+    for (unsigned d = 0; d < 2; ++d) for (int sign = -1; sign <= 1; sign += 2) for (int reverse = 0; reverse < 2; ++reverse)
+      for (float way = .44f; way < .71f; way += .26f) for (int across = 0; across < 2; ++across) {
+        /* forward: the rifle's eye `way` behind, the sidearm's 0.07 m (0.11 m ahead of the head node, whose eye is 0.18);
+         * reverse: from 0.07 m to `way` */
+        const float held = sign*(reverse ? .07f : way), incoming = sign*(reverse ? way : .07f);
+        for (double draw = 0; draw <= 450.001; draw += FRAMES[f] < 10 ? 2*FRAMES[f] : FRAMES[f]) {
+          const TakeRun r = take_run(dirs[d], held, incoming, across ? .06f : 0, draw, FRAMES[f]);
+          if (!r.drawn) continue;
+          ++runs;
+          if (getenv("TFP_TAKEOVER_TABLE") && (r.outside > 5e-5f || r.past_head > 5e-5f || r.over_bound > 0))
+            printf("    take-over dir %u held %+.2f incoming %+.2f across %d drawn %3.0f ms, %4.1f ms a frame: outside %.4f past head %+.4f over bound %+.5f\n",
+                d, held, incoming, across, draw, FRAMES[f], r.outside, r.past_head, r.over_bound);
+          worst.outside = fmaxf(worst.outside, r.outside); worst.past_head = fmaxf(worst.past_head, r.past_head);
+          worst.over_bound = fmaxf(worst.over_bound, r.over_bound); worst.ended = worst.ended && r.ended; worst.took_ms = fmaxf(worst.took_ms, r.took_ms);
+        }
+      }
+    if (getenv("TFP_TAKEOVER_TABLE")) printf("  take-over, %4.1f ms a frame: %d runs, outside the span %.6f m, past the head eye %+.6f m, over the bound %+.6f m, longest %.0f ms\n",
+        FRAMES[f], runs, worst.outside, worst.past_head, worst.over_bound, worst.took_ms);
+    /* within the span of the held eye, the incoming eye and the head camera's own (to 0.05 mm, as the lapse), never past
+     * the head camera's eye, no frame's step changing by more than the judge allows or the release alone does in that
+     * frame, and at the incoming eye at the end, within two of the release's longest (750 to 800 ms seen, the incoming
+     * eye off the line: the way along it, then across) */
+    CHECK(runs > 50 && worst.outside <= 5e-5f && worst.past_head <= 5e-5f && worst.over_bound <= 0 && worst.ended);
+    CHECK(worst.took_ms <= 2*TFP_EYE_RELEASE_MAX_MS+2*FRAMES[f]);
+  }
+}
+/* The incoming eye AHEAD of the head camera's own along the release's way (past it, as the eye goes), on the line and
+ * off it (round 19, second review: the speed carried onto such an eye bulged the path out of the span, 0.015 m through
+ * the helper, up to 0.075 m in 3-D pairs). The release's speed is carried only onto an eye no further on than where the
+ * release was going; otherwise it is eased away first, so the eye stays inside the span of the held eye, the incoming
+ * eye and the head camera's own, with no frame over the bound, and ends at the incoming eye. */
+static void take_over_ahead(void) {
+  const float line[3] = {.36f, .80f, -.48f}, fore[3] = {0, 1, 0};
+  const float *dirs[2] = {fore, line};
+  for (unsigned f = 0; f < 4; ++f) {
+    TakeRun worst = {0, -1, -1, 0, true, true}; int runs = 0;
+    for (unsigned d = 0; d < 2; ++d) for (int sign = -1; sign <= 1; sign += 2)
+      for (float way = .44f; way < .71f; way += .26f) for (int k = 0; k < 3; ++k) for (int across = 0; across < 3; ++across) {
+        const float ahead[3] = {.02f, .05f, .10f}, aside[3] = {0, .03f, .06f};
+        for (double draw = 0; draw <= 450.001; draw += FRAMES[f] < 10 ? 2*FRAMES[f] : FRAMES[f]) {
+          const TakeRun r = take_run(dirs[d], sign*way, -sign*ahead[k], aside[across], draw, FRAMES[f]);
+          if (!r.drawn) continue;
+          ++runs;
+          if (getenv("TFP_TAKEOVER_TABLE") && (r.outside > 5e-5f || r.over_bound > 0))
+            printf("    take-over ahead dir %u held %+.2f incoming %+.2f aside %.2f drawn %3.0f ms, %4.1f ms a frame: outside %.4f over bound %+.5f\n",
+                d, sign*way, -sign*ahead[k], aside[across], draw, FRAMES[f], r.outside, r.over_bound);
+          worst.outside = fmaxf(worst.outside, r.outside); worst.over_bound = fmaxf(worst.over_bound, r.over_bound);
+          worst.ended = worst.ended && r.ended; worst.took_ms = fmaxf(worst.took_ms, r.took_ms);
+        }
+      }
+    if (getenv("TFP_TAKEOVER_TABLE")) printf("  take-over ahead, %4.1f ms a frame: %d runs, outside the span %.6f m, over the bound %+.6f m, longest %.0f ms\n",
+        FRAMES[f], runs, worst.outside, worst.over_bound, worst.took_ms);
+    CHECK(runs > 200 && worst.outside <= 5e-5f && worst.over_bound <= 0 && worst.ended);
+    CHECK(worst.took_ms <= 2*TFP_EYE_RELEASE_MAX_MS+2*FRAMES[f]);
+  }
+}
+/* The take-over's conditions and rates, one call at a time (tfp_eye_glide_take_over): the eye at 0 going 'v' m/s along
+ * y, where it was going 1 m on. */
+static void take_over_rates(void) {
+  const float zero[3] = {0, 0, 0}, toward[3] = {0, 1, 0}, rate = TFP_EYE_RELEASE_SLOW;
+  /* The new target 0.1 m on, on the line, but too near to lose the speed in at the rate (v^2 / (2 rate) = 0.1056 m),
+   * though a release from rest of that way would be quick enough to carry it: eased away, nothing planned harder than
+   * the rate. (Carried, it lost the speed at v^2 / (2 * 0.1 m) = 14.25 m/s^2.) */
+  {
+    const float v = sqrtf(2*.1f*14.25f), speed[3] = {0, v, 0}, target[3] = {0, .1f, 0};
+    TfpEyeGlide g; tfp_eye_glide_reset(&g); tfp_eye_glide_take_over(&g, zero, speed, target, toward, 0);
+    CHECK(g.slow <= rate*1.001f && same(g.goal, target));
+  }
+  /* The new target 0.1 m on along the motion and 0.5 m aside: the speed could be lost before it, but a release from
+   * rest of the whole 0.51 m takes longer than the carried glide may last: eased away, nothing harder than the rate.
+   * (Carried, the eye went aside at 21.6 m/s^2.) */
+  {
+    const float speed[3] = {0, 1.2f, 0}, target[3] = {.5f, .1f, 0};
+    TfpEyeGlide g; tfp_eye_glide_reset(&g); tfp_eye_glide_take_over(&g, zero, speed, target, toward, 0);
+    CHECK(g.slow <= rate*1.001f && same(g.goal, target));
+  }
+  /* Eased away at the running glide's own hardest rate where it is above TFP_EYE_RELEASE_SLOW: the eye comes to rest
+   * v^2 / (2 slow) on (1/60 m at 30 m/s^2, not 1/27 m), and at TFP_EYE_RELEASE_SLOW where it is below. */
+  {
+    const float speed[3] = {0, 1, 0}, behind[3] = {0, -.1f, 0};
+    TfpEyeGlide g; tfp_eye_glide_reset(&g); tfp_eye_glide_take_over(&g, zero, speed, behind, toward, 30);
+    CHECK(fabsf(g.target[1]-1.f/60) < 1e-5f && fabsf(g.target[0]) < 1e-7f && same(g.goal, behind));
+    tfp_eye_glide_reset(&g); tfp_eye_glide_take_over(&g, zero, speed, behind, toward, 5);
+    CHECK(fabsf(g.target[1]-1/(2*rate)) < 1e-5f);
+  }
+  /* Through tfp_eye_glide_release: a release of a long way (1.2 m: 450 ms, losing its way at about 30 m/s^2) whose
+   * target goes back behind the eye 200 ms in is eased away at the release's own hardest rate, not at 13.5 m/s^2. */
+  {
+    const float held[3] = {0, -1.2f, 0}, back[3] = {0, -1.5f, 0};
+    TfpEyeGlide g; tfp_eye_glide_reset(&g); float eye[3]; memcpy(eye, held, 12);
+    for (int i = 0; i < 12; ++i) tfp_eye_glide_release(&g, eye, zero, .0167f);
+    CHECK(g.slow > 2*rate);
+    float place[3], speed[3]; tfp_eye_glide_at(&g, g.elapsed, place, speed);
+    const float v = sqrtf(dot3(speed, speed)), slow = g.slow;
+    CHECK(v > .5f);
+    tfp_eye_glide_release(&g, eye, back, 0);
+    CHECK(fabsf(g.target[1]-(place[1]+v*v/(2*slow))) < 1e-4f && same(g.goal, back));
+  }
+}
+
 int main(void) {
   retail();
   gentle();
@@ -389,6 +736,11 @@ int main(void) {
   comes_to_rest();
   gate();
   logged();
+  release();
+  lapse_mid_swap();
+  take_over();
+  take_over_ahead();
+  take_over_rates();
   printf("camera glide: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

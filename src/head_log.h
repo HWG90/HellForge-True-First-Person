@@ -38,6 +38,7 @@ typedef struct TfpHeadTick {
   const char *phase; /* its name */
   uint32_t kind;     /* the camera kind of the game's top request this tick, as the tick read it */
   unsigned rows, head, torso, shoulders;   /* owned now: all rows, and the camera rows by part (TfpHeadResult) */
+  unsigned backpack;                       /* owned now: the backpack's rows (TfpHeadResult.hidden_backpack; round 22) */
   /* The last update's TfpHeadWatch (src/head_visibility.h). */
   bool full;
   unsigned camera_rows, on_new, on_again, on_again_head, on_still, turned_off, left_on, put_back;
@@ -49,7 +50,7 @@ typedef struct TfpHeadTick {
 } TfpHeadTick;
 typedef struct TfpHeadLog {
   bool known, was_view, was_active;
-  unsigned head, torso, shoulders, left_on, put_back;
+  unsigned head, torso, shoulders, backpack, left_on, put_back;
   uint64_t veil_behind;
   uint64_t again_ticks, again_meshes, off_ticks;   /* since the start: ticks with meshes drawn again, those meshes, ticks of the view without hiding */
   double off_since;     /* round 24: when the view went on without hiding (ms; 0: it has hiding, or no clock) */
@@ -67,17 +68,18 @@ static inline bool tfp_head_log_step(TfpHeadLog *g, const TfpHeadTick *t, char *
     else if (!off && g->off_since > 0) { if (t->active && t->now_ms >= g->off_since) let_go = t->now_ms-g->off_since; g->off_since = 0; }
   }
   const unsigned was_head = g->known ? g->head : 0, was_torso = g->known ? g->torso : 0, was_shoulders = g->known ? g->shoulders : 0;
+  const unsigned was_backpack = g->known ? g->backpack : 0;
   /* A steady tick reads no row: it says nothing about what is left drawn, and what was left stands. */
   const unsigned left = t->full || !t->active ? t->left_on : g->left_on;
-  const bool worth = t->on_again || (t->put_back && t->put_back != g->put_back) || left != g->left_on || t->head != was_head || t->torso != was_torso || t->shoulders != was_shoulders
+  const bool worth = t->on_again || (t->put_back && t->put_back != g->put_back) || left != g->left_on || t->head != was_head || t->torso != was_torso || t->shoulders != was_shoulders || t->backpack != was_backpack
     || (g->known && t->active != g->was_active && (t->view || g->was_view)) || t->veil_behind != g->veil_behind;
   g->known = true; g->was_view = t->view; g->was_active = t->active;
-  g->head = t->head; g->torso = t->torso; g->shoulders = t->shoulders; g->left_on = left; g->put_back = t->put_back; g->veil_behind = t->veil_behind;
+  g->head = t->head; g->torso = t->torso; g->shoulders = t->shoulders; g->backpack = t->backpack; g->left_on = left; g->put_back = t->put_back; g->veil_behind = t->veil_behind;
   if (!worth || !size) return false;
-  snprintf(text, size, "Head: kind=%u %s: owns head %u, torso %u, shoulders %u (%u rows; was head %u, torso %u, shoulders %u); found drawn %u new, %u again (%u of "
+  snprintf(text, size, "Head: kind=%u %s: owns head %u, torso %u, shoulders %u, hidden_backpack %u (%u rows; was head %u, torso %u, shoulders %u, hidden_backpack %u); found drawn %u new, %u again (%u of "
            "the head), %u still; switched off %u, left drawn %u, gave back %u; so far drawn again on %llu ticks (%llu meshes), view on without hiding on %llu ticks; veil: %llu leaves, %llu frames, eye moved clear on %llu, "
            "left behind the head on %llu, largest move %.3f m, opens at %s",
-           t->kind, t->phase ? t->phase : "-", t->head, t->torso, t->shoulders, t->rows, was_head, was_torso, was_shoulders, t->on_new, t->on_again, t->on_again_head,
+           t->kind, t->phase ? t->phase : "-", t->head, t->torso, t->shoulders, t->backpack, t->rows, was_head, was_torso, was_shoulders, was_backpack, t->on_new, t->on_again, t->on_again_head,
            t->on_still, t->turned_off, t->left_on, t->put_back, (unsigned long long)g->again_ticks, (unsigned long long)g->again_meshes,
            (unsigned long long)g->off_ticks, (unsigned long long)t->veil_leaves, (unsigned long long)t->veil_frames, (unsigned long long)t->veil_moved,
            (unsigned long long)t->veil_behind, (double)t->veil_largest_m,
