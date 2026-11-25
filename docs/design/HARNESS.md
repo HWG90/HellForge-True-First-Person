@@ -115,9 +115,13 @@ As a spec:
   `MOUSEEVENTF_WHEEL` with `mouseData` = delta; a delta that is 0, not a whole notch (a multiple of 120) or over ten
   notches is refused (counted in `failed`).
 - `aim.py` `ZOOM_STEP` = `down r; wait 0.8; wheel 1; wait 0.3; up r`. `scope_zoom()`: full aim, then
-  `zoom_cycle()`: one `ZOOM_STEP` per range, each range held `ZOOM_HOLD_S` (2 s) in full aim, at most `ZOOM_STEPS`
-  (4) or until the field of view comes back to the first. Where no step changed the field of view, `zoom_before_aim()`:
-  for each range `ZOOM_STEP` with no aim held, then a whole full aim of 2 s. Each step is kept in `zoom_steps`
+  `zoom_cycle()`: one `ZOOM_STEP` per range, each range, the last too, held `ZOOM_HOLD_S` (2 s) in full aim counted
+  from R let go, so the hold is free aim with the weapon functions menu shut (the step itself takes about 1.26 s; the
+  first build counted the hold from before it and left 0.77 s, the last range 1.1 s), at most `ZOOM_STEPS` (4) or
+  until the field of view comes back to the first. Where no step changed the field of view, `zoom_before_aim()`: for
+  each range `ZOOM_STEP` with no aim held, then a whole full aim of 2 s. Where the fallback changes the field of view
+  the phase is judged on its steps: what the ranges in aim said (full aim lost under R) is kept in `in_aim_notes`
+  and does not fail it. Each step is kept in `zoom_steps`
   (where, field of view before and after, `zoomed`, the sight and depth before and after, `seat_moved`, held in full
   aim) and `zoom_where` says "in aim", "before aim" or nothing. A capture of each step goes beside the phase's
   (`OUT/aim-scope-zoom-N.png`), for the reticle where the field of view does not move.
@@ -129,16 +133,20 @@ As a spec:
 - `dive.py` `dive_swap()`, the matrix phase `dive-swap` (`matrix.DIVES`, played by `matrix.play()` like the aims, and
   in the soak's draw): `key 1`, read the log until the game's view (a View line with `kind=6`), then
   `down w; wait 0.3; key alt; wait D; key 2; wait 2.5; up w` with D from `SWAP_AFTER_S` = 1.0, 0.6, 1.3, 0.3 s in
-  turn until `State: left the native view` comes in the try's stretch; `key 1` after every try. The result lists each
-  try and the veiled Trace rows' `veil_head=(ahead up)`, with the lowest head. Why a late swap: a dive alone holds the
+  turn until a `State: left the native view` comes in the try's stretch whose last `Motion: action=` before it is
+  `dive` (`dive_leave()`; a leave after the dive landed is noted, `left_any`, and not counted); `key 1` after every
+  try. The result lists each try and the veiled Trace rows' `veil_head=(ahead up)` of that leave only (to the next
+  `entered the native view`), with the lowest head. Why a late swap: a dive alone holds the
   game's view; in feel.52's soak 34 (02:22:23.454) a swap 1.3 s into a dive left it ("hold ended: the gun has left
   the hands"), while the soak overlap with the swap 0.3 s in stayed in kind 6. The phase fails where no try left the
   view or no veiled row came (`dive.verdict()`); the soak prints a line for each and a summary
   `dive + swap: N of M left the game's view; ... the head lowest X m from the eye`.
 - Offline proof: `tests/test_harness_aim.py` (the wheel's event lines, the helper built against the stand-in
-  `windows.h`, which now writes `wheel <delta>`, the zoom sequences against a fake game) and
+  `windows.h`, which now writes `wheel <delta>`, the zoom sequences against a fake game whose scripts take their own
+  time on the fake clock, so the 2 s of each range are measured from R let go) and
   `tests/test_harness_dive.py` (the try's events, the view and veil_head reading, the tries against a fake game, the
-  phase wiring, and soak 36 read: 112 veiled rows, lowest -0.2228 m). `win_input.c` also builds with
+  phase wiring with the soak's `act()`, a leave in the dive against one after it, and soak 36 read: 112 veiled rows,
+  lowest -0.2228 m). `win_input.c` also builds with
   `x86_64-w64-mingw32-gcc -Wall -Wextra -Werror` against the real headers. Not proven offline: that the game hears the
   wheel in the weapon functions menu, which of in aim or before aim it takes, whether the BR-14's range changes its
   field of view, and at which delay a swap leaves the game's view.

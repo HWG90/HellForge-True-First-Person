@@ -118,8 +118,8 @@ Phases (`tools/harness/matrix.py OUT_DIR PHASE ...`):
 | Phase | What it does | Passes when |
 | --- | --- | --- |
 | `aim-full` | full aim, then 2 s | the camera judge passes, `State: aim in` came, no `State: aim out` before the harness let go, an `Aim: in` line, an `Aim: out after` at least 2.0 s |
-| `aim-scope-zoom` | round 30: full aim, then the scope's range the game's way on PC: hold R (the weapon functions menu), the mouse wheel up one notch, let go of R (`aim.ZOOM_STEP`); each range held 2 s in full aim, up to 4 steps or until the field of view comes round to the first. Where no step changed it, the same steps before aiming, each followed by a full aim of 2 s | as aim-full (2 s), at least two zoom levels in the `Aim:` lines, and every step held in full aim |
-| `dive-swap` | round 30: the primary up and the game's view, then a dive forward with a swap to the secondary D s into it, D = 1.0, 0.6, 1.3, 0.3 in turn until the log says `State: left the native view`; the primary back after each try (`tools/harness/dive.py`) | the camera judge passes, a try left the game's view, and veiled `Trace:` rows carry `veil_head` |
+| `aim-scope-zoom` | round 30: full aim, then the scope's range the game's way on PC: hold R (the weapon functions menu), the mouse wheel up one notch, let go of R (`aim.ZOOM_STEP`); each range, the last too, held 2 s in full aim after R is let go (the menu shut), up to 4 steps or until the field of view comes round to the first. Where no step changed it, the same steps before aiming, each followed by a full aim of 2 s | as aim-full (2 s), at least two zoom levels in the `Aim:` lines, and every step where the zoom changed (in aim, or before aiming) held in full aim; a loss of full aim in the in-aim steps does not fail the fallback |
+| `dive-swap` | round 30: the primary up and the game's view, then a dive forward with a swap to the secondary D s into it, D = 1.0, 0.6, 1.3, 0.3 in turn until the log says `State: left the native view` with `Motion: action=dive` the last action before it; the primary back after each try (`tools/harness/dive.py`) | the camera judge passes, a try left the game's view in the dive, and that leave's veiled `Trace:` rows carry `veil_head` |
 | `aim`, `aim-fire`, `aim-walk`, `pistol-aim` | as before, but in full aim | as before, and as aim-full with their own hold |
 
 The phase line prints `full aim after T s (N aim-mode presses)` or `NO full aim`, the `Aim:` lines counted by kind
@@ -154,7 +154,8 @@ Run `matrix.py OUT aim-full aim-scope-zoom aim aim-fire pistol-aim dive-swap` wi
   with its sight and depth, and look at the step captures: the reticle or the range shown should change with each
   step. Then the gate's `changed K times` at each range confirms or kills the testers' "zoom shake at 50/100 m".
   - `full aim was lost while the scope's range was stepped` means holding R ends full aim; the before-aim steps
-    then show whether the range is set outside the sights.
+    then show whether the range is set outside the sights. Where they change the zoom the phase passes and that
+    note is under `in_aim_notes`.
   - `the zoom never changed` with `seat_moved` steps (the sight or depth moved) means the range changed and this
     weapon's field of view does not follow it: a zeroing, not a zoom. Try a scope that really magnifies.
   - `the zoom never changed` and nothing moved, with captures that look the same: the wheel did not reach the menu.
@@ -164,6 +165,8 @@ Run `matrix.py OUT aim-full aim-scope-zoom aim aim-fire pistol-aim dive-swap` wi
 - dive-swap: `left the game's view` and the head's lowest point. Round 26 estimated 0.55 m below the eye in a dive;
   the lowest so far is -0.223 m (a crouch). Write the number here. `the game's view never left` after four tries
   means the swap is held through at every delay; try it after a sprint, or swap to the support weapon (`key 3`).
+  `the view was left after the dive, not in it` means the swap came once the dive had landed: try the shorter
+  delays first.
 - The aim phases pass with the view in first person the whole time (`+0 missed`). This is the first harness run of
   the Aim field of view and of the near clip in full aim, so judge their captures too.
 
