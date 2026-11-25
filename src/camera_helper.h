@@ -280,6 +280,15 @@ void tfp_camera_orphan_stats(TfpCameraOrphanStats *out);
  * 0), does not open the veil there: it is kept pending, and the tick that sees it opens the veil (tfp_camera_veil_tick),
  * which moves only head-camera frames: nothing, when the view went straight back. Every other leave opens it as before. */
 #define TFP_CAMERA_VEIL_SAME_FRAME_MS 2.0
+/* Round 30 (review): a leave kept pending whose view does not go back (a knock-down or a gun dropped in full aim, say;
+ * none in soaks 8 to 36) is veiled from its second head-camera frame, which the whole move would make jump by up to
+ * TFP_CAMERA_VEIL_MOST in a frame between two head-camera frames. Its move is let in instead: the n-th veiled frame
+ * after such a leave moves the eye at most tfp_camera_veil_let_in(n) = TFP_CAMERA_VEIL_LET_IN_M n (n+1) / 2, so the
+ * step changes by at most TFP_CAMERA_VEIL_LET_IN_M a frame (under the judge's 0.06 m), and the let-out after the
+ * veil closes starts from what was moved. The cost: those frames are short of TFP_CAMERA_VEIL_CLEAR (counted behind),
+ * a frame or two of the helmet where the body is drawn, as a move over TFP_CAMERA_VEIL_MOST already accepts. */
+#define TFP_CAMERA_VEIL_LET_IN_M .04f
+static inline float tfp_camera_veil_let_in(unsigned frames) { return TFP_CAMERA_VEIL_LET_IN_M*(float)frames*(float)(frames+1)/2; }
 /* What of the last move is still added `ms` after the last veiled frame: from 1 to 0 from rest to rest (1 - smoothstep),
  * so the step changes by at most 6 (dt/T)^2 of the move a frame: 0.058 m for 0.40 m at 50 ms a frame. */
 static inline float tfp_camera_veil_let_out(double ms) {
