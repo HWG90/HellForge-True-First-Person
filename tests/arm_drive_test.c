@@ -1998,18 +1998,20 @@ static void test_grip_reach_forward(void) {
   CHECK(most_step < 1 && !g.cut && !g.out_of_reach && !g.too_far);
   const char *line = tfp_arm_drive_grip_line(&g);
   CHECK(strstr(line, "reach 1.0") && strstr(line, "shoulder forward 0.0") && strstr(line, "0 frames cut, not taken: 0 out of reach, 0 too far"));
-  /* the fake engine does not evaluate the rig and gun again after the write: what it reads is what the game held */
-  CHECK(g.drawn && strstr(line, "as drawn the hand"));
-  /* aiming fading in or out (the copy's weight under 1): the drawn arm is part the game's aim pose, so the hand as
-   * drawn is not measured, though the reach holds the grip (review of round 26) */
+  /* the fake engine does not evaluate the rig and gun again after the write: what it reads is what the game held. The
+   * hand as drawn is a line of its own since round 36b (test_grip_drawn_line) */
+  CHECK(g.drawn && !strstr(line, "as drawn") && strstr(tfp_arm_drive_grip_drawn_line(&g), "as drawn at the hip (30 frames, 30 held)"));
+  /* aiming fading in or out (the copy's weight under 1): measured too since round 36b, apart from the hip */
   tfp_arm_drive_set(true, true, .5f);
   for (int i = 0; i < 10; i++) grip_draw(t += 33, &hand, &socket);
   tfp_arm_drive_grip_take(&g);
-  CHECK(g.state == TFP_ARM_GRIP_HELD && g.held == 10 && !g.drawn && !strstr(tfp_arm_drive_grip_line(&g), "as drawn"));
+  CHECK(g.state == TFP_ARM_GRIP_HELD && g.held == 10 && g.drawn && !g.hip.frames && g.aim.frames == 10 && g.aim.held == 10);
+  CHECK(strstr(tfp_arm_drive_grip_drawn_line(&g), "as drawn at the hip: not measured; while aiming (10 frames, 10 held)"));
   tfp_arm_drive_set(true, true, 1);
   for (int i = 0; i < 10; i++) grip_draw(t += 33, &hand, &socket);
   tfp_arm_drive_grip_take(&g);
-  CHECK(g.state == TFP_ARM_GRIP_HELD && g.drawn);
+  CHECK(g.state == TFP_ARM_GRIP_HELD && g.drawn && g.hip.frames == 10 && !g.aim.frames);
+  CHECK(strstr(tfp_arm_drive_grip_drawn_line(&g), "while aiming: not measured"));
 }
 /* A foregrip: its own node, where the body's hand is, and the gun's own node 17 cm from there: the foregrip's is held. */
 static void test_grip_foregrip(void) {
@@ -2159,6 +2161,100 @@ static void test_grip_attachment_never_gun_own(void) {
     CHECK(grip_m(&hand, &at) < .001f);
   }
   printf("arm drive: grip: an attachment's node 0.084 m below the gun's own: held whichever node the body's hand is latched on\n");
+}
+/* Round 36b (A of the Adjudicator diagnosis): the hand as drawn, which the Grip line has to prove each cause with: the
+ * wrist (rig node 13) from the node it holds, its turn from the node's, the palm (0.05 m along each one's X) from the
+ * node's palm point, the fingers' curl (middle and index, joints 1 to 2, X to X) and the wrist from the gun's own node; at
+ * the hip and while aiming apart. Here the rig's evaluated matrices are put by hand (the fake engine does not evaluate)
+ * and each number is checked against them; and the two lines stay inside say()'s 700 characters, whatever the numbers. */
+static void put_rig_world(unsigned node, const TfpGraftMatrix *m) { put(worlds_of(RIG) + 64 * (uintptr_t)node, m, 64); }
+static TfpGraftMatrix own_turn(const TfpGraftMatrix *m, unsigned row, double degrees) {
+  TfpOgFrame f = tfp_og_frame(m);
+  double axis[3];
+  memcpy(axis, f.r[row], sizeof axis);
+  tfp_og_turn_rows(f.r, axis, degrees * TFP_OG_PI / 180);
+  TfpGraftMatrix out = *m;
+  for (unsigned i = 0; i < 3; i++)
+    for (unsigned j = 0; j < 3; j++) out.values[4 * i + j] = (float)f.r[i][j];
+  return out;
+}
+static void test_grip_drawn_line(void) {
+  static const float zero[3] = {0, 0, 0};
+  float ahead[3];
+  forward_of_socket(.12f, -.04f, ahead);
+  TfpGraftMatrix hand, socket;
+  fresh();
+  grip_resources();
+  grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], zero, NULL);
+  fit_grip(ahead);
+  tfp_arm_drive_set(true, true, 1);
+  tfp_arm_drive_set_grip(true, false);
+  uint64_t t = 1000;
+  for (int i = 0; i < 40; i++) grip_draw(t += 16, &hand, &socket);
+  /* the node it holds, the gun's own, and the drawn wrist: 1 cm along the node's X from it, turned 30 degrees about its Y */
+  TfpGraftMatrix node = body_now[body_left_hand()], own = node;
+  for (unsigned i = 0; i < 3; i++) node.values[12 + i] += ahead[i];
+  TfpGraftMatrix wrist = own_turn(&node, 1, 30);
+  for (unsigned i = 0; i < 3; i++) wrist.values[12 + i] += .01f * node.values[i];
+  put_rig_world(13, &wrist);
+  /* the fingers: middle 1 to 2 turned 60 degrees, index 1 to 2 turned 40 */
+  const TfpGraftMatrix m2 = own_turn(&wrist, 1, 60), i2 = own_turn(&wrist, 1, 40);
+  put_rig_world(20, &wrist), put_rig_world(21, &m2), put_rig_world(23, &wrist), put_rig_world(24, &i2);
+  TfpArmDriveGrip g;
+  tfp_arm_drive_grip_take(&g);
+  for (int i = 0; i < 5; i++) grip_draw(t += 16, &hand, &socket);
+  tfp_arm_drive_grip_take(&g);
+  double palm[3];
+  for (unsigned i = 0; i < 3; i++) palm[i] = wrist.values[12 + i] + .05 * wrist.values[i] - node.values[12 + i] - .05 * node.values[i];
+  const double palm_m = tfp_og_len(palm), own_m = grip_m(&wrist, &own);
+  printf("arm drive: grip as drawn: wrist %.4f m, turned %.2f degrees, palm %.4f m, fingers %.2f degrees, %.4f m from the gun's own node\n",
+         (double)g.hip.m, (double)g.hip.turn, (double)g.hip.palm_m, (double)g.hip.curl, (double)g.hip.own_m);
+  CHECK(g.drawn && g.hip.frames == 5 && g.hip.held == 5 && !g.aim.frames);
+  CHECK(fabsf(g.hip.m - .01f) < 1e-5f && fabsf(g.hip.most_m - .01f) < 1e-5f);
+  CHECK(fabsf(g.hip.turn - 30) < .01f && fabsf(g.hip.most_turn - 30) < .01f);
+  CHECK(fabs(g.hip.palm_m - palm_m) < 1e-5 && fabs(g.hip.most_palm_m - palm_m) < 1e-5);
+  CHECK(fabsf(g.hip.curl - 50) < .01f && fabsf(g.hip.least_curl - 50) < .01f);
+  CHECK(fabs(g.hip.own_m - own_m) < 1e-5);
+  const char *line = tfp_arm_drive_grip_drawn_line(&g);
+  CHECK(line && strstr(line, "as drawn at the hip (5 frames, 5 held): the hand 0.010 m from the grip (most 0.010), turned 30.0 degrees (most 30.0), palm "));
+  CHECK(strstr(line, "fingers curled 50.0 degrees (least 50.0)") && strstr(line, "m from the gun's own node; while aiming: not measured"));
+  /* aiming: the same numbers in the other half */
+  tfp_arm_drive_set(true, true, 0);
+  for (int i = 0; i < 3; i++) grip_draw(t += 16, &hand, &socket);
+  tfp_arm_drive_grip_take(&g);
+  /* (the weight dropped at once, not over arm_weight.h's 120 ms: the arm eases to the grip on the game's aim pose, so these
+   * frames are measured, not yet held) */
+  CHECK(!g.hip.frames && g.aim.frames == 3 && fabsf(g.aim.m - .01f) < 1e-5f && fabsf(g.aim.curl - 50) < .01f);
+  CHECK(strstr(tfp_arm_drive_grip_drawn_line(&g), "as drawn at the hip: not measured; while aiming (3 frames, "));
+  CHECK(strstr(tfp_arm_drive_grip_drawn_line(&g), " held): the hand 0.010 m from the grip"));
+  /* the body's hand off the gun (a reload): nothing measured, no line */
+  static const float far[3] = {.3f, 0, 0};
+  grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], far, NULL);
+  for (int i = 0; i < 3; i++) grip_draw(t += 16, &hand, &socket); /* (the first: the body's hand may trail the node by a frame) */
+  tfp_arm_drive_grip_take(&g);
+  for (int i = 0; i < 3; i++) grip_draw(t += 16, &hand, &socket);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(g.state == TFP_ARM_GRIP_FREE && !g.drawn && !tfp_arm_drive_grip_drawn_line(&g));
+  /* the longest lines say() is ever given: within its 700 characters with "Grip: " before them */
+  TfpArmDriveGrip big;
+  memset(&big, 0, sizeof big);
+  big.frames = big.held = big.nodes = big.units = big.cut = big.out_of_reach = big.too_far = UINT32_MAX;
+  big.state = TFP_ARM_GRIP_FREE, big.found = true, big.attachment = true, big.target_unit = 1, big.gate_unit = 0;
+  big.body_m = big.to_m = big.most_to_m = big.reach = big.most_reach = big.shoulder_m = big.most_shoulder_m = -999999.f;
+  big.step_degrees = big.limit_degrees = big.weight = big.held_step_degrees = big.body_degrees = -999999.f;
+  big.drawn = true;
+  TfpArmDriveDrawn *const b[2] = {&big.hip, &big.aim};
+  for (unsigned k = 0; k < 2; k++) {
+    b[k]->frames = b[k]->held = UINT32_MAX;
+    b[k]->m = b[k]->most_m = b[k]->turn = b[k]->most_turn = b[k]->palm_m = b[k]->most_palm_m = b[k]->curl = b[k]->least_curl = b[k]->own_m = -999999.f;
+  }
+  for (uint32_t state = 0; state < TFP_ARM_GRIPS; state++) {
+    big.state = state;
+    CHECK(strlen(tfp_arm_drive_grip_line(&big)) + 6 < 700);
+  }
+  CHECK(strlen(tfp_arm_drive_grip_drawn_line(&big)) + 6 < 700);
+  printf("arm drive: grip lines at most %zu and %zu characters (say() keeps 699)\n", strlen(tfp_arm_drive_grip_line(&big)) + 6,
+         strlen(tfp_arm_drive_grip_drawn_line(&big)) + 6);
 }
 /* Round 36: a grip unit that is not a child of the gun but hangs on one of its nodes from elsewhere (a child of the rig
  * whose external array is the gun's): seen, listed as from elsewhere, and held. */
@@ -2438,6 +2534,7 @@ int main(int argc, char **argv) {
   test_grip_foregrip();
   test_grip_foregrip_body_on_gun();
   test_grip_attachment_never_gun_own();
+  test_grip_drawn_line();
   test_grip_mounted_from_rig();
   test_grip_while_aiming();
   test_grip_fingers_close();
