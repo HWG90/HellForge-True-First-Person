@@ -588,7 +588,7 @@ int main() {
   // after the native frame with its ordinary camera on top and no action owning the view, and the next frame is the
   // native view again. The leave is kept pending: that frame is not moved (it is the eye the veil would not have
   // touched), the tick opens the veil for head-camera frames only, and the native frames after it are the game's own.
-  // A swap in full aim (the gun leaving the hands, mask 2), a
+  // A swap in full aim (the gun leaving the hands, mask 2), any other action owning the view (mask 1, a stim's 0x40), a
   // same-frame leave out of the hip and a lone frame a whole frame later are veiled at once as before; a kept leave
   // whose view stays away is veiled from the next frame, its move let in (TFP_CAMERA_VEIL_LET_IN_M: 0.04 m, then
   // 0.12 m) instead of the whole 0.32 m in one frame, and let out from there after the veil closes. ----
@@ -596,6 +596,8 @@ int main() {
     struct Release { const char *name; bool aim; uint32_t mask; double gap; bool kept; };
     const Release cases[] = {{"aim released, nothing owns the view, 0.35 ms", true, 0, .35, true},
                              {"a swap in full aim (mask 2), 0.25 ms", true, 2, .25, false},
+                             {"another action owning the view (mask 1), 0.3 ms", true, 1, .3, false},
+                             {"a stim in full aim (mask 0x40), 0.3 ms", true, 0x40, .3, false},
                              {"out of the hip, 0.3 ms", false, 0, .3, false},
                              {"aim released, a whole frame later", true, 0, 33.3, false}};
     for (const Release &c : cases) for (int stay = 0; stay < 2; ++stay) {
