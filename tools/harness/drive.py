@@ -15,6 +15,7 @@ Command line:
   drive.py focus
   drive.py shot OUT.png
   drive.py run "wait 0.5; key r; hold w 0.7; click left 0.6; look 0 -40; key f11"
+  drive.py run "down right; wait 0.35; click middle; wait 2"    full aim (the middle button is the game's aim mode)
 """
 import json
 import os
@@ -111,7 +112,11 @@ def _code(name):
 
 
 def events(script):
-    """Turn 'wait S; key NAME; hold NAME S; click BUTTON [S]; down NAME; up NAME; look DX DY' into timed lines."""
+    """Turn 'wait S; key NAME; hold NAME S; click BUTTON [S]; down NAME; up NAME; keep NAME; look DX DY' into timed lines.
+
+    keep NAME: what this script pressed with `down NAME` is left down when the helper ends (the helper otherwise lets
+    go of everything it still holds). A later run's `up NAME` lets go of it; Input.close() does for what is left. Round
+    26: full aim is held across runs while the log is read (tools/harness/aim.py)."""
     at, lines = 0.0, []
     def add(text):
         lines.append(f"{int(at * 1000)} {text}")
@@ -130,6 +135,8 @@ def events(script):
         elif word == "up":
             add(f"u {_code(rest[0])}")
             at += 0.03
+        elif word == "keep":
+            add(f"k {_code(rest[0])}")
         elif word == "point":   # point X Y: the pointer to a pixel of the game's client area (menus)
             add(f"p {int(rest[0])} {int(rest[1])}")
             at += 0.1
@@ -182,12 +189,28 @@ def _helper():
     return executable
 
 
+def held_after(script, held=()):
+    """The names still down after `script` ran, given those down before: a `down` with a `keep` stays down, an `up`
+    lets go; everything else the helper lets go of when it ends."""
+    held, downs, kept = set(held), set(), set()
+    for step in filter(None, (part.strip() for part in script.split(";"))):
+        word, *rest = step.split()
+        if word == "down":
+            downs.add(rest[0])
+        elif word == "keep":
+            kept.add(rest[0])
+        elif word in ("up", "key", "hold", "click"):
+            held.discard(rest[0]); downs.discard(rest[0])
+    return held | (downs & kept)
+
+
 class Input:
     """Plays input scripts as window messages posted from inside the game's Wine prefix (win_input.c)."""
 
     def __init__(self, check_focus=True):
         self.check_focus = check_focus
         self.executable = _helper()
+        self.held = set()   # names a script left down with `keep`; close() lets go of them
 
     def run(self, script):
         lines, total = events(script)
@@ -211,6 +234,8 @@ class Input:
             report = Path(scratch) / "result.txt"
             text = report.read_text() if report.is_file() else ""
         time.sleep(max(0.0, total - (time.monotonic() - started)))  # a trailing wait is part of the script
+        if result.returncode in (0, 4):   # 4: played, some events refused; what was kept may be down
+            self.held = held_after(script, self.held)
         if result.returncode:
             raise DriveError(f"input helper failed ({result.returncode}): {text or result.stderr[-300:]}")
         return text
@@ -219,7 +244,14 @@ class Input:
         return self.run(f"hold {name} {seconds}")
 
     def close(self):
-        pass
+        """Lets go of what a `keep` left down (the aim button of an aim that was interrupted)."""
+        if self.held:
+            names = sorted(self.held)
+            try:
+                self.run("; ".join(f"up {name}" for name in names))
+            except DriveError as error:
+                print(f"drive: could not let go of {', '.join(names)}: {error}; click them in the game", file=sys.stderr)
+            self.held = set()
 
     def __enter__(self):
         return self
