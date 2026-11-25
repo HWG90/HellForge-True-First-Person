@@ -1174,6 +1174,121 @@ int main() {
     CHECK(tfp_camera_error() == 0);
     g.end();
   }
+  // ---- 28. A high clamber in the head camera (round 24; the user's log of 2026-11-24 on feel.51, 20:27:42, Stable).
+  // The native view, then the head camera as the gun is stowed (the binder's event, mask 0x22), and the body root
+  // climbs 1.8 m in 0.3 s at 6 m/s. The head goes up with it for 80 ms and then crouches onto the ledge: it rises at
+  // 1.2 m/s while the root goes on (a step change of 0.08 to 0.24 m a frame against the root, at 16.7 to 50 ms a frame);
+  // the mask is 0x20 from 0.15 s on. The root stops; 0.15 s later the body stands up (the head 1.06 m up against the
+  // root at 2.5 m/s, inside the window the event opened), the mask 2 from 0.55 s (the gun being drawn, as at
+  // 20:28:14.0, where Stable's damping held the eye 0.25 m below the rising head); then the native view on mask 0.
+  // In the log the crouch was taken up as four jumps, the run's speed handed to the ease-out, and the shown eye rose
+  // 0.5 to 0.6 m past the head and sank back over 0.3 s, with Stable's damping 0.25 m behind on top. Now: the shown
+  // eye stays within 0.25 m of the head camera's eye throughout (the change of camera at the hand-off is eased, 0.08 m
+  // here), and within 0.1 m of it from 100 ms after the root stops. ----
+  {
+    static const float times[] = {8, 16.7f, 33.3f, 50};
+    for (unsigned d = 0; d < 4; ++d) for (int bodycam = 0; bodycam < 2; ++bodycam) {
+      const double dt = times[d];
+      fresh(true, true, true, bodycam ? 180.0f : 0.0f, bodycam != 0);
+      tfp_camera_set_action_tuning(0x22, 900, true); // the binder's: the head camera takes the clamber's mask
+      Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.native(); g.begin();
+      standing(g, static_cast<int>(500 / dt), dt, true);
+      tfp_camera_continuity_event(); // "hold ended: the gun has left the hands"
+      { TfpCameraTraceRow drop[128]; while (tfp_camera_trace_read(drop, 128)) {} }
+      tfp_camera_trace_edge();
+      unsigned turned = 0, rows_read = 0; float worst_turn = 0;
+      float climbing = 0, after = 0, risen = 0; double t = 0;
+      const float c = std::cos(.2f), n = std::sin(.2f);
+      for (; t < 1.3; t += dt / 1000) {
+        const float tc = static_cast<float>(std::fmin(t, .3));
+        const float root_z = 6 * tc, forward = 3.3f * tc;
+        const float head_z = 1.5f + 6 * std::fmin(tc, .08f) + 1.2f * std::fmax(0.0f, tc - .08f); // in the world
+        float height = head_z - root_z;
+        if (t > .45) height = std::fmin(1.5f, height + 2.5f * static_cast<float>(t - .45));
+        g.pose(1 - n * forward, 2 + c * forward, root_z, .2f, height);
+        const uint32_t mask = t < .15 ? 0x22u : t < .55 ? 0x20u : 2u; // the gun drawn in the stand-up, as at 20:28:14
+        if (t < .9) g.hip(mask); else g.native(0);
+        g.frame(dt);
+        { TfpCameraTraceRow rows[128]; // round 24: every head-camera row says the direction shown, a unit vector along the look (yaw 0.2, level)
+          for (uint32_t i = 0, count = tfp_camera_trace_read(rows, 128); i < count; ++i) {
+            if (rows[i].kind != 4) continue; // the fake's native argument is not a rig-local direction
+            ++rows_read;
+            const float *v = rows[i].turn, length = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+            if (length > .99f && length < 1.01f) ++turned;
+            worst_turn = std::fmax(worst_turn, std::sqrt((v[0] + n) * (v[0] + n) + (v[1] - c) * (v[1] - c) + v[2] * v[2]));
+          } }
+        if (t < .9) {
+          climbing = std::fmax(climbing, g.from_head_eye());
+          if (t >= .4) after = std::fmax(after, g.from_head_eye());
+        }
+        if (t >= .45 && t < .9) risen = std::fmax(risen, g.from_head_eye());
+      }
+      std::printf("a high clamber in the head camera, %s, %g ms a frame: the shown eye at most %.3f m from the head camera's eye, "
+                  "%.3f m once the root stopped (%.3f m in the stand-up), the change of its step %.3f m at most\n",
+                  bodycam ? "Bodycam" : "Stable", dt, climbing, after, risen, g.world_change);
+      CHECK(climbing <= .25f);
+      CHECK(after <= .10f);
+      if (!(rows_read > 0 && turned == rows_read && worst_turn < .01f)) std::printf("  turn: %u rows, %u unit, %.4f off\n", rows_read, turned, worst_turn);
+      CHECK(rows_read > 0 && turned == rows_read && worst_turn < .01f);
+      CHECK(tfp_camera_error() == 0);
+      g.end();
+      tfp_camera_set_action_tuning(0, 300, false); // the defaults again for what runs after
+    }
+  }
+  // ---- 29. The window and a clamber's masks, in the helper (round 24 review: putting the old rule back in
+  // smooth_detect, any change of mask opening the window, survived every test). The head camera on a vault's mask
+  // 0x20 with the root still, long after any event (no jump is looked for), then the clamber's 0x22: nothing opens.
+  // The same with a swap's 2 then 0: that change of mask opens the window, as it always did. ----
+  for (int traversal = 0; traversal < 2; ++traversal) {
+    fresh(true, true, true);
+    tfp_camera_set_action_tuning(0x22, 900, true);
+    Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+    standing(g, 40, 33.3, false, traversal ? 0x20u : 2u); // 1.3 s: any window is over
+    { TfpCameraTraceRow drop[128]; while (tfp_camera_trace_read(drop, 128)) {} }
+    standing(g, 5, 33.3, false, traversal ? 0x22u : 0u);
+    tfp_camera_trace_edge();
+    TfpCameraTraceRow rows[64];
+    const uint32_t count = tfp_camera_trace_read(rows, 64);
+    unsigned before = 0, after = 0;
+    for (uint32_t i = 0; i < count; ++i) if (rows[i].what & TFP_CAMERA_TRACE_LOOKED) { if (i == 0) ++before; else ++after; }
+    std::printf("the window at a change of mask %s, the head camera, the root still: %u of %u frames after it looked at\n",
+                traversal ? "0x20 -> 0x22" : "2 -> 0", after, count - 1);
+    CHECK(count == 6 && before == 0);
+    if (traversal) CHECK(after == 0); else CHECK(after == 5);
+    CHECK(tfp_camera_error() == 0);
+    g.end();
+    tfp_camera_set_action_tuning(0, 300, false);
+  }
+  // ---- 30. THE SETTLE's switch and gate, in the helper (round 24 review: dropping its mask-0 condition survived).
+  // The native view, then the head camera on a swap's mask 2, then the binder's arm (the native view was left for a
+  // new firearm) and the native view again with the rig 0.3 m under the head camera's eye. Only with the switch on
+  // (settle_on.txt), the arm given and the entry on mask 0 is the eye held (a Trace row says +settle). ----
+  {
+    struct Case { bool on, arm; uint32_t mask; bool held; const char *name; } cases[] = {
+      {false, true, 0, false, "the switch off (the default)"}, {true, true, 0, true, "the switch on, armed, mask 0"},
+      {true, true, 2, false, "the switch on, armed, mask 2"}, {true, false, 0, false, "the switch on, not armed"}};
+    for (const Case &k : cases) {
+      fresh(true, true, true);
+      tfp_camera_set_settle(k.on);
+      Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.native(); g.begin();
+      standing(g, 20, 33.3, true);
+      standing(g, 20, 33.3, false, 2);
+      if (k.arm) tfp_camera_settle_arm();
+      g.eye[2] = -.25f;
+      standing(g, 4, 33.3, true, k.mask);
+      tfp_camera_trace_edge();
+      TfpCameraTraceRow rows[64];
+      const uint32_t count = tfp_camera_trace_read(rows, 64);
+      unsigned held = 0, native = 0;
+      for (uint32_t i = 0; i < count; ++i) { if (rows[i].kind == 6) ++native; if (rows[i].what & TFP_CAMERA_TRACE_SETTLE) ++held; }
+      std::printf("THE SETTLE, %s: %u of %u native frames held\n", k.name, held, native);
+      CHECK(native == 4);
+      CHECK(k.held ? held > 0 : held == 0);
+      CHECK(tfp_camera_error() == 0);
+      g.end();
+    }
+    tfp_camera_set_settle(false);
+  }
   std::printf("camera smooth: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

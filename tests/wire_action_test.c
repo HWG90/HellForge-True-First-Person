@@ -1,4 +1,4 @@
-/* src/wire_action.h: the pick-up mask for the head camera, and the aim button between ticks. */
+/* src/wire_action.h: the high clamber's mask for the head camera, and the aim button between ticks. */
 #include <stdio.h>
 #include "wire_action.h"
 #include "quit_guard.h"
@@ -12,7 +12,7 @@ int main(void) {
   CHECK(!tfp_quit_guard_faulty(UINT64_C(0x1989750)));   /* an ordinary block: released as the engine means to */
   CHECK(!tfp_quit_guard_faulty(0) && !tfp_quit_guard_faulty(UINT64_C(0x335d20080)));
   const uint8_t pickup[6] = {0x22, 0, 0, 0, 0, 0}, guarded[6] = {0x22, 0, 0, 0, 0, 1}, other[6] = {0x40, 0, 0, 0, 0, 0}, wide[6] = {0x22, 0, 1, 0, 0, 0};
-  /* the head camera's flag: retail's answer stands; the pick-up mask adds to it on the ordinary camera only */
+  /* the head camera's flag: retail's answer stands; the clamber's mask adds to it on the ordinary camera only */
   CHECK(tfp_action_head_camera(true, 6, true, other));
   CHECK(tfp_action_head_camera(false, 4, false, pickup));
   CHECK(!tfp_action_head_camera(false, 6, false, pickup)); /* the native view is not the head camera */
@@ -104,6 +104,6 @@ int main(void) {
   CHECK(!tfp_aim_watch_probe(&w, 0, 0));
 
   if (failures) return 1;
-  printf("wire action: %d checks passed (pick-up mask for the head camera; the aim button between ticks)\n", checks);
+  printf("wire action: %d checks passed (the clamber's mask for the head camera; the aim button between ticks)\n", checks);
   return 0;
 }

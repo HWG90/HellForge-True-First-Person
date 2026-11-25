@@ -203,6 +203,13 @@ void tfp_camera_set_continuity(bool on, bool trace_frames);
  * when the control mask, the top request's kind or weapon, or the weapon key changes. Outside those windows the rig
  * eye's motion is the game's own and is shown as it is; a change of camera is always taken up. */
 void tfp_camera_continuity_event(void);
+/* Round 24: the native view was left because its request or firearm changed (a backpack picked up: the gun leaves the
+ * hands and the game re-requests the native view). The next change of camera into the native view on mask 0, within
+ * 2 s, may hold the eye until the rig has settled (THE SETTLE, src/camera_continuity.h). The binder calls it. */
+void tfp_camera_settle_arm(void);
+/* Round 24: THE SETTLE itself, a test switch (settle_on.txt beside the DLL); off by default and after
+ * tfp_camera_reset_for_tests. Off, an armed entry is presented as without it. */
+void tfp_camera_set_settle(bool on);
 /* Beyond retail, and only in frames the camera lock holds. `on`: the game still presents the first-person request
  * (kind 6) although its exit has been asked for and the gun has left the first-person rig (a stim keeps the request
  * for about 0.85 s). The rig's eye then sits at the body's head; while this is on, a native frame presents the head
@@ -296,7 +303,8 @@ enum { TFP_CAMERA_TRACE_LOOKED = 1,  /* jumps within the camera were looked for 
        TFP_CAMERA_TRACE_OFF_FOOT = 128, /* a head-camera frame of a body that was not on foot: its eye is not damped and jumps in it are not looked for. A native frame never says it: the question is not asked there */
        TFP_CAMERA_TRACE_DAMPED = 256, /* the eye damping ran in this frame (src/camera_damp.h); without it a `damp` that is not nothing is a lag being let go */
        TFP_CAMERA_TRACE_SELF = 512,  /* the presented eye changed its step by TFP_TRACE_SELF_M or more in this frame: the helper opened a window itself, or kept one open (src/trace_edges.h) */
-       TFP_CAMERA_TRACE_CUT = 1024   /* round 19: the head camera's pose cut was taken up as a change of camera (THE CUT, src/camera_continuity.h) */ };
+       TFP_CAMERA_TRACE_CUT = 1024,  /* round 19: the head camera's pose cut was taken up as a change of camera (THE CUT, src/camera_continuity.h) */
+       TFP_CAMERA_TRACE_SETTLE = 2048 /* round 24: THE SETTLE held the eye in this frame, or began or ended (src/camera_continuity.h) */ };
 /* damp: what the eye damping added to the true eye of this frame, in the world (wanted - damp is the eye the head
  * camera would have had without it); zeros where it added nothing. view: which way the view pointed, a unit vector
  * in the world (the head camera's forward; in a native frame the forward axis of the rig eye the camera hangs on);
@@ -308,7 +316,7 @@ enum { TFP_CAMERA_TRACE_LOOKED = 1,  /* jumps within the camera were looked for 
  * zeros where it moved nothing. `eye` is the eye before it (what the continuity, the damping and `step` work on), so
  * the eye shown is eye + veil. Round 18 found the veil moving the shown eye up to 0.32 m forward for a frame or two at
  * most leaves of the native view, and no row said so. */
-typedef struct TfpCameraTraceRow { float ms; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; float root[3]; uint32_t what; float axes[9]; double tick; float damp[3], view[3]; float sock; uint32_t arms; float veil[3]; } TfpCameraTraceRow;
+typedef struct TfpCameraTraceRow { float ms; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; float root[3]; uint32_t what; float axes[9]; double tick; float damp[3], view[3]; float sock; uint32_t arms; float veil[3]; float turn[3]; } TfpCameraTraceRow;
 void tfp_camera_trace_edge(void);
 /* The arm drive's figures of the last primary draw, for the newest frame presented. The draw comes after the frame's
  * camera call and before the next tick, so the binder calls this once a tick, when the drive has seen a draw since the

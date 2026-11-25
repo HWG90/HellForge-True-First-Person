@@ -422,6 +422,8 @@ static void entry_note(void) {
  *                written values left (arms_live_keep.txt), 3 driven in a hold or with the gun away (put back)
  *   eye_edge     1: the presented eye's step changed by 0.15 m or more in this frame; the camera helper opened this
  *                window itself, or kept it open (src/trace_edges.h)
+ *   turn         round 24: the direction the frame was shown with (the forward axis of the rotation handed to the game,
+ *                in the world; in the native view through the rig eye's axes), (0 0 0) where it was not known
  *   veil         round 19: how far the helmet veil moved the eye handed to the game in this frame, in the world
  *                (src/camera_helper.h tfp_camera_set_veil), or 0 where it moved nothing. eye_world is the eye before
  *                it, so the eye shown is eye_world + veil (round 18: up to 0.32 m forward at a leave of the native
@@ -435,6 +437,11 @@ static void trace_note(void) {
   const int action = motion && motion->state.phase == TFP_MOTION_PHASE_ACTIVE && motion->state.action != TFP_ACT_NONE ? (int)motion->state.action : -1;
   const unsigned edge = tfp_trace_edges_step(&edges, wire.log.has_lease, wire.controller.holding, action);
   if ((edge & TFP_TRACE_EDGE_EVENT) && lock_wanted) tfp_camera_continuity_event(); /* a lease or a hold begun or ended: the rig may be re-seated */
+  /* Round 24: the native view left because its request or firearm changed (a backpack picked up): the next entry may
+   * hold the eye until the rig has settled (THE SETTLE). On the leave only. */
+  static bool had_lease;
+  if (had_lease && !wire.log.has_lease && lock_wanted && strstr(wire.controller.wait_reason, "Native camera request or firearm changed")) tfp_camera_settle_arm();
+  had_lease = wire.log.has_lease;
   if (!lock_wanted || !trace_wanted) return;
   { /* What the arm drive drew in the frame just presented: its draw came after that frame's camera call and before this
      * tick. Said before the rows are read, once for each draw the drive saw. */
@@ -464,16 +471,17 @@ static void trace_note(void) {
      * run it again frame for frame (the soaks of 2026-11-22 on feel.51: without the time across edges, full aim and
      * the starts, and with places to 0.1 mm, 29 of 3447 frames could not be replayed: two decisions that fell
      * within the rounding). */
-    char taken[48] = "";
-    snprintf(taken, sizeof taken, "%s%s%s%s%s%s", r->what & TFP_CAMERA_TRACE_JUMP ? "+jump" : "", r->what & TFP_CAMERA_TRACE_EDGE ? "+edge" : "",
+    char taken[64] = "";
+    snprintf(taken, sizeof taken, "%s%s%s%s%s%s%s", r->what & TFP_CAMERA_TRACE_JUMP ? "+jump" : "", r->what & TFP_CAMERA_TRACE_EDGE ? "+edge" : "",
              r->what & TFP_CAMERA_TRACE_ROOT ? "+root" : "", r->what & TFP_CAMERA_TRACE_RESTART ? "+restart" : "",
-             r->what & TFP_CAMERA_TRACE_START ? "+start" : "", r->what & TFP_CAMERA_TRACE_CUT ? "+cut" : "");
+             r->what & TFP_CAMERA_TRACE_START ? "+start" : "", r->what & TFP_CAMERA_TRACE_CUT ? "+cut" : "",
+             r->what & TFP_CAMERA_TRACE_SETTLE ? "+settle" : "");
     char veil[64] = "0";
     if (r->veil[0] != 0 || r->veil[1] != 0 || r->veil[2] != 0)
       snprintf(veil, sizeof veil, "(%.5f %.5f %.5f)", (double)r->veil[0], (double)r->veil[1], (double)r->veil[2]);
     say("Trace: t=%.1f kind=%u eye_world=(%.5f %.5f %.5f) step=%.4f wanted=(%.5f %.5f %.5f) correction=%.4f lease=0x%llx pose_armed=%d entry_ease=%.2f source=%s"
         " root=(%.5f %.5f %.5f) axes=(%.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f) looked=%d taken=%s quiet=%d tick=%.3f"
-        " off_foot=%d damped=%d damp=(%.5f %.5f %.5f) view=(%.5f %.5f %.5f) sock=%.5f arms=%u eye_edge=%d veil=%s",
+        " off_foot=%d damped=%d damp=(%.5f %.5f %.5f) view=(%.5f %.5f %.5f) sock=%.5f arms=%u eye_edge=%d veil=%s turn=(%.4f %.4f %.4f)",
         (double)r->ms, r->kind, (double)r->eye[0], (double)r->eye[1], (double)r->eye[2], (double)r->step, (double)r->wanted[0], (double)r->wanted[1],
         (double)r->wanted[2], (double)r->correction, lease, (int)(pose.armed != 0), (double)r->entry_ease, sources[r->source < 4 ? r->source : 0],
         (double)r->root[0], (double)r->root[1], (double)r->root[2], (double)r->axes[0], (double)r->axes[1], (double)r->axes[2], (double)r->axes[3],
@@ -481,7 +489,7 @@ static void trace_note(void) {
         (int)((r->what & TFP_CAMERA_TRACE_LOOKED) != 0), taken[0] ? taken + 1 : "-", (int)((r->what & TFP_CAMERA_TRACE_QUIET) != 0), r->tick,
         (int)((r->what & TFP_CAMERA_TRACE_OFF_FOOT) != 0), (int)((r->what & TFP_CAMERA_TRACE_DAMPED) != 0), (double)r->damp[0], (double)r->damp[1],
         (double)r->damp[2], (double)r->view[0], (double)r->view[1], (double)r->view[2], (double)r->sock, (unsigned)r->arms,
-        (int)((r->what & TFP_CAMERA_TRACE_SELF) != 0), veil);
+        (int)((r->what & TFP_CAMERA_TRACE_SELF) != 0), veil, (double)r->turn[0], (double)r->turn[1], (double)r->turn[2]);
   }
 }
 #endif
@@ -546,6 +554,7 @@ static void head_note(void) {
   char text[700];
   if (!tfp_wire_engine_head_tick(&wire, &tick)) { tfp_camera_veil_from_head(NULL); return; }
   tick.view = wire.controller.enabled;
+  tick.now_ms = (double)GetTickCount64(); /* round 24: how long hiding was let go */
   /* Round 14, the veil (src/camera_helper.h tfp_camera_veil_from_head): this tick's update closes the one a leave
    * opened once it found the body drawn again and left none of it drawn; it stays armed while the module is active. */
   tfp_camera_veil_from_head(&tick);
@@ -875,6 +884,14 @@ static void start(void) {
                         "0xffffffff to the pack's cached mode word so the game plays them again. \"Warp:\" lines say each step"
                       : "Warp: the Warp Pack's glow is left to the game (a file warp_hide.txt beside the DLL stops it while the view is TFP's); "
                         "\"Warp:\" lines say what the game plays");
+        /* Round 24: THE SETTLE (src/camera_continuity.h), off by default: replayed, it made soak windows worse and
+         * held back the rig's real motion; on only to compare in the game. */
+        strcpy(slash + 1, "settle_on.txt");
+        FILE *settle_file = fopen(parts_path, "r");
+        if (settle_file) fclose(settle_file);
+        tfp_camera_set_settle(settle_file != NULL);
+        if (settle_file) say("Test: settle_on.txt: the native view coming back on mask 0 after it was left for a new request or firearm holds the "
+                             "eye against the root until the rig is steady (3 frames, 350 ms at most), then eases once (THE SETTLE)");
         /* The overrides of the three live features (src/wire_options.h): for testing only. */
         static const struct { const char *name; TfpFeature feature; bool on; } forced[] = {
           {"arms_live.txt", TFP_FEATURE_ARMS, true}, {"arms_off.txt", TFP_FEATURE_ARMS, false},
@@ -895,7 +912,7 @@ static void start(void) {
     }
   }
   /* What build 25480438 does differently during actions (src/wire_action.h). */
-  tfp_camera_set_action_tuning(TFP_ACTION_PICKUP_MASK, TFP_ACTION_EYE_IDLE_MS, TFP_ACTION_EYE_RETURN);
+  tfp_camera_set_action_tuning(TFP_ACTION_CLAMBER_MASK, TFP_ACTION_EYE_IDLE_MS, TFP_ACTION_EYE_RETURN);
   /* The camera lock (docs/design/specs/2026-11-22-locked-view-design.md): first person through every action and camera. */
   tfp_camera_set_lock(lock_wanted, .35f, 8.0f, 300.0f, .7f, 35.0f, tfp_camera_damping_ms(60), false); /* the options' defaults (the Stable camera); lock_note sets the saved ones */
 #ifdef TFP_FEEL
@@ -909,9 +926,9 @@ static void start(void) {
                   : "Test: lock_off.txt: the camera lock is off");
   tfp_camera_set_continuity(false, lock_wanted && trace_wanted); /* the continuity itself: option_smooth, once the settings are read */
   if (lock_wanted && !trace_wanted) say("Test: trace_off.txt: no \"Trace:\" lines after State edges");
-  say("Ready: action camera: the head camera also takes the pick-up action (mask 0x%x); the eye is held through %u ms without an action "
+  say("Ready: action camera: the head camera also takes a high clamber (mask 0x%x); the eye is held through %u ms without an action "
       "(a stim) and glides back before the weapon returns; the aim button is read from Windows, again as the script update begins",
-      TFP_ACTION_PICKUP_MASK, TFP_ACTION_EYE_IDLE_MS);
+      TFP_ACTION_CLAMBER_MASK, TFP_ACTION_EYE_IDLE_MS);
 #ifdef TFP_FEEL
   tfp_win_mouse_engine(&mouse_engine);
   eng_set_script_probe(aim_script_probe);
