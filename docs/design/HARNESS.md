@@ -133,7 +133,7 @@ As a spec:
 - `dive.py` `dive_swap()`, the matrix phase `dive-swap` (`matrix.DIVES`, played by `matrix.play()` like the aims, and
   in the soak's draw): `key 1`, read the log until the game's view (a View line with `kind=6`), then
   `down w; wait 0.3; key alt; wait D; key 2; wait 2.5; up w` with D from `SWAP_AFTER_S` = 1.0, 0.6, 1.3, 0.3 s in
-  turn until a `State: left the native view` comes in the try's stretch whose last `Motion: action=` before it is
+  turn (round 32 stands the body up first and changed the delays: "The dive + swap's timing" below) until a `State: left the native view` comes in the try's stretch whose last `Motion: action=` before it is
   `dive` (`dive_leave()`; a leave after the dive landed is noted, `left_any`, and not counted); `key 1` after every
   try. The result lists each try and the veiled Trace rows' `veil_head=(ahead up)` of that leave only (to the next
   `entered the native view`), with the lowest head. Why a late swap: a dive alone holds the
@@ -150,6 +150,57 @@ As a spec:
   `x86_64-w64-mingw32-gcc -Wall -Wextra -Werror` against the real headers. Not proven offline: that the game hears the
   wheel in the weapon functions menu, which of in aim or before aim it takes, whether the BR-14's range changes its
   field of view, and at which delay a swap leaves the game's view.
+
+## The dive + swap's timing (round 32, 2026-11-25)
+
+feel.54's matrix played dive-swap and measured nothing (`tfp-soak-37.modlog` 09:56:25 to 09:56:47; matrix.out
+"the game's view never left (4 tries)"). Two causes, both the script's:
+
+- **The body was still prone from the try before.** Each try's dive lands prone and nothing stood the body up. Tries 2
+  and 4 (0.6 and 0.3 s) never dived: their dive key stood the body up from prone (`Motion: action=idle` at
+  09:56:32.503 and 09:56:47.259, no `action=dive`). The matrix's own dive-back phase also began prone after the dive
+  phase and stood up instead of diving (prone 09:56:14.842, idle 09:56:19.015, no dive line between).
+- **1.0 and 1.3 s were too late.** The dives ran 0.93 s (dive 09:56:25.125, prone 26.060) and 1.27 s (39.514,
+  40.783); the game held the swap until the landing and the gun left the hands about 0.53 s after `action=prone`
+  (26.594, 41.317). Both leaves came after the dive and were rightly not counted.
+
+The fix, in `dive.py`:
+
+- `stand_up()` before every try and after the last: the body's last `Motion: action=` (from the lines read, else the
+  log before the harness began reading it, up to 1 MB back); `dive` waits up to 2 s for the landing; from `prone` it
+  presses `key z`, from `crouch` `key c` (the matrix's prone and crouch phases stood up that way in feel.54: 09:56:09.901,
+  09:56:04.459), and from prone again the dive key as the fallback, reading the log 2 s for the next `Motion:` line
+  after each, at most 3 presses. Any action other than prone, crouch or dive is standing; a log that never named one
+  presses nothing. Each try keeps its `stood` ({before, presses, after, standing}).
+- `script(D)`: `down w; wait 0.3; down alt; wait 0.03; up alt; wait D-0.09; key 2; wait 2.5; up w`, so the swap key
+  goes down D s after the dive key went down (drive.events: 0.03 s per down or up; the dive key is held 0.06 s, two
+  frames at 30 a second, so a swap 0.1 s in comes after it is let go). D = 0.1, 0.15, 0.2, 0.3, then 0.4: the soak's
+  overlap `down w; wait 0.2; key alt; wait 0.3; key 2` (the swap 0.41 s after the dive key) left the view in a dive in
+  both feel.54 soaks.
+- The rule is kept: only a leave whose last `Motion: action=` is `dive` counts. Each try records `dive_s` (the dive's
+  line to the next `Motion:` line) and `leave_after_s` (the first leave after the dive's line), and the phase line
+  prints them, so a late leave shows as `left at` past the dive's length.
+- `dive.py --log LOG` also lists every leave in a dive with its own lowest head (`dive_leaves()`). feel.54:
+
+  | log | leave | after the dive's line | lowest head (up, ahead) |
+  | --- | --- | --- | --- |
+  | -37 Stable | 10:00:22.357 (dive-swap 1.0 s) | 1.501 s | -0.003, -0.142 |
+  | -37 Stable | 10:04:58.182 (overlap) | 0.767 s | **-0.626**, +0.340 |
+  | -37 Stable | 10:07:47.845 (dive-swap 0.6 s) | 1.102 s | -0.102, -0.034 |
+  | -38 Bodycam | 10:22:39.811 (dive-swap 1.0 s) | 1.503 s | -0.337, +0.194 |
+  | -38 Bodycam | 10:24:38.160 (overlap) | 0.768 s | **-0.690**, +0.459 |
+  | -38 Bodycam | 10:24:50.011 (dive-swap 0.6 s) | 1.101 s | -0.320, +0.203 |
+  | -38 Bodycam | 10:25:47.833 (dive-swap 0.6 s) | 1.067 s | -0.361, +0.219 |
+
+  Round 26 estimated -0.55 m; the head 0.77 s into a dive is 0.63 to 0.69 m below the eye. The dive-swap leaves at
+  1.1 to 1.5 s are near the landing.
+- Offline proof: `tests/test_harness_dive.py`: the swap's key-down D after the dive's for every delay (the event
+  lines), the stand-up from each posture against a fake game (prone by z, crouch by c, prone to a crouch then up, the
+  dive key as the fallback, giving up, a dive that lands first, the posture read from before the tail), every try
+  starting on its feet, the timing of a late leave, feel.54's tries read from `tfp-soak-37.modlog` (try 1 dived 0.935
+  s and left 1.469 s in; try 2 stood up and never dived) and its soaks' heads. Not proven offline: that a 0.06 s dive
+  key is heard as a dive, that z stands the body up from a dive's prone as from the prone key's, and at which delay
+  the game lets the swap leave its view in the dive.
 
 ## First-person rig probe, 2026-11-20
 

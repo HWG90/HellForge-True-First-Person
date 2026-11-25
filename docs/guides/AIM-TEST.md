@@ -119,7 +119,7 @@ Phases (`tools/harness/matrix.py OUT_DIR PHASE ...`):
 | --- | --- | --- |
 | `aim-full` | full aim, then 2 s | the camera judge passes, `State: aim in` came, no `State: aim out` before the harness let go, an `Aim: in` line, an `Aim: out after` at least 2.0 s |
 | `aim-scope-zoom` | round 30: full aim, then the scope's range the game's way on PC: hold R (the weapon functions menu), the mouse wheel up one notch, let go of R (`aim.ZOOM_STEP`); each range, the last too, held 2 s in full aim after R is let go (the menu shut), up to 4 steps or until the field of view comes round to the first. Where no step changed it, the same steps before aiming, each followed by a full aim of 2 s | as aim-full (2 s), at least two zoom levels in the `Aim:` lines, and every step where the zoom changed (in aim, or before aiming) held in full aim; a loss of full aim in the in-aim steps does not fail the fallback |
-| `dive-swap` | round 30: the primary up and the game's view, then a dive forward with a swap to the secondary D s into it, D = 1.0, 0.6, 1.3, 0.3 in turn until the log says `State: left the native view` with `Motion: action=dive` the last action before it; the primary back after each try (`tools/harness/dive.py`) | the camera judge passes, a try left the game's view in the dive, and that leave's veiled `Trace:` rows carry `veil_head` |
+| `dive-swap` | round 30, timing round 32: the primary up, the body stood up (z from prone, c from a crouch, until the log's `Motion: action=` is a standing one), the game's view, then a dive forward with a swap to the secondary D s after the dive key went down, D = 0.1, 0.15, 0.2, 0.3, 0.4 in turn until the log says `State: left the native view` with `Motion: action=dive` the last action before it; the primary back after each try and the body stood up after the last (`tools/harness/dive.py`) | the camera judge passes, a try left the game's view in the dive, and that leave's veiled `Trace:` rows carry `veil_head` |
 | `aim`, `aim-fire`, `aim-walk`, `pistol-aim` | as before, but in full aim | as before, and as aim-full with their own hold |
 
 The phase line prints `full aim after T s (N aim-mode presses)` or `NO full aim`, the `Aim:` lines counted by kind
@@ -133,7 +133,12 @@ gives the lowest head of all of them.
 
 `python3 tools/harness/aim.py full` and `aim.py zoom` play one aim outside the matrix; `aim.py --log LOG` counts what
 a log says of aiming (the numbers above). `dive.py` plays one dive + swap; `dive.py --log LOG` gives a log's veiled
-rows and the lowest head (soak 36: 112 rows, lowest -0.223 m, a crouch; no dive among them).
+rows and the lowest head (soak 36: 112 rows, lowest -0.223 m, a crouch; no dive among them), then every leave in a
+dive with its own lowest head. Round 32: feel.54's soaks already have the head in a dive, from the soak's overlap
+`down w; wait 0.2; key alt; wait 0.3; key 2` (the swap 0.41 s after the dive key; the view left 0.77 s after the
+dive's line): -0.626 m (Stable, `tfp-soak-37.modlog` 10:04:58.182, 0.340 ahead) and -0.690 m (Bodycam, -38
+10:24:38.160, 0.459 ahead). The soaks' dive-swap leaves came 1.1 to 1.5 s after the dive's line, near the
+landing: -0.003 to -0.361 m.
 
 Before aim-scope-zoom: have a scoped rifle with ranges as the primary (the R-4 Hyena, or another with 25 / 50 / 100
 m) and the view on. With iron sights it fails with "one zoom level seen".
@@ -163,10 +168,16 @@ Run `matrix.py OUT aim-full aim-scope-zoom aim aim-fire pistol-aim dive-swap` wi
     `drive.py run "wheel 1; wait 0.5"`, `drive.py shot menu2.png`, `drive.py run "up r"`. If the game's aim is on
     tap, not hold, set it to hold and run again.
 - dive-swap: `left the game's view` and the head's lowest point. Round 26 estimated 0.55 m below the eye in a dive;
-  the lowest so far is -0.223 m (a crouch). Write the number here. `the game's view never left` after four tries
-  means the swap is held through at every delay; try it after a sprint, or swap to the support weapon (`key 3`).
-  `the view was left after the dive, not in it` means the swap came once the dive had landed: try the shorter
-  delays first.
+  feel.54's soaks measured -0.626 and -0.690 m at 0.77 s into a dive (above). Write the matrix's number here, and
+  which delay left. The phase line lists each try: `D s dive L s left at T s` (the dive's length and the leave, both
+  from the dive's `Motion:` line) or `D s no dive`.
+  - `no dive in the try` means the dive key was not heard as a dive: look at each try's `stood` in `matrix.json`.
+    feel.54's tries 2 and 4 began prone and their dive key stood the body up instead (round 32's cause).
+    `the body could not be stood up` means neither z, c nor the dive key brought a standing `Motion:` line.
+  - `the view was left after the dive, not in it` with `left at` past the dive's length means the game held the swap
+    until the landing (feel.54: 1.0 and 1.3 s, the gun leaving the hands 0.53 s after `action=prone`).
+  - `the game's view never left` after five tries means the swap is held through at every delay; try it after a
+    sprint, or swap to the support weapon (`key 3`).
 - The aim phases pass with the view in first person the whole time (`+0 missed`). This is the first harness run of
   the Aim field of view and of the near clip in full aim, so judge their captures too.
 
