@@ -98,6 +98,51 @@ What the harness does about it, as a spec:
   into full aim on the middle press, and which direction of the menu is the scope's range. `docs/guides/AIM-TEST.md`
   "The harness" says what the next run must show.
 
+## The scope's range and the dive + swap (round 30, 2026-11-25)
+
+Round 26's `zoom_cycle()` held R and pressed the arrow keys. The game never changed its zoom: in feel.53's soak 36
+every `Aim:` line of the BR-14 Adjudicator says fov 30.0, and no step was ever held at another range. On PC the
+game's input for the scope range is **hold R** (the weapon functions menu, "open weapon wheel") and the **mouse wheel
+up**; the wheel down is the flashlight and the right button the fire mode (Steam discussion 553850/4206994023683971394,
+Destructoid's "how to zoom in / zero your sights", a Reddit post saying the range changes how far the scope zooms in
+first person). One Steam reply says it may need doing outside the sights or with the aim on hold, not tap. The harness
+had no wheel at all.
+
+As a spec:
+
+- `drive.py`: the script word `wheel N`, N notches up (N > 0) or down, 1 to 10. One helper line `w +-120` per notch,
+  0.1 s apart (`WHEEL_GAP_S`), so each lands in its own game frame. `win_input.c`: `w <delta>` sends one
+  `MOUSEEVENTF_WHEEL` with `mouseData` = delta; a delta that is 0, not a whole notch (a multiple of 120) or over ten
+  notches is refused (counted in `failed`).
+- `aim.py` `ZOOM_STEP` = `down r; wait 0.8; wheel 1; wait 0.3; up r`. `scope_zoom()`: full aim, then
+  `zoom_cycle()`: one `ZOOM_STEP` per range, each range held `ZOOM_HOLD_S` (2 s) in full aim, at most `ZOOM_STEPS`
+  (4) or until the field of view comes back to the first. Where no step changed the field of view, `zoom_before_aim()`:
+  for each range `ZOOM_STEP` with no aim held, then a whole full aim of 2 s. Each step is kept in `zoom_steps`
+  (where, field of view before and after, `zoomed`, the sight and depth before and after, `seat_moved`, held in full
+  aim) and `zoom_where` says "in aim", "before aim" or nothing. A capture of each step goes beside the phase's
+  (`OUT/aim-scope-zoom-N.png`), for the reticle where the field of view does not move.
+- A range is judged by a change of 0.5 degrees or more in the field of view of an `Aim: changed` or `Aim: in` line.
+  The sight (the game's near clip) and depth come along as a second sign: the game reseats both at a new zoom level.
+  The mod logs nothing that names the range itself. `pose_helper.c` reads the selected zoom level
+  (`observed.zoom_index`, sent on as `TFP_RT_DEPTH_ZOOM_INDEX`) but no log line carries it; putting it on the `Aim:`
+  lines would be a change to the mod, not the harness.
+- `dive.py` `dive_swap()`, the matrix phase `dive-swap` (`matrix.DIVES`, played by `matrix.play()` like the aims, and
+  in the soak's draw): `key 1`, read the log until the game's view (a View line with `kind=6`), then
+  `down w; wait 0.3; key alt; wait D; key 2; wait 2.5; up w` with D from `SWAP_AFTER_S` = 1.0, 0.6, 1.3, 0.3 s in
+  turn until `State: left the native view` comes in the try's stretch; `key 1` after every try. The result lists each
+  try and the veiled Trace rows' `veil_head=(ahead up)`, with the lowest head. Why a late swap: a dive alone holds the
+  game's view; in feel.52's soak 34 (02:22:23.454) a swap 1.3 s into a dive left it ("hold ended: the gun has left
+  the hands"), while the soak overlap with the swap 0.3 s in stayed in kind 6. The phase fails where no try left the
+  view or no veiled row came (`dive.verdict()`); the soak prints a line for each and a summary
+  `dive + swap: N of M left the game's view; ... the head lowest X m from the eye`.
+- Offline proof: `tests/test_harness_aim.py` (the wheel's event lines, the helper built against the stand-in
+  `windows.h`, which now writes `wheel <delta>`, the zoom sequences against a fake game) and
+  `tests/test_harness_dive.py` (the try's events, the view and veil_head reading, the tries against a fake game, the
+  phase wiring, and soak 36 read: 112 veiled rows, lowest -0.2228 m). `win_input.c` also builds with
+  `x86_64-w64-mingw32-gcc -Wall -Wextra -Werror` against the real headers. Not proven offline: that the game hears the
+  wheel in the weapon functions menu, which of in aim or before aim it takes, whether the BR-14's range changes its
+  field of view, and at which delay a swap leaves the game's view.
+
 ## First-person rig probe, 2026-11-20
 
 Solo mission, difficulty 1, 0.6.0-feel.10, primary and support weapon. Numbers are in
