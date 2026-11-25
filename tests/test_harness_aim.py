@@ -269,6 +269,11 @@ class Phases(unittest.TestCase):
         held = [o for o in soak.OVERLAPS if "down right" in o]
         self.assertTrue(held and all("click middle" in o for o in held))
 
+    def test_the_soak_still_has_its_sixteen_overlaps(self):
+        # round 26 put a comment on the full-aim swap's line and took the next two overlaps into it
+        self.assertEqual(len(soak.OVERLAPS), 16)
+        self.assertIn("key c; wait 0.4; key g; wait 2.5; key c", soak.OVERLAPS)
+
     def test_the_soak_plays_the_aim_phases_and_not_the_zoom(self):
         names = [n for n in matrix.PHASES if n not in soak.SKIP]
         self.assertTrue({"aim", "aim-fire", "aim-walk", "pistol-aim", "aim-full"} <= set(names))

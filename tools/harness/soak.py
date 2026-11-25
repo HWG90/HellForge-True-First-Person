@@ -37,7 +37,8 @@ SKIP = {"toggle-off-on", "toggle-fast", "ragdoll", "death", "idle", "aim-scope-z
 OVERLAPS = [   # two inputs at once, as a player does
     "down w; key g; wait 1.5; up w", "down w; key v; wait 2.0; up w", "down shift; down w; wait 0.8; key 2; wait 1.2; up w; up shift",
     "key 2; wait 0.3; key g", "key g; wait 0.4; key 1", "key r; wait 0.5; key 2", "key v; wait 0.6; click right 0.8",
-    "down right; wait 0.35; click middle; wait 0.6; key 2; wait 1.0; up right",   # a swap in full aim "key c; wait 0.4; key g; wait 2.5; key c", "key z; wait 1.0; key v; wait 3.0; key z",
+    "down right; wait 0.35; click middle; wait 0.6; key 2; wait 1.0; up right",   # a swap in full aim (round 26)
+    "key c; wait 0.4; key g; wait 2.5; key c", "key z; wait 1.0; key v; wait 3.0; key z",
     "key ctrl; wait 0.6; key g", "key 2; wait 0.15; key 2; wait 0.15; key 1", "down w; wait 0.2; key alt; wait 0.3; key 2; wait 1.0; up w",
     "key b; wait 0.8; key g", "look 300 200; key g; look -300 -200", "key f; wait 0.2; key f; wait 0.2; key r",
 ]
