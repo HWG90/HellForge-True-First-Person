@@ -69,7 +69,8 @@ the suit destroyed or changed (its rows are retired with no write), by head visi
 
 ## Log lines
 
-- `Seat: in an exosuit: first person kept; ...` on entry; `Seat: left the exosuit: ...` on leaving.
+- `Seat: in a vehicle's seat (an exosuit's, an FRV's): first person kept; ...` on entry; `Seat: left the seat: ...`
+  once the glide out has ended.
 - `Seat: cockpit: seen through: the suit 0x..., found by ...` / `no suit proven ...` / `... drawn again`.
 - Once a second while seated (`src/seat_log.h`): frames, the eye in the root frame, the anchor and glide, both
   hands from the eye, diver rows hidden, the cockpit, and the arm drive's frames (none driven in the suit).

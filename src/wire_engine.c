@@ -1449,12 +1449,13 @@ static void cockpit_refresh(St *st) {
   const bool wanted = body && see_through && see_through();
   if (body && !st->cockpit.said_seat) {
     st->cockpit.said_seat = true;
-    sayf(st, "Seat: in an exosuit: first person kept; the eye at the helmet, fixed to the suit's seat, looking where the suit aims; the diver hidden "
-             "whole (helmet, armour, arms, backpack, shadow); the first-person arm rig is the game's own and not drawn in the suit's camera; "
-             "see-through cockpit %s", wanted ? "on" : "off");
+    sayf(st, "Seat: in a vehicle's seat (an exosuit's, an FRV's): first person kept; the eye at the helmet, fixed to the seat, looking where the "
+             "game's camera aims; the diver hidden whole (helmet, armour, arms, backpack, shadow) until the view is back at the head; the "
+             "first-person arm rig is the game's own and not drawn in the seat's camera; see-through cockpit %s (an exosuit's only)",
+         wanted ? "on" : "off");
   } else if (!body && st->cockpit.said_seat) {
     cockpit_forget(st);
-    sayf(st, "Seat: left the exosuit: the diver and the suit as the game draws them; first person on foot as before");
+    sayf(st, "Seat: left the seat: the diver and the vehicle as the game draws them; first person on foot as before");
     return;
   }
   if (!wanted) { if (st->cockpit.suit) { cockpit_forget(st); st->cockpit.said_seat = body != 0; } return; }
