@@ -37,6 +37,7 @@ class Reading(unittest.TestCase):
     def test_the_view(self):
         self.assertIsNone(dive.in_native_view(["10:00:00.000 Ready: x"]))
         self.assertTrue(dive.in_native_view([NATIVE]))
+        self.assertFalse(dive.in_native_view([NATIVE, NATIVE.replace("kind=6", "kind=4")]))   # the head camera's
         self.assertFalse(dive.in_native_view([NATIVE] + LEFT))
         self.assertTrue(dive.in_native_view(LEFT + ["10:00:05.000 State: entered the native view request=0x1 kind=6"]))
 
@@ -162,6 +163,21 @@ class Phases(unittest.TestCase):
         finally:
             dive.dive_swap = original
         self.assertEqual(calls, [log.path])
+
+    def test_the_soak_plays_it_by_dive_swap(self):
+        # soak.act: a DRIVEN phase goes to matrix.play (dive-swap is in DIVES, not AIMED), not its plain script
+        log, calls = FakeLog(self), []
+        original = dive.dive_swap
+        dive.dive_swap = lambda device, tail: calls.append(tail.path) or {"left": False}
+        try:
+            game = FakeGame(log)
+            result = soak.act(game, "dive-swap", matrix.PHASES["dive-swap"][0], 0.4, log.path, sleep=lambda s: None)
+        finally:
+            dive.dive_swap = original
+        self.assertEqual((calls, game.scripts, result), ([log.path], [], {"left": False}))
+        plain = FakeGame(log)
+        self.assertIsNone(soak.act(plain, "walk", "hold w 1.5", 0.4, log.path))
+        self.assertEqual(plain.scripts, ["hold w 1.5; wait 0.40"])
 
     def test_the_judge_and_the_summary(self):
         result = {"left": True, "swap_after": 1.0, "attempts": [{}], "veil_heads": [{"up": -0.5}], "lowest_up": -0.5, "notes": []}

@@ -296,6 +296,17 @@ class ZoomCycle(unittest.TestCase):
         self.assertEqual(aim.zoom_levels(tail.lines), [10.0, 20.0, 30.8])
         self.assertTrue(aim.verdict(result, tail.lines, aim.ZOOM_HOLD_S, zoom=True)["pass"])
 
+    def test_a_new_aim_in_line_at_another_field_of_view_is_a_change(self):
+        # where R in the sights takes the game out of full aim and back, the new range comes as an "Aim: in" line
+        def react(script, log, n):
+            if script == "click middle":
+                log.write("10:00:00.700 State: aim in", AIM_IN_LINE)
+            elif script == aim.ZOOM_STEP and n == 3:
+                log.write(_aim_line("in", 20.0, at="10:00:02.000"))
+        _, result, _ = self.zoom(react)
+        self.assertEqual((result["zoom_steps"][0]["fov_after"], result["zoom_steps"][0]["zoomed"]), (20.0, True))
+        self.assertEqual(result["zoom_where"], "in aim")
+
     def test_no_change_in_aim_then_the_ranges_before_aiming(self):
         aims = [0]
 

@@ -96,6 +96,17 @@ def dive_summary(dives):
                    if lows else "; the head in a dive not measured")
 
 
+def act(device, name, script, settle, log, sleep=time.sleep):
+    """One action: a phase of matrix.DRIVEN (the aims, the dive + swap) by matrix.play(), which reads the log as it
+    goes, then `settle`; any other its script with the settle as a wait. Returns matrix.play()'s result, or None."""
+    if name in matrix.DRIVEN:
+        aimed = matrix.play(device, name, log)
+        sleep(settle)
+        return aimed
+    device.run(f"{script}; wait {settle:.2f}")
+    return None
+
+
 def judge_log(lines):
     """A log judged in one piece for each camera style it ran in: one line of text for each stretch between two
     "Camera style:" lines in which a frame was held or traced. Frames on either side of such a line are not measured
@@ -141,13 +152,8 @@ def main(argv):
             script, settle = matrix.PHASES[name]
         settle *= rng.choice((0.15, 0.4, 1.0))   # often the next action begins before this one is over
         start = log.stat().st_size
-        aimed = None
         try:
-            if name in matrix.DRIVEN:
-                aimed = matrix.play(d, name, log)
-                time.sleep(settle)
-            else:
-                d.run(f"{script}; wait {settle:.2f}")
+            aimed = act(d, name, script, settle, log)
         except drive.DriveError as error:
             print(f"stopped: {error}")
             break
