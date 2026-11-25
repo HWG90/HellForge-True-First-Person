@@ -46,6 +46,7 @@ typedef struct TfpHeadTick {
   uint64_t veil_leaves, veil_frames, veil_moved, veil_behind;
   float veil_largest_m; /* the largest move since the start (m) */
   bool veil_second;     /* the veil opens at the tick that sees the leave (veil_second.txt), not at the first head-camera frame */
+  uint64_t veil_under, veil_far; /* round 26: frames with the head below the view (moved less or not at all), and frames not moved because the move was over TFP_CAMERA_VEIL_MOST */
   double now_ms;        /* round 24: the tick's time (ms); 0: not known, and nothing is timed */
 } TfpHeadTick;
 typedef struct TfpHeadLog {
@@ -84,7 +85,14 @@ static inline bool tfp_head_log_step(TfpHeadLog *g, const TfpHeadTick *t, char *
            (unsigned long long)g->off_ticks, (unsigned long long)t->veil_leaves, (unsigned long long)t->veil_frames, (unsigned long long)t->veil_moved,
            (unsigned long long)t->veil_behind, (double)t->veil_largest_m,
            t->veil_second ? "the tick that sees the leave (veil_second.txt)" : "the first head-camera frame");
-  const size_t used = strlen(text);
+  size_t used = strlen(text);
+  /* Round 26 (src/camera_helper.h TFP_CAMERA_VEIL_MOST): said where either happened; a frame left for being too far is
+   * also one left behind the head, so it makes a line by itself. */
+  if ((t->veil_under || t->veil_far) && used+1 < size) {
+    snprintf(text+used, size-used, "; veil kept short: head below the view on %llu, too far to move on %llu", (unsigned long long)t->veil_under,
+             (unsigned long long)t->veil_far);
+    used = strlen(text);
+  }
   if (let_go > 0 && used+1 < size) snprintf(text+used, size-used, "; hiding was let go for %.0f ms with the view on", let_go);
   return true;
 }
