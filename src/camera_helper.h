@@ -248,6 +248,39 @@ void tfp_camera_orphan_stats(TfpCameraOrphanStats *out);
  * new one's first head-camera frame are no leave.
  * Off (the default) and without the lock: nothing is reached or read. */
 #define TFP_CAMERA_VEIL_CLEAR .10f
+/* Round 26 (docs/design/specs/2026-11-24-helmet-in-view.md "Round 26"): how far the veil moves the eye. In feel.52's
+ * Stable soak (~/.cache/tfp-soak-34.modlog) the only moves over 0.5 m were two swaps in the middle of a dive or lunge
+ * (02:16:09.838 and 02:18:33.429: 0.548 and 0.534 m, then 0.527 and 0.495 m): the body had gone 0.43 to 0.45 m on
+ * from the eye the swap holds, and the veil carried the eye after it for two frames and back. So:
+ *  - The head is taken as a cube of TFP_CAMERA_VEIL_HEAD_M either way of the head node. An eye with all of that cube
+ *    below the bottom edge of the view (the view's own pitch, half the vertical field of view and
+ *    TFP_CAMERA_VEIL_FOV_SPARE more) has no head in its frame, wherever it is: the veil moves it no further than that
+ *    takes (in a dive the head is well below the eye: 0.55 m in the estimate of the spec). Its field of view is
+ *    tfp_camera_set_veil_fov's; not known, TFP_CAMERA_VEIL_FOV_MOST, the widest the settings allow.
+ *  - A move over TFP_CAMERA_VEIL_MOST is not made: that is no weapon's eye behind the head (the LAS-5 Scythe's needs
+ *    0.32 m, a prone swap 0.34) but a body that has left the camera, and the move would be the lurch. The frame keeps
+ *    the held eye and is counted as left behind the head (and as `too_far`): a frame of the helmet, from at least 0.30 m
+ *    behind it, accepted in that case only. Less than the whole way is never taken there: from nearer the head the
+ *    helmet would fill more of the frame, or the eye would be inside it.
+ *  - After the veil closes, its last move is let out over TFP_CAMERA_VEIL_LET_OUT_MS (tfp_camera_veil_let_out) instead
+ *    of taken back in one frame: the body is hidden by then, so the eye need not be clear, and the step back was the
+ *    lurch's other half. Only head-camera frames of the lock with the body not down are let out into; any other frame ends it. */
+#define TFP_CAMERA_VEIL_HEAD_M .15f
+#define TFP_CAMERA_VEIL_MOST .40f
+#define TFP_CAMERA_VEIL_FOV_MOST 2.0943951f   /* 120 degrees: tfp_settings.h fov_degrees at most */
+#define TFP_CAMERA_VEIL_FOV_SPARE .08726646f  /* 5 degrees */
+#define TFP_CAMERA_VEIL_LET_OUT_MS 300.0
+/* What of the last move is still added `ms` after the last veiled frame: from 1 to 0 from rest to rest (1 - smoothstep),
+ * so the step changes by at most 6 (dt/T)^2 of the move a frame: 0.058 m for 0.40 m at 50 ms a frame. */
+static inline float tfp_camera_veil_let_out(double ms) {
+  if (!(ms > 0)) return 1;
+  if (!(ms < TFP_CAMERA_VEIL_LET_OUT_MS)) return 0;
+  const float x = (float)(ms/TFP_CAMERA_VEIL_LET_OUT_MS);
+  return 1-x*x*(3-2*x);
+}
+/* The vertical field of view the frames are drawn with (radians), each tick (src/mod_view.c head_note); 0 or not a
+ * number: not known (TFP_CAMERA_VEIL_FOV_MOST). */
+void tfp_camera_set_veil_fov(float vertical_radians);
 void tfp_camera_set_veil(bool armed);
 void tfp_camera_veil_tick(bool hidden);
 /* Round 19, a test switch (the binder's file veil_second.txt; off by default, and tfp_camera_reset_for_tests sets it
@@ -265,7 +298,10 @@ void tfp_camera_set_veil_second(bool on);
  * the view. Native frames drawn while it is open (a leave that goes straight back within a tick) are counted in
  * `frames` only: they are the game's own camera, which the veil never moves. On foot `behind` stays 0. largest_m: the
  * largest move since the start. second: tfp_camera_set_veil_second is on. */
-typedef struct TfpCameraVeilStats { uint64_t leaves, frames, moved, behind; float largest_m; bool second; } TfpCameraVeilStats;
+/* Round 26: under, of the frames it moved or found clear, those whose head was below the view before the whole way
+ * to TFP_CAMERA_VEIL_CLEAR in front (moved less, or not at all); too_far, frames it left behind the head because the move
+ * was over TFP_CAMERA_VEIL_MOST (counted in behind too). */
+typedef struct TfpCameraVeilStats { uint64_t leaves, frames, moved, behind; float largest_m; bool second; uint64_t under, too_far; } TfpCameraVeilStats;
 void tfp_camera_veil_stats(TfpCameraVeilStats *out);
 /* The tick's whole part in the veil (src/mod_view.c head_note calls it after head visibility's update, `tick` filled as
  * the "Head:" line has it, view included). NULL, no tick read: switched off. Otherwise tfp_camera_veil_tick with
@@ -316,7 +352,9 @@ enum { TFP_CAMERA_TRACE_LOOKED = 1,  /* jumps within the camera were looked for 
  * zeros where it moved nothing. `eye` is the eye before it (what the continuity, the damping and `step` work on), so
  * the eye shown is eye + veil. Round 18 found the veil moving the shown eye up to 0.32 m forward for a frame or two at
  * most leaves of the native view, and no row said so. */
-typedef struct TfpCameraTraceRow { float ms; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; float root[3]; uint32_t what; float axes[9]; double tick; float damp[3], view[3]; float sock; uint32_t arms; float veil[3]; float turn[3]; } TfpCameraTraceRow;
+typedef struct TfpCameraTraceRow { float ms; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; float root[3]; uint32_t what; float axes[9]; double tick; float damp[3], view[3]; float sock; uint32_t arms; float veil[3]; float turn[3];
+  float veil_head[2]; /* round 26: in a frame the veil was open for, the head node from the eye before the veil: ahead along the level view, up (m); 0 0 otherwise */
+} TfpCameraTraceRow;
 void tfp_camera_trace_edge(void);
 /* The arm drive's figures of the last primary draw, for the newest frame presented. The draw comes after the frame's
  * camera call and before the next tick, so the binder calls this once a tick, when the drive has seen a draw since the

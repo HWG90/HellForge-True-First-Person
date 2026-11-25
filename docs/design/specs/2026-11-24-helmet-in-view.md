@@ -402,3 +402,108 @@ the veil, so its body frame was drawn unveiled (on main as well).
 - Whether one veiled frame (`veil_second.txt`) still hides the helmet at every leave: that needs the order of soak
   27 to hold in the game, and a burst of captures around the leave (`tools/harness/burst.py`).
 - Whether the step forward and back reads as a jolt at all next to the helmet it replaces, with one frame or two.
+
+## Round 26: a swap in the middle of a dive
+
+feel.52's Stable soak (`~/.cache/tfp-soak-34.modlog`) has 117 veil moves: 71 of 0.1 to 0.2 m, 7 of 0.3 to 0.4, one of
+0.495 and three over 0.5 (0.548, 0.534, 0.527). All four over 0.4 m are the two frames of two leaves, both a weapon
+swap (BR-14 Adjudicator to P/40-K Bolt Pistol) begun in the middle of a dive or lunge, the view leaving because the gun
+left the hands (mask 0x02): actions 118 (02:16:09.838) and 173 (02:18:33.429).
+
+### What the rows say
+
+- **The eye is not held still; the head goes on.** The swap holds the native eye as a difference from the head
+  camera's eye in the body root's frame (`eye_delta`), so the held eye moves with the root (0.14 to 0.15 m a frame
+  after the leave of 118, the root's own). In the dive the game's own camera stays high above the root (1.065 m above
+  it, 0.289 m in front at the leave) while the body pitches forward under it: the head node is 0.737 m in front of the
+  root, 0.446 m in front of the eye (0.548 - 0.10). In 173 the head is 0.458 m in front of the root, 0.433 in front of the
+  eye, which is 0.025 m in front of the root and 1.076 m above it. Neither the analyst's "held still while the body
+  carries the head on" nor the sceptic's "the native eye fell behind (sock -0.64)" is quite it: `sock` is the weapon
+  socket against the game's (`src/arm_drive.c` stats.draw.sock_m), not the eye.
+- **The old veil carries the eye the whole way.** `veil_apply` moved it to 0.10 m in front of the head along the level
+  view whatever the height: 0.548 and 0.527 m in 118, 0.534 and 0.495 m in 173, and back in one frame after the second
+  tick. The judge (`tools/harness/matrix.py measure` on the rows) sees 0.548, 0.633, 0.494 and 0.535 m of change of
+  step in 118 and 0.537, 0.570, 0.456, 0.496 in 173; two of them (0.633 and 0.494 at .872 and .905) were even counted
+  as the filter's, the eye before the veil changing by 0.06 to 0.08 m there.
+- **Where the head is in height is not logged.** From the head camera's eye in the dives of soak 25 (10:17:37: 0.74 to
+  0.78 m in front of the root, 0.53 to 0.56 m above it, less c.forward 0.18 and c.up 0.04) the head in 118 is about 0.51
+  m above the root: 0.55 m below the held eye. In 173 the wanted eye rose 0.52 m and went 0.24 m back in the 330 ms
+  after the leave with the held difference unchanged, so the head did: standing again by then, it was about 1.0 m
+  above the root at the leave, level with the eye. 118 is a dive with the head under the eye; 173 a lunge with the head
+  in front of it.
+- **The 0.4 s after.** At .938 the incoming weapon's eye is known and the hold glides to it: the wanted eye's part
+  in front of the root goes 0.304, 0.536, 0.683, 0.770, 0.824, 0.857 m, each step 0.62 to 0.65 of the last, which is
+  retail's 70 ms glide (src/camera_glide.h: a way over TFP_EYE_GLIDE_FAR_M, here about 0.6 m, is glided on retail's
+  rate under the lock as well), and the continuity takes its first step up as a jump and lets it out (carried 0.31 to
+  0.65 m, the soak's float 0.295 and 0.334 m). It is smooth: after .938 the judge finds no frame of 0.06 m or more in
+  either window (the largest 0.050 m at 10.272). It is the round 19 path doing what its spec says for a long way, from an
+  eye the game put high above a diving body. **Not changed**: nothing in the rows calls for it, and the glide's gate was
+  measured against 96 made-up swaps.
+
+### What changed (`src/camera_helper.c` `veil_apply`, `src/camera_helper.h`)
+
+Root speed was not used as the sign: the lunge's root moves 2.1 m/s, a sprinting standing swap's as fast, and what
+makes the move large is where the head is against the eye, which the veil has in hand.
+
+1. **The head below the view.** The head is taken as a box from 0.15 m (`TFP_CAMERA_VEIL_HEAD_M`) behind its node to
+   `TFP_CAMERA_VEIL_CLEAR` in front of it, 0.15 m up, down and to either side. An eye with all of that box below the
+   bottom edge of the view has no head in its frame: the bottom edge is a plane through the eye holding the camera's
+   right axis, at the view's pitch less half the vertical field of view and 5 degrees (`TFP_CAMERA_VEIL_FOV_SPARE`).
+   The veil moves the eye forward only as far as that takes (5 mm past it), where that is less than the whole way.
+   The field of view is the wider of the game's and the one shown (`tfp_fov_lock_stats`), the widest of the last two
+   seconds, handed over each tick in `head_note` (`tfp_camera_set_veil_fov`); not known, 120 degrees, the most the
+   settings allow. Looking down steeply (the edge within a degree of straight down) nothing is below the view and the
+   rule is the old one.
+2. **Too far: no move.** A move over 0.40 m (`TFP_CAMERA_VEIL_MOST`) is not made. That is no weapon's eye behind the
+   head (the LAS-5 Scythe's needs 0.32 m, the prone swaps of soak 34 0.33 to 0.34) but a body that has left the camera,
+   and the move itself is the lurch. The frame keeps the held eye and counts as left behind the head (so the `Head:`
+   line comes) and as `far`. Accepted: a frame of the helmet from 0.30 m or more behind it, in this case only. A part
+   of the way was not taken: for a head level with the eye (173) every point between the held eye and 0.10 m in front
+   of the head has the helmet larger in the frame than the held eye has it, and from 0.08 m behind the node the eye is
+   inside it; and moving up and forward together takes about as far (0.53 m).
+3. **Let out, not taken back.** After the veil closes, its last move is let out over 300 ms
+   (`TFP_CAMERA_VEIL_LET_OUT_MS`, `tfp_camera_veil_let_out`: from rest to rest, at most 6 (dt/T)^2 of the move a frame,
+   0.058 m for 0.40 m at 50 ms a frame, under the judge's 0.06) instead of in one frame: the body is hidden by then, so
+   the eye need not be clear, and the step back was the lurch's other half. Only head-camera frames of the lock on
+   foot are let out into; any other frame, and a new leave, ends it. The Trace row's `veil=` carries the let-out too, so
+   `eye_world + veil` stays the eye shown and the judges see it.
+
+**How "never inside the head" is checked.** In the code: a move is either the whole way (the eye `TFP_CAMERA_VEIL_CLEAR`
+in front of the node, outside the box) or one after which the whole box is below a plane through the eye, which the eye
+cannot be inside; a frame that gets neither keeps the held eye, which is then more than 0.30 m behind the node. In the
+tests (`tests/camera_veil_helper_test.cpp` 17 to 20), apart from the helper's arithmetic: in every veiled frame the shown
+eye is checked against the box (`inside_head`: behind the front, in front of the back, within 0.15 m sideways and in
+height) and for being clear (`clear_of_head`: 0.10 m in front, or the angle of each of the box's eight corners from the
+view axis, in the plane of the view's forward and up, below minus half the field of view, the spare left out).
+
+### Numbers (the scenes of the tests: the two leaves rebuilt from their rows; field of view 90 degrees as the user's
+`Fov:` lines, or not known)
+
+| Scene | Before: moves, judge's measure | After, 90 degrees | After, not known |
+|---|---|---|---|
+| 118 dive, 8 / 16.7 / 33.3 / 50 ms | 0.553 to 0.582 m; 0.562 to 0.637 m | moves 0.099 / 0.088 / 0.067 / 0.046 m; measure 0.110 to 0.112 m | moves 0.290 to 0.269 m; measure 0.300 to 0.333 m |
+| 173 lunge, same | 0.501 to 0.531 m; 0.537 to 0.557 m | no move (far, 2 frames); measure 0.010 to 0.052 m, the bare eye's own | the same |
+
+The measure "bare" (the same scene without the veil) is 0.011 / 0.023 / 0.045 / 0.066 m in 118, so what the veil adds
+falls from about 0.55 m to 0.05 to 0.10 m at 90 degrees. Made-up dives (the head 0.30 to 0.70 m below the held eye and
+0.30 to 0.55 m in front of it, fields of view of 80, 90 and 120 degrees, every frame time: 144 scenes): 116 moved less
+than the whole way, 19 kept the held eye, the largest move 0.396 m; never inside the head, always clear or counted far.
+The standing Scythe swap (test 20) moves the whole 0.32 m as before, and lets it out after. The soak's `largest_veil_m`
+(0.570 m on feel.52) should fall to the largest kept move: at most 0.40 m and the eye's own change, about 0.34 m for the
+prone swaps of soak 34 unless their head is below the view too.
+
+### Logged
+
+- **Trace rows**: `veil_head=(ahead up)` at the end, in a frame the veil was open for: the head node from the eye before
+  the veil, along the level view and up (`0` otherwise). That settles the head's height that this round had to estimate.
+- **`Head:` line**: `...; veil kept short: head below the view on N, too far to move on M`, only where either happened.
+
+### What only the game can show
+
+- Where the head really is in a dive and a lunge (`veil_head=`): the 0.55 m below the eye in 118 and level in 173 are
+  estimates. If the dive's head is higher, more of those leaves fall under "too far" and show a frame of helmet.
+- Whether the bottom-edge rule is right on screen: a burst of captures (`tools/harness/burst.py`) around a swap begun
+  in a dive, at the user's field of view; the 5-degree spare and the box's size (0.15 m) are judgement.
+- Whether the frame of helmet from 0.43 m behind it in a lunge (173, "too far") shows, and whether it is worse than the
+  0.53 m lurch it replaces. If it is, `TFP_CAMERA_VEIL_MOST` is the one number to raise.
+- How the 300 ms let-out reads after a standing swap (0.32 m eased back where it used to step back in a frame).

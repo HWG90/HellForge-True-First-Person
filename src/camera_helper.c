@@ -244,6 +244,12 @@ static _Atomic uint64_t veil_leaves, veil_frames, veil_moved, veil_behind;
 /* Round 19 (tfp_camera_set_veil_second): the veil opens at the tick that sees the leave; the hook notes the leave in
  * veil_pending and the tick takes it. Both are the game thread, as above. */
 static _Atomic uint32_t veil_second, veil_pending;
+/* Round 26: the vertical field of view the frames are drawn with (a float's bits; 0: not known), and the frames the
+ * head was below the view in (under) or the move was over TFP_CAMERA_VEIL_MOST (far). */
+static _Atomic uint32_t veil_fov;
+static _Atomic uint64_t veil_under, veil_far;
+/* Round 26: the last veiled frame's move and time, let out after the veil closes (game thread, under the policy lock). */
+static float veil_out_move[3]; static double veil_out_tick; static bool veil_out_on;
 static _Atomic uint64_t orphan_frames, orphan_refused;
 static struct { bool known; uint32_t mask, kind, weapon, key; double until; } smooth_watch;
 /* Round 24 (src/camera_traversal.h): the body root's motion, for the head-camera frames of a clamber. Policy lock. */
@@ -255,7 +261,7 @@ static _Atomic uint32_t settle_arm, settle_on; static double settle_armed_at; /*
 #define TRACE_RING 128u
 #define TRACE_BEFORE 6u   /* frames before the edge that are written with it */
 #define TRACE_MS 500.0
-typedef struct TraceFrame { double tick; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease, root[3]; uint32_t what; float axes[9], damp[3], view[3], sock; uint32_t arms; float veil[3], turn[3]; } TraceFrame;
+typedef struct TraceFrame { double tick; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease, root[3]; uint32_t what; float axes[9], damp[3], view[3], sock; uint32_t arms; float veil[3], turn[3], veil_head[2]; } TraceFrame;
 /* Round 24, the log only: the native view's parent (the rig eye's axis rows) in the frame being presented, for the
  * direction shown (lock_rotation: the argument there is parent-local). trace_parent_tick: whose frame; policy lock. */
 static float trace_parent[9]; static double trace_parent_tick = -1;
@@ -1109,6 +1115,7 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
     row->entry_ease = p->entry.ease.active && p->entry.ease.duration > 0 ? (float)fmin(1.0, fmax(0.0, (tick-p->entry.ease.started)/p->entry.ease.duration)) : 1;
     row->sock = 0; row->arms = 0; /* tfp_camera_trace_draw says them, after this frame's draw */
     memset(row->veil, 0, sizeof row->veil); /* the setter says it, after the veil (round 19) */
+    memset(row->veil_head, 0, sizeof row->veil_head); /* and where the head was (round 26) */
     memset(row->turn, 0, sizeof row->turn); /* lock_rotation says it, after the rotation is final (round 24) */
     if (trace.head-trace.sent > TRACE_RING) trace.sent = trace.head-TRACE_RING;
     /* The log only: the eye opens a window itself where its step changes by TFP_TRACE_SELF_M or more
@@ -1242,17 +1249,48 @@ static bool orphan_head(Policy *p, const float *given, uint32_t kind, double tic
 static void veil_forget(void) {
   atomic_store_explicit(&veil_last_kind, 0, memory_order_relaxed); atomic_store_explicit(&veil_open, 0, memory_order_relaxed);
   atomic_store_explicit(&veil_ticks, 0, memory_order_relaxed); atomic_store_explicit(&veil_pending, 0, memory_order_relaxed);
+  veil_out_on = false;
 }
 /* The eye of a head-camera frame while the veil is open: at least TFP_CAMERA_VEIL_CLEAR in front of the head along
  * `horizontal` (the level view direction, unit length, z 0). `move`: a body on foot; otherwise only looked at.
  * true: the eye is that far in front (moved there, or already). */
-static bool veil_apply(const float *head, const float *horizontal, bool move, float *eye) {
+/* Round 26: the least move along `horizontal` after which the head (TFP_CAMERA_VEIL_HEAD_M behind the node to
+ * TFP_CAMERA_VEIL_CLEAR in front, TFP_CAMERA_VEIL_HEAD_M up, down and to either side) is wholly below the bottom edge
+ * of the view from the eye; 0: it is already; INFINITY: no move along the view does it. `ahead`: the head node in
+ * front of the eye along `horizontal`; `forward`: the view direction. Worked in the vertical plane of the view: the
+ * bottom edge is the line through the eye at the view's pitch less half the vertical field of view (and
+ * TFP_CAMERA_VEIL_FOV_SPARE); it is a plane holding the camera's right axis, so how far to the side the head is does
+ * not matter (no roll in this camera). Out of view below it: bx*z - bz*x < 0 for every corner (x along the view, z up,
+ * from the eye; (bx, bz) the edge's direction), so for its worst corner. */
+static float veil_under_move(const float *head, const float *forward, const float *eye, float ahead) {
+  const float fov_given = bits_float(atomic_load_explicit(&veil_fov, memory_order_relaxed));
+  const float half = (fov_given > 0 ? fov_given : TFP_CAMERA_VEIL_FOV_MOST)/2+TFP_CAMERA_VEIL_FOV_SPARE;
+  const float flat = sqrtf(forward[0]*forward[0]+forward[1]*forward[1]), edge = atan2f(forward[2], flat)-fminf(half, 1.55f);
+  const float drop = eye[2]-head[2], r = TFP_CAMERA_VEIL_HEAD_M;
+  if (!isfinite(edge) || !isfinite(drop) || !(edge > -1.55f)) return INFINITY; /* looking (nearly) straight down: the head is in view */
+  const float bx = cosf(edge), bz = sinf(edge);
+  if (bz < 0) { /* the edge points down: the worst corner is the head's top front, `ahead`+CLEAR along, r above the node */
+    if (!(drop > r)) return INFINITY;
+    const float move = ahead+TFP_CAMERA_VEIL_CLEAR-bx*(drop-r)/(-bz);
+    return move > 0 ? move+.005f : 0; /* 5 mm past the edge, for rounding */
+  }
+  /* The edge points up (the view raised past half its field): the worst corner is the top back, and a move forward
+   * only brings it into view. */
+  return bx*(r-drop)-bz*(ahead-r) < 0 ? 0 : INFINITY;
+}
+static bool veil_apply(const float *head, const float *horizontal, const float *forward, bool move, float *eye) {
   const float ahead = (eye[0]-head[0])*horizontal[0]+(eye[1]-head[1])*horizontal[1];
   if (!isfinite(ahead) || !finite3(eye)) return false;
   if (ahead >= TFP_CAMERA_VEIL_CLEAR) return true;
   if (!move) return false;
-  const float step = TFP_CAMERA_VEIL_CLEAR-ahead, moved[3] = {eye[0]+horizontal[0]*step, eye[1]+horizontal[1]*step, eye[2]};
-  if (!finite3(moved) || !(step <= 1.0f)) return false; /* more than a metre is not this view */
+  const float whole = TFP_CAMERA_VEIL_CLEAR-ahead, under = finite3(forward) ? veil_under_move(head, forward, eye, -ahead) : INFINITY;
+  const float step = fminf(whole, under);
+  /* Round 26: over TFP_CAMERA_VEIL_MOST the body has left the camera: no move (camera_helper.h). */
+  if (!(step <= TFP_CAMERA_VEIL_MOST)) { atomic_fetch_add_explicit(&veil_far, 1, memory_order_relaxed); return false; }
+  if (step < whole) atomic_fetch_add_explicit(&veil_under, 1, memory_order_relaxed);
+  if (!(step > 0)) return true; /* the head is below the view already */
+  const float moved[3] = {eye[0]+horizontal[0]*step, eye[1]+horizontal[1]*step, eye[2]};
+  if (!finite3(moved)) return false;
   memcpy(eye, moved, 12);
   atomic_fetch_add_explicit(&veil_moved, 1, memory_order_relaxed);
   if (step > bits_float(atomic_load_explicit(&veil_largest, memory_order_relaxed))) atomic_store_explicit(&veil_largest, float_bits(step), memory_order_relaxed);
@@ -1299,6 +1337,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
       }
     }
     veil_frame = atomic_load_explicit(&veil_open, memory_order_relaxed) != 0;
+    if (!(known_kind && kind == 4 && policy.lock_now)) veil_out_on = false; /* round 26: the let-out is the head camera's only */
     if (!lock_asked && smooth.known) smooth_forget();
     const bool supported = known_kind && (kind == 4 || kind == 6 || policy.lock_now);
     if (supported && policy.presentation_enabled) atomic_fetch_add_explicit(&view_frames, 1, memory_order_relaxed);
@@ -1597,14 +1636,28 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
               memcpy(policy.last_head_world, adjusted, 12);
               /* Beyond retail, round 14: after everything that keeps the eye (the swap's hold and glide, the continuity, the
                * damping, the trace), so only what this frame hands the game changes. */
+              const float before[3] = {adjusted[0], adjusted[1], adjusted[2]};
+              bool veil_logged = false;
               if (veil_frame && policy.lock_now && kind == 4) {
-                const float before[3] = {adjusted[0], adjusted[1], adjusted[2]};
-                veil_clear = veil_apply(head, horizontal, !policy.lock_down && !policy.lock_off_foot, adjusted);
-                /* Round 19, the log only: the move on this frame's Trace row (smooth_present wrote it above, with the eye
-                 * before the veil), so that eye + veil is what is shown. */
-                if (atomic_load_explicit(&trace_on, memory_order_relaxed) && trace.head) {
-                  TraceFrame *row = &trace.frames[(trace.head-1) % TRACE_RING];
-                  if (row->tick == tick) for (unsigned i = 0; i < 3; ++i) row->veil[i] = adjusted[i]-before[i];
+                veil_clear = veil_apply(head, horizontal, forward, !policy.lock_down && !policy.lock_off_foot, adjusted);
+                /* Round 26: what the move was, for the let-out after the veil closes. */
+                for (unsigned i = 0; i < 3; ++i) veil_out_move[i] = adjusted[i]-before[i];
+                veil_out_tick = tick; veil_out_on = veil_out_move[0] != 0 || veil_out_move[1] != 0 || veil_out_move[2] != 0;
+                veil_logged = true;
+              } else if (veil_out_on && !veil_frame && policy.lock_now && kind == 4 && !policy.lock_down && tick >= veil_out_tick) {
+                /* Round 26: the veil closed: its last move is let out (camera_helper.h tfp_camera_veil_let_out). */
+                const float w = tfp_camera_veil_let_out(tick-veil_out_tick);
+                if (w > 0) for (unsigned i = 0; i < 3; ++i) adjusted[i] += veil_out_move[i]*w;
+                else veil_out_on = false;
+              } else veil_out_on = false;
+              /* Round 19, the log only: the move on this frame's Trace row (smooth_present wrote it above, with the eye
+               * before the veil), so that eye + veil is what is shown. Round 26: the let-out too, and in a frame the veil
+               * was open for, where the head node was from the eye before it. */
+              if (atomic_load_explicit(&trace_on, memory_order_relaxed) && trace.head) {
+                TraceFrame *row = &trace.frames[(trace.head-1) % TRACE_RING];
+                if (row->tick == tick) {
+                  for (unsigned i = 0; i < 3; ++i) row->veil[i] = adjusted[i]-before[i];
+                  if (veil_logged) { row->veil_head[0] = (head[0]-before[0])*horizontal[0]+(head[1]-before[1])*horizontal[1]; row->veil_head[1] = head[2]-before[2]; }
                 }
               }
               if (policy.fallback_safe) policy.last_view_tick = tick; else ++policy.guard_grace_frames;
@@ -1909,6 +1962,9 @@ void tfp_camera_veil_tick(bool hidden) {
   if (!atomic_load(&veil_open)) return;
   if (hidden || atomic_fetch_add(&veil_ticks, 1) + 1 >= 2) atomic_store(&veil_open, 0);
 }
+void tfp_camera_set_veil_fov(float vertical_radians) {
+  atomic_store(&veil_fov, isfinite(vertical_radians) && vertical_radians > 0 && vertical_radians < 3.1f ? float_bits(vertical_radians) : 0u);
+}
 void tfp_camera_set_veil_second(bool on) { atomic_store(&veil_second, on ? 1u : 0u); if (!on) atomic_store(&veil_pending, 0); }
 void tfp_camera_veil_from_head(const TfpHeadTick *tick) {
   if (!tick) { tfp_camera_set_veil(false); return; }
@@ -1918,6 +1974,7 @@ void tfp_camera_veil_from_head(const TfpHeadTick *tick) {
 void tfp_camera_veil_stats(TfpCameraVeilStats *out) {
   out->leaves = atomic_load(&veil_leaves); out->frames = atomic_load(&veil_frames); out->moved = atomic_load(&veil_moved);
   out->behind = atomic_load(&veil_behind); out->largest_m = bits_float(atomic_load(&veil_largest)); out->second = atomic_load(&veil_second) != 0;
+  out->under = atomic_load(&veil_under); out->too_far = atomic_load(&veil_far);
 }
 void tfp_camera_orphan_stats(TfpCameraOrphanStats *out) {
   if (!out) return;
@@ -1964,7 +2021,7 @@ uint32_t tfp_camera_trace_read(TfpCameraTraceRow *rows, uint32_t capacity) {
     row->step = frame->step; row->correction = frame->correction; row->entry_ease = frame->entry_ease;
     memcpy(row->root, frame->root, 12); memcpy(row->axes, frame->axes, 36); row->what = frame->what; row->tick = frame->tick;
     memcpy(row->damp, frame->damp, 12); memcpy(row->view, frame->view, 12); row->sock = frame->sock; row->arms = frame->arms;
-    memcpy(row->veil, frame->veil, 12); memcpy(row->turn, frame->turn, 12);
+    memcpy(row->veil, frame->veil, 12); memcpy(row->turn, frame->turn, 12); memcpy(row->veil_head, frame->veil_head, 8);
   }
   policy_release();
   return count;
@@ -2016,6 +2073,7 @@ void tfp_camera_reset_for_tests(void) {
   atomic_store(&veil_armed, 0); atomic_store(&veil_open, 0); atomic_store(&veil_ticks, 0); atomic_store(&veil_last_kind, 0); atomic_store(&veil_largest, 0);
   atomic_store(&veil_leaves, 0); atomic_store(&veil_frames, 0); atomic_store(&veil_moved, 0); atomic_store(&veil_behind, 0);
   atomic_store(&veil_second, 0); atomic_store(&veil_pending, 0);
+  atomic_store(&veil_fov, 0); atomic_store(&veil_under, 0); atomic_store(&veil_far, 0); veil_out_on = false;
   atomic_store(&lock_frames, 0); atomic_store(&view_frames, 0); atomic_store(&lock_foreign_frames, 0); atomic_store(&lock_missed, 0); atomic_store(&lock_missed_kind, 0); atomic_store(&lock_missed_error, 0);
   atomic_store(&lock_missed_apart, 0);
   atomic_store(&lock_missed_why, 0); atomic_store(&lock_down_frames, 0); atomic_store(&lock_down_refused, 0); atomic_store(&lock_down_kind, 0);
