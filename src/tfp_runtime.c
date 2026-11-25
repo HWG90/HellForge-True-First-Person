@@ -17,6 +17,8 @@
 
 #define H (rt->host)
 #define HAS(o) (rt->has[TFP_RT_O_##o])
+/* Not in retail (round 35): marks where a part of on_update begins, for the Perf update line (TfpRt.lap). */
+#define PART(p) do { if (rt->lap) rt->lap(rt->lap_user, TFP_RT_PART_##p); } while (0)
 #define MADE(s) (rt->made[TFP_RT_STAGE_##s])
 #define F(t, kind, field) ((t).f[TFP_RT_##kind##_##field])
 #define CHUNK "src/first_person/runtime.lua"
@@ -1119,6 +1121,7 @@ static void probe_update(TfpRt *rt) { /* :1049-1053 */
   }
 }
 static void menu_update(TfpRt *rt, int line) {
+  PART(MENU);
   NEED(MENU, line, "upvalue 'menu'");
   CALL(H->menu_update(H));
 }
@@ -1126,6 +1129,7 @@ static void update_frame(TfpRt *rt, void *unused) {
   Pair p;
   V value = VNIL;
   (void)unused;
+  PART(ENTRY);
   rt->fird_tick = rt->fird_tick + 1;
   if (HAS(PROBE_UPDATE)) probe_update(rt);
   ATT(COMPAT, p, compat_update);
@@ -1193,6 +1197,7 @@ static void update_frame(TfpRt *rt, void *unused) {
     CALL(H->fird_warm_is_clean(H, &value));
     if (!truthy(value)) { OATTX(fird_warm_stop); rt->idle_clean = vb(false); }
   }
+  PART(OWNER);
   if (HAS(RECOVERY)) {
     V enabled = controller_is_enabled(rt);
     if (!veq(enabled, rt->recovery_enabled)) {
@@ -1201,7 +1206,9 @@ static void update_frame(TfpRt *rt, void *unused) {
     }
   }
   if (recover_new_owner(rt)) { menu_update(rt, 598); return; }
+  PART(PRESENTATION);
   observe_presentation(rt);
+  PART(RECOVERY);
   if (HAS(RECOVERY)) {
     CALL(H->recovery_has_policies(H, &value));
     if (truthy(value)) {
@@ -1229,8 +1236,10 @@ static void update_frame(TfpRt *rt, void *unused) {
     CALL(H->recovery_blocks_view(H, at, &value, &name, &phase));
     blocked = truthy(value);
   }
+  PART(CONTROLLER);
   if (!blocked) CALL(H->controller_update(H));
   else if (controller_lease(rt).present) OATTX(controller_retry_cleanup);
+  PART(EDITOR_MOTION);
   NEED(EDITOR, 610, "upvalue 'editor'");
   CALL(H->editor_update(H));
   bool calibrating = false;
@@ -1242,6 +1251,7 @@ static void update_frame(TfpRt *rt, void *unused) {
     NEED(MOTION, 614, "upvalue 'motion'");
     CALL(H->motion_update(H));
   }
+  PART(STOPS);
   bool idle = !truthy(controller_is_enabled(rt));
   if (idle) { NEED(EDITOR, 615, "upvalue 'editor'"); CALL(H->editor_is_active(H, &value)); idle = !truthy(value); }
   if (!idle) rt->idle_clean = vb(false);
@@ -1257,6 +1267,7 @@ static void update_frame(TfpRt *rt, void *unused) {
     menu_update(rt, 622);
     return;
   }
+  PART(MANAGED);
   Pair adjusted = managed_update(rt, TG_FOV, false);
   Pair blur_ready = managed_update(rt, TG_BLUR, false);
   Pair camera_ready = managed_update(rt, TG_CAMERA, false);
@@ -1271,6 +1282,7 @@ static void update_frame(TfpRt *rt, void *unused) {
   /* :634-638, each operand only when the ones before it were true */
   V clean = vb(idle && is_true(adjusted.a) && is_true(blur_ready.a) && is_true(camera_ready.a) && is_true(head_ready.a) &&
                is_true(movement_ready.a) && is_true(dof_ready.a));
+  PART(CLEAN);
   if (truthy(clean)) { NEED(NEAR, 636, "upvalue 'near'"); CALL(H->near_is_clean(H, &clean)); }
   if (truthy(clean) && HAS(FIRD_WARM)) CALL(H->fird_warm_is_clean(H, &clean));
   if (truthy(clean)) {
@@ -1288,14 +1300,17 @@ static void update_frame(TfpRt *rt, void *unused) {
 static void update_body(TfpRt *rt, Pair *out) {
   bool ok = rt_pcall(rt, update_frame, NULL);
   V why = ok ? VNIL : rt->error;
+  PART(READY);
   if (!ok) {
     if (HAS(HELD_FIRE)) OATTX(held_fire_stop);
     if (HAS(READY_POSE)) OATTX(ready_pose_stop);
   }
   ready_update(rt);
+  PART(AIM_MARKERS);
   if (HAS(AIM_MARKERS)) {
     if (ok && !rt->owner_draining.present) OATTX(aim_markers_update); else OATTX(aim_markers_stop);
   }
+  PART(DIAGNOSTICS);
   RecordBox box = {ok, why};
   if (!rt_pcall(rt, record_presentation, &box)) {
     V fault = vt(tostr(rt, rt->error));
@@ -1304,6 +1319,7 @@ static void update_body(TfpRt *rt, Pair *out) {
       log_text(rt, fmt(rt, "Presentation diagnostics unavailable: %s", fault.text));
     }
   } else rt->diagnostics_fault = VNIL;
+  PART(FRAME);
   if (!ok) raise_value(rt, why);
   out->a = vb(true);
 }

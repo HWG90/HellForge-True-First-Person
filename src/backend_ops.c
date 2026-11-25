@@ -102,6 +102,7 @@ static bool fail(TfpOps *b, const char *format, ...) {
   vsnprintf(text, sizeof text, format, args);
   va_end(args);
   memcpy(b->why, text, sizeof text);
+  b->perf.why_writes++; /* round 35: the live memo keeps whether a take wrote it */
   return false;
 }
 static void none(TfpOpsText *t) {
@@ -376,6 +377,26 @@ static void set_reason(TfpOpsSnapshot *s, const char *text) {
 #define FOREIGN_REASON "Photo Mode or another camera owns the view"
 
 /* ---- _snapshot (:167) -------------------------------------------------------------------- */
+/* backend.foreign_camera(), the last step of a pin and a full snapshot (:221-226, :284-289): the pin's takes any answer but
+ * false as foreign, the full one only true. Round 35: also replayed by a served memo hit (taken()), so the hook is called
+ * and answered fresh on every call, as without the memo. */
+static bool foreign_step(TfpOps *b, TfpOpsSnapshot *s, bool full) {
+  TfpOpsText text;
+  none(&text);
+  TfpOpsForeign foreign = b->host->foreign_camera(b->host->user, &text);
+  if (foreign == TFP_OPS_FOREIGN_RAISED) return fail(b, "%s", text.text);
+  if (full ? foreign == TFP_OPS_FOREIGN_TRUE : foreign != TFP_OPS_FOREIGN_FALSE) {
+    s->safe = false;
+    s->foreign_camera = true;
+    set_reason(s, FOREIGN_REASON);
+  }
+  return true;
+}
+/* Round 35, the memo on only: the snapshot as it stands before the foreign step, and the backend's `why` then. */
+static void memo_tail(TfpOps *b, const TfpOpsSnapshot *s, bool full) {
+  b->perf.tail.reached = true, b->perf.tail.full = full, b->perf.tail.base = *s, b->perf.tail.why_writes = b->perf.why_writes;
+  memcpy(b->perf.tail.why, b->why, sizeof b->perf.tail.why);
+}
 static TfpOpsResult action_state(TfpOps *b, const TfpOpsSnapshot *snapshot, TfpOpsAction *out, char *why, size_t why_size);
 static bool snapshot(TfpOps *b, bool player_only, const TfpOpsSnapshot *retiring, bool pin_player, TfpOpsSnapshot *out) {
   TfpOpsSnapshot s;
@@ -430,15 +451,8 @@ static bool snapshot(TfpOps *b, bool player_only, const TfpOpsSnapshot *retiring
       if (!u32(b, s.context + L_CAMERA_UNIT, &s.camera_unit)) return false;
       if (!valid_id(s.camera_unit)) return fail(b, "Local render camera unavailable");
       if (b->host->foreign_camera) {
-        TfpOpsText text;
-        none(&text);
-        TfpOpsForeign foreign = b->host->foreign_camera(b->host->user, &text);
-        if (foreign == TFP_OPS_FOREIGN_RAISED) return fail(b, "%s", text.text);
-        if (foreign != TFP_OPS_FOREIGN_FALSE) {
-          s.safe = false;
-          s.foreign_camera = true;
-          set_reason(&s, FOREIGN_REASON);
-        }
+        if (b->perf.memo_on) memo_tail(b, &s, false);
+        if (!foreign_step(b, &s, false)) return false;
       }
     }
     *out = s;
@@ -484,15 +498,8 @@ static bool snapshot(TfpOps *b, bool player_only, const TfpOpsSnapshot *retiring
     set_reason(&s, s.has_action_error ? s.action_error : "Character is not in the verified on-foot lifecycle");
   }
   if (b->host->foreign_camera) {
-    TfpOpsText text;
-    none(&text);
-    TfpOpsForeign foreign = b->host->foreign_camera(b->host->user, &text);
-    if (foreign == TFP_OPS_FOREIGN_RAISED) return fail(b, "%s", text.text);
-    if (foreign == TFP_OPS_FOREIGN_TRUE) {
-      s.safe = false;
-      s.foreign_camera = true;
-      set_reason(&s, FOREIGN_REASON);
-    }
+    if (b->perf.memo_on) memo_tail(b, &s, true);
+    if (!foreign_step(b, &s, true)) return false;
   }
   s.native_pose_eligible = s.safe;
   *out = s;
@@ -504,7 +511,8 @@ static bool take(TfpOps *b, int mode, TfpOpsSnapshot *out) {
   return snapshot(b, mode != TAKE_FULL, NULL, mode == TAKE_PIN, out);
 }
 /* Round 32: the shadow memo (backend_ops.h TfpOpsPerf, docs/design/specs/2026-11-25-performance.md section 5). Logging
- * only: taken() answers exactly as before; this only compares and counts. */
+ * only while the memo is off (tfp_ops_set_memo, round 35): taken() then answers exactly as before; this only compares
+ * and counts. */
 #define SNAP_FIELD(name) {offsetof(TfpOpsSnapshot, name), sizeof(((TfpOpsSnapshot *)0)->name), #name}
 #define ACTION_FIELD(name) {offsetof(TfpOpsSnapshot, action) + offsetof(TfpOpsAction, name), sizeof(((TfpOpsAction *)0)->name), "action." #name}
 static const struct { size_t at, size; const char *name; } snapshot_fields[] = {
@@ -554,38 +562,113 @@ static void mismatch(TfpOps *b, int mode, size_t offset, const char *field) {
   b->perf.first.has = true, b->perf.first.mode = mode, b->perf.first.offset = offset, b->perf.first.field = field;
   b->perf.first.epoch = b->frame_epoch;
 }
-static void shadow(TfpOps *b, int mode, bool hit, TfpOpsResult result, const TfpOpsSnapshot *out) {
+/* Compares a hit's fresh answer with the stored one (counting a mismatch), then stores the fresh one. Answers the field
+ * of a mismatch (NULL: none) and its offset. */
+static const char *shadow(TfpOps *b, int mode, bool hit, TfpOpsResult result, const TfpOpsSnapshot *out, size_t *offset) {
   TfpOpsMemo *m = &b->perf.memo[mode];
+  const char *field = NULL;
+  *offset = 0;
   if (hit) {
     b->perf.memo_hits[mode]++;
-    if (m->result != result) mismatch(b, mode, 0, "result");
+    if (m->result != result) field = "result";
     else if (result == TFP_OPS_TRUE) {
       if (memcmp(&m->s, out, sizeof *out)) { /* the byte walk only when they differ */
         const unsigned char *x = (const unsigned char *)&m->s, *y = (const unsigned char *)out;
         for (size_t i = 0; i < sizeof *out; i++)
-          if (x[i] != y[i]) { mismatch(b, mode, i, tfp_ops_snapshot_field(i)); break; }
+          if (x[i] != y[i]) { *offset = i, field = tfp_ops_snapshot_field(i); break; }
       }
-    } else if (strcmp(m->why, b->why)) mismatch(b, mode, 0, "why");
+    } else if (strcmp(m->why, b->why)) field = "why";
+    if (field) mismatch(b, mode, *offset, field);
   }
   m->has = b->frame_active, m->epoch = b->frame_epoch, m->result = result;
   if (result == TFP_OPS_TRUE) memcpy(&m->s, out, sizeof m->s), m->why[0] = 0;
   else keep_text(m->why, sizeof m->why, b->why);
+  return field;
 }
-static TfpOpsResult taken(TfpOps *b, int mode, TfpOpsSnapshot *out, TfpOpsText *why) {
+/* Round 35: the memo live (backend_ops.h TfpOpsPerf, docs/design/specs/2026-11-25-performance.md section 6). */
+void tfp_ops_memo_forget(TfpOps *b) {
+  for (int i = 0; i < TFP_OPS_TAKES; i++) b->perf.memo[i].has = false;
+}
+void tfp_ops_memo_wrote(TfpOps *b) {
+  if (b->perf.memo_on) tfp_ops_memo_forget(b); /* off: the shadow counts as it did before round 35 */
+}
+void tfp_ops_set_memo(TfpOps *b, bool on) {
+  b->perf.memo_on = on;
+  b->perf.memo_live = on && !b->perf.off.has;
+  tfp_ops_memo_forget(b); /* an answer stored before has no reads, why or foreign step kept */
+}
+static void memo_off(TfpOps *b, int mode, bool moved, size_t offset, const char *field) {
+  b->perf.memo_live = false;
+  if (b->perf.off.has) return;
+  b->perf.off.has = true, b->perf.off.moved = moved, b->perf.off.mode = mode, b->perf.off.offset = offset, b->perf.off.field = field;
+  b->perf.off.epoch = b->frame_epoch;
+}
+/* A served hit: the stored answer, and the backend's `why` as the take left it; nothing read. A take that reached the foreign
+ * step (a pin or a full one with the hook) is replayed from the snapshot as it stood before that step: the hook is called
+ * and its answer applied, so a raise or a change of its answer reads as it would without the memo. Nothing else is touched
+ * (a hit's take moved nothing, or the checks turn the memo off). */
+static TfpOpsResult served(TfpOps *b, int mode, TfpOpsSnapshot *out, TfpOpsText *why) {
+  const TfpOpsMemo *m = &b->perf.memo[mode];
+  b->perf.memo_hits[mode]++, b->perf.memo_served[mode]++, b->perf.memo_saved_reads += m->reads;
+  none(why);
+  if (m->replay) {
+    TfpOpsSnapshot s = m->base;
+    if (m->base_wrote_why) memcpy(b->why, m->base_why, sizeof b->why), b->perf.why_writes++;
+    if (b->host->foreign_camera && !foreign_step(b, &s, m->replay_full)) return say(why, TFP_OPS_NIL, b->why);
+    if (m->replay_full) s.native_pose_eligible = s.safe;
+    *out = s;
+    return TFP_OPS_TRUE;
+  }
+  if (m->wrote_why) memcpy(b->why, m->left_why, sizeof b->why), b->perf.why_writes++;
+  if (m->result == TFP_OPS_TRUE) {
+    *out = m->s;
+    return TFP_OPS_TRUE;
+  }
+  return say(why, TFP_OPS_NIL, m->why);
+}
+static TfpOpsResult taken_body(TfpOps *b, int mode, TfpOpsSnapshot *out, TfpOpsText *why) {
   TfpOpsMemo *m = &b->perf.memo[mode];
   const bool hit = b->frame_active && m->has && m->epoch == b->frame_epoch;
-  OpsState before, after;
+  bool check = false;
   b->perf.memo_calls[mode]++;
+  if (hit && b->perf.memo_live) { /* round 35: served, except the first live hit and every 16th after it */
+    if (b->perf.memo_live_hits++ % TFP_OPS_MEMO_CHECK_EVERY) return served(b, mode, out, why);
+    check = true, b->perf.memo_checked[mode]++;
+  }
+  OpsState before, after;
+  const uint64_t reads = b->perf.reads, why_writes = b->perf.why_writes;
+  b->perf.tail.reached = false;
   if (hit) ops_state(b, &before);
   TfpOpsResult result;
   none(why);
   if (take(b, mode, out)) result = TFP_OPS_TRUE;
   else result = say(why, TFP_OPS_NIL, b->why);
+  bool moved = false;
   if (hit) {
     ops_state(b, &after);
-    if (!same_state(&before, &after)) b->perf.memo_moved++;
+    if (!same_state(&before, &after)) b->perf.memo_moved++, moved = true;
   }
-  shadow(b, mode, hit, result, out);
+  size_t offset;
+  const char *field = shadow(b, mode, hit, result, out, &offset);
+  if (b->perf.memo_on) {
+    m->reads = (uint32_t)(b->perf.reads - reads);
+    m->wrote_why = b->perf.why_writes != why_writes;
+    if (m->wrote_why) memcpy(m->left_why, b->why, sizeof m->left_why);
+    m->replay = b->perf.tail.reached, m->replay_full = b->perf.tail.full;
+    if (m->replay) {
+      m->base = b->perf.tail.base, m->base_wrote_why = b->perf.tail.why_writes != why_writes;
+      if (m->base_wrote_why) memcpy(m->base_why, b->perf.tail.why, sizeof m->base_why);
+    }
+  }
+  if (check && (field || moved)) memo_off(b, mode, !field, offset, field ? field : "state");
+  return result;
+}
+/* Round 35: with a clock (the Perf lines), the time of every public snapshot call, served or taken. */
+static TfpOpsResult taken(TfpOps *b, int mode, TfpOpsSnapshot *out, TfpOpsText *why) {
+  if (!b->perf.clock) return taken_body(b, mode, out, why);
+  const int64_t t0 = b->perf.clock();
+  const TfpOpsResult result = taken_body(b, mode, out, why);
+  b->perf.snapshot_ticks += (uint64_t)(b->perf.clock() - t0);
   return result;
 }
 TfpOpsResult tfp_ops_snapshot(TfpOps *b, TfpOpsSnapshot *out, TfpOpsText *why) { return taken(b, TAKE_FULL, out, why); }
@@ -1865,6 +1948,7 @@ TfpOpsResult tfp_ops_release_body_pose(TfpOps *b, TfpOpsLease *lease, TfpOpsToke
 
 /* ---- keep_aim_view, detach_seated_camera (:1340, :1372) ------------------------------------ */
 static bool store(TfpOps *b, uint64_t at, const void *bytes, size_t size) {
+  tfp_ops_memo_wrote(b); /* round 35: retail writes here without a new epoch (keep_aim_view); the memo must not outlive it */
   if (!b->host->write || !b->host->write(b->host->user, at, bytes, size)) return fail(b, "Memory write unavailable");
   return true;
 }

@@ -282,3 +282,191 @@ If all five hold, round 33 returns the stored answer on a hit (TRUE: copy the st
 `b->why`), keeps `tfp_wire_snapshot_table` running on every call (its ring slot and `frame_full` / `frame_identity`), and keeps the
 shadow running beside it in an assert mode for one more soak: the stored and a fresh take are still compared on every Nth hit, and
 mismatches must stay 0. Its proof: the backend_ops vectors identical, the wire and feel tests, `replay.py` over the soak Trace rows.
+
+## 6. Round 35: the memo live behind `memo_on.txt`, and on_update in parts
+
+**Nothing here has run in the game.** Without `memo_on.txt` the mod answers exactly as feel.55 does. The only differences are
+the new `Perf update:` line and a few more clock reads (see "Cost" below). With the file present, a repeated snapshot in one
+frame epoch answers the one already taken.
+
+### What the game has shown so far
+
+The only game data is feel.55 at the title screen on HellForge 0.5, at 30 ticks a second:
+
+```
+Perf snapshots: per second: guarded reads 2370; snapshots full 60, player 60, pin 30; ... memo (shadow) calls 60/60/30, hits 30/0/0, mismatches 0/0/0, moved 0
+Perf frame: on_update 27/39 (... other 27/39)
+```
+
+Each tick takes 2 full snapshots, 2 player ones and 1 pin one, and makes 79 guarded reads in all. One full call per tick is a
+hit. A hit saves at most one take's reads, so at the title screen the memo can save at most about 2 µs a tick
+(79 × 0.06 µs = 4.7 µs a tick is every read together). The case that counts is a mission (hip, prone, ADS), where round 31
+expects 12 to 20 snapshot calls a tick. Those counts have not been seen yet. This round makes the memo testable there, and
+splits the 27 µs of "other" so the run shows where on_update's time goes.
+
+### The switch
+
+`memo_on.txt` beside the DLL, read once at start like the other switch files (`src/mod_view.c` `start()`). When the file is
+there, the log says `Test: memo_on.txt: ...`. `tfp_wire_set_memo` (`src/wire_rt.c`) sets it on the current backend and on every
+backend made after it (`rt_backend_new`). Without the file, `tfp_ops_set_memo` is never called and the backend is the
+round-32 one: the shadow compares and counts, and every answer is fresh.
+
+### The memo live (`src/backend_ops.c` `taken()`)
+
+- **A hit** is a call of `tfp_ops_snapshot`, `_player_snapshot` or `_pin_player_snapshot` that finds a stored answer of the
+  same mode and the same `frame_epoch`, with a frame active. This is the same rule as the shadow's. Every native call and every
+  `invalidate` still starts a new epoch.
+- **A served hit** returns the stored answer without reading memory. TRUE copies the stored snapshot. NIL returns the stored
+  text. Either way the backend's `why` is left as the take left it: the take's own `fail()` text, or untouched when the take
+  wrote none.
+- **The foreign-camera step is replayed.** A pin or full take that reached the `foreign_camera` hook keeps the snapshot as it
+  stood before that step. A served hit calls the hook again and applies its fresh answer: the pin takes any answer but false
+  as foreign, the full one only true, and the full one then sets `native_pose_eligible`. So the hook is called once per call,
+  as without the memo. A raise of the hook, or a change of its answer inside the epoch, comes out as it would without the
+  memo.
+- **Callers are unchanged.** `tfp_wire_snapshot_table` still runs on every TRUE answer, served or not. Its ring slot and
+  `frame_full` / `frame_identity` are set exactly as before, because the memo lives below them in the backend.
+- **Checks.** The first live hit, and every 16th after it (`TFP_OPS_MEMO_CHECK_EVERY`, counted over all modes), still takes a
+  fresh snapshot and compares it as the shadow does: the result, the snapshot byte for byte, the NIL text, and the backend's
+  own state before and after the take. A check that differs, or whose take moved the backend's state, turns the memo off.
+  `memo_live` goes false. Every call from then on is fresh, and the shadow keeps comparing. `Memo: off for the session: ...`
+  is logged once, naming the mode, the epoch and the field (or that the state moved). The wire keeps the memo off on every
+  backend made later in the session. A wrong memo can therefore last at most 15 hits.
+- **Game writes drop the memo.** With the memo on, a write that does not start a new epoch drops the stored answers
+  (`tfp_ops_memo_wrote`):
+  - the backend's own `keep_aim_view`. Retail writes the controller's active byte there without a new epoch, and the
+    vectors' `session` run reads that byte again in the same epoch.
+  - the effects' `WriteProcessMemory` of the locomotion byte and the aim option (`src/wire_effects.c` `m_write`,
+    `tfp_fx_memory_copy`).
+
+  Off, these calls do nothing, so the shadow counts as in round 32.
+
+### What the lines show
+
+- **Perf snapshots.** Without the file, the line is round 32's text byte for byte. With it:
+
+  ```
+  ... memo (live, the first and every 16th hit checked) calls c/c/c, hits h/h/h, served s/s/s, checked k/k/k, mismatches m/m/m, moved V; saved reads R
+  ```
+
+  After a failed check the line reads `memo (turned off by a check, shadow again)`. `saved reads` is the guarded reads the
+  served hits did not make. Each served hit counts its stored take's reads. The `snapshots full/player/pin` counts and
+  `guarded reads` drop by what was served.
+- **Perf update** comes every second, right after Perf frame. It splits on_update into exclusive parts that add up to Perf
+  frame's `on_update` (`src/perf_line.h` `TFP_UPD_*`; at most 513 bytes):
+
+  ```
+  Perf update: per tick mean/largest us, on_update in parts: targets A/B, controller A/B, managed A/B, recovery A/B, owner A/B, presentation A/B, stops A/B, clean poll A/B, editor+motion A/B, entry A/B, menu A/B, ready A/B, aim markers A/B, diagnostics A/B, frame A/B; all snapshot calls A/B
+  ```
+
+  The runtime marks where each part begins (`PART()` in `src/tfp_runtime.c`, through `TfpRt.lap`; NULL in every vector
+  test). The parts:
+
+  | part | what runs in it |
+  |---|---|
+  | targets | the seven managed targets' own update calls (the timed wrappers), whatever part calls them |
+  | controller | `controller:update`, with its own snapshots and lease work, or its retry cleanup |
+  | managed | recovery's bookkeeping around each target: action, proof (a full snapshot), success or failure, the result, a stop and clean poll on a cleanup |
+  | recovery | the policy walk and `blocks_view` |
+  | owner | the new-owner check; on a new body, every target's stop and clean poll |
+  | stops | the idle and foreign-camera stops |
+  | clean poll | whether the idle frame is clean |
+  | other parts | the probe, compat, the Fird checks, the editor, motion, menu, ready stance, aim markers, diagnostics |
+  | frame | the backend's frame begin and end |
+
+  So round 32's `other` (27/39 at the title screen) is now `on_update` less `targets`, split by name. `all snapshot calls` is
+  gross. It is the time inside the three public snapshot functions from every caller (runtime, effects, motion, engine,
+  editor), served or taken, measured inside `taken()` with the same clock. It is the number the memo is meant to shrink.
+
+### Proof (tests)
+
+- **With the switch off, answers are unchanged.** The backend_ops vectors (357 and 372 runs, 41899 and 42837 steps), the
+  shadow section, and the wire and feel tests pass as on main. Without the file, `tfp_ops_set_memo` is never called,
+  `tfp_ops_memo_wrote` does nothing, and the wire test checks that `tfp_wire_set_memo(false)` leaves the backend's counts
+  untouched.
+- **With the switch on, every vector answers as retail.** `tests/run-vectors-backend-ops.sh` runs both programs again with
+  `TFP_OPS_MEMO=1`, which sets the memo on after every `new`. The fixture models the memo's premise: it drops the memo
+  (`tfp_ops_memo_forget`) when a step changes the scene, a hook or the profile inside a frame, which the game does not do
+  between two calls on its own thread. The result is 24 hits served, 66 and 68 checked, and 2204 guarded reads saved.
+  - In `random51` the memo turned itself off. A trap changes memory in the middle of a take's reads, which models the game
+    writing while the mod reads. The next check found `result` different and the memo turned off, which is the purpose of
+    the check. `TFP_OPS_MEMO_WHY=1` prints what turned it off.
+- **`tests/backend_ops_test.c`, live memo, on 371 first images:**
+  - a served hit answers what a fresh take and a backend without the memo answer, and makes no read;
+  - `saved reads` equals the stored take's reads per hit;
+  - the player and pin modes are served the same way;
+  - a change of the game's memory without an invalidate is answered stale until the next check; that check finds
+    `controller_bytes`, turns the memo off, returns the fresh unsafe answer, and from then on takes fresh;
+  - `set_memo(true)` does not bring it back on that backend;
+  - a served failure answers the fresh text and leaves the backend's `why` as a fresh take would.
+- **`tests/wire_feel_test.c`:**
+  - the parts add up to the update lap exactly (fake clock);
+  - the runtime's marks land, and a target called from a part is charged to `targets` while that part carries on after it;
+  - nothing is charged outside on_update;
+  - the switch reaches each new backend, and a turned-off memo stays off on the next backend.
+- **`tests/perf_line_test.c`:** the live and turned-off Perf snapshots lines (at most 475 bytes), the Memo off line (296),
+  and the Perf update line (513) all fit 700 bytes. The shadow's line is still round 32's (332).
+
+### Cost
+
+- **Without the file,** about 15 clock reads a tick for the parts and 2 per public snapshot call. With 12 to 20 calls that is
+  about 40 to 55 reads, about 1 to 3 µs at Wine's in-process `QueryPerformanceCounter`. It is counted inside the lines it
+  measures.
+- **With the file,** each fresh take also copies the snapshot at the foreign step (792 bytes) and up to two 320-byte texts.
+  A served hit costs one snapshot copy and the foreign hook's call instead of the take's reads.
+
+### How to run the A/B in the game
+
+Use the same build, the same scenario and the same length for both:
+
+- **A:** no `memo_on.txt` beside the DLL.
+- **B:** an empty `memo_on.txt` beside the DLL (the folder of `head_parts.txt` and the other switch files).
+
+The B log must start with `Test: memo_on.txt: ...`. Run a Stable and a Bodycam harness soak like -37 and -38, each in hip,
+prone and ADS. If possible, also the user's own play in a mission. Then compare, second by second and state by state:
+
+1. **Perf snapshots.** In B the `snapshots full/player/pin` counts and `guarded reads` per second are lower than in A by about
+   the `served` and `saved reads` that B reports. `checked` is above 0 in every second with hits.
+2. **Perf update.** `all snapshot calls` mean per tick, A against B. Then the parts: if `controller` or `managed` carry most
+   of on_update in A and shrink in B, the snapshots were their cost. If they do not shrink, the cost is elsewhere in them,
+   and the next round splits that part.
+3. **Perf and Perf frame.** The Perf line's `frame` mean and largest, and Perf frame's `on_update` and `extra`.
+4. **Feel.** The same Drop, Wait, Return and State line counts, no new Refused lines, and the Trace rows replay
+   (`replay.py`) alike in A and B.
+
+### The pass mark for making the memo the default
+
+All of these must hold in both soaks and, if it was run, the play:
+
+1. No `Memo: off` line in any B log. Mismatches are 0/0/0 and moved is 0 in every second, with `checked` above 0 wherever
+   there are hits.
+2. The feel is unchanged against A (item 4 above).
+3. **The saving is real and worth keeping.**
+   - In hip, prone and ADS, B's `all snapshot calls` mean is lower than A's by at least half of `saved reads` per tick ×
+     0.06 µs (harness; 0.10 µs in the user's play). The other half allows for the foreign hook and the copy.
+   - The Perf line's `frame` mean is lower by **at least 10 µs a tick** (about 3% of feel.54's 310 µs tick), beyond the
+     run-to-run noise of two A runs.
+
+If item 1 or 2 fails, the memo stays behind the switch. The `Memo: off` line names the field and mode, and either that site
+gets an invalidate or that mode leaves the memo. If items 1 and 2 hold but item 3 does not, the snapshots are not the bulk.
+The memo stays off, and the Perf update parts name the next target.
+
+If all three hold, the next round makes the memo the default:
+
+- `memo_off.txt` becomes the switch;
+- the checks stay at every 16th hit, because they cost one take in 16;
+- the backend_ops vectors run with the memo on by default.
+
+### What only the game can show
+
+- **Whether the game changes snapshot fields inside one frame epoch** on its own: another thread writing the controller
+  bytes, the avatar flags or the camera record while the tick runs, or a helper hook firing inside on_update. The vectors
+  cannot model this; the checks will see it.
+- **Whether the foreign-camera hook's answer can change inside an epoch.** The memo replays it, so this costs only the
+  hook's own time.
+- **Whether the managed targets write game memory that a snapshot reads.** The FOV, camera, near and blur helpers during
+  their update are the candidates. Only the effects' writes are known, and they drop the memo.
+- **The real hit, served and saved-read counts in a mission, and so the saving itself.** The estimate is
+  `saved reads` × 0.06 to 0.10 µs. At round 31's figures it is about 7 to 15 µs for each served full hit. If about half of
+  12 to 20 calls a tick are hits, that is 40 to 120 µs a tick, but nobody has counted them in a mission.
+- **What the 27 µs (title screen) and the larger in-mission `other` really are,** now named by the Perf update parts.
