@@ -1310,8 +1310,38 @@ TfpRtStatus tfp_wire_call(TfpWire *w, TfpRtEntry entry, const TfpRtArgs *args, T
   return status;
 }
 
+/* Round 32: the laps (wire.h). Each wrapper calls the target's own update function and adds its time to the lap. */
+#define LAPPED(name, slot, lap) \
+  static bool lapped_##name(TfpRtHost *h, V *o1, V *o2) { \
+    TfpWire *w = W(h); \
+    const int64_t t0 = w->laps.clock(); \
+    const bool done = w->laps.update[slot](h, o1, o2); \
+    w->laps.tick[lap] += w->laps.clock() - t0; \
+    return done; \
+  }
+LAPPED(fov, 0, TFP_LAP_FOV)
+LAPPED(blur, 1, TFP_LAP_BLUR)
+LAPPED(camera, 2, TFP_LAP_CAMERA)
+LAPPED(head, 3, TFP_LAP_HEAD)
+LAPPED(movement, 4, TFP_LAP_MOVEMENT)
+LAPPED(near, 5, TFP_LAP_NEAR)
+LAPPED(dof, 6, TFP_LAP_DOF)
+#undef LAPPED
+void tfp_wire_laps_start(TfpWire *w, int64_t (*clock)(void)) {
+  typedef bool (*Update)(TfpRtHost *, V *, V *);
+  Update *const at[7] = {&w->host.fov_update, &w->host.blur_update, &w->host.camera_update, &w->host.head_update,
+                         &w->host.movement_update, &w->host.near_update, &w->host.dof_update};
+  static const Update lapped[7] = {lapped_fov, lapped_blur, lapped_camera, lapped_head, lapped_movement, lapped_near, lapped_dof};
+  memset(w->laps.tick, 0, sizeof w->laps.tick);
+  w->laps.clock = clock;
+  if (!clock) return;
+  for (int i = 0; i < 7; i++)
+    if (*at[i] && *at[i] != lapped[i]) w->laps.update[i] = *at[i], *at[i] = lapped[i]; /* NULL stays NULL: the runtime's "not a function" */
+}
+
 void tfp_wire_frame(TfpWire *w, const char *extra) {
   V r[2] = {nil(), nil()};
+  int64_t mark = tfp_wire_lap_now(w); /* round 32: the laps of the Perf frame line */
   w->has_row = w->frame_full = false;
   if (tfp_wire_call(w, TFP_RT_E_on_update, NULL, r) == TFP_RT_RAISED) {
     char why[240];
@@ -1321,16 +1351,19 @@ void tfp_wire_frame(TfpWire *w, const char *extra) {
       tfp_view_log_event(&w->log, "Refused: the frame raised: %s", why);
     }
   } else w->entry_fault[0] = 0;
+  tfp_wire_lap(w, TFP_LAP_UPDATE, &mark);
 
   if (w->frame_extra) w->frame_extra(w);
+  tfp_wire_lap(w, TFP_LAP_EXTRA, &mark);
   tfp_wire_hold_frame(w); /* nothing while the hold is off */
+  tfp_wire_lap(w, TFP_LAP_HOLD, &mark);
   TfpViewSample s;
   TfpFovResult fov;
   TfpBlurResult blur;
   TfpCameraAdapterResult camera;
   TfpNearResult near_clip;
   memset(&s, 0, sizeof s);
-  if (!w->rt.has[TFP_RT_O_CONTROLLER]) return; /* not enabled (yet): nothing to sample */
+  if (!w->rt.has[TFP_RT_O_CONTROLLER]) { tfp_wire_lap(w, TFP_LAP_VIEW_LOG, &mark); return; } /* not enabled (yet): nothing to sample */
   tfp_fov_lease_result(&w->fov, &fov);
   tfp_blur_lease_result(&w->blur, &blur);
   tfp_camera_adapter_result(&w->camera, &camera);
@@ -1398,4 +1431,5 @@ void tfp_wire_frame(TfpWire *w, const char *extra) {
     if (l) tfp_view_log_event(&w->log, "Ids: avatar=0x%x body=0x%x weapon_unit=0x%x", (unsigned)l->ops.origin.avatar, (unsigned)l->ops.origin.body,
                               (unsigned)l->ops.origin.weapon_unit);
   }
+  tfp_wire_lap(w, TFP_LAP_VIEW_LOG, &mark);
 }

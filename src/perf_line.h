@@ -51,4 +51,69 @@ static inline int tfp_perf_line(char *out, size_t size, const TfpPerfSecond *p) 
                   (unsigned)p->scan_worst_us, (unsigned)p->scans, (unsigned)p->host_writes, (unsigned)p->process_writes, (unsigned)p->queries,
                   (unsigned)p->engine_calls, (unsigned)p->log_lines);
 }
+
+/* Round 32 (docs/design/specs/2026-11-25-performance.md, section 5): the frame section in laps, and what the backend did.
+ * Two more lines, each once a second right after the Perf line; logging only, like it.
+ *
+ * The laps of tfp_wire_frame, gross (each includes what it calls; the dof lap includes the vignette, which the Perf
+ * line's frame section leaves out). The two "other" slots are filled per tick by tfp_perf_laps_close: the part of
+ * on_update outside the seven managed targets' update calls (the controller, recovery, motion, editor, menu, aim
+ * markers, diagnostics), and the part of frame_extra outside its four modules (the Feel line). */
+enum { TFP_LAP_UPDATE, TFP_LAP_FOV, TFP_LAP_BLUR, TFP_LAP_CAMERA, TFP_LAP_HEAD, TFP_LAP_MOVEMENT, TFP_LAP_NEAR, TFP_LAP_DOF,
+       TFP_LAP_UPDATE_OTHER, TFP_LAP_EXTRA, TFP_LAP_POSE, TFP_LAP_MOTION, TFP_LAP_ENGINE, TFP_LAP_EFFECTS, TFP_LAP_EXTRA_OTHER,
+       TFP_LAP_HOLD, TFP_LAP_VIEW_LOG, TFP_LAPS };
+/* After a tick: the two "other" laps from their totals (never below 0). */
+static inline void tfp_perf_laps_close(int64_t lap[TFP_LAPS]) {
+  int64_t other = lap[TFP_LAP_UPDATE];
+  for (int i = TFP_LAP_FOV; i <= TFP_LAP_DOF; i++) other -= lap[i];
+  lap[TFP_LAP_UPDATE_OTHER] = other > 0 ? other : 0;
+  other = lap[TFP_LAP_EXTRA];
+  for (int i = TFP_LAP_POSE; i <= TFP_LAP_EFFECTS; i++) other -= lap[i];
+  lap[TFP_LAP_EXTRA_OTHER] = other > 0 ? other : 0;
+}
+static inline double tfp_perf_clamp(double us) { return us > 0 ? (us < 99999999.0 ? us : 99999999.0) : 0; }
+
+/* "Perf frame:": each lap's mean per tick and largest in the second, over the Perf line's ticks. */
+static inline int tfp_perf_frame_line(char *out, size_t size, const double mean_us[TFP_LAPS], const double most_us[TFP_LAPS]) {
+  double m[TFP_LAPS], x[TFP_LAPS];
+  for (int i = 0; i < TFP_LAPS; i++) m[i] = tfp_perf_clamp(mean_us[i]), x[i] = tfp_perf_clamp(most_us[i]);
+#define TFP_LAP_(i) m[i], x[i]
+  return snprintf(out, size,
+                  "Perf frame: per tick mean/largest us: on_update %.0f/%.0f (fov %.0f/%.0f, blur %.0f/%.0f, camera %.0f/%.0f, head %.0f/%.0f, "
+                  "movement %.0f/%.0f, near %.0f/%.0f, dof %.0f/%.0f, other %.0f/%.0f); extra %.0f/%.0f (pose %.0f/%.0f, motion %.0f/%.0f, "
+                  "engine %.0f/%.0f, effects %.0f/%.0f, other %.0f/%.0f); hold %.0f/%.0f; view log %.0f/%.0f",
+                  TFP_LAP_(TFP_LAP_UPDATE), TFP_LAP_(TFP_LAP_FOV), TFP_LAP_(TFP_LAP_BLUR), TFP_LAP_(TFP_LAP_CAMERA), TFP_LAP_(TFP_LAP_HEAD),
+                  TFP_LAP_(TFP_LAP_MOVEMENT), TFP_LAP_(TFP_LAP_NEAR), TFP_LAP_(TFP_LAP_DOF), TFP_LAP_(TFP_LAP_UPDATE_OTHER),
+                  TFP_LAP_(TFP_LAP_EXTRA), TFP_LAP_(TFP_LAP_POSE), TFP_LAP_(TFP_LAP_MOTION), TFP_LAP_(TFP_LAP_ENGINE), TFP_LAP_(TFP_LAP_EFFECTS),
+                  TFP_LAP_(TFP_LAP_EXTRA_OTHER), TFP_LAP_(TFP_LAP_HOLD), TFP_LAP_(TFP_LAP_VIEW_LOG));
+#undef TFP_LAP_
+}
+
+/* "Perf snapshots:": per second, what the backend (src/backend_ops.c TfpOpsPerf) did, and the shadow memo. Modes in the
+ * order full, player, pin. */
+typedef struct TfpPerfSnapshots {
+  uint32_t reads;              /* guarded reads of the backend */
+  uint32_t takes[3];           /* snapshots built, by mode (the hold's are player ones) */
+  uint32_t tables;             /* snapshot tables handed to the runtime (w->snap_next) */
+  uint32_t invokes, invoke_bodies;
+  uint32_t calls[3], hits[3], mismatches[3]; /* the memo: public snapshot calls, those in the same frame epoch, those that differed */
+  uint32_t moved;              /* hits whose own take changed the backend's state */
+} TfpPerfSnapshots;
+static inline int tfp_perf_snapshots_line(char *out, size_t size, const TfpPerfSnapshots *p) {
+  return snprintf(out, size,
+                  "Perf snapshots: per second: guarded reads %u; snapshots full %u, player %u, pin %u; tables %u; invoke %u, invoke_body %u; "
+                  "memo (shadow) calls %u/%u/%u, hits %u/%u/%u, mismatches %u/%u/%u, moved %u",
+                  (unsigned)p->reads, (unsigned)p->takes[0], (unsigned)p->takes[1], (unsigned)p->takes[2], (unsigned)p->tables,
+                  (unsigned)p->invokes, (unsigned)p->invoke_bodies, (unsigned)p->calls[0], (unsigned)p->calls[1], (unsigned)p->calls[2],
+                  (unsigned)p->hits[0], (unsigned)p->hits[1], (unsigned)p->hits[2], (unsigned)p->mismatches[0], (unsigned)p->mismatches[1],
+                  (unsigned)p->mismatches[2], (unsigned)p->moved);
+}
+/* Once per session, at the first mismatch. field: a TfpOpsSnapshot field name (or "result", "why"); cut to 48 bytes. */
+static inline int tfp_perf_mismatch_line(char *out, size_t size, int mode, const char *field, size_t offset, uint64_t epoch) {
+  static const char *const modes[] = {"full", "player", "pin"};
+  return snprintf(out, size,
+                  "Memo: first mismatch: a %s snapshot taken again in the same frame epoch (%llu) differed from the one before it, first at "
+                  "%.48s (+0x%llx); the memo stays a shadow (answers are always fresh)",
+                  mode >= 0 && mode < 3 ? modes[mode] : "?", (unsigned long long)epoch, field ? field : "?", (unsigned long long)offset);
+}
 #endif

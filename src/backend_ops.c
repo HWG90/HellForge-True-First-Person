@@ -143,6 +143,7 @@ static void keep_text(char *out, size_t size, const char *text) { /* a text into
 /* ---- _read, _u32, _u8, _ptr (:65-84) ----------------------------------------------------- */
 static bool rd(TfpOps *b, uint64_t at, void *out, size_t size) {
   if (at < LOW || !size || size > 1024 || at + size >= HIGH) return fail(b, "Invalid read");
+  b->perf.reads++; /* round 32: the Perf lines' count of guarded reads */
   if (!b->host->read(b->host->user, at, out, size)) return fail(b, "Memory unavailable");
   return true;
 }
@@ -373,6 +374,7 @@ static bool snapshot(TfpOps *b, bool player_only, const TfpOpsSnapshot *retiring
   uint64_t base;
   uint32_t count = 0, index = 0, d[6];
   uint8_t entry[20];
+  b->perf.takes[!player_only ? TFP_OPS_TAKE_FULL : pin_player ? TFP_OPS_TAKE_PIN : TFP_OPS_TAKE_PLAYER]++; /* round 32: counted only */
   memset(&s, 0, sizeof s);
   if (!module(b, SCOPE_IDENTITY, &base) || !top(b, base, &s)) return false;
   if (!ptr(b, s.base + FP_WORLD, &s.world) || !ptr(b, s.base + FP_CONTROLLER, &s.controller) ||
@@ -486,15 +488,95 @@ static bool snapshot(TfpOps *b, bool player_only, const TfpOpsSnapshot *retiring
   *out = s;
   return true;
 }
-enum { TAKE_FULL, TAKE_PLAYER, TAKE_PIN };
+enum { TAKE_FULL = TFP_OPS_TAKE_FULL, TAKE_PLAYER = TFP_OPS_TAKE_PLAYER, TAKE_PIN = TFP_OPS_TAKE_PIN };
 /* snapshot() / player_snapshot() / pin_player_snapshot(): pcall(_snapshot, …). */
 static bool take(TfpOps *b, int mode, TfpOpsSnapshot *out) {
   return snapshot(b, mode != TAKE_FULL, NULL, mode == TAKE_PIN, out);
 }
+/* Round 32: the shadow memo (backend_ops.h TfpOpsPerf, docs/design/specs/2026-11-25-performance.md section 5). Logging
+ * only: taken() answers exactly as before; this only compares and counts. */
+#define SNAP_FIELD(name) {offsetof(TfpOpsSnapshot, name), sizeof(((TfpOpsSnapshot *)0)->name), #name}
+#define ACTION_FIELD(name) {offsetof(TfpOpsSnapshot, action) + offsetof(TfpOpsAction, name), sizeof(((TfpOpsAction *)0)->name), "action." #name}
+static const struct { size_t at, size; const char *name; } snapshot_fields[] = {
+  SNAP_FIELD(base), SNAP_FIELD(context), SNAP_FIELD(camera), SNAP_FIELD(record), SNAP_FIELD(world), SNAP_FIELD(controller),
+  SNAP_FIELD(player), SNAP_FIELD(avatar_owner), SNAP_FIELD(avatar_entry), SNAP_FIELD(flags_address),
+  SNAP_FIELD(weapon_component_descriptor), SNAP_FIELD(head), SNAP_FIELD(tail), SNAP_FIELD(camera_kind), SNAP_FIELD(request_avatar),
+  SNAP_FIELD(request_weapon), SNAP_FIELD(local_entity), SNAP_FIELD(avatar), SNAP_FIELD(avatar_index), SNAP_FIELD(body),
+  SNAP_FIELD(viewmodel), SNAP_FIELD(weapon), SNAP_FIELD(weapon_unit), SNAP_FIELD(camera_unit), SNAP_FIELD(controller_bytes),
+  SNAP_FIELD(flags), SNAP_FIELD(avatar_descriptor), SNAP_FIELD(weapon_descriptor), SNAP_FIELD(controller_active), SNAP_FIELD(blocked),
+  SNAP_FIELD(request_local), SNAP_FIELD(aiming), SNAP_FIELD(shoulder_aim), SNAP_FIELD(seated), SNAP_FIELD(reloading), SNAP_FIELD(safe),
+  SNAP_FIELD(weapon_transition), SNAP_FIELD(head_camera_transition), SNAP_FIELD(full), SNAP_FIELD(pin_camera),
+  SNAP_FIELD(foreign_camera), SNAP_FIELD(weapon_ready), SNAP_FIELD(engine_safe), SNAP_FIELD(native_pose_eligible),
+  SNAP_FIELD(has_reason), SNAP_FIELD(has_action), SNAP_FIELD(has_action_error), SNAP_FIELD(reason), SNAP_FIELD(action_error),
+  ACTION_FIELD(body_object), ACTION_FIELD(graph), ACTION_FIELD(instance), ACTION_FIELD(body), ACTION_FIELD(layer_count),
+  ACTION_FIELD(resource), ACTION_FIELD(resource_match), ACTION_FIELD(sprint_hypothesis), ACTION_FIELD(sampled), ACTION_FIELD(unknown),
+  ACTION_FIELD(states), ACTION_FIELD(owner_base), ACTION_FIELD(owner_context), ACTION_FIELD(owner_camera), ACTION_FIELD(owner_world),
+  ACTION_FIELD(owner_controller), ACTION_FIELD(owner_player), ACTION_FIELD(owner_avatar_owner), ACTION_FIELD(owner_entry),
+  ACTION_FIELD(owner_light), ACTION_FIELD(owner_avatar_index), ACTION_FIELD(owner_avatar), ACTION_FIELD(owner_body),
+  ACTION_FIELD(owner_descriptor),
+};
+#undef SNAP_FIELD
+#undef ACTION_FIELD
+const char *tfp_ops_snapshot_field(size_t offset) {
+  for (size_t i = 0; i < sizeof snapshot_fields / sizeof snapshot_fields[0]; i++)
+    if (offset >= snapshot_fields[i].at && offset < snapshot_fields[i].at + snapshot_fields[i].size) return snapshot_fields[i].name;
+  return "padding";
+}
+/* The backend's own state a take may touch, without `why` (a text, rewritten by any failure) and without the action maps'
+ * address arrays (5 x 16 KB; their has / def / count are compared): what a memo that skipped the take would have left
+ * different. */
+#define STATE_HEAD offsetof(TfpOps, actions.maps)
+typedef struct OpsState { unsigned char head[STATE_HEAD]; struct { bool has; uint64_t def; uint32_t count; } maps[5]; } OpsState;
+static void ops_state(const TfpOps *b, OpsState *out) {
+  memcpy(out->head, b, STATE_HEAD);
+  for (int i = 0; i < 5; i++)
+    out->maps[i].has = b->actions.maps[i].has, out->maps[i].def = b->actions.maps[i].def, out->maps[i].count = b->actions.maps[i].count;
+}
+static bool same_state(const OpsState *x, const OpsState *y) {
+  if (memcmp(x->head, y->head, STATE_HEAD)) return false;
+  for (int i = 0; i < 5; i++)
+    if (x->maps[i].has != y->maps[i].has || x->maps[i].def != y->maps[i].def || x->maps[i].count != y->maps[i].count) return false;
+  return true;
+}
+static void mismatch(TfpOps *b, int mode, size_t offset, const char *field) {
+  b->perf.memo_mismatches[mode]++;
+  if (b->perf.first.has) return;
+  b->perf.first.has = true, b->perf.first.mode = mode, b->perf.first.offset = offset, b->perf.first.field = field;
+  b->perf.first.epoch = b->frame_epoch;
+}
+static void shadow(TfpOps *b, int mode, bool hit, TfpOpsResult result, const TfpOpsSnapshot *out) {
+  TfpOpsMemo *m = &b->perf.memo[mode];
+  if (hit) {
+    b->perf.memo_hits[mode]++;
+    if (m->result != result) mismatch(b, mode, 0, "result");
+    else if (result == TFP_OPS_TRUE) {
+      if (memcmp(&m->s, out, sizeof *out)) { /* the byte walk only when they differ */
+        const unsigned char *x = (const unsigned char *)&m->s, *y = (const unsigned char *)out;
+        for (size_t i = 0; i < sizeof *out; i++)
+          if (x[i] != y[i]) { mismatch(b, mode, i, tfp_ops_snapshot_field(i)); break; }
+      }
+    } else if (strcmp(m->why, b->why)) mismatch(b, mode, 0, "why");
+  }
+  m->has = b->frame_active, m->epoch = b->frame_epoch, m->result = result;
+  if (result == TFP_OPS_TRUE) memcpy(&m->s, out, sizeof m->s), m->why[0] = 0;
+  else keep_text(m->why, sizeof m->why, b->why);
+}
 static TfpOpsResult taken(TfpOps *b, int mode, TfpOpsSnapshot *out, TfpOpsText *why) {
+  TfpOpsMemo *m = &b->perf.memo[mode];
+  const bool hit = b->frame_active && m->has && m->epoch == b->frame_epoch;
+  OpsState before, after;
+  b->perf.memo_calls[mode]++;
+  if (hit) ops_state(b, &before);
+  TfpOpsResult result;
   none(why);
-  if (take(b, mode, out)) return TFP_OPS_TRUE;
-  return say(why, TFP_OPS_NIL, b->why);
+  if (take(b, mode, out)) result = TFP_OPS_TRUE;
+  else result = say(why, TFP_OPS_NIL, b->why);
+  if (hit) {
+    ops_state(b, &after);
+    if (!same_state(&before, &after)) b->perf.memo_moved++;
+  }
+  shadow(b, mode, hit, result, out);
+  return result;
 }
 TfpOpsResult tfp_ops_snapshot(TfpOps *b, TfpOpsSnapshot *out, TfpOpsText *why) { return taken(b, TAKE_FULL, out, why); }
 TfpOpsResult tfp_ops_player_snapshot(TfpOps *b, TfpOpsSnapshot *out, TfpOpsText *why) { return taken(b, TAKE_PLAYER, out, why); }
@@ -986,6 +1068,7 @@ static bool native(TfpOps *b, TfpOpsNative which, uint64_t address, uint64_t a0,
 /* s: base and context always; controller, avatar and weapon for `allowed` and `enter`. */
 static bool invoke(TfpOps *b, TfpOpsNative which, const TfpOpsSnapshot *s, bool entry, bool *allowed) {
   uint64_t base = 0, result = 0;
+  b->perf.invokes++; /* round 32: counted only */
   invalidate(b);
   if (!module(b, entry ? SCOPE_ENTRY : SCOPE_FULL, &base)) return false;
   if (base != s->base) return fail(b, "Game module changed");
@@ -1682,6 +1765,7 @@ static bool same_body_api(const BodyApi *a, const BodyApi *b) {
 static bool invoke_body(TfpOps *b, bool trigger, const TfpOpsSnapshot *s, const BodyApi *expected, bool *exists) {
   BodyApi api;
   uint64_t result = 0;
+  b->perf.invoke_bodies++; /* round 32: counted only */
   invalidate(b);
   if (!body_api(b, s->base, &api)) return false;
   if (!same_body_api(&api, expected)) return fail(b, "Unit API changed during body event preflight");

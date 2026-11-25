@@ -33,6 +33,8 @@ static bool no_call(void *u, TfpOpsNative which, uint64_t address, const uint64_
   return false;
 }
 static double test_clock(void *u) { (void)u; return now_seconds; }
+static int64_t fake_tick_count;
+static int64_t fake_ticks(void) { return fake_tick_count += 3; } /* round 32: the laps' clock */
 static int test_mouse(void *u, int button) { (void)u; (void)button; return 0; }
 static uint32_t h_validate_c(const TfpCameraConfig *c) { (void)c; return 0; }
 static uint32_t h_begin_c(const TfpCameraConfig *c, uint64_t *g) { (void)c; (void)g; return 0; }
@@ -227,8 +229,43 @@ int main(void) {
   CHECK(logged("State: enter requested (F11)") && logged("Refused: F11 enter: Start refused: game.dll unavailable") && !pose_calls);
   CHECK(!wire.controller.enabled && !wire.controller.lease);
 
-  /* ---- presentation:action and :resume through the motion binder (transition.lua:85-104) ---- */
+  /* ---- round 32: the laps of the Perf frame line (wire.h); from here on every frame runs with them ---- */
   TfpRtValue o1, o2;
+  {
+    const TfpRtHost before = wire.host;
+    CHECK(!wire.laps.clock);
+    for (int i = 0; i < TFP_LAPS; i++) CHECK(wire.laps.tick[i] == 0); /* no clock: nothing timed */
+    tfp_wire_laps_start(&wire, fake_ticks);
+    tfp_wire_laps_start(&wire, fake_ticks); /* a second start does not wrap the wrappers */
+    CHECK(h->fov_update != before.fov_update && wire.laps.update[0] == before.fov_update && wire.laps.update[1] == before.blur_update);
+    CHECK(wire.laps.update[2] == before.camera_update && wire.laps.update[3] == before.head_update && wire.laps.update[4] == before.movement_update);
+    CHECK(wire.laps.update[5] == before.near_update && wire.laps.update[6] == before.dof_update);
+    CHECK(h->camera_stop == before.camera_stop && h->fov_result == before.fov_result); /* only the seven updates */
+    const int lines_before = line_count;
+    now_seconds += 1 / 60.0;
+    tfp_wire_feel_begin(&wire);
+    tfp_wire_frame(&wire, NULL);
+    CHECK(wire.laps.tick[TFP_LAP_UPDATE] > 0 && wire.laps.tick[TFP_LAP_EXTRA] > 0 && wire.laps.tick[TFP_LAP_HOLD] > 0 && wire.laps.tick[TFP_LAP_VIEW_LOG] > 0);
+    CHECK(wire.laps.tick[TFP_LAP_POSE] > 0 && wire.laps.tick[TFP_LAP_MOTION] > 0 && wire.laps.tick[TFP_LAP_ENGINE] > 0 && wire.laps.tick[TFP_LAP_EFFECTS] > 0);
+    CHECK(line_count == lines_before); /* idle: the laps say nothing */
+    /* each wrapper answers what the target's own update answers, and times it */
+    static const int laps[7] = {TFP_LAP_FOV, TFP_LAP_BLUR, TFP_LAP_CAMERA, TFP_LAP_HEAD, TFP_LAP_MOVEMENT, TFP_LAP_NEAR, TFP_LAP_DOF};
+    bool (*const lapped[7])(TfpRtHost *, TfpRtValue *, TfpRtValue *) = {h->fov_update, h->blur_update, h->camera_update, h->head_update,
+                                                                       h->movement_update, h->near_update, h->dof_update};
+    for (int i = 0; i < 7; i++) {
+      TfpRtValue a1, a2, b1, b2;
+      const int64_t spent = wire.laps.tick[laps[i]];
+      const bool own = wire.laps.update[i](h, &a1, &a2), timed = lapped[i](h, &b1, &b2);
+      CHECK(own == timed && a1.kind == b1.kind && a2.kind == b2.kind && wire.laps.tick[laps[i]] > spent);
+    }
+    int64_t lap[TFP_LAPS];
+    memcpy(lap, wire.laps.tick, sizeof lap);
+    tfp_perf_laps_close(lap);
+    CHECK(lap[TFP_LAP_EXTRA_OTHER] >= 0 && lap[TFP_LAP_UPDATE_OTHER] >= 0);
+    memset(wire.laps.tick, 0, sizeof wire.laps.tick);
+  }
+
+  /* ---- presentation:action and :resume through the motion binder (transition.lua:85-104) ---- */
   CHECK(h->transition_action(h, tfp_wire_nil(), now_seconds, &o1, &o2) && o1.kind == TFP_RT_NIL);           /* text(action) fails */
   CHECK(h->transition_action(h, tfp_wire_text(""), now_seconds, &o1, &o2) && o1.kind == TFP_RT_NIL);
   CHECK(h->transition_resume(h, tfp_wire_text("W:zz"), tfp_wire_text("P:0000000000000001"), now_seconds, &o1, &o2) && o1.kind == TFP_RT_NIL);

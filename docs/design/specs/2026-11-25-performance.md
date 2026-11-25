@@ -172,3 +172,113 @@ The run is the user's own play in a real mission, like -31-user, plus a harness 
 5. **VirtualQuery per second.** If the arms' user-play spikes (0.8–3 ms largest per second against 80 µs in the
    harness) line up with seconds of many queries, Wine's virtual-memory lock is the suspect.
 6. **Feel fields unchanged** against feel.53 (`vignette=owned:N`, `writes`, `head`, `pose`). Only the two lines are new.
+
+## 5. Round 32: laps inside the frame, the backend's counts, a shadow snapshot memo
+
+**Nothing here has run in the game.** Logging only, like section 2: every answer the mod gives is the one it gave before.
+
+### Why
+
+The feel.54 logs (`~/.cache/tfp-soak-37.modlog` Stable, `-38` Bodycam; analysis in `~/.cache/tfp-round31/result-0.md` and
+the second look in `result-1.md`) put the tick at 308–312 µs, of which **frame is 230–260 µs** (hip, prone, ADS), 151 µs
+waiting with first person on, and 35 µs with it never enabled. Both analysts pinned what frame is *not*:
+
+- the ~1000 `eng_call`s a second are the vignette's (0 in seconds without a scan, about 2.8 per scanned entity), outside frame;
+- VirtualQuery (the arm drive's `api()`, about 2 µs a frame) and the view-log strings (about 1.8 µs a tick) are noise.
+
+Their shared hypothesis is that the bulk is **backend snapshots re-taken by many callers each tick and never memoised**: a full
+snapshot is about 152 guarded reads (127 the first time in a frame, 105 the second) at 0.06 µs, about 6–9 µs; a player one is 40.
+The runtime takes snapshots at 12 sites, effects 11, motion 6, head 4 and others. Filling 230 µs takes about 25 full snapshots per
+tick. Nobody has counted them. This round counts them, splits frame, and asks the question a memo would raise: within one
+`frame_epoch`, does a second snapshot of the same mode ever answer differently from the first?
+
+### The lines
+
+Right after the Perf line, every second (`src/perf_line.h`; both fit say()'s 700 bytes with every field at its largest: 469
+and 332 bytes, `tests/perf_line_test.c`):
+
+```
+Perf frame: per tick mean/largest us: on_update A/B (fov A/B, blur A/B, camera A/B, head A/B, movement A/B, near A/B, dof A/B, other A/B); extra A/B (pose A/B, motion A/B, engine A/B, effects A/B, other A/B); hold A/B; view log A/B
+Perf snapshots: per second: guarded reads R; snapshots full F, player P, pin N; tables T; invoke I, invoke_body B; memo (shadow) calls c/c/c, hits h/h/h, mismatches m/m/m, moved V
+```
+
+and once per session, at the first mismatch:
+
+```
+Memo: first mismatch: a full snapshot taken again in the same frame epoch (E) differed from the one before it, first at controller_bytes (+0x8c); the memo stays a shadow (answers are always fresh)
+```
+
+**Perf frame** splits `tfp_wire_frame` (`src/wire_rt.c`), over the same ticks as the Perf line. Its laps are gross: each includes
+what it calls, so `dof` includes the vignette (which the Perf line's frame section leaves out) and the sum is the Perf line's frame
+plus its dof and vignette, less `eng_temp_end`.
+
+| lap | what it times |
+|---|---|
+| on_update | the runtime's `on_update` call |
+| fov, blur, camera, head, movement, near, dof | each managed target's own `*_update` host function; `tfp_wire_laps_start` wraps the seven pointers of `w->host` after the feel binders set them (the call lands in the same function as before, one frame deeper) |
+| other (on_update) | on_update less the seven: the controller, recovery, motion, editor, menu, aim markers, diagnostics |
+| extra | `frame_extra` (`src/wire_feel.c` frame) |
+| pose, motion, engine, effects | its four module frames (motion is the settings frame when motion is not bound) |
+| other (extra) | extra less the four: the Feel line's second |
+| hold | `tfp_wire_hold_frame` |
+| view log | the rest of `tfp_wire_frame`: the gate, action and camera strings, `tfp_view_log_frame`, the Ids line |
+
+**Perf snapshots**, per second, from `TfpOpsPerf` (`src/backend_ops.h`, in `TfpOps`; a backend made anew restarts its counts and
+the line then counts from 0):
+
+- **guarded reads:** every `_read` of the backend through the host (`rd()`: snapshots, module checks, the action state, the hold,
+  the configs), the count the round-31 estimate rests on. Reads made outside `backend_ops.c` are not in it.
+- **snapshots full / player / pin:** every snapshot built, by mode: the three public functions, the hold's view (a player one) and
+  the backend's own (enter, release, retiring).
+- **tables:** snapshot tables handed to the runtime (`w->snap_next`'s growth), the callers' side of the same count.
+- **invoke, invoke_body:** native calls (allowed, enter, exit; the body event). Each bumps the epoch before it calls.
+- **memo (shadow):** the three public functions' calls (`calls`), the calls that found a stored answer of the same `frame_epoch`
+  with a frame active (`hits`), the hits whose fresh answer differed (`mismatches`), each by mode full/player/pin; and `moved`:
+  hits whose own take left the backend's state changed.
+
+### The shadow memo
+
+`taken()` (`src/backend_ops.c`, behind `tfp_ops_snapshot`, `_player_snapshot`, `_pin_player_snapshot`) keeps the last answer per
+mode: TRUE with its `TfpOpsSnapshot`, or NIL with its text, and the `frame_epoch` after the take, only while a frame is active.
+Every call still takes its own snapshot and returns it, exactly as before. A call that finds a stored answer of the same epoch is
+a hit; it then compares:
+
+- the result (TRUE/NIL), then the snapshot bytewise (all of `TfpOpsSnapshot`, so the state that does not come from memory is in
+  it: `foreign_camera` and the reason from the `foreign_camera` callback, the action state, `safe`), or the NIL text;
+- the backend's own state before and after the take (all of `TfpOps` up to the action maps' address arrays, without `why`; the
+  maps' `has`/`def`/`count`). A take that changes it on a hit (`moved`) is a side effect a memo would skip.
+
+The first mismatch's mode, field (`tfp_ops_snapshot_field`: `controller_bytes`, `action.states`, `result`, `why`, ... or
+`padding`) and byte offset are kept and said once. Nothing in the backend logs, so the vectors' log comparison is untouched.
+
+Proof that answers are unchanged: the code returns the fresh take's result on every path (by construction); the backend_ops
+vectors (372 runs, 42837 steps, 22056 method calls) still answer as retail; a new section of `tests/backend_ops_test.c` checks on
+371 first images that hits happen only in a frame and the same epoch, that every answer equals that of a backend without the memo,
+that a write to the game's memory without an invalidate is one mismatch at `controller_bytes`, that an invalidate and a new frame
+end the hit run, and that a hit's take moves nothing in the fixture. `tests/wire_feel_test.c` runs its frames after
+`tfp_wire_laps_start` and checks each wrapper answers what the target's own update answers.
+
+Cost (not measured in the game): about 24 QueryPerformanceCounter reads a tick for the laps (about 1.5 µs at 0.06 µs); for the
+memo, a 792-byte copy per public call and on a hit two 888-byte copies and two compares, about 36 ns natively; 3.6 KB more in `TfpOps`.
+
+### What the next run must show to turn the memo on (round 33)
+
+The run: a Stable and a Bodycam harness soak like -37/-38 and, if possible, the user's own play.
+
+1. **The snapshots are the bulk.** In the hip, prone and ADS states, `Perf frame` puts most of on_update and extra into laps that
+   take snapshots, and `guarded reads` per tick × the read cost (0.06 µs harness, 0.10 µs user play) is a large part of frame. If
+   reads × cost is under about 50 µs a tick, the memo cannot save what round 31 hoped and is not built; the laps then name the real cost.
+2. **Hits are many:** hits / calls high for full and player (round 31's call sites suggest more than half). The saving is about
+   hits × reads per snapshot × read cost; the next round states it from these numbers before building.
+3. **Mismatches 0/0/0 in every second of both soaks and the play**, and no `Memo:` line. Any mismatch names a write or a game
+   change inside one epoch that nothing invalidates (a helper's CAS write, the game's own update thread, the foreign camera
+   callback changing its answer); the memo then needs that site to invalidate, or must not cover that mode.
+4. **moved 0.** Otherwise a hit's take does work the backend keeps (the module checks, the action maps); a memo would have to keep
+   doing it.
+5. **The same feel as feel.54:** the same Drop / Wait / Return / State line counts in the matrix and soaks, the Perf line's frame
+   within noise of feel.54 (the laps' 1.5 µs aside), no new Refused lines.
+
+If all five hold, round 33 returns the stored answer on a hit (TRUE: copy the stored snapshot; NIL: the stored text into `why` and
+`b->why`), keeps `tfp_wire_snapshot_table` running on every call (its ring slot and `frame_full` / `frame_identity`), and keeps the
+shadow running beside it in an assert mode for one more soak: the stored and a fresh take are still compared on every Nth hit, and
+mismatches must stay 0. Its proof: the backend_ops vectors identical, the wire and feel tests, `replay.py` over the soak Trace rows.

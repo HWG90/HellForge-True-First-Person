@@ -19,11 +19,16 @@ bool tfp_wire_feel_markers(TfpWire *w, TfpRtValue value, TfpAimMarkersSaved *out
  * `Feel:` line (the View line of that second is the view build's own). */
 static void frame(TfpWire *w) {
   TfpWireFeel *f = feel_of(w);
+  int64_t mark = tfp_wire_lap_now(w); /* round 32: the extra's laps of the Perf frame line (wire.h) */
   if (f->has_pose) tfp_wire_pose_frame(w);
+  tfp_wire_lap(w, TFP_LAP_POSE, &mark);
   if (f->has_motion) tfp_wire_motion_frame(w);
   else tfp_wire_settings_frame(w);
+  tfp_wire_lap(w, TFP_LAP_MOTION, &mark);
   if (f->has_engine) tfp_wire_engine_frame(w);
+  tfp_wire_lap(w, TFP_LAP_ENGINE, &mark);
   if (f->has_effects) tfp_wire_effects_frame(w);
+  tfp_wire_lap(w, TFP_LAP_EFFECTS, &mark);
   if (!w->rt.has[TFP_RT_O_CONTROLLER] || !w->controller.enabled || w->rt.clock_previous.kind != TFP_RT_NUMBER) {
     f->second_open = false;
     return;
