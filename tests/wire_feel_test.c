@@ -222,11 +222,11 @@ int main(void) {
     tfp_wire_frame(&wire, NULL);
   }
   CHECK(!wire.controller.enabled && !logged("the frame raised") && !logged("Feel:")); /* off: no Feel line */
-  wire.toggle_requested = true; /* F11 with no game: retail's own refusal; nothing reaches the pose helper */
+  wire.toggle_requested = true; /* the toggle key with no game: retail's own refusal; nothing reaches the pose helper */
   now_seconds += 1 / 60.0;
   tfp_wire_feel_begin(&wire);
   tfp_wire_frame(&wire, NULL);
-  CHECK(logged("State: enter requested (F11)") && logged("Refused: F11 enter: Start refused: game.dll unavailable") && !pose_calls);
+  CHECK(logged("State: enter requested (toggle key)") && logged("Refused: toggle key enter: Start refused: game.dll unavailable") && !pose_calls);
   CHECK(!wire.controller.enabled && !wire.controller.lease);
 
   /* ---- round 32: the laps of the Perf frame line (wire.h); from here on every frame runs with them ---- */
@@ -392,7 +392,7 @@ int main(void) {
     CHECK(!none.head && !none.sleeves && !none.grip && !none.dof && !none.vignette && !none.markers && !none.movement && !none.aim_option);
     /* the gathering reads the modules' own state */
     wire.controller.enabled = true;
-    CHECK((why = tfp_wire_feel_held(&wire)) && strstr(why, "the view is on") && strstr(why, "F11"));
+    CHECK((why = tfp_wire_feel_held(&wire)) && strstr(why, "the view is on") && strstr(why, "the toggle key") && !strstr(why, "F11"));
     wire.controller.enabled = false;
     wire.controller.phase = TFP_PHASE_WAITING;
     CHECK((why = tfp_wire_feel_held(&wire)) && strstr(why, "has not finished switching off"));

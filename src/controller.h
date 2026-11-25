@@ -133,8 +133,8 @@ typedef struct TfpController {
 #define TFP_HOLD_EMPTY_CAP 1.0       /* seconds on end a hold may last with no action flag and empty hands; not in retail */
 
 void tfp_controller_init(TfpController *c, const TfpBackendApi *backend);
-bool tfp_controller_start(TfpController *c);                       /* F11 on */
-bool tfp_controller_stop(TfpController *c, const char *reason);    /* F11 off; reason NULL: "manual stop" */
+bool tfp_controller_start(TfpController *c);                       /* toggled on (the toggle key, U) */
+bool tfp_controller_stop(TfpController *c, const char *reason);    /* toggled off; reason NULL: "manual stop" */
 bool tfp_controller_shutdown(TfpController *c);
 bool tfp_controller_suspend(TfpController *c, const char *reason);
 bool tfp_controller_update(TfpController *c);

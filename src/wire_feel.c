@@ -113,7 +113,7 @@ void tfp_wire_feel_facts(TfpWire *w, TfpWireFeelFacts *out) {
   }
 }
 const char *tfp_wire_feel_held_of(const TfpWireFeelFacts *f) {
-  if (f->view_on) return "the view is on; press F11 to switch it off first";
+  if (f->view_on) return "the view is on; press the toggle key (U unless changed in the menu) to switch it off first";
   if (f->phase == TFP_PHASE_CLEANUP_PENDING) return "the view's cleanup is still pending; wait a moment and try again";
   if (f->phase != TFP_PHASE_IDLE && f->phase != TFP_PHASE_DISABLED) return "the view has not finished switching off; wait a moment and try again";
   if (f->lease) return "a native-view lease is still held";

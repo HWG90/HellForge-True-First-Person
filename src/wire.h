@@ -24,6 +24,12 @@
 #include "wire_action.h"
 #include "perf_line.h"
 
+/* The view's toggle key (a Windows virtual-key code): U. Retail's, and this mod's until round 36, was F11 (0x7A, which
+ * retail's menu registers and saves as 122); HellForge 0.5's Armor LUT editor now opens on F11. A stored 122 reads as U
+ * (src/wire_menu.h tfp_wire_menu_toggle_key), so a player who never changed the key gets U, and F11 is refused for it. */
+#define TFP_TOGGLE_KEY 0x55
+#define TFP_TOGGLE_KEY_OLD 0x7A
+
 typedef struct TfpWirePlatform {
   void *user;
   /* Seconds, never going back; NAN: no clock. Retail's is Application.time_since_launch; the view
@@ -129,7 +135,8 @@ typedef struct TfpWire {
   TfpAimWatch aim;
   TfpOpsSnapshot aim_snapshot;
   bool aim_has_snapshot;
-  /* F11: set by the key poll, taken by menu:update() at the end of the frame, as retail's menu does. */
+  /* The toggle key (TFP_TOGGLE_KEY, retail's F11): set by the key poll, taken by menu:update() at the end of the frame, as
+   * retail's menu does. */
   bool toggle_requested;
   /* The last diagnostics row (runtime.lua:513), for the session log. */
   bool has_row, row_has_eye, row_has_fov, frame_full;

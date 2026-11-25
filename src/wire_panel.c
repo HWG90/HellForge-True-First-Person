@@ -28,7 +28,7 @@ typedef struct Panel {
   Row shown[ROWS];
   int held, held_value;      /* the slider being dragged, -1: none; its value so far */
   int asking;                /* the key control waiting for a key, -1: none */
-  int refused;               /* the key control whose last key was not taken (F8 for the editor), -1: none; shown while it asks */
+  int refused;               /* the key control whose last key was not taken (F8 for the editor, F11 for the toggle), -1: none; shown while it asks */
   double asked_at;
 } Panel;
 
@@ -77,17 +77,7 @@ static bool host_set_label(void *user, const char *id, const char *label) {
 }
 
 /* ---- the render thread ---- */
-static void key_name(int key, char out[16]) {
-  static const struct { int key; const char *name; } named[] = {
-    {8, "BACKSPACE"}, {9, "TAB"}, {13, "ENTER"}, {16, "SHIFT"}, {17, "CTRL"}, {18, "ALT"}, {19, "PAUSE"}, {20, "CAPS LOCK"}, {27, "ESC"},
-    {32, "SPACE"}, {33, "PAGE UP"}, {34, "PAGE DOWN"}, {35, "END"}, {36, "HOME"}, {37, "LEFT"}, {38, "UP"}, {39, "RIGHT"}, {40, "DOWN"},
-    {45, "INSERT"}, {46, "DELETE"}, {1, "MOUSE 1"}, {2, "MOUSE 2"}, {4, "MOUSE 3"}, {5, "MOUSE 4"}, {6, "MOUSE 5"}};
-  for (size_t i = 0; i < sizeof named / sizeof *named; i++) if (named[i].key == key) { snprintf(out, 16, "%s", named[i].name); return; }
-  if ((key >= '0' && key <= '9') || (key >= 'A' && key <= 'Z')) snprintf(out, 16, "%c", key);
-  else if (key >= 0x60 && key <= 0x69) snprintf(out, 16, "NUM %d", key - 0x60);
-  else if (key >= 0x70 && key <= 0x87) snprintf(out, 16, "F%d", key - 0x6f);
-  else snprintf(out, 16, "KEY %d", key);
-}
+static void key_name(int key, char out[16]) { tfp_wire_menu_key_name(key, out); }   /* src/wire_menu.h */
 /* What the user did, for the game thread; the shown value follows at once so the control does not jump back for a frame. */
 static void push(Panel *p, int index, bool activate, TfpMenuValue value) {
   lock(p);
@@ -163,14 +153,18 @@ static void draw_control(Panel *p, int i, const OvFrame *frame) {
       /* A stored 119 (F8) for the editor means "the default", which here is another key (HellForge has F8): the row
        * would show F8 while that other key stayed the real one. So this row does not take F8. */
       const bool no_f8 = c->menu == TFP_MENU_editor_key && p->platform.editor_key != 119;
+      /* Likewise a stored F11 for the toggle reads as U (src/wire_menu.h): HellForge's Armor LUT editor has F11. */
+      const bool no_f11 = c->menu == TFP_MENU_toggle_key;
       if (ov->small_button(change)) p->asking = i, p->refused = -1, p->asked_at = frame->time;
       else if (p->asking == i && (row->disabled || frame->time - p->asked_at > 10)) p->asking = -1;
       else if (p->asking == i) {
-        if (p->refused == i) ov->text_colored(ov->theme(OV_THEME_TEXT_DIM), "F8 is HellForge's own editor key, so it cannot open this one.");
+        if (p->refused == i)
+          ov->text_colored(ov->theme(OV_THEME_TEXT_DIM), no_f11 ? "F11 opens HellForge's Armor LUT editor, so it cannot toggle True First Person."
+                                                                : "F8 is HellForge's own editor key, so it cannot open this one.");
         ov->text_colored(ov->theme(OV_THEME_TEXT_DIM), "Press a key. Esc keeps the current one, Delete clears it.");
         for (int pressed = 8; pressed < 255 && p->asking == i; pressed++) {
           if (pressed == TFP_PANEL_KEY || !ov->key_pressed(pressed)) continue;   /* the panel's own key closes the window */
-          if (pressed == 119 && no_f8) { p->refused = i, p->asked_at = frame->time; continue; }   /* said in the row; ten more seconds */
+          if ((pressed == 119 && no_f8) || (pressed == TFP_TOGGLE_KEY_OLD && no_f11)) { p->refused = i, p->asked_at = frame->time; continue; }   /* said in the row; ten more seconds */
           p->asking = -1;
           if (pressed != 27) push(p, i, false, (TfpMenuValue){TFP_MENU_VALUE_NUMBER, false, pressed == 46 ? 0 : pressed});
         }

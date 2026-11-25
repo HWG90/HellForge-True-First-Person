@@ -1077,7 +1077,7 @@ static bool rt_mouse_button(TfpRtHost *h, double index, V *o1) {
 }
 static V rt_global_get(TfpRtHost *h) { return num(W(h)->global_ours ? 1 : 0); }
 static void rt_global_set(TfpRtHost *h, bool ours) { W(h)->global_ours = ours; }
-/* Retail's menu polls F11 inside menu:update(), the last thing of update_frame (rt:639; inventory 2.1
+/* Retail's menu polls its toggle key (F11; here TFP_TOGGLE_KEY, U) inside menu:update(), the last thing of update_frame (rt:639; inventory 2.1
  * step 15), and calls toggle_pose there: inside the owned frame. The same here. */
 static bool rt_menu_update(TfpRtHost *h) {
   TfpWire *w = W(h);
@@ -1085,16 +1085,16 @@ static bool rt_menu_update(TfpRtHost *h) {
   w->toggle_requested = false;
   bool was = w->controller.enabled;
   V r[2] = {nil(), nil()};
-  tfp_view_log_event(&w->log, "State: %s requested (F11)", was ? "exit" : "enter");
+  tfp_view_log_event(&w->log, "State: %s requested (toggle key)", was ? "exit" : "enter");
   TfpRtStatus s = tfp_rt_call(&w->rt, TFP_RT_E_toggle_pose, NULL, r);
   char why[240];
   if (s == TFP_RT_RAISED) {
     value_show(w->rt.error, why, sizeof why);
-    tfp_view_log_event(&w->log, "Refused: F11 raised: %s", why);
-  } else if (s == TFP_RT_ABSENT) tfp_view_log_event(&w->log, "Refused: F11 before the mode was ready");
+    tfp_view_log_event(&w->log, "Refused: toggle key raised: %s", why);
+  } else if (s == TFP_RT_ABSENT) tfp_view_log_event(&w->log, "Refused: toggle key before the mode was ready");
   else if (r[0].kind != TFP_RT_TRUE) {
     value_show(r[1], why, sizeof why);
-    tfp_view_log_event(&w->log, "Refused: F11 %s: %s", was ? "exit" : "enter", r[1].kind == TFP_RT_NIL ? w->controller.label : why);
+    tfp_view_log_event(&w->log, "Refused: toggle key %s: %s", was ? "exit" : "enter", r[1].kind == TFP_RT_NIL ? w->controller.label : why);
   }
   return true;
 }
