@@ -1,4 +1,4 @@
-# True First Person for HellForge: test build 0.6.0-feel.51
+# True First Person for HellForge: test build 0.6.0-feel.52
 
 For HellForge on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
@@ -48,6 +48,37 @@ keep their values. "View kick when thrown" works in both.
 To get the old behaviour back: tick **Bodycam**. Your slider values are still there.
 
 Tested in the game: ten actions in each style (Stable: no kick at all; Bodycam: 2.4 to 5.8 degrees); I have not played it yet.
+
+## Fixed in 0.6.0-feel.52
+
+- **Your support hand holds the weapon.** On rifles the left hand now reaches the fore-end or vertical grip
+  instead of resting against the receiver. Pistols at the hip stay one-handed. "First Person Arms" in the
+  menu switches it; a file `grip_off.txt` beside the DLL brings the old hand back to compare.
+- **Clambering no longer floats the view.** On a high clamber the view rose half a metre above your head and
+  sank back; it now stays with you. In Stable the head's own bob in a climb now shows instead of being
+  smoothed.
+- **No snap about a second after an emote, the stratagem menu, a grenade or a stim.** The view used to jump
+  about 15 cm in one frame when it let go of the held weapon view; it now glides back.
+- **Sprinting or diving straight out of an emote** no longer throws the view for a frame.
+- **Aiming:**
+  - New option "Aim field of view": the game's zoom (as before), your locked view, or a value you choose.
+  - The placement editor now works while you aim, on the aim position.
+  - "Sight distance in aim" can bring the sight closer to your eye. It is off (0) by default.
+- **Settings menu:** Camera style and Motion preset are one-click `< Stable >` selectors instead of
+  drop-downs.
+- **Placement editor:** right-drag turns the weapon, middle-drag rolls it; the mouse wheel is depth (Page Up
+  and Page Down no longer change depth).
+- **Checked in the game (2026-11-24, solo missions):** a 13-minute run of random actions in each camera style
+  and the 37-phase check (34 passed). No crash. Bodycam's largest jump fell from 0.46 m to 0.16 m.
+
+**Known issues in this build:**
+- A weapon swap in the middle of a dive can push the view up to half a metre forward for a frame or two.
+- The support hand can sit a few centimetres off the grip, and may twitch at reloads and swaps.
+- In Stable, after a swap on a slope the view can trail about 0.4 m for half a second.
+- Not yet tried in the game: the Aim field of view option and the editor while aiming.
+- The Warp Pack's glow still shows in first person. A fix is in this build but off: put a file named
+  `warp_hide.txt` beside the DLL to try it, and tell me what you see.
+- Backpack pick-ups can still drift the view briefly.
 
 ## Fixed in 0.6.0-feel.51
 
