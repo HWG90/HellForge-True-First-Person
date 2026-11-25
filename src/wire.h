@@ -22,6 +22,7 @@
 #include "transition.h"
 #include "wire_log.h"
 #include "wire_action.h"
+#include "perf_line.h"
 
 typedef struct TfpWirePlatform {
   void *user;
@@ -155,7 +156,26 @@ typedef struct TfpWire {
   bool (*pose_counts)(const struct TfpWire *w, double *weapon_updates, double *zero_restores);
   TfpWireHold hold;
   TfpOrphan orphan;            /* tfp_wire_orphan's memory (src/wire_action.h) */
+  /* Round 32 (src/perf_line.h TFP_LAP_*): laps inside tfp_wire_frame for the "Perf frame:" line, summed over the tick;
+   * the caller reads and zeroes tick[]. clock NULL (the tests, the view build): nothing is timed and nothing wrapped.
+   * update[]: the seven managed targets' own update functions, which tfp_wire_laps_start wrapped. Logging only. */
+  struct {
+    int64_t (*clock)(void);
+    int64_t tick[TFP_LAPS];
+    bool (*update[7])(TfpRtHost *h, TfpRtValue *out1, TfpRtValue *out2);
+  } laps;
 } TfpWire;
+/* Round 32: the clock's now (0 without one), and the time since *mark added to lap (mark moved to now). */
+static inline int64_t tfp_wire_lap_now(const TfpWire *w) { return w->laps.clock ? w->laps.clock() : 0; }
+static inline void tfp_wire_lap(TfpWire *w, int lap, int64_t *mark) {
+  if (!w->laps.clock) return;
+  const int64_t now = w->laps.clock();
+  w->laps.tick[lap] += now - *mark, *mark = now;
+}
+/* Round 32: starts the laps with clock (QueryPerformanceCounter's ticks in the mod), and wraps the managed targets' update
+ * functions (FOV, blur, camera, head, movement, near, depth of field) in w->host so each is timed. Call once, after every
+ * binder has set its pointers and before on_enable; a second call changes only the clock. */
+void tfp_wire_laps_start(TfpWire *w, int64_t (*clock)(void));
 
 /* Builds the host (off answers first, then the wired view) and the runtime's start state. The
  * TfpOpsHost's four hook pointers are filled in here; its other members are the caller's. */
