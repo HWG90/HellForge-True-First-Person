@@ -26,9 +26,17 @@ the cockpit could be made transparent from the inside.
    has been steady within 2 cm for 300 ms, plus 0.18 m along the root's level forward and 0.04 m up. Never along the
    game camera. **The direction**: the game's own on the same frame, no ease, no kick, no veil.
 3. **Entry and exit** glide between eyes (smoothstep, 300 to 600 ms, a cut beyond 8 m); the continuity is let go
-   at both ends.
+   at both ends. The exit glide runs in the head camera and in the game's native first-person view alike
+   (`seat_native`: the rig eye plus the frame's parent-local argument, the glided point written back as the
+   argument; only the position glides there, the direction is the native view's own). Native frames begin it again
+   from the view last shown; any frame the lock does not show ends it, so it never resumes from the cockpit. The
+   independent check of 2026-11-25 had found a 2.52 m cut leaving straight into the native view, and a glide
+   interrupted by native frames stepping 2.46 m to the head and then 2.21 m back toward the cockpit
+   (`~/.cache/tfp-verify50-mech/probe`); `tests/camera_seat_test.cpp` cases 6 to 8 hold every step under 0.15 m.
+   Measured with the probe's own sequences, drawing native frames at rig eye plus argument: 0.000 m and 0.052 m.
 4. **The whole diver hidden** (`src/head_visibility.c`, `TfpHeadIo.seat`): all 30 appearance slots, the body's own
-   meshes and the backpack lose camera and shadow passes from the first seat frame to the end of the glide out. The
+   meshes and the backpack lose camera and shadow passes from the first seat frame to the end of the glide out,
+   whatever the camera kind of its frames (a kind 6 frame of the glide drew the diver again before the check). The
    first-person rig is left to the game. Leaving gives back exactly what was there (head and shoulders hidden, the
    torso as the menu says).
 5. **See through the exosuit cockpit** (option, default on; `TfpHeadIo.cockpit`, `src/cockpit_find.h`).
@@ -73,3 +81,17 @@ the suit destroyed or changed (its rows are retired with no write), by head visi
 - That hiding `g_combat_walker` from inside looks right, and that the game never rewrites that mesh's pass while
   seated (an outside write is left alone by retail's foreign-mask rule).
 - What the hands do in the cockpit (the Seat line's hand positions), and the feel of entry, exit and turning.
+- Whether the game ever leaves the seat straight into its native first-person view, or flips between that view and
+  the head camera during the exit (the fake memory proves the glide through both; the game decides which happens).
+- The native-view exit's direction: only the position glides there; a direction step at the change, if the suit
+  aimed far from where the diver looks once out, would be the game's own.
+
+## Other vehicles
+
+The seat rule is any seat: seated, off foot, not in physics. An FRV's seat (driver or passenger) therefore keeps
+first person the same way: the eye on the head's anchor in the body root's frame, the game's direction, the diver
+hidden; nothing is seen through, because the suit search only takes a unit with the exosuit's resource
+(`camera_seat_test` case 9 drives an FRV seat at 20 m/s and turning: the eye stays within 1 mm of the anchor).
+Only the game can show whether an FRV seat really reads as seated and off foot (the Seat line says so on entry),
+whether the root frame is steady enough on rough ground, and whether the hidden diver hides anything the player
+wants to see in an open seat (the gunner's hands on the turret).

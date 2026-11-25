@@ -115,7 +115,8 @@ static const Control CONTROLS[] = {
   ROW("see_through_cockpit", TFP_MK_TOGGLE, "See through the exosuit cockpit", 2, L(see_through_cockpit),
       TIP("In an exosuit, first person looks out from your helmet. With this on, the suit's body is hidden from your own view, so you see "
           "the world around you, the suit's weapons and its shadow. The cockpit's console and sticks are part of the suit's body and go "
-          "with it. Others still see your suit.")),
+          "with it (they are one mesh in the game's data). Other vehicles' seats keep first person but are never seen through. "
+          "Others still see your suit.")),
 };
 #undef ROW
 #undef NONE
