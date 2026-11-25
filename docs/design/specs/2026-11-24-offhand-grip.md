@@ -405,3 +405,78 @@ that hangs on the rig is not taken).
 - How the hand looks on a vertical grip 0.17 m forward of where the body's is: the reach (about 0.1 more arm lengths),
   the shoulder coming forward, the wrist and the fingers (the body's fingers, shaped by the game for the gun's own node).
 - Whether the elsewhere walk costs anything visible (`Perf:` arms).
+
+## Round 36b (2026-11-25): the BR-14 Adjudicator's vertical grip
+
+The user, after round 36: "Hand on foregrip attachments is not working", "im using the adjudicator". The read-only
+diagnosis (`~/.cache/tfp-round36/adjudicator-diagnosis.md`, filediver dumps beside it) found the node right (the
+attachment's `IK_left`, the wrist of a hand wrapped round the handle, 0.084 m below the gun's own) and the wrist on it at
+the hip, and four faults around it:
+
+1. **Aiming gave the hand back to the game** (27 % of the frames): `grip_frame` stopped at weight 0 and the game's aim pose
+   held the hand about 17 cm short (retail's measurement), sliding there over 120 ms at each aim edge. A regression: retail
+   kept correcting while aiming.
+2. **The fingers were the body's**, shaped for the handguard and nearly flat: the hand sat beside the handle.
+3. **Walking dropped the grip**: "too far" (0.60 m from the copied hand) had no keep threshold, and fired while the body's
+   own hand stayed pinned on the node: held in 43 % of the moving frames.
+4. **The log could not show any of it**: the hand was measured as drawn only when held at full weight, by position only,
+   and the Grip line could reach say()'s 700 characters.
+
+### What changed
+
+- **Aiming (C).** The reach runs after the blend with the game's own pose (`tfp_graft_mix`), on the mixed locals and the
+  mixed socket. At weight 0 that is the game's aim pose, and only the left arm (nodes 10, 12, 13) and, on an attachment,
+  the fingers differ from it: the socket and the right arm stay the game's, so the rifle still rises to the shoulder
+  (`src/arm_weight.h`) and the eye the game seats by the socket does not move. The camera does not follow the left hand:
+  the camera unit hangs on the rig's eye (node 50, under node 4), the arms under node 7, and the values go back after the
+  draw. At weight 1 the result is bit for bit what it was. Cost: while aiming with the hand on a grip the rig, sleeves and
+  gun are refreshed each frame (before, nothing was written then).
+- **Fingers (B, `src/grip_fingers.h`).** Held on an attachment's node, each finger joint 1 to 3 goes about its own +Y,
+  by the reach's weight, from the body's curl to the grip's: pinky 53, ring 63, middle 65, index 60 degrees a joint,
+  absolute (the hand is on the node, so the handle is fixed in the hand's frame whatever the body plays; a curl added to
+  the body's would follow its handguard shape, and a finger it curls further would go into the handle). The angles put
+  every fingertip 2.7 to 3.1 cm from the axis of standard_verticalgrip's handle (4.6 cm across) on fp_cha_avatar's bind
+  pose, no bone nearer than 2.6 cm. The thumb keeps the body's joint 1 and turns joints 2 and 3 a further 20 degrees:
+  the independent check found the first version's absolute 30 degrees turned joint 1 (bind -51.6 degrees from the hand's
+  X) by 81.6 and swept the tip across the palm through the handle; 70 degrees on every finger joint put tips 1.5 cm from
+  the axis. Positions are kept. The joints are found by name in the map at bind. Never on the gun's own node; eased out
+  with the arm, or over 0.15 s. No vertical-grip hand pose of the game's own was found to take the angles from.
+- **Walking (D).** Once held, "too far" keeps to `TFP_OG_SHIFT_KEEP_M` 0.75 m, and is not asked at all while the body's
+  hand is within `GRIP_PIN_M` of the gate node (`TfpOffhand.pinned`). A first take is refused at 0.60 m as before;
+  `REACH_KEEP` is unchanged.
+- **E.** With an attachment's node on the gun, the gun's own node is never the target, whichever node the latch keeps
+  (already so since round 36; now tested at the Adjudicator's 0.084 m).
+- **The log (A).** A second Grip line: `as drawn at the hip (N frames, M held): the hand X m from the grip (most), turned D
+  degrees (most), palm X m (most), fingers curled D degrees (least), X m from the gun's own node; while aiming (...)`.
+  Measured on every frame the body's hand is on a node and the node held is known, at any weight, also where nothing was
+  written. The palm is 0.05 m along node 13's X against the same point of the node (0 when wrist and turn agree); the curl
+  is the mean X-to-X angle of middle and index joints 1 to 2. The main Grip line no longer carries the drawn part; both
+  lines stay under 700 characters (tested at extreme values).
+
+Pass in the game (the diagnosis's table): held at the hip, wrist under 0.01 m, turn under 10 degrees, curl over 45; while
+aiming, wrist under 0.02 m, turn under 10, curl over 45; while moving, "too far" near 0 and held over 90 % of the frames.
+
+### Tests
+
+`tests/offhand_grip_test.c`: `test_too_far_keep` (0.65 m first take refused, kept once held; 0.80 m kept only pinned;
+REACH_KEEP still lets go), `test_fingers` (found by name and parent; each finger to its angle, also one curled further;
+thumb joint 1 untouched, 2 and 3 turned by 20; half way at weight 0.5; positions and the rest of each record kept),
+`test_fingers_on_bind` (fp_cha_avatar's bind pose and the vertical grip's handle, `tests/fp_hand_bind.h`: at weights 0,
+0.5 and 1 the thumb tip beyond the index knuckle and outside the handle, no finger bone within 2.0 cm of the axis; at 1
+every fingertip 2.0 to 3.5 cm from it). `tests/arm_drive_test.c`:
+`test_grip_attachment_never_gun_own`, `test_grip_drawn_line` (each number against matrices put by hand; both lines within
+700 at extreme values), `test_grip_fingers_close` (at the hip and aiming; the curl by the weight; back to the body's
+fingers bit for bit after a reload and after switching off, without a step), `test_grip_while_aiming` (on the grip within
+0.001 m through the fade, the aim and back; at weight 0 every node but 10, 12, 13 the game's own, put back after the draw),
+`test_grip_left_alone` (a handgun aimed, or the body's hand off the grip while aimed: nothing written; a reload at the
+hip and while aimed: back to the body's or the game's aim pose within the step limit, the socket the game's).
+
+### What only the game can show
+
+- The aim pose's shoulder: whether the vertical grip is within reach from it (the Grip line's reach while aiming), and
+  whether a second arm screen shows at the cuff while aiming (retail `grip_hand.lua:60-89` needed work for that).
+- Whether the hand looks wrapped round the handle: the angles fit the bind pose's hand on the node's mesh box; the body's
+  splay of the fingers and the drawn thumb (joint 1 the body's, which on bind already passes the handle's top end) are
+  only seen in the game.
+- The turn while held: the solver puts node 13 on the node's rotation at full weight, but the turn limits can lag.
+- Walking: whether held stays above 90 % with the keep threshold and the pin.

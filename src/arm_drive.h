@@ -232,14 +232,15 @@ const char *tfp_arm_drive_held(void);
  * shoulder (node 10) comes forward where the grip is beyond 97 % of the arm (round 26). Round 36: the body's hand on any
  * grip node of the gun says the game pins it; the hand holds a fitted grip's node even when the body's is on the gun's own
  * (the R-4 Hyena's case), and units hanging on the gun's nodes from elsewhere (the rig's or the body's) are searched too.
- * one_handed: a handgun at the hip, held in one hand: the hand stays as the body holds it. While aiming the copy fades out
- * (the drive's weight) and the game's own aim pose holds the gun; the reach is not asked for then. */
+ * one_handed: a handgun, held in one hand: the hand stays as the body (or, aiming, the game's aim pose) holds it. While aiming
+ * the copy fades out (the drive's weight) and the game's own aim pose holds the gun; since round 36b the reach runs on that
+ * blend, so the hand stays on the grip, and only the left arm (nodes 10, 12, 13) differs from the game's own there. */
 void tfp_arm_drive_set_grip(bool on, bool one_handed);
 /* What the grip did in the driven frames since the last call, for the "Grip:" line (the call empties it). */
 enum {
   TFP_ARM_GRIP_OFF = 0,   /* switched off */
   TFP_ARM_GRIP_ONE_HANDED,/* a handgun at the hip */
-  TFP_ARM_GRIP_AIMING,    /* the copy is not shown (the drive's weight is 0): the game's aim pose */
+  TFP_ARM_GRIP_AIMING,    /* not used since round 36b (the hand holds the grip while aiming too); kept for the numbering */
   TFP_ARM_GRIP_NO_GUN,    /* no gun on the rig */
   TFP_ARM_GRIP_NO_NODE,   /* none of the gun's units carries a grip node */
   TFP_ARM_GRIP_STALE,     /* the gun's units were not where the rig puts them, and no earlier reading of the grip is kept */
@@ -259,6 +260,18 @@ typedef struct TfpArmDriveGripUnit {
   uint32_t grips, grip_node;      /* its grip nodes (name 67C94E4B), and the first */
   bool elsewhere;                 /* not a child of the gun: a unit of the rig or the body mounted on one of the gun's nodes */
 } TfpArmDriveGripUnit;
+/* The hand as drawn against the node it holds, both as the game evaluated them for the draw (round 36b): what the Grip
+ * line proves each cause of "the hand is not on the foregrip" with. Measured on every frame the body's hand is on a grip
+ * node and the node the hand holds is known, at any weight; at the hip (weight 1) and while aiming (under 1) apart. */
+typedef struct TfpArmDriveDrawn {
+  uint32_t frames, held;          /* frames measured; of those, held on the grip */
+  float m, most_m;                /* the wrist (rig node 13) from the node: last frame, the most while held */
+  float turn, most_turn;          /* degrees between node 13's rotation and the node's: last, the most while held */
+  float palm_m, most_palm_m;      /* the palm (0.05 m along node 13's X) from the node's palm point (0.05 m along its X) */
+  float curl, least_curl;         /* degrees, the fingers' curl: middle and index, joints 1 to 2, X to X, their mean; last, the
+                                   * least while held; -1: the finger joints are not known */
+  float own_m;                    /* the wrist from the gun's own grip node, last frame; -1: the gun has none */
+} TfpArmDriveDrawn;
 typedef struct TfpArmDriveGrip {
   uint32_t frames, held;          /* driven frames with the grip switched on; of those, held on the grip */
   uint32_t state;                 /* TFP_ARM_GRIP_* of the last frame */
@@ -276,8 +289,8 @@ typedef struct TfpArmDriveGrip {
   float shoulder_m, most_shoulder_m; /* the shoulder brought forward to reach it: last frame, and the most while held */
   float held_step_degrees;        /* the largest turn of a written joint in a frame held on the grip (steady holding) */
   float body_degrees;             /* the largest turn of the drive's own arm joints in one frame while the reach was in force */
-  bool drawn;                     /* the drawn hand was measured against the gun as evaluated for the draw (held, full weight) */
-  float drawn_m, most_drawn_m;    /* the rig's evaluated hand from the gun's evaluated grip node: last frame, the most while held */
+  bool drawn;                     /* the drawn hand was measured against the gun as evaluated for the draw (hip or aim below) */
+  TfpArmDriveDrawn hip, aim;      /* round 36b: at the hip (the drive's weight 1) and while aiming or fading (under 1) */
   /* round 36: the gun's units as the last grip search saw them, and which node the hand holds and the body's is on */
   uint32_t tree_units;            /* the gun, its attachments, and units from elsewhere mounted on its nodes */
   uint32_t listed;                /* of them in unit[] (the first TFP_ARM_GRIP_LIST) */
@@ -295,8 +308,12 @@ const char *tfp_arm_drive_grip_units_line(const TfpArmDriveGrip *grip, bool only
 /* "60 frames, 60 held: on the attachment's grip (2 grip nodes on 3 units), the body's hand 0.002 m from it; hand 0.000 m from
  * the grip (most 0.004), largest joint step 3.1 degrees (allowed 12.0), weight 1.00; reach 1.05 of the arm (most 1.08), shoulder
  * forward 0.047 m (most 0.065), held step 0.4 degrees, the body's arm turned 2.0 degrees, 0 frames cut, not taken: 0 out of reach,
- * 0 too far; as drawn the hand 0.001 m from the gun's grip (most 0.002)". A static buffer. */
+ * 0 too far". A static buffer. */
 const char *tfp_arm_drive_grip_line(const TfpArmDriveGrip *grip);
+/* Round 36b, a line of its own so that say()'s 700 characters cut nothing: "as drawn at the hip (60 frames, 60 held): the hand
+ * 0.000 m from the grip (most 0.001), turned 2.1 degrees (most 4.0), palm 0.002 m (most 0.004), fingers curled 65.0 degrees
+ * (least 64.2), 0.084 m from the gun's own node; while aiming (30 frames, 30 held): ...". NULL: nothing measured. A static buffer. */
+const char *tfp_arm_drive_grip_drawn_line(const TfpArmDriveGrip *grip);
 const char *tfp_arm_drive_grip_state_name(uint32_t state);
 
 void tfp_arm_drive_stats(TfpArmDriveStats *out);

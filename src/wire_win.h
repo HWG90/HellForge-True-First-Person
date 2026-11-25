@@ -39,6 +39,9 @@ unsigned tfp_win_restore_slots(void);
 /* F11 and focus. */
 bool tfp_win_focused(void);
 bool tfp_win_key_down(int virtual_key);
+/* Round 36c: every key's level in one call (GetKeyboardState: keys[vk] & 0x80 down), for the key guard's typing
+ * sample (src/key_guard.h); false: no snapshot. */
+bool tfp_win_keyboard(uint8_t keys[256]);
 /* The aim button (src/wire_mouse.h). The feel build installs its engine caller; without one the
  * level comes from Windows. tfp_win_mouse_note: true once per change of why the engine is or is
  * not used ("" = the engine answers), for one log line. */

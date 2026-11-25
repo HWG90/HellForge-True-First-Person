@@ -60,6 +60,7 @@
  * src/render_slot.c passes that condition in as `game_thread`; without it nothing is read or written. */
 #include "arm_drive.h"
 #include "offhand_grip.h"
+#include "grip_fingers.h"
 #include "profile.h"
 #include "snapshot.h"
 #include <float.h>
@@ -195,6 +196,7 @@ static struct {
     unsigned unit_count;
     /* the node the body's hand is on: taken once the body's hand was on it, kept while it is there and the hand is on no other */
     bool latched, held, has_rel, has_last;
+    bool pinned; /* the body's hand within GRIP_PIN_M of the gate this frame: the game pins it (offhand_grip.h TfpOffhand.pinned) */
     uintptr_t object;
     uint32_t ref, node, weapon;
     /* the node the hand holds (round 36): an attachment's when one is fitted, though the body's hand is on the gun's own */
@@ -207,7 +209,12 @@ static struct {
     unsigned elsewhere_count;
     uint64_t elsewhere_at;
     uint32_t elsewhere_weapon;
-    bool measure;       /* held this frame at full weight: grip_drawn() measures the hand as drawn */
+    TfpGripFingers fingers; /* the left hand's finger joints in the map (bound with it; src/grip_fingers.h) */
+    double finger_weight;   /* the share of the grip's curl in the fingers: the reach's on an attachment's node, else easing out */
+    bool measure;       /* the body's hand on a grip node and the node held known this frame: grip_drawn() measures the hand */
+    bool measure_held;  /* ...and the hand is held on it */
+    uintptr_t own_object; /* the gun's own grip node nearest the one held (0: the gun has none), for the log */
+    uint32_t own_node;
     float last[3];      /* its world position in the last frame: the body's hand trails it by up to a frame */
     TfpArmDriveGrip seen;
   } grip;
@@ -452,6 +459,7 @@ static bool bind(const Units *u) {
         !tfp_graft_view_node(fl, &d.view) || !tfp_graft_view(body, &fp[d.view]) || !tfp_graft_bind(&d.map, bn, bl, fn, fl, body, fp))
       return false;
     d.joints = TFP_GRAFT_JOINTS;
+    tfp_grip_fingers_find(&d.map, fn, &d.grip.fingers); /* not found: the fingers stay the body's */
   }
   /* the avatar's appearance rows: three armour layers, slots 6 and 7 of each are the arms */
   if (!rd(u->avatar_owner + B_AVATAR_PARTS + (uintptr_t)u->avatar_index * 0x1b8 + 0xdc, parts, sizeof parts)) return false;
@@ -771,7 +779,7 @@ static bool grip_in_socket(const Tree *tree, unsigned index, uint32_t node, TfpG
   }
   return false;
 }
-static void grip_unlatch(void) { d.grip.latched = d.grip.held = d.grip.has_rel = d.grip.has_last = false, d.grip.target_object = 0; }
+static void grip_unlatch(void) { d.grip.latched = d.grip.held = d.grip.pinned = d.grip.has_rel = d.grip.has_last = false, d.grip.target_object = 0; }
 static float grip_gap(const float *a, const float *b) {
   const float x = a[0] - b[0], y = a[1] - b[1], z = a[2] - b[2];
   return sqrtf(x * x + y * y + z * z);
@@ -838,7 +846,10 @@ static uint32_t grip_target(const Units *u, const TfpGraftMatrix *body, const Tf
   }
   memcpy(d.grip.last, seen_nodes[use].at, sizeof d.grip.last), d.grip.has_last = true;
   d.grip.held = use_m <= GRIP_PIN_M || (d.grip.held && use_m <= GRIP_LEAVE_M);
-  /* the target: fixed while the gate and the gun's units are (the nodes are rigid on the gun), so it does not drift */
+  d.grip.pinned = use_m <= GRIP_PIN_M;
+  /* the target: fixed while the gate and the gun's units are (the nodes are rigid on the gun), so it does not drift. With
+   * an attachment's node anywhere on the gun the gun's own is never the target, whichever node the latch keeps (round 36b,
+   * E: the BR-14's vertical grip node is 0.084 m from the gun's own, inside GRIP_LEAVE_M) */
   int target = use;
   if (!seen_nodes[use].unit) {
     float near_m = FLT_MAX;
@@ -853,6 +864,13 @@ static uint32_t grip_target(const Units *u, const TfpGraftMatrix *body, const Tf
     d.grip.has_rel = false;
   }
   d.grip.attachment = seen_nodes[target].unit != 0;
+  d.grip.own_object = 0;
+  { /* for the log: the gun's own grip node nearest the one held */
+    float own_m = FLT_MAX;
+    for (unsigned k = 0; k < count; ++k)
+      if (!seen_nodes[k].unit && grip_gap(seen_nodes[k].at, seen_nodes[target].at) < own_m)
+        own_m = grip_gap(seen_nodes[k].at, seen_nodes[target].at), d.grip.own_object = tree.units[0].object, d.grip.own_node = seen_nodes[k].node;
+  }
   seen->found = true, seen->attachment = d.grip.attachment, seen->body_m = use_m;
   seen->gate_unit = (int32_t)seen_nodes[use].unit, seen->gate_node = seen_nodes[use].node;
   seen->target_unit = (int32_t)seen_nodes[target].unit, seen->target_node = seen_nodes[target].node;
@@ -863,8 +881,13 @@ static uint32_t grip_target(const Units *u, const TfpGraftMatrix *body, const Tf
   *out = tfp_graft_product(&d.grip.rel, socket_local);
   return TFP_ARM_GRIP_HELD;
 }
-/* Each driven frame, on the poses about to be written (before the blend with the game's own). */
-static void grip_frame(const Units *u, const TfpGraftMatrix *body, TfpGraftMatrix *poses) {
+/* Each driven frame, on the locals about to be written: after the blend with the game's own (round 36b), so the hand
+ * is on the grip at any weight. While aiming (weight 0) the blend is the game's own aim pose, and only the left arm (nodes
+ * 10, 12, 13) is changed from it: the socket and the right arm stay the game's, so the rifle still rises to the shoulder
+ * (src/arm_weight.h) and the eye the game seats by the socket does not move. Until round 36b the reach ran on the copy
+ * before the blend and was not asked for while aiming: the game's aim pose then held the hand some 17 cm short of a
+ * foregrip (retail grip_hand.lua) and the hand slid there at every aim edge. */
+static void grip_frame(const Units *u, const TfpGraftMatrix *body, TfpGraftLocal *mixed) {
   const TfpGraft *m = &d.map;
   TfpArmDriveGrip *seen = &d.grip.seen;
   if (m->fp[TFP_OG_UPPER] != 10 || m->parent[TFP_OG_UPPER] != TFP_GRAFT_RIG_ROOT || m->fp[TFP_OG_FORE] != 12 || m->parent[TFP_OG_FORE] != 10 ||
@@ -875,35 +898,49 @@ static void grip_frame(const Units *u, const TfpGraftMatrix *body, TfpGraftMatri
    * body's) everything starts again */
   double seconds = 0;
   if (d.grip.rig != u->rig || !d.now || !d.grip.at || d.now < d.grip.at || d.now - d.grip.at > 250) {
-    if (d.grip.rig != u->rig || (d.grip.at && (!d.now || d.now < d.grip.at || d.now - d.grip.at > 250))) tfp_offhand_reset(&d.grip.ik), grip_unlatch();
+    if (d.grip.rig != u->rig || (d.grip.at && (!d.now || d.now < d.grip.at || d.now - d.grip.at > 250)))
+      tfp_offhand_reset(&d.grip.ik), grip_unlatch(), d.grip.finger_weight = 0;
     d.grip.rig = u->rig;
   } else seconds = (double)(d.now - d.grip.at) / 1000;
   d.grip.at = d.now;
   uint32_t state;
-  TfpGraftMatrix target;
+  TfpGraftMatrix target, arm[3] = {tfp_graft_local_matrix(&mixed[TFP_OG_UPPER]), tfp_graft_local_matrix(&mixed[TFP_OG_FORE]),
+                                   tfp_graft_local_matrix(&mixed[TFP_OG_HAND])};
+  const TfpGraftMatrix socket = tfp_graft_local_matrix(&mixed[TFP_GRAFT_JOINTS - 1]);
   if (!d.grip.on) state = TFP_ARM_GRIP_OFF;
   else if (d.grip.one_handed) state = TFP_ARM_GRIP_ONE_HANDED;
-  else if (!(d.weight > 0)) state = TFP_ARM_GRIP_AIMING;
   else if (u->gun_away || !u->weapon) state = TFP_ARM_GRIP_NO_GUN;
-  else state = grip_target(u, body, &poses[TFP_GRAFT_JOINTS - 1], &target);
+  else state = grip_target(u, body, &socket, &target);
   if (state < TFP_ARM_GRIP_NO_GUN) seen->found = false, seen->nodes = seen->units = 0;
   if (d.grip.on) seen->frames++;
   const bool wanted = state == TFP_ARM_GRIP_HELD;
-  float to = 0, step = 0, limit = 0, weight = 0;
+  float to = 0, step = 0, limit = 0, weight = 0, weight_of_reach = 0;
   TfpOffhandResult r = {0};
   d.grip.measure = false;
   if (wanted || d.grip.ik.active || d.grip.ik.weight > 0) {
-    r = tfp_offhand_step(&d.grip.ik, &poses[TFP_OG_UPPER], &poses[TFP_OG_FORE], &poses[TFP_OG_HAND], wanted ? &target : NULL, wanted, seconds);
+    d.grip.ik.pinned = wanted && d.grip.pinned; /* walking: the drawn hand swings off a grip the body's hand stays on (round 36b) */
+    r = tfp_offhand_step(&d.grip.ik, &arm[0], &arm[1], &arm[2], wanted ? &target : NULL, wanted, seconds);
+    /* the three locals as the reach left them (untouched ones come back bit for bit) */
+    tfp_graft_set_local(&mixed[TFP_OG_UPPER], &arm[0]), tfp_graft_set_local(&mixed[TFP_OG_FORE], &arm[1]), tfp_graft_set_local(&mixed[TFP_OG_HAND], &arm[2]);
     to = r.to_target_m, step = r.step_degrees, limit = r.limit_degrees, weight = r.weight;
     if (wanted)
       state = r.reason == TFP_OG_HELD ? TFP_ARM_GRIP_HELD : r.reason == TFP_OG_TOO_FAR || r.reason == TFP_OG_OUT_OF_REACH ? TFP_ARM_GRIP_FAR
               : r.reason == TFP_OG_NOT_RIGID ? TFP_ARM_GRIP_POSE : TFP_ARM_GRIP_EASING;
     seen->cut += r.cut, seen->out_of_reach += r.reason == TFP_OG_OUT_OF_REACH, seen->too_far += r.reason == TFP_OG_TOO_FAR;
+    weight_of_reach = r.weight;
     if (d.grip.ik.active && r.body_degrees > seen->body_degrees) seen->body_degrees = r.body_degrees;
-    /* drive(): the hand against the gun as drawn; not while aiming fades in or out (weight under 1), when the drawn arm
-     * is part the game's aim pose and the hand is that far off the grip by design */
-    d.grip.measure = state == TFP_ARM_GRIP_HELD && d.grip.latched && d.weight >= 1;
   }
+  /* drive(): the hand against the gun as drawn, at any weight (round 36b: until then held at full weight only, so the log
+   * was blind while aiming): whenever the body's hand is on a node and the one held is known this frame */
+  d.grip.measure = (state == TFP_ARM_GRIP_HELD || state == TFP_ARM_GRIP_EASING || state == TFP_ARM_GRIP_FAR || state == TFP_ARM_GRIP_POSE) &&
+                   d.grip.latched && d.grip.held && d.grip.target_object;
+  d.grip.measure_held = state == TFP_ARM_GRIP_HELD;
+  /* round 36b: the hand closed on an attachment's grip, with the reach's weight; never on the gun's own node (the body's
+   * fingers suit its handguard). Otherwise what is curled eases out over EASE_S. */
+  const bool on_attachment = d.grip.attachment && d.grip.target_object && state >= TFP_ARM_GRIP_NO_NODE;
+  if (on_attachment) d.grip.finger_weight = weight_of_reach;
+  else d.grip.finger_weight = fmax(0, d.grip.finger_weight - seconds / TFP_OG_EASE_S);
+  tfp_grip_fingers_close(&d.grip.fingers, mixed, d.grip.finger_weight);
   seen->state = state, seen->weight = weight, seen->to_m = wanted ? to : 0;
   seen->reach = wanted ? r.reach_share : 0, seen->shoulder_m = r.shoulder_m;
   if (state == TFP_ARM_GRIP_HELD) {
@@ -915,18 +952,47 @@ static void grip_frame(const Units *u, const TfpGraftMatrix *body, TfpGraftMatri
   }
   if (step >= seen->step_degrees) seen->step_degrees = step, seen->limit_degrees = limit;
 }
-/* After the rig and the gun are evaluated for the draw: the rig's left hand (node 13) from the gun's grip node in use,
- * both as the game evaluated them. It settles what the solver's own numbers cannot: whether the target was where the
- * gun is drawn (a frame behind, another socket). */
+/* After the rig and the gun are evaluated for the draw (or, where nothing was written, as the game evaluated them): the rig's
+ * left hand (node 13) against the grip node it holds, both as drawn. It settles what the solver's own numbers cannot: whether
+ * the target was where the gun is drawn (a frame behind, another socket), whether the hand is turned as the node is, whether
+ * the fingers are closed (round 36b), and how far the gun's own node is. */
+static void palm_point(const TfpGraftMatrix *m, float out[3]) {
+  for (unsigned i = 0; i < 3; ++i) out[i] = m->values[12 + i] + .05f * m->values[i];
+}
 static void grip_drawn(uintptr_t rig_worlds) {
-  TfpGraftMatrix hand, grip;
+  TfpGraftMatrix hand, grip, own;
   uintptr_t worlds;
   if (!d.grip.measure || !d.grip.target_object || !ptr(d.grip.target_object + L_UNIT_WORLDS, &worlds) || !rd(rig_worlds + 64 * 13, &hand, sizeof hand) ||
       !rd(worlds + 64 * (uintptr_t)d.grip.target_node, &grip, sizeof grip) || !tfp_graft_rigid(&hand) || !tfp_graft_rigid(&grip))
     return;
-  const float m = grip_gap(hand.values + 12, grip.values + 12);
-  d.grip.seen.drawn = true, d.grip.seen.drawn_m = m;
-  if (m > d.grip.seen.most_drawn_m) d.grip.seen.most_drawn_m = m;
+  TfpArmDriveDrawn *b = d.weight >= 1 ? &d.grip.seen.hip : &d.grip.seen.aim;
+  const bool held = d.grip.measure_held;
+  float a[3], c[3];
+  const TfpOgFrame hf = tfp_og_frame(&hand), gf = tfp_og_frame(&grip);
+  palm_point(&hand, a), palm_point(&grip, c);
+  const float m = grip_gap(hand.values + 12, grip.values + 12), turn = (float)(tfp_og_angle(hf.r, gf.r) * 180 / TFP_OG_PI), palm = grip_gap(a, c);
+  float curl = -1, own_m = -1;
+  const TfpGripFingers *f = &d.grip.fingers;
+  if (f->ok) {
+    TfpGraftMatrix w[4];
+    const unsigned nodes[4] = {d.map.fp[f->joint[TFP_GF_MIDDLE][0]], d.map.fp[f->joint[TFP_GF_MIDDLE][1]], d.map.fp[f->joint[TFP_GF_INDEX][0]],
+                               d.map.fp[f->joint[TFP_GF_INDEX][1]]};
+    bool read = true;
+    for (unsigned i = 0; i < 4; ++i) read = read && rd(rig_worlds + 64 * (uintptr_t)nodes[i], &w[i], sizeof w[i]) && tfp_graft_rigid(&w[i]);
+    if (read) curl = (float)((tfp_gf_x_degrees(&w[0], &w[1]) + tfp_gf_x_degrees(&w[2], &w[3])) / 2);
+  }
+  if (d.grip.own_object && ptr(d.grip.own_object + L_UNIT_WORLDS, &worlds) && rd(worlds + 64 * (uintptr_t)d.grip.own_node, &own, sizeof own) &&
+      tfp_graft_rigid(&own))
+    own_m = grip_gap(hand.values + 12, own.values + 12);
+  b->frames++, b->held += held;
+  b->m = m, b->turn = turn, b->palm_m = palm, b->curl = curl, b->own_m = own_m;
+  if (held) {
+    if (m > b->most_m) b->most_m = m;
+    if (turn > b->most_turn) b->most_turn = turn;
+    if (palm > b->most_palm_m) b->most_palm_m = palm;
+    if (curl >= 0 && (b->held == 1 || curl < b->least_curl)) b->least_curl = curl;
+  }
+  d.grip.seen.drawn = true;
 }
 
 /* ---- one frame (graft:662-817 graft_present, its steady action path) ---- */
@@ -957,9 +1023,10 @@ static uint32_t drive(const Units *u) {
   } else {
     if (!align(u, body, base)) return TFP_ARM_POSE;
     if (!tfp_graft_pose(&d.map, body, poses)) return TFP_ARM_POSE;
-    if (d.grip.on || d.grip.ik.active || d.grip.ik.weight > 0) grip_frame(u, body, poses);
     for (unsigned i = 0; i < d.joints; ++i)
       if (!tfp_graft_mix(&base[i], &poses[i], d.weight, &target[i])) return TFP_ARM_POSE;
+    d.grip.measure = false; /* grip_frame says, when it runs */
+    if (d.grip.on || d.grip.ik.active || d.grip.ik.weight > 0 || d.grip.finger_weight > 0) grip_frame(u, body, target);
     /* For the log (stats.draw.sock_m): the socket as it is about to be drawn less the game's own, along the view.
      * Both are locals of the socket's parent (the rig's root, which the drive does not write), so the difference
      * goes through that node's axes into the world and onto the forward axis of the rig's eye. */
@@ -994,8 +1061,8 @@ static uint32_t drive(const Units *u) {
     if (!update(&a, u->world, u->rig_ref) || !refresh_arms(&a, u->world, u->rig, rig_worlds, d.arms, d.arm_count)) return TFP_ARM_FAULT;
     int weapon = u->gun_away ? 1 : update_weapon(&a, u->world, &tree);
     if (weapon <= 0) return weapon ? TFP_ARM_FAULT : TFP_ARM_TREE;
-    if (!d.bend) grip_drawn(rig_worlds);
   }
+  if (!d.bend) grip_drawn(rig_worlds); /* nothing written: the hand as the game evaluated it (round 36b) */
   return TFP_ARM_NONE;
 }
 
@@ -1020,7 +1087,7 @@ void tfp_arm_drive_grip_take(TfpArmDriveGrip *out) {
 }
 const char *tfp_arm_drive_grip_state_name(uint32_t state) {
   static const char *const names[TFP_ARM_GRIPS] = {
-      "switched off", "a handgun at the hip: held in one hand", "aiming: the game's own aim pose holds the gun", "no gun on the rig",
+      "switched off", "a handgun: held in one hand", "aiming: the game's own aim pose holds the gun", "no gun on the rig",
       "no grip node on the gun's units", "the gun's units could not be read in the socket's frame", ("the body's left hand is on no grip (a reload, "
       "or a weapon the game does not pin the hand to)"), "on the grip", "easing", "the grip is out of the arm's reach or too far from the drawn hand",
       "the arm's pose was not usable"};
@@ -1034,14 +1101,36 @@ const char *tfp_arm_drive_grip_line(const TfpArmDriveGrip *g) {
              (unsigned)g->nodes, (unsigned)g->units, (double)g->body_m, g->target_unit != g->gate_unit && !g->gate_unit ? "the gun's own" : "it");
   else if (g->nodes) snprintf(where, sizeof where, "%u grip nodes on %u of the gun's units, the body's hand %.3f m from the nearest", (unsigned)g->nodes, (unsigned)g->units, (double)g->body_m);
   else snprintf(where, sizeof where, "no grip node");
-  char drawn[96] = "";
-  if (g->drawn) snprintf(drawn, sizeof drawn, "; as drawn the hand %.3f m from the gun's grip (most %.3f)", (double)g->drawn_m, (double)g->most_drawn_m);
   snprintf(line, sizeof line, "%u frames, %u held: %s; %s; hand %.3f m from the grip (most %.3f while held), largest joint step %.1f degrees (allowed %.1f), weight %.2f; "
            "reach %.2f of the arm (most %.2f), shoulder forward %.3f m (most %.3f), held step %.1f degrees, the body's arm turned %.1f degrees, %u frames cut, "
-           "not taken: %u out of reach, %u too far%s",
+           "not taken: %u out of reach, %u too far",
            (unsigned)g->frames, (unsigned)g->held, tfp_arm_drive_grip_state_name(g->state), where, (double)g->to_m, (double)g->most_to_m, (double)g->step_degrees,
            (double)g->limit_degrees, (double)g->weight, (double)g->reach, (double)g->most_reach, (double)g->shoulder_m, (double)g->most_shoulder_m,
-           (double)g->held_step_degrees, (double)g->body_degrees, (unsigned)g->cut, (unsigned)g->out_of_reach, (unsigned)g->too_far, drawn);
+           (double)g->held_step_degrees, (double)g->body_degrees, (unsigned)g->cut, (unsigned)g->out_of_reach, (unsigned)g->too_far);
+  return line;
+}
+static void drawn_part(char *out, size_t size, const char *when, const TfpArmDriveDrawn *b) {
+  if (!b->frames) { snprintf(out, size, "%s: not measured", when); return; }
+  /* the last frame's numbers; in brackets the worst of the held frames, when there were any */
+  char most[3][32] = {"", "", ""}, curl[72], own[48];
+  if (b->held) {
+    snprintf(most[0], sizeof most[0], " (most %.3f)", (double)b->most_m), snprintf(most[1], sizeof most[1], " (most %.1f)", (double)b->most_turn);
+    snprintf(most[2], sizeof most[2], " (most %.3f)", (double)b->most_palm_m);
+  }
+  if (b->curl < 0) snprintf(curl, sizeof curl, "fingers not read");
+  else if (b->held) snprintf(curl, sizeof curl, "fingers curled %.1f degrees (least %.1f)", (double)b->curl, (double)b->least_curl);
+  else snprintf(curl, sizeof curl, "fingers curled %.1f degrees", (double)b->curl);
+  if (b->own_m < 0) snprintf(own, sizeof own, "no gun's own node");
+  else snprintf(own, sizeof own, "%.3f m from the gun's own node", (double)b->own_m);
+  snprintf(out, size, "%s (%u frames, %u held): the hand %.3f m from the grip%s, turned %.1f degrees%s, palm %.3f m%s, %s, %s", when, (unsigned)b->frames,
+           (unsigned)b->held, (double)b->m, most[0], (double)b->turn, most[1], (double)b->palm_m, most[2], curl, own);
+}
+const char *tfp_arm_drive_grip_drawn_line(const TfpArmDriveGrip *g) {
+  static char line[690];
+  char hip[340], aim[340];
+  if (!g->drawn) return NULL;
+  drawn_part(hip, sizeof hip, "as drawn at the hip", &g->hip), drawn_part(aim, sizeof aim, "while aiming", &g->aim);
+  snprintf(line, sizeof line, "%s; %s", hip, aim);
   return line;
 }
 static char grip_units_last[700];

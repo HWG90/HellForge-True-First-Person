@@ -1,19 +1,13 @@
-# True First Person for HellForge: test build 0.6.0-feel.52
+# True First Person for HellForge: test build 0.6.0-feel.56
 
-For HellForge on game build 25480438. This is a test build: it works, it is not finished, and I want to
+For HellForge 0.4 and 0.5 on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
-
-## Changed in the next build
-
-- **U now switches first person on and off, not F11.** HellForge's new Armor LUT editor opens on F11. If you
-  never changed the key, it is U from now on; nothing to do. If you picked another key in the settings, you keep
-  it. F11 can no longer be picked for this mod.
 
 ## Install
 
 1. Close the game and the HellForge launcher.
 2. Extract the ZIP into HellForge's `mods` folder. Don't put the ZIP itself in `mods`: it holds three mods, and
-   HellForge takes a ZIP there as one mod (it says "no hellforge-mod.json ... in its one top-level folder"). It adds three folders:
+   HellForge 0.4 takes a ZIP there as one mod (it says "no hellforge-mod.json ... in its one top-level folder"). It adds three folders:
    - `true-first-person`: the mod.
    - `mcm`: DBF-MCM 0.1.74-hellforge.4, the settings menu. With it, every option is on the mod's
      "True First Person" page.
@@ -56,6 +50,32 @@ keep their values. "View kick when thrown" works in both.
 To get the old behaviour back: choose **Bodycam**. Your slider values are still there.
 
 Tested in the game: ten actions in each style (Stable: no kick at all; Bodycam: 2.4 to 5.8 degrees); I have not played it yet.
+
+## Changed and fixed in 0.6.0-feel.56
+
+Everything since 0.6.0-feel.52. This is a test build: I have played 0.6.0-feel.55 on HellForge 0.5; this build as a
+whole, and the items marked *not played yet*, have passed my tests but have not been played in the game.
+
+- **HellForge 0.5.** HellForge 0.5 moved some of the game's records the mod reads; it now finds them where the game's
+  own code puts them, on 0.4 and 0.5. (0.6.0-feel.55; played on 0.5.)
+- **U switches first person on and off, not F11.** HellForge 0.5's Armor LUT editor opens on F11. If you never changed
+  the key, it is U now; nothing to do. A key you picked yourself is kept, and F11 can no longer be picked.
+- **U does nothing while you type** in chat, the settings menu, the panel or the placement editor. *Not played yet.*
+- **Your support hand on foregrips.** *Not played yet.*
+  - The left hand goes on a fitted vertical or fore grip and closes round it.
+  - It stays there while you aim and while you walk.
+  - While aiming, the hand is now placed on every two-handed gun, so aiming looks a little different. Tell me how it
+    feels.
+- **Performance.** The mod's time per frame is 13 to 19 % shorter (0.6.0-feel.54). A test switch, a file
+  `memo_on.txt` beside the DLL, turns on a further saving; it is off by default.
+
+**Known issues in this build:**
+- In an exosuit the first-person view is still wrong: your diver's own arm and helmet fill the cockpit. A fix is in
+  progress.
+- Scope of Authority 2.27.13 can crash HellForge 0.5 at the title screen. That is not this mod.
+- From 0.6.0-feel.52, still open: a swap in the middle of a dive can push the view forward for a frame or two; in
+  Stable, after a swap on a slope the view can trail for half a second; backpack pick-ups can drift the view briefly;
+  the Warp Pack's glow shows unless you try `warp_hide.txt`; in DBF-MCM, Enter does not change a `< >` row.
 
 ## Fixed in 0.6.0-feel.52
 
