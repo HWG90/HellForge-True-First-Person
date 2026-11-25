@@ -30,7 +30,9 @@
  *     frame, so no joint can turn over by a flip of the solve; going away, it returns to the drive's pose at that rate;
  *   - a target further than SHIFT_M from where the body's pose put the hand, or than REACH times the arm's length from
  *     the shoulder (REACH_KEEP once held, so a grip swaying about the limit does not flicker), is not taken: the arm
- *     eases back to the body's pose (the reason says which).
+ *     eases back to the body's pose (the reason says which). Once held, the hand's distance has a keep threshold too,
+ *     SHIFT_KEEP_M, and is not asked at all while the caller says the body's own hand is pinned on the target (round 36b:
+ *     walking, the copied hand swings away from a grip the game still pins the body's hand on).
  * The fingers are the body's (the drive copies them relative to the hand), and the body's hand is the one the game
  * shapes around this grip. */
 #ifndef TFP_OFFHAND_GRIP_H
@@ -49,7 +51,8 @@ enum { TFP_OG_UPPER = 0, TFP_OG_FORE = 2, TFP_OG_HAND = 3 };
 #define TFP_OG_REACH_KEEP 1.18  /* ...and one held already is let go only beyond this share (round 26) */
 #define TFP_OG_SHOULDER .21     /* the shoulder comes forward by at most this share of the arm's length (round 26) */
 #define TFP_OG_SHOULDER_MPS .6  /* ...moving by at most this many metres a second */
-#define TFP_OG_SHIFT_M .60      /* a target further than this from the hand the body's pose drew is not taken */
+#define TFP_OG_SHIFT_M .60      /* a target further than this from the hand the body's pose drew is not taken... */
+#define TFP_OG_SHIFT_KEEP_M .75 /* ...and one held already is let go only beyond this (round 36b; not asked while pinned) */
 #define TFP_OG_PI 3.14159265358979323846
 
 /* What a frame did (TfpOffhandResult.reason). */
@@ -59,7 +62,7 @@ enum {
   TFP_OG_EASING,       /* on its way to the target or back to the body's pose */
   TFP_OG_NO_TARGET,    /* wanted, but no target this frame: easing back */
   TFP_OG_OUT_OF_REACH, /* the target is beyond REACH (REACH_KEEP once held) of the arm's length from the shoulder */
-  TFP_OG_TOO_FAR,      /* the target is more than SHIFT_M from the hand the body's pose drew */
+  TFP_OG_TOO_FAR,      /* the target is more than SHIFT_M (SHIFT_KEEP_M once held, unpinned) from the hand the body's pose drew */
   TFP_OG_NOT_RIGID,    /* a pose was not rigid or a bone has no length: nothing was changed this frame */
   TFP_OG_REASONS
 };
@@ -76,6 +79,8 @@ typedef struct TfpOffhand {
   double full_shift[3];
   bool has_body;
   double body[3][3][3];   /* the drive's local rotations last frame */
+  bool pinned;            /* set by the caller each frame: the body's own hand is on the target (the game pins it there);
+                           * once held, the drawn hand's distance from the target is then not asked (round 36b) */
 } TfpOffhand;
 typedef struct TfpOffhandResult {
   unsigned reason;        /* TFP_OG_* */
@@ -340,7 +345,7 @@ static inline TfpOffhandResult tfp_offhand_step(TfpOffhand *s, TfpGraftMatrix *u
     double ts[3], th[3];
     tfp_og_sub(T.p, S, ts), tfp_og_sub(T.p, H, th);
     out.reach_share = (float)(tfp_og_len(ts) / (a + b));
-    if (tfp_og_len(th) > TFP_OG_SHIFT_M) usable = false, reason = TFP_OG_TOO_FAR;
+    if (!(s->reaching && s->pinned) && tfp_og_len(th) > (s->reaching ? TFP_OG_SHIFT_KEEP_M : TFP_OG_SHIFT_M)) usable = false, reason = TFP_OG_TOO_FAR;
     else if (tfp_og_len(ts) > (s->reaching ? TFP_OG_REACH_KEEP : TFP_OG_REACH) * (a + b)) usable = false, reason = TFP_OG_OUT_OF_REACH;
   } else if (wanted) reason = TFP_OG_NO_TARGET;
   const bool going = wanted && usable;

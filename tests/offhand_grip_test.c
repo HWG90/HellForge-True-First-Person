@@ -196,6 +196,62 @@ static void test_refused(void) {
   tfp_offhand_reset(&s);
   CHECK(tfp_offhand_step(&s, &bad.upper, &bad.fore, &bad.hand, &t, true, 1 / 60.0).reason == TFP_OG_NOT_RIGID);
 }
+/* Round 36b (walking with the BR-14 Adjudicator: 321 "too far" frames in 13 s, held in 43 % of the frames): the drawn hand
+ * swings away from a grip the body's hand stays pinned on. Once held, "too far" has a keep threshold (SHIFT_KEEP_M), as
+ * the reach has; while the caller says the body's hand is pinned on the target it is not asked at all. A first take is
+ * refused as before. */
+static TfpGraftMatrix away_from_hand(double from_hand, double *from_shoulder) {
+  const Arm base = model();
+  const World b = world(&base);
+  double d[3], p[3], r[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+  tfp_og_sub(b.u.p, b.h.p, d); /* from the hand through the shoulder, on: the furthest from the hand for a reach */
+  const double h = tfp_og_len(d), reach = from_hand - h;
+  for (unsigned i = 0; i < 3; i++) p[i] = b.u.p[i] + d[i] / h * reach;
+  *from_shoulder = reach / (UPPER + LOWER);
+  CHECK(fabs(gap(p, b.h.p) - from_hand) < 1e-9);
+  return target_at(p, r);
+}
+static void test_too_far_keep(void) {
+  TfpOffhand s;
+  Arm a;
+  const Arm base = model();
+  double r[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}, p[3], share;
+  around(.4, .3, 0, p);
+  const TfpGraftMatrix near = target_at(p, r), swung = away_from_hand(.65, &share), gone = away_from_hand(.80, &share);
+  CHECK(share < TFP_OG_REACH_KEEP && TFP_OG_SHIFT_M < .65 && .65 < TFP_OG_SHIFT_KEEP_M && TFP_OG_SHIFT_KEEP_M < .80);
+  /* a first take at 0.65 m from the drawn hand: refused, whether or not the body's hand is pinned on it */
+  for (int pinned = 0; pinned < 2; pinned++) {
+    tfp_offhand_reset(&s);
+    s.pinned = pinned;
+    const TfpOffhandResult res = run(&s, &a, &swung, true, 1 / 60.0, 5);
+    CHECK(res.reason == TFP_OG_TOO_FAR && !s.active && !memcmp(&a, &base, sizeof a));
+  }
+  /* held, then the drawn hand 0.65 m from the grip: kept, and the hand gets there */
+  tfp_offhand_reset(&s);
+  CHECK(run(&s, &a, &near, true, 1 / 60.0, 30).reason == TFP_OG_HELD);
+  TfpOffhandResult res = {0};
+  for (int i = 0; i < 60; i++) {
+    res = run(&s, &a, &swung, true, 1 / 60.0, 1);
+    CHECK(res.reason != TFP_OG_TOO_FAR);
+  }
+  CHECK(res.reason == TFP_OG_HELD && res.to_target_m < 1e-4);
+  /* 0.80 m: beyond the keep threshold, let go, unless the body's hand is pinned on it */
+  CHECK(run(&s, &a, &gone, true, 1 / 60.0, 1).reason == TFP_OG_TOO_FAR);
+  tfp_offhand_reset(&s);
+  s.pinned = true;
+  CHECK(run(&s, &a, &near, true, 1 / 60.0, 30).reason == TFP_OG_HELD);
+  for (int i = 0; i < 90; i++) {
+    res = run(&s, &a, &gone, true, 1 / 60.0, 1);
+    CHECK(res.reason != TFP_OG_TOO_FAR);
+  }
+  CHECK(res.reason == TFP_OG_HELD && res.to_target_m < 1e-4);
+  /* the reach's keep threshold is unchanged: pinned or not, a grip beyond REACH_KEEP is let go */
+  double far[3];
+  around((UPPER + LOWER) * (TFP_OG_REACH_KEEP + .02), .3, 0, far);
+  const TfpGraftMatrix out = target_at(far, r);
+  CHECK(run(&s, &a, &out, true, 1 / 60.0, 1).reason == TFP_OG_OUT_OF_REACH);
+  printf("offhand grip: held while the drawn hand swings 0.65 m and, pinned, 0.80 m from the grip; a first take at 0.65 m refused\n");
+}
 /* Released: back to the drive's pose at the step limit, ending bit for bit on it. */
 static void test_release(void) {
   const Arm base = model();
@@ -530,6 +586,7 @@ int main(void) {
   test_reach();
   test_stretch();
   test_refused();
+  test_too_far_keep();
   test_release();
   test_step_limit();
   test_behind();

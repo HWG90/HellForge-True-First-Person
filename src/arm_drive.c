@@ -195,6 +195,7 @@ static struct {
     unsigned unit_count;
     /* the node the body's hand is on: taken once the body's hand was on it, kept while it is there and the hand is on no other */
     bool latched, held, has_rel, has_last;
+    bool pinned; /* the body's hand within GRIP_PIN_M of the gate this frame: the game pins it (offhand_grip.h TfpOffhand.pinned) */
     uintptr_t object;
     uint32_t ref, node, weapon;
     /* the node the hand holds (round 36): an attachment's when one is fitted, though the body's hand is on the gun's own */
@@ -771,7 +772,7 @@ static bool grip_in_socket(const Tree *tree, unsigned index, uint32_t node, TfpG
   }
   return false;
 }
-static void grip_unlatch(void) { d.grip.latched = d.grip.held = d.grip.has_rel = d.grip.has_last = false, d.grip.target_object = 0; }
+static void grip_unlatch(void) { d.grip.latched = d.grip.held = d.grip.pinned = d.grip.has_rel = d.grip.has_last = false, d.grip.target_object = 0; }
 static float grip_gap(const float *a, const float *b) {
   const float x = a[0] - b[0], y = a[1] - b[1], z = a[2] - b[2];
   return sqrtf(x * x + y * y + z * z);
@@ -838,6 +839,7 @@ static uint32_t grip_target(const Units *u, const TfpGraftMatrix *body, const Tf
   }
   memcpy(d.grip.last, seen_nodes[use].at, sizeof d.grip.last), d.grip.has_last = true;
   d.grip.held = use_m <= GRIP_PIN_M || (d.grip.held && use_m <= GRIP_LEAVE_M);
+  d.grip.pinned = use_m <= GRIP_PIN_M;
   /* the target: fixed while the gate and the gun's units are (the nodes are rigid on the gun), so it does not drift */
   int target = use;
   if (!seen_nodes[use].unit) {
@@ -893,6 +895,7 @@ static void grip_frame(const Units *u, const TfpGraftMatrix *body, TfpGraftMatri
   TfpOffhandResult r = {0};
   d.grip.measure = false;
   if (wanted || d.grip.ik.active || d.grip.ik.weight > 0) {
+    d.grip.ik.pinned = wanted && d.grip.pinned; /* walking: the drawn hand swings off a grip the body's hand stays on (round 36b) */
     r = tfp_offhand_step(&d.grip.ik, &poses[TFP_OG_UPPER], &poses[TFP_OG_FORE], &poses[TFP_OG_HAND], wanted ? &target : NULL, wanted, seconds);
     to = r.to_target_m, step = r.step_degrees, limit = r.limit_degrees, weight = r.weight;
     if (wanted)
