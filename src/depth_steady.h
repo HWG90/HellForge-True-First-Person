@@ -27,9 +27,15 @@
  * It is keyed on nothing but the game's own numbers of the same evaluation: not on the gate bit, not on a motion
  * pattern. It cannot flatten recoil or any other motion: those are other parts of y and pass through.
  *
- * Not undone: in the 75 ms after a reload state changed (request+0x8d set, the weight at +0x88 under 1) with the gate
- * set, the game scales the rig's whole vector by the float at main row +0x11ac (game+0x1287b76). That is passed
- * (TFP_STEADY_SCALED) and counted.
+ * The reload (request+0x8d set): the evaluator blends the rig's whole seating vector (rig eye, socket and D) to a
+ * constant vector C of its data over the weight at +0x88 as request+0x8f changes, holds it at C while +0x8f stays
+ * set, and blends back as it clears (game+0x1287af6..0x1287bb4). tfp_steady_gain is the share of the rig's own vector
+ * left in that blend, so this term adds nothing in a reload either. Round 39 puts the rest back: src/reload_hold.h,
+ * the vector the rig had before the reload in place of C, the eye held through it.
+ *
+ * Not undone: in the 75 ms after a reload state changed (request+0x8d set, the weight at +0x88 under 1) with the
+ * avatar's bit set ([rsp+0x44]), the game also scales the rig's whole vector by the float at main row +0x11ac
+ * (game+0x1287b76). That is passed (TFP_STEADY_SCALED) and counted; the reload's hold passes it too.
  *
  * The second half is the "Steady:" line's counting, as src/gate_log.h does it for "Gate:". */
 #ifndef TFP_DEPTH_STEADY_H
@@ -39,6 +45,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include "reload_hold.h"
 
 #define TFP_STEADY_RATE 18.0        /* 1/s: nine tenths of the way in 216 ms, at rest in about 520; the game's own lens takes 170 to 260 ms over 30 degrees */
 #define TFP_STEADY_GAP_MS 250.0     /* longer without a frame: begin again at the game's own depth */
@@ -233,6 +240,7 @@ typedef struct TfpSteadySecond {
   uint32_t aim_frames;                     /* round 20: frames worked out in full aim (the hip share under 1/2) */
   TfpSteadyRange aim_depth;                /* the rig's depth in them: the game's own plus what the hold added */
   float aim_step;                          /* its largest change between two frames running in full aim, m */
+  TfpReloadSecond reload;                  /* round 39: the reloads that ended in this second (src/reload_hold.h), each said once */
 } TfpSteadySecond;
 typedef struct TfpSteadyLog { TfpSteadySecond now; float aim_last; bool aim_known; } TfpSteadyLog;
 

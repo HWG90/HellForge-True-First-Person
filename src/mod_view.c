@@ -1368,6 +1368,9 @@ static void steady_note(void) { /* once a second: the rig's depth held steady (s
   if (!tfp_pose_steady_take(&held)) return;
   tfp_aim_log_add_rig(&aim_log, &held); /* round 20c: the rig's depth in full aim, for the "Aim:" line */
   if (tfp_steady_stop_line(&held, line, sizeof line)) say("%s", line); /* the root did not follow: said once, in the second it stopped */
+  /* round 39: once a reload, in the second it ended (src/reload_hold.h) */
+  for (uint32_t i = 0; i < held.reload.count && i < TFP_RELOAD_LOGGED; ++i) { tfp_reload_line(&held.reload.ends[i], line, sizeof line); say("%s", line); }
+  if (held.reload.count > TFP_RELOAD_LOGGED) say("Reload: %u more reloads ended in the same second", held.reload.count - TFP_RELOAD_LOGGED);
   if (!tfp_steady_worth(&held)) return;
   tfp_steady_line(&held, line, sizeof line);
   say("%s", line);
