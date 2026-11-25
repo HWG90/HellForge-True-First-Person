@@ -16,11 +16,13 @@
  *            host too old to say).
  *   typing   only when the chat flag cannot be read: another text key (a letter, a digit, space, punctuation) went
  *            down in the last TFP_KEY_GUARD_TYPING_MS before the press. A key that was already held (W while running)
- *            makes no edge and does not count.
+ *            makes no edge and does not count; a game key (W, A, S, D, Space, a digit) that went down counts only
+ *            inside a word (round 36c, tfp_key_guard_is_game).
  * One log line per burst of refusals: the first refusal says why; refusals follow without a line until a press is
  * taken or TFP_KEY_GUARD_BURST_MS pass without one.
  *
- * Header only, no Windows: the readers and the clock are the caller's (src/mod_view.c), tests/key_guard_test.c. */
+ * Header only, no Windows: the readers and the clock are the caller's (src/mod_view.c, through tfp_key_guard_toggle),
+ * tests/key_guard_test.c. */
 #ifndef TFP_KEY_GUARD_H
 #define TFP_KEY_GUARD_H
 #include <stdbool.h>
@@ -118,8 +120,10 @@ typedef struct TfpKeyContext {
 typedef struct TfpKeyGuard {
   uint8_t held[32];        /* the text keys' last levels (bit per virtual key) */
   bool seen;               /* held[] has a first sample: before it, keys already down are not edges */
-  bool any_text;           /* a text key went down at last_text_ms */
+  bool any_text;           /* a text key that is not a game key went down at last_text_ms */
   uint64_t last_text_ms;
+  bool any_game;           /* round 36c: a game key (W, A, S, D, Space, a digit) went down at last_game_ms */
+  uint64_t last_game_ms;
   bool in_burst;           /* a refusal was logged; quiet until a taken press or BURST_MS without a refusal */
   uint64_t last_refusal_ms;
   unsigned refused;        /* presses refused, in all */
@@ -131,16 +135,32 @@ static inline bool tfp_key_guard_is_text(int vk) {
   return (vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9') || vk == 0x20 || vk == 0x08 || (vk >= 0xBA && vk <= 0xC0) ||
          (vk >= 0xDB && vk <= 0xDF) || vk == 0xE2;
 }
-/* A sample of every text key (down(user, vk)), with the toggle key's own press left out: its edge is the press being
- * judged. Called every tick while the chat flag is unknown (src/mod_view.c). */
-static inline void tfp_key_guard_sample(TfpKeyGuard *g, uint64_t now_ms, int toggle_key, bool (*down)(void *user, int vk), void *user) {
+/* Round 36c: the text keys the game plays with: W, A, S, D (moving), Space (jump), the digits (weapon and stratagem
+ * slots). Their edges alone are play, not typing: one counts only inside a word, when another text key went down
+ * within TFP_KEY_GUARD_WORD_MS of the press ("what u": H and T; "was u" alone reads as moving, and is taken). */
+#define TFP_KEY_GUARD_WORD_MS 1500u
+static inline bool tfp_key_guard_is_game(int vk) {
+  return vk == 'W' || vk == 'A' || vk == 'S' || vk == 'D' || vk == 0x20 || (vk >= '0' && vk <= '9');
+}
+/* One sample of every text key, from one snapshot of the keyboard (keys[vk] & 0x80: down, as GetKeyboardState fills
+ * it), with the toggle key's own press left out: its edge is the press being judged. */
+static inline void tfp_key_guard_sample(TfpKeyGuard *g, uint64_t now_ms, int toggle_key, const uint8_t keys[256]) {
   for (int vk = 1; vk < 256; vk++) {
     if (!tfp_key_guard_is_text(vk)) continue;
-    const bool d = down(user, vk), was = (g->held[vk >> 3] >> (vk & 7)) & 1;
+    const bool d = (keys[vk] & 0x80) != 0, was = (g->held[vk >> 3] >> (vk & 7)) & 1;
     if (d) g->held[vk >> 3] |= (uint8_t)(1u << (vk & 7)); else g->held[vk >> 3] &= (uint8_t)~(1u << (vk & 7));
-    if (d && !was && g->seen && vk != toggle_key) g->any_text = true, g->last_text_ms = now_ms;
+    if (!d || was || !g->seen || vk == toggle_key) continue;
+    if (tfp_key_guard_is_game(vk)) g->any_game = true, g->last_game_ms = now_ms;
+    else g->any_text = true, g->last_text_ms = now_ms;
   }
   g->seen = true;
+}
+/* Typing just before the press: another text key in the last TYPING_MS, or a game key in the last TYPING_MS inside a
+ * word (another text key in the last WORD_MS). */
+static inline bool tfp_key_guard_typing(const TfpKeyGuard *g, uint64_t now_ms) {
+  const bool text = g->any_text && now_ms - g->last_text_ms <= TFP_KEY_GUARD_TYPING_MS;
+  const bool game = g->any_game && now_ms - g->last_game_ms <= TFP_KEY_GUARD_TYPING_MS;
+  return text || (game && g->any_text && now_ms - g->last_text_ms <= TFP_KEY_GUARD_WORD_MS);
 }
 /* A press of the toggle key: taken, or refused and why. `line` gets the one log line of a new burst ("" otherwise). */
 static inline TfpKeyVerdict tfp_key_guard_press(TfpKeyGuard *g, uint64_t now_ms, const TfpKeyContext *c, char *line, size_t line_size) {
@@ -148,7 +168,7 @@ static inline TfpKeyVerdict tfp_key_guard_press(TfpKeyGuard *g, uint64_t now_ms,
   if (c->chat == 1) v = TFP_KEY_CHAT;
   else if (c->overlay) v = TFP_KEY_OVERLAY;
   else if (c->panel) v = TFP_KEY_PANEL;
-  else if (c->chat < 0 && g->any_text && now_ms - g->last_text_ms <= TFP_KEY_GUARD_TYPING_MS) v = TFP_KEY_TYPING;
+  else if (c->chat < 0 && tfp_key_guard_typing(g, now_ms)) v = TFP_KEY_TYPING;
   if (line_size) line[0] = 0;
   if (v == TFP_KEY_TAKEN) { g->in_burst = false; return v; }
   g->refused++;
@@ -159,5 +179,41 @@ static inline TfpKeyVerdict tfp_key_guard_press(TfpKeyGuard *g, uint64_t now_ms,
                                     "typing (another text key just before it; the game's chat state is not readable)"};
   snprintf(line, line_size, "toggle key ignored: %s", why[v]);
   return v;
+}
+
+/* ---- one tick of the toggle key (round 36c) ------------------------------------------------------------------------ */
+/* The whole toggle-key path of src/mod_view.c's tick, so that the press it acts on can only come out of the guard:
+ * the key's level and edge, the typing sample, and the verdict. The Windows side is the caller's:
+ *   key_down   the toggle key's level (GetAsyncKeyState: one call a tick, as before)
+ *   edge       the press edge from that level (the menu's TfpKeyEdge in the feel build); called every tick, so a key
+ *              let go while the game was not in front is seen let go
+ *   keyboard   one snapshot of all 256 keys (GetKeyboardState): one call a tick, and only while `sample` (the chat flag
+ *              cannot be read); false leaves the sample out. It replaced a GetAsyncKeyState per text key (56 a tick):
+ *              under Wine each of those can be a wineserver request, which a mod's reads had saturated before
+ *   chat, overlay, panel, say   asked only on a press
+ * Returns true for a press to act on. */
+typedef struct TfpKeyGuardIo {
+  void *user;
+  bool (*key_down)(void *user, int vk);
+  bool (*edge)(void *user, int key, bool down);
+  bool (*keyboard)(void *user, uint8_t keys[256]);
+  int (*chat)(void *user);
+  bool (*overlay)(void *user);
+  bool (*panel)(void *user);
+  void (*say)(void *user, const char *line);
+} TfpKeyGuardIo;
+static inline bool tfp_key_guard_toggle(TfpKeyGuard *g, const TfpKeyGuardIo *io, uint64_t now_ms, int toggle_key, bool focused, bool sample) {
+  const bool down = toggle_key && focused && io->key_down(io->user, toggle_key);
+  const bool pressed = io->edge(io->user, toggle_key, down);
+  if (toggle_key && focused && sample) {
+    uint8_t keys[256];
+    if (io->keyboard(io->user, keys)) tfp_key_guard_sample(g, now_ms, toggle_key, keys);
+  }
+  if (!pressed) return false;
+  const TfpKeyContext c = {io->chat(io->user), io->overlay(io->user), io->panel(io->user)};
+  char line[200];
+  const bool taken = tfp_key_guard_press(g, now_ms, &c, line, sizeof line) == TFP_KEY_TAKEN;
+  if (line[0]) io->say(io->user, line);
+  return taken;
 }
 #endif

@@ -1407,8 +1407,9 @@ static void fov_note(void) { /* once a second, on its own: the field-of-view loc
   told_fov = f.applied;
 }
 /* Round 36b: the toggle key (a letter since round 36) is not taken while text is typed (src/key_guard.h). The chat
- * flag's place is read from the game's code once its pages read (tried every 5 s); until then the text keys are
- * sampled each tick for the typing fallback. The flag and the host are only asked on a press. */
+ * flag's place is read from the game's code once its pages read (tried every 5 s); until then one snapshot of the
+ * keyboard is taken each tick for the typing fallback. The flag and the host are only asked on a press. Round 36c: the
+ * whole toggle path (level, edge, sample, verdict) is tfp_key_guard_toggle, so the tick's press only comes out of it. */
 #include "key_guard.h"
 #include "goose_overlay.h"
 static TfpKeyGuard key_guard;
@@ -1417,7 +1418,10 @@ static uint64_t chat_next_try;
 static char chat_why[160];
 static bool guard_read(void *u, uint64_t at, void *out, size_t size) { (void)u; return tfp_win_read(at, out, size); }
 static bool guard_key(void *u, int vk) { (void)u; return tfp_win_key_down(vk); }
-static bool guard_overlay(void) { /* a host window open or look capture held: the host has the keyboard */
+static bool guard_keyboard(void *u, uint8_t keys[256]) { (void)u; return tfp_win_keyboard(keys); }
+static int guard_chat(void *u) { (void)u; return tfp_chat_open(guard_read, NULL, &chat_layout); }
+static bool guard_overlay(void *u) { /* a host window open or look capture held: the host has the keyboard */
+  (void)u;
   HMODULE host = GetModuleHandleA(OV_HOST_DLL);
   OvApiFn get = host ? (OvApiFn)(void *)GetProcAddress(host, "ov_api") : NULL;
   const OvApi *ov = get ? get(3) : NULL; /* every host since API 3 answers; input_captured from API 8 (host 0.6.0) */
@@ -1426,31 +1430,39 @@ static bool guard_overlay(void) { /* a host window open or look capture held: th
     return ov->input_captured() != 0;
   return ov->look_capture && ov->look_capture() != 0;
 }
-static void guard_tick(int toggle_key) {
-  const uint64_t now = GetTickCount64();
-  if (!chat_layout.resolved && now >= chat_next_try && tfp_win_game()) {
-    char why[160];
-    chat_next_try = now + 5000;
-    if (tfp_chat_resolve(guard_read, NULL, tfp_win_game(), FP_GAME_SIZE, &chat_layout, why, sizeof why))
-      say("Keys: the toggle key waits while the game's chat is open (its flag at UI root game+0x%llx + 0x%x, from two of the game's "
-          "own chat-gated handlers)", (unsigned long long)(chat_layout.root - tfp_win_game()), (unsigned)chat_layout.flag);
-    else if (strcmp(why, chat_why)) {
-      snprintf(chat_why, sizeof chat_why, "%s", why);
-      say("Keys: the game's chat state is not readable yet (%s); until it is, a toggle press right after other typing is ignored", why);
-    }
-  }
-  if (!chat_layout.resolved) tfp_key_guard_sample(&key_guard, now, toggle_key, guard_key, NULL);
-}
-static bool guard_press(bool pressed) {
-  if (!pressed) return false;
-  TfpKeyContext c = {tfp_chat_open(guard_read, NULL, &chat_layout), guard_overlay(), false};
+static bool guard_panel(void *u) {
+  (void)u;
 #ifdef TFP_FEEL
-  c.panel = tfp_mod_panel_is_open() || tfp_wire_editor_active(&wire);
+  return tfp_mod_panel_is_open() || tfp_wire_editor_active(&wire);
+#else
+  return false;
 #endif
-  char line[200];
-  const bool taken = tfp_key_guard_press(&key_guard, GetTickCount64(), &c, line, sizeof line) == TFP_KEY_TAKEN;
-  if (line[0]) say("Keys: %s", line);
-  return taken;
+}
+static void guard_say(void *u, const char *line) { (void)u; say("Keys: %s", line); }
+static bool guard_edge(void *u, int key, bool down) {
+  (void)u;
+#ifdef TFP_FEEL
+  return tfp_wire_menu_key_edge(&toggle_edge, key, down);
+#else
+  (void)key;
+  const bool pressed = down && !key_held;
+  key_held = down;
+  return pressed;
+#endif
+}
+static const TfpKeyGuardIo guard_io = {NULL, guard_key, guard_edge, guard_keyboard, guard_chat, guard_overlay, guard_panel, guard_say};
+static void guard_resolve(void) {
+  const uint64_t now = GetTickCount64();
+  if (chat_layout.resolved || now < chat_next_try || !tfp_win_game()) return;
+  char why[160];
+  chat_next_try = now + 5000;
+  if (tfp_chat_resolve(guard_read, NULL, tfp_win_game(), FP_GAME_SIZE, &chat_layout, why, sizeof why))
+    say("Keys: the toggle key waits while the game's chat is open (its flag at UI root game+0x%llx + 0x%x, from two of the game's "
+        "own chat-gated handlers)", (unsigned long long)(chat_layout.root - tfp_win_game()), (unsigned)chat_layout.flag);
+  else if (strcmp(why, chat_why)) {
+    snprintf(chat_why, sizeof chat_why, "%s", why);
+    say("Keys: the game's chat state is not readable yet (%s); until it is, a toggle press right after other typing is ignored", why);
+  }
 }
 static void tick_body(void) {
 #ifdef TFP_FEEL
@@ -1484,17 +1496,14 @@ static void tick_body(void) {
 #ifdef TFP_FEEL
   /* The toggle key is the menu's (default U, a stored F11 reads as U: src/wire_menu.h; 0: unbound). Polled as before: the SDK
    * has no key event. */
-  int toggle_key = stage == RUNNING ? tfp_wire_menu_toggle_key(&wire) : TFP_TOGGLE_KEY;
-  bool down = toggle_key && tfp_win_focused() && tfp_win_key_down(toggle_key);
-  bool pressed = tfp_wire_menu_key_edge(&toggle_edge, toggle_key, down);
+  const int toggle_key = stage == RUNNING ? tfp_wire_menu_toggle_key(&wire) : TFP_TOGGLE_KEY;
 #else
-  bool down = tfp_win_focused() && tfp_win_key_down(TFP_TOGGLE_KEY);
-  bool pressed = down && !key_held;
-  key_held = down;
   const int toggle_key = TFP_TOGGLE_KEY;
 #endif
-  if (toggle_key && tfp_win_focused()) guard_tick(toggle_key);
-  pressed = guard_press(pressed); /* round 36b: not while text is typed */
+  const bool focused = tfp_win_focused();
+  if (toggle_key && focused) guard_resolve();
+  /* round 36b/36c: the press, refused while text is typed (src/key_guard.h tfp_key_guard_toggle) */
+  const bool pressed = tfp_key_guard_toggle(&key_guard, &guard_io, GetTickCount64(), toggle_key, focused, !chat_layout.resolved);
   if (stage == WAIT_PINS) {
     uint64_t now = GetTickCount64();
     if (pressed) say("Refused: the toggle key before the game's code pages could be read; try again once a mission or the ship is loaded");

@@ -366,6 +366,7 @@ bool tfp_win_focused(void) {
   return window && GetWindowThreadProcessId(window, &process) && process == GetCurrentProcessId();
 }
 bool tfp_win_key_down(int virtual_key) { return (GetAsyncKeyState(virtual_key) & 0x8000) != 0; }
+bool tfp_win_keyboard(uint8_t keys[256]) { return GetKeyboardState(keys) != 0; }
 /* Retail reads stingray.Mouse.button('right' / 'middle') (runtime.lua:395-421). src/wire_mouse.c chooses:
  * the engine's own answer once the feel build has installed its engine caller and the two functions
  * are proven, else the level of the same two buttons from Windows (0 while the game is not the
