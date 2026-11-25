@@ -92,7 +92,26 @@ static void perf_effects(int from) {
   if (perf_tick[from] < 0) perf_tick[from] = 0;
 }
 /* After the tick: what is left is rest; each section into the second's sums. */
+/* Round 32: the frame's laps (src/perf_line.h TFP_LAP_*, timed by the wire), per tick into the second's sums. */
+static int64_t lap_total[TFP_LAPS], lap_most[TFP_LAPS];
+static void perf_laps_close(void) {
+  int64_t lap[TFP_LAPS];
+  memcpy(lap, wire.laps.tick, sizeof lap);
+  memset(wire.laps.tick, 0, sizeof wire.laps.tick);
+  tfp_perf_laps_close(lap);
+  for (int i = 0; i < TFP_LAPS; i++) {
+    lap_total[i] += lap[i];
+    if (lap[i] > lap_most[i]) lap_most[i] = lap[i];
+  }
+}
+/* Round 32: a running count's growth since the last line (a backend made anew starts its counts at 0 again). */
+static uint32_t perf_delta(uint64_t now, uint64_t *told) {
+  const uint64_t d = now >= *told ? now - *told : now;
+  *told = now;
+  return d > UINT32_MAX ? UINT32_MAX : (uint32_t)d;
+}
 static void perf_close(int64_t spent) {
+  perf_laps_close();
   perf_effects(TFP_PERF_MENUS); /* a stop from the options or the menu, after the frame */
   int64_t rest = spent;
   for (int i = 0; i < TFP_PERF_REST; i++) rest -= perf_tick[i];
@@ -862,6 +881,40 @@ static void arms_tick(void) {
     char line[700];
     tfp_perf_line(line, sizeof line, &p);
     say("%s", line);
+    { /* round 32: the frame in laps, over the same ticks */
+      double mean[TFP_LAPS], most[TFP_LAPS];
+      for (int i = 0; i < TFP_LAPS; i++) {
+        mean[i] = tick_cost_count ? (double)lap_total[i] * us / (double)tick_cost_count : 0;
+        most[i] = (double)lap_most[i] * us;
+        lap_total[i] = lap_most[i] = 0;
+      }
+      tfp_perf_frame_line(line, sizeof line, mean, most);
+      say("%s", line);
+    }
+    { /* round 32: what the backend did in the second, and the shadow memo (src/backend_ops.h TfpOpsPerf) */
+      static uint64_t told_reads, told_takes[3], told_tables, told_invokes, told_bodies, told_memo[3][3], told_moved;
+      static bool told_mismatch;
+      const TfpOpsPerf *o = &wire.ops.perf;
+      TfpPerfSnapshots n;
+      memset(&n, 0, sizeof n);
+      n.reads = perf_delta(o->reads, &told_reads);
+      for (int m = 0; m < 3; m++) {
+        n.takes[m] = perf_delta(o->takes[m], &told_takes[m]);
+        n.calls[m] = perf_delta(o->memo_calls[m], &told_memo[0][m]);
+        n.hits[m] = perf_delta(o->memo_hits[m], &told_memo[1][m]);
+        n.mismatches[m] = perf_delta(o->memo_mismatches[m], &told_memo[2][m]);
+      }
+      n.tables = perf_delta(wire.snap_next, &told_tables);
+      n.invokes = perf_delta(o->invokes, &told_invokes), n.invoke_bodies = perf_delta(o->invoke_bodies, &told_bodies);
+      n.moved = perf_delta(o->memo_moved, &told_moved);
+      tfp_perf_snapshots_line(line, sizeof line, &n);
+      say("%s", line);
+      if (o->first.has && !told_mismatch) {
+        told_mismatch = true;
+        tfp_perf_mismatch_line(line, sizeof line, o->first.mode, o->first.field, o->first.offset, o->first.epoch);
+        say("%s", line);
+      }
+    }
     tick_cost_total = tick_cost_max = 0, tick_cost_count = 0;
   }
 }
@@ -1022,6 +1075,7 @@ static void start(void) {
     parts.effects = &fx_platform;
     parts.editor = tfp_mod_editor_platform(&fx_platform);
     tfp_wire_feel_bind(&wire, &feel, &parts);
+    tfp_wire_laps_start(&wire, perf_qpc); /* round 32: after every binder's pointers, before on_enable (the Perf frame line) */
     /* Where the two files are saved. A settings.json of 0.6.0-feel.20 to feel.24 is converted here, at once. */
     static const TfpSettingsDisk user_disk = {NULL, write_user_file, copy_user_file, same_user_file};
     tfp_wire_settings_disk(&wire, &user_disk, user_file);
