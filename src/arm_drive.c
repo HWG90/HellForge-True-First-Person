@@ -1025,6 +1025,7 @@ static uint32_t drive(const Units *u) {
     if (!tfp_graft_pose(&d.map, body, poses)) return TFP_ARM_POSE;
     for (unsigned i = 0; i < d.joints; ++i)
       if (!tfp_graft_mix(&base[i], &poses[i], d.weight, &target[i])) return TFP_ARM_POSE;
+    d.grip.measure = false; /* grip_frame says, when it runs */
     if (d.grip.on || d.grip.ik.active || d.grip.ik.weight > 0 || d.grip.finger_weight > 0) grip_frame(u, body, target);
     /* For the log (stats.draw.sock_m): the socket as it is about to be drawn less the game's own, along the view.
      * Both are locals of the socket's parent (the rig's root, which the drive does not write), so the difference
