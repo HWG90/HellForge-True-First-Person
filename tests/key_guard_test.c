@@ -51,8 +51,12 @@ int main(void) {
   CHECK(!tfp_chat_resolve(rd, NULL, GAME, IMAGE, &l, why, sizeof why) && !l.resolved && strstr(why, "disagree"));
   mems = 0; game_code(); put(GAME + 0x12f3a16, "7410");
   CHECK(!tfp_chat_resolve(rd, NULL, GAME, IMAGE, &l, why, sizeof why) && strstr(why, "Toggle HUD"));
-  mems = 0; put(GAME + 0x12f3a08, "488b15299b170280ba507e020000751080ba");
-  CHECK(!tfp_chat_resolve(rd, NULL, GAME, IMAGE, &l, why, sizeof why) && strstr(why, "chat-gated"));
+  mems = 0; put(GAME + 0x12f3a08, "488b15299b170280ba507e020000751080ba");   /* the second page still cold */
+  CHECK(!tfp_chat_resolve(rd, NULL, GAME, IMAGE, &l, why, sizeof why) && strstr(why, "chat-gated") && strstr(why, "unreadable"));
+  mems = 0; game_code(); put(GAME + 0xa96e4f, "74");
+  CHECK(!tfp_chat_resolve(rd, NULL, GAME, IMAGE, &l, why, sizeof why) && strstr(why, "chat-gated handler at game+0xa96e42 differs"));
+  mems = 0;
+  CHECK(!tfp_chat_resolve(rd, NULL, GAME, IMAGE, &l, why, sizeof why) && strstr(why, "Toggle HUD handler at game+0x12f3a08 is unreadable"));
   mems = 0; game_code();
   CHECK(!tfp_chat_resolve(rd, NULL, GAME, 0x3000000, &l, why, sizeof why) && strstr(why, "out of bounds"));
   CHECK(!tfp_chat_resolve(rd, NULL, 0, IMAGE, &l, why, sizeof why));

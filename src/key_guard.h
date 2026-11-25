@@ -53,15 +53,18 @@ static inline bool tfp_chat_bytes(const uint8_t *have, const char *want_hex) { /
   }
   return true;
 }
-static inline bool tfp_chat_site(TfpGuardRead code, void *user, uint64_t at, const char *pattern, uint64_t *root, uint32_t *flag) {
+/* 1 matched (root and flag set), 0 other bytes, -1 unreadable (a cold page: ask again later). */
+static inline int tfp_chat_site(TfpGuardRead code, void *user, uint64_t at, const char *pattern, uint64_t *root, uint32_t *flag) {
   uint8_t b[32];
   int32_t d;
   const size_t n = strlen(pattern) / 2;
-  if (n < 13 || n > sizeof b || !code(user, at, b, n) || !tfp_chat_bytes(b, pattern)) return false;
+  if (n < 13 || n > sizeof b) return 0;
+  if (!code(user, at, b, n)) return -1;
+  if (!tfp_chat_bytes(b, pattern)) return 0;
   memcpy(&d, b + 3, 4);
   memcpy(flag, b + 9, 4);
   *root = at + 7 + (uint64_t)(int64_t)d;
-  return true;
+  return 1;
 }
 /* `code` reads code as the game runs it now (HellForge's rewrites included, its hooks not); game: game.dll's base and
  * image size. false: why says which check failed; the layout stays unresolved and tfp_chat_open answers -1. */
@@ -71,12 +74,14 @@ static inline bool tfp_chat_resolve(TfpGuardRead code, void *user, uint64_t game
   uint32_t flag_a = 0, flag_b = 0;
   memset(out, 0, sizeof *out);
   if (!game) { snprintf(why, why_size, "game.dll is not loaded"); return false; }
-  if (!tfp_chat_site(code, user, game + TFP_CHAT_SITE_HUD, "488b15????????80ba????????00751080ba", &root_a, &flag_a)) {
-    snprintf(why, why_size, "the Toggle HUD handler at game+0x%llx differs", (unsigned long long)TFP_CHAT_SITE_HUD);
+  const int a = tfp_chat_site(code, user, game + TFP_CHAT_SITE_HUD, "488b15????????80ba????????00751080ba", &root_a, &flag_a);
+  if (a != 1) {
+    snprintf(why, why_size, "the Toggle HUD handler at game+0x%llx %s", (unsigned long long)TFP_CHAT_SITE_HUD, a < 0 ? "is unreadable" : "differs");
     return false;
   }
-  if (!tfp_chat_site(code, user, game + TFP_CHAT_SITE_GATE, "488b05????????80b8????????007541488bcfe8", &root_b, &flag_b)) {
-    snprintf(why, why_size, "the chat-gated handler at game+0x%llx differs", (unsigned long long)TFP_CHAT_SITE_GATE);
+  const int b = tfp_chat_site(code, user, game + TFP_CHAT_SITE_GATE, "488b05????????80b8????????007541488bcfe8", &root_b, &flag_b);
+  if (b != 1) {
+    snprintf(why, why_size, "the chat-gated handler at game+0x%llx %s", (unsigned long long)TFP_CHAT_SITE_GATE, b < 0 ? "is unreadable" : "differs");
     return false;
   }
   if (root_a != root_b || flag_a != flag_b) {
