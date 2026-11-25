@@ -8,6 +8,7 @@
 #include "arm_drive.h"
 #include "arm_weight.h"
 #include "offhand_grip.h"
+#include "grip_fingers.h"
 #include "snapshot.h"
 #include <stdlib.h>
 
@@ -2197,6 +2198,73 @@ static void test_grip_mounted_from_rig(void) {
   tfp_arm_drive_grip_take(&g);
   CHECK(g.tree_units == 2 && !g.attachment && g.target_unit == 0);
 }
+/* Round 36b (B of the Adjudicator diagnosis): held on an attachment's grip node, the hand closes round the grip: each finger
+ * joint (rig nodes 14 to 28) curled about its own +Y to the grip's curl, by the grip's weight; positions kept. Never on the
+ * gun's own node (test_grip_holds: only nodes 10, 12, 13 differ there), and back to the body's fingers when let go. */
+static double rig_curl(const TfpGraftLocal *l) { return tfp_gf_curl(l) * 180 / TFP_OG_PI; }
+static void drawn_locals(uint64_t now, TfpGraftLocal out[TFP_GRAFT_RIG_NODES]) {
+  tfp_arm_drive_set_rest(now, TFP_ARM_REST_NONE, 0);
+  const bool after = tfp_arm_drive_render(WORLD, true);
+  rig_locals(out);
+  if (after) tfp_arm_drive_after_render();
+}
+static void test_grip_fingers_close(void) {
+  static const float zero[3] = {0, 0, 0};
+  float ahead[3];
+  forward_of_socket(.12f, -.04f, ahead);
+  for (int aiming = 0; aiming < 2; aiming++) {
+    TfpGraftLocal plain[TFP_GRAFT_RIG_NODES], held[TFP_GRAFT_RIG_NODES], easing[TFP_GRAFT_RIG_NODES], back[TFP_GRAFT_RIG_NODES];
+    fresh();
+    grip_resources();
+    grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], zero, NULL);
+    fit_grip(ahead);
+    tfp_arm_drive_set(true, true, aiming ? 0 : 1);
+    uint64_t t = 1000;
+    drawn_locals(t, plain); /* the grip off: the body's fingers (aiming: the game's) */
+    tfp_arm_drive_set_grip(true, false);
+    drawn_locals(t += 16, easing);
+    drawn_locals(t += 16, easing); /* on its way: part of the curl */
+    TfpArmDriveGrip g;
+    tfp_arm_drive_grip_take(&g);
+    const float part = g.weight;
+    CHECK(part > 0 && part < 1);
+    for (int i = 0; i < 40; i++) drawn_locals(t += 16, held);
+    tfp_arm_drive_grip_take(&g);
+    CHECK(g.state == TFP_ARM_GRIP_HELD && g.attachment && g.weight == 1);
+    double least = 180;
+    for (unsigned n = 14; n <= 28; n++) {
+      const double want = n >= 26 ? TFP_GF_THUMB_DEGREES : TFP_GF_CURL_DEGREES, was = rig_curl(&plain[n]);
+      CHECK(!memcmp(held[n].position, plain[n].position, 12) && !memcmp(held[n].preserved, plain[n].preserved, 16));
+      CHECK(fabs(rig_curl(&held[n]) - fmax(want, was)) < .01);
+      if (was < want) {
+        CHECK(fabs(rig_curl(&easing[n]) - was - (want - was) * part) < .05); /* the grip's weight of what it lacks */
+        if (n < 26) least = fmin(least, rig_curl(&held[n]));
+      } else CHECK(!memcmp(&held[n], &plain[n], 64));
+    }
+    for (unsigned n = 0; n < TFP_GRAFT_RIG_NODES; n++) /* the rest is what the grip alone writes: the left arm */
+      if ((n < 14 || n > 28) && n != 10 && n != 12 && n != 13) CHECK(!memcmp(&held[n], &plain[n], 64));
+    /* let go (a reload): back to the body's fingers, exactly */
+    static const float far[3] = {.2f, 0, 0};
+    grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], far, NULL);
+    for (int i = 0; i < 40; i++) drawn_locals(t += 16, back);
+    for (unsigned n = 14; n <= 28; n++) CHECK(!memcmp(&back[n], &plain[n], 64));
+    /* held again, then the grip switched off: the fingers ease out with the arm, no frame drops them at once */
+    grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], zero, NULL);
+    fit_grip(ahead);
+    for (int i = 0; i < 40; i++) drawn_locals(t += 16, held);
+    tfp_arm_drive_set_grip(false, false);
+    double last = rig_curl(&held[21]);
+    for (int i = 0; i < 40; i++) {
+      drawn_locals(t += 16, back);
+      const double now = rig_curl(&back[21]);
+      CHECK(now <= last + 1e-6 && last - now < (TFP_GF_CURL_DEGREES - rig_curl(&plain[21])) * 16 / 150.0 + .05);
+      last = now;
+    }
+    for (unsigned n = 14; n <= 28; n++) CHECK(!memcmp(&back[n], &plain[n], 64));
+    printf("arm drive: grip on an attachment%s: the fingers closed to %.1f degrees a joint at least (%.0f%% of it at weight %.2f)\n",
+           aiming ? " while aiming" : "", least, 100.0 * part, (double)part);
+  }
+}
 /* Round 36b (C of the Adjudicator diagnosis): while aiming the copy fades out and the game's own aim pose holds the gun
  * (src/arm_weight.h), and until now the hand went with it, off the grip (retail measured the game's aim hand 17 cm from a
  * foregrip's node) and slid there over 120 ms at every aim edge. The reach now runs on the mixed pose: the hand stays on the
@@ -2372,6 +2440,7 @@ int main(int argc, char **argv) {
   test_grip_attachment_never_gun_own();
   test_grip_mounted_from_rig();
   test_grip_while_aiming();
+  test_grip_fingers_close();
   test_grip_left_alone();
   test_grip_step_limit();
   if (argc == 3) test_rest_recorded(argv[2]);

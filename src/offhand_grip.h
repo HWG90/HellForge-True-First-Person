@@ -33,8 +33,8 @@
  *     eases back to the body's pose (the reason says which). Once held, the hand's distance has a keep threshold too,
  *     SHIFT_KEEP_M, and is not asked at all while the caller says the body's own hand is pinned on the target (round 36b:
  *     walking, the copied hand swings away from a grip the game still pins the body's hand on).
- * The fingers are the body's (the drive copies them relative to the hand), and the body's hand is the one the game
- * shapes around this grip. */
+ * The fingers are the body's (the drive copies them relative to the hand), shaped for the gun's own handguard; on an
+ * attachment's grip node the drive closes them round the grip (round 36b, src/grip_fingers.h). */
 #ifndef TFP_OFFHAND_GRIP_H
 #define TFP_OFFHAND_GRIP_H
 #include "arm_graft.h"

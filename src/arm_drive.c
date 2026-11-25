@@ -60,6 +60,7 @@
  * src/render_slot.c passes that condition in as `game_thread`; without it nothing is read or written. */
 #include "arm_drive.h"
 #include "offhand_grip.h"
+#include "grip_fingers.h"
 #include "profile.h"
 #include "snapshot.h"
 #include <float.h>
@@ -208,6 +209,8 @@ static struct {
     unsigned elsewhere_count;
     uint64_t elsewhere_at;
     uint32_t elsewhere_weapon;
+    TfpGripFingers fingers; /* the left hand's finger joints in the map (bound with it; src/grip_fingers.h) */
+    double finger_weight;   /* the share of the grip's curl in the fingers: the reach's on an attachment's node, else easing out */
     bool measure;       /* held this frame at full weight: grip_drawn() measures the hand as drawn */
     float last[3];      /* its world position in the last frame: the body's hand trails it by up to a frame */
     TfpArmDriveGrip seen;
@@ -453,6 +456,7 @@ static bool bind(const Units *u) {
         !tfp_graft_view_node(fl, &d.view) || !tfp_graft_view(body, &fp[d.view]) || !tfp_graft_bind(&d.map, bn, bl, fn, fl, body, fp))
       return false;
     d.joints = TFP_GRAFT_JOINTS;
+    tfp_grip_fingers_find(&d.map, fn, &d.grip.fingers); /* not found: the fingers stay the body's */
   }
   /* the avatar's appearance rows: three armour layers, slots 6 and 7 of each are the arms */
   if (!rd(u->avatar_owner + B_AVATAR_PARTS + (uintptr_t)u->avatar_index * 0x1b8 + 0xdc, parts, sizeof parts)) return false;
@@ -884,7 +888,8 @@ static void grip_frame(const Units *u, const TfpGraftMatrix *body, TfpGraftLocal
    * body's) everything starts again */
   double seconds = 0;
   if (d.grip.rig != u->rig || !d.now || !d.grip.at || d.now < d.grip.at || d.now - d.grip.at > 250) {
-    if (d.grip.rig != u->rig || (d.grip.at && (!d.now || d.now < d.grip.at || d.now - d.grip.at > 250))) tfp_offhand_reset(&d.grip.ik), grip_unlatch();
+    if (d.grip.rig != u->rig || (d.grip.at && (!d.now || d.now < d.grip.at || d.now - d.grip.at > 250)))
+      tfp_offhand_reset(&d.grip.ik), grip_unlatch(), d.grip.finger_weight = 0;
     d.grip.rig = u->rig;
   } else seconds = (double)(d.now - d.grip.at) / 1000;
   d.grip.at = d.now;
@@ -899,7 +904,7 @@ static void grip_frame(const Units *u, const TfpGraftMatrix *body, TfpGraftLocal
   if (state < TFP_ARM_GRIP_NO_GUN) seen->found = false, seen->nodes = seen->units = 0;
   if (d.grip.on) seen->frames++;
   const bool wanted = state == TFP_ARM_GRIP_HELD;
-  float to = 0, step = 0, limit = 0, weight = 0;
+  float to = 0, step = 0, limit = 0, weight = 0, weight_of_reach = 0;
   TfpOffhandResult r = {0};
   d.grip.measure = false;
   if (wanted || d.grip.ik.active || d.grip.ik.weight > 0) {
@@ -912,11 +917,18 @@ static void grip_frame(const Units *u, const TfpGraftMatrix *body, TfpGraftLocal
       state = r.reason == TFP_OG_HELD ? TFP_ARM_GRIP_HELD : r.reason == TFP_OG_TOO_FAR || r.reason == TFP_OG_OUT_OF_REACH ? TFP_ARM_GRIP_FAR
               : r.reason == TFP_OG_NOT_RIGID ? TFP_ARM_GRIP_POSE : TFP_ARM_GRIP_EASING;
     seen->cut += r.cut, seen->out_of_reach += r.reason == TFP_OG_OUT_OF_REACH, seen->too_far += r.reason == TFP_OG_TOO_FAR;
+    weight_of_reach = r.weight;
     if (d.grip.ik.active && r.body_degrees > seen->body_degrees) seen->body_degrees = r.body_degrees;
     /* drive(): the hand against the gun as drawn; not while aiming fades in or out (weight under 1), when the drawn arm
      * is part the game's aim pose and the hand is that far off the grip by design */
     d.grip.measure = state == TFP_ARM_GRIP_HELD && d.grip.latched && d.weight >= 1;
   }
+  /* round 36b: the hand closed on an attachment's grip, with the reach's weight; never on the gun's own node (the body's
+   * fingers suit its handguard). Otherwise what is curled eases out over EASE_S. */
+  const bool on_attachment = d.grip.attachment && d.grip.target_object && state >= TFP_ARM_GRIP_NO_NODE;
+  if (on_attachment) d.grip.finger_weight = weight_of_reach;
+  else d.grip.finger_weight = fmax(0, d.grip.finger_weight - seconds / TFP_OG_EASE_S);
+  tfp_grip_fingers_close(&d.grip.fingers, mixed, d.grip.finger_weight);
   seen->state = state, seen->weight = weight, seen->to_m = wanted ? to : 0;
   seen->reach = wanted ? r.reach_share : 0, seen->shoulder_m = r.shoulder_m;
   if (state == TFP_ARM_GRIP_HELD) {
@@ -972,7 +984,7 @@ static uint32_t drive(const Units *u) {
     if (!tfp_graft_pose(&d.map, body, poses)) return TFP_ARM_POSE;
     for (unsigned i = 0; i < d.joints; ++i)
       if (!tfp_graft_mix(&base[i], &poses[i], d.weight, &target[i])) return TFP_ARM_POSE;
-    if (d.grip.on || d.grip.ik.active || d.grip.ik.weight > 0) grip_frame(u, body, target);
+    if (d.grip.on || d.grip.ik.active || d.grip.ik.weight > 0 || d.grip.finger_weight > 0) grip_frame(u, body, target);
     /* For the log (stats.draw.sock_m): the socket as it is about to be drawn less the game's own, along the view.
      * Both are locals of the socket's parent (the rig's root, which the drive does not write), so the difference
      * goes through that node's axes into the world and onto the forward axis of the rig's eye. */
