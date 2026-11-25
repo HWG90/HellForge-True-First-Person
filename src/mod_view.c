@@ -738,8 +738,8 @@ static void arms_start(void) {
   if (grip_off) say("Test: grip_off.txt: the left hand is not put on the weapon's grip; it stays where the body's arm puts it (as before round 23), "
                     "whatever First Person Arms says");
   else say("Grip: the left hand of the drawn arms holds the weapon's grip node (a foregrip's or vertical grip's own node when one is fitted) "
-           "whenever the body's left hand is on it, while First Person Arms and Animated arms are on; not for a handgun at the hip, and not "
-           "while aiming (the game's own aim pose). A file grip_off.txt beside the DLL leaves the hand as the body puts it, to compare");
+           "whenever the body's left hand is on it, while First Person Arms and Animated arms are on, also while aiming (on the game's own aim "
+           "pose, the left arm only); not for a handgun. A file grip_off.txt beside the DLL leaves the hand as the body puts it, to compare");
   const char *why = tfp_render_slot_contract();
   if (why) {
     snprintf(arms_refusal, sizeof arms_refusal, "%s", why);
@@ -821,6 +821,8 @@ static void arms_tick(void) {
         next_grip = now + 1000;
         tfp_arm_drive_grip_take(&g);
         if (g.frames) say("Grip: %s", tfp_arm_drive_grip_line(&g));
+        const char *drawn = g.frames ? tfp_arm_drive_grip_drawn_line(&g) : NULL; /* round 36b: the hand as drawn, a line of its own */
+        if (drawn) say("Grip: %s", drawn);
         const char *units = g.frames ? tfp_arm_drive_grip_units_line(&g, true) : NULL; /* round 36: whenever the gun's units change */
         if (units) say("Grip: %s", units);
         if (g.frames && g.state != told_state && g.state != TFP_ARM_GRIP_HELD && g.state != TFP_ARM_GRIP_EASING)
