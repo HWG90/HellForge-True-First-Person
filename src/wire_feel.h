@@ -50,7 +50,7 @@ bool tfp_wire_feel_markers(TfpWire *w, TfpRtValue value, TfpAimMarkersSaved *out
  * What the mod still holds in the game. Gathered by reading the modules' own state: no game call, no
  * engine call, no write, so it may run on the loader's change thread once no tick is in flight. */
 typedef struct TfpWireFeelFacts {
-  bool view_on;        /* the controller is enabled (F11 on, running or waiting) */
+  bool view_on;        /* the controller is enabled (toggled on, running or waiting) */
   TfpPhase phase;      /* the controller's phase */
   bool lease;          /* a native-view lease is held */
   bool recovering;     /* the recovery ledger has a row */

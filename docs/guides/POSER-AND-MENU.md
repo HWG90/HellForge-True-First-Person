@@ -59,7 +59,7 @@ Defaults are the store's defaults (retail's, and the locked view's); on a first 
 | First person | Show aim markers | checkbox |  | as saved | settings.json first_person.show_aim_markers (through the runtime) |
 | First person | Edit arms and weapon placement | button |  |  | - |
 | First person | Open / close placement editor | key |  | Page Up (stored 119, retail's F8) | settings.json menu.editor_key |
-| First person | Toggle True First Person | key |  | F11 | settings.json menu.toggle_key |
+| First person | Toggle True First Person | key |  | U (a stored 122, F11, reads as U) | settings.json menu.toggle_key |
 | First person | True First Person: native ADS | checkbox |  | off | settings.json menu.true_native_ads |
 | First person | True First Person: show torso | checkbox |  | off | settings.json menu.show_torso |
 | First person | First Person Arms | checkbox |  | on | settings.json menu.fird_person_arms |
@@ -103,6 +103,7 @@ Notes on the list:
 
 - **First Person Arms** (retail's label was the typo "Fird Person Arms"; the stored key keeps retail's name `fird_person_arms`) is shown disabled, with the line "Sleeves and hand grips are refused on this build." in the panel and one log line, when sleeves and hand grips refused at start-up (they do on current builds).
 - **Open / close placement editor** and **Edit arms and weapon placement** are disabled when NEST is not loaded (the editor needs it). The editor key's default is Page Up: F8 is HellForge's own editor, and a stored 119 is read as Page Up. The panel's key row does not take F8 for it.
+- **Toggle True First Person**: the default is U. It was F11 (retail's default, stored as 122); HellForge 0.5's Armor LUT editor now opens on F11, so a stored 122 is read as U: a player who never changed the key gets U with no file rewritten, and a key you chose is kept. F11 cannot be chosen for it: the panel's key row says so and keeps asking, and in DBF-MCM the choice is put back with one `Menu:` line in the log. The log's `Keys:` line at the start names the key in use.
 - **Camera style** is the Boolean `bodycam` of `locked_view.json` (Stable is off). While it is Stable, View kick strength, View kick limit and Camera damping are disabled (Bodycam only); the panel says so under the row, MCM at the end of the description.
 - **One-handed pistols** is stored and nothing acts on it: always disabled, with its note.
 - **Animated arms**, **Weapon put-away** and **Smooth eye** switch a feature while the game runs (`src/wire_options.c`): the change is made at the next update, and waits while a lease is held through an action. Test files beside the DLL beat the option: `arms_live.txt` / `hold_lease.txt` force on, `arms_off.txt` / `hold_off.txt` / `smooth_off.txt` force off (off wins); the `Option:` lines say which decided.

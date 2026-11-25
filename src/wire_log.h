@@ -1,12 +1,12 @@
 /* The session log of the view build: one line per state change and one line a second while the mode
  * is on, so a jarring frame can be found afterwards. Values only: no game reads, no Windows.
  *
- *   State: enter requested (F11)
+ *   State: enter requested (toggle key)
  *   Status: First person enabled until manually stopped        (the controller's label, retail's own log line)
  *   State: entered the native view request=0x1f2a3b4c kind=6
  *   State: aim in / aim out / aim kept (1) / swap / seated camera detached
  *   State: left the native view: <why the controller waits>
- *   State: exit requested (F11) / exit complete
+ *   State: exit requested (toggle key) / exit complete
  *   Drop: <gate> | <action> | <camera>     with "State: left the native view": what the snapshot, the animation layers
  *                                           and the head-camera helper said on that frame
  *   Wait: <gate> | <action> | <camera>     while the view waits: each change of the gate (7 a stretch, then one line saying more follow)

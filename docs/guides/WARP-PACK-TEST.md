@@ -28,7 +28,7 @@ register from SendInput keys (HARNESS.md).
 
 ## The run
 
-Do all of this twice, with the camera style on Stable and then on Bodycam. View on (F11) for every step unless the step
+Do all of this twice, with the camera style on Stable and then on Bodycam. View on (U) for every step unless the step
 says otherwise.
 
 | # | Do | Look for |
@@ -39,7 +39,7 @@ says otherwise.
 | 4 | Charge the pack | `mode_word` goes to 0x1, then 0x2. Each change brings one `did: stopped 1 […]` line, then `quiet`. No glow, or a flash of a single frame |
 | 5 | Warp | The same as 4. The view stays first person, camera kind 6 (`Head: kind=6` and the `View:` lines) |
 | 6 | Full aim down sights, then release | While aiming: `bit48=1 ads_cache=1`, and the game hides the glow itself. The line says `did: the game's full ADS` if the view stays TFP's while aiming, or `did: restored` then `not owned` if TFP hands the view to the game's ADS. Either is right. On release: `bit48=0 ads_cache=0`, then a `did: stopped …` line (the game replays at the falling edge, and the next tick stops it again) |
-| 7 | Third person (F11 off), then back on | Off: `view not owned … did: restored: the cached mode word set to 0xffffffff`, then `mode_word=0x0` (or the current mode) again. **The glow is back in third person.** On again: `did: stopped …` |
+| 7 | Third person (U off), then back on | Off: `view not owned … did: restored: the cached mode word set to 0xffffffff`, then `mode_word=0x0` (or the current mode) again. **The glow is back in third person.** On again: `did: stopped …` |
 | 8 | Photo mode, if it is installed | The same as 7: the glow comes back while the view is not TFP's |
 | 9 | Drop the pack | `Warp: pack N: restored: …` then `Warp: no Warp Pack (backpack none)`. **The pack on the ground glows.** Pick it up again: step 2 and 3 again |
 | 10 | Die with the pack on | Either the view stays (camera lock) and the pack stays stopped, or the pack drops and step 9 applies. No crash |

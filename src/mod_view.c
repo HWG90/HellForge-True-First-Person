@@ -1,6 +1,6 @@
 /* True First Person for HellForge, view build 0.6.0-view.1 (game build 25480438).
  *
- * F11 toggles the game's own first-person camera through the translated retail units: the runtime
+ * U (the menu's toggle key; F11 until round 36) toggles the game's own first-person camera through the translated retail units: the runtime
  * order (tfp_runtime.c) with the controller, the backend, the camera / FOV / near / blur adapters
  * and helpers bound for real (wire_rt.c, wire_win.c), and every other module answering "off"
  * (wire_off.c). No arms, sleeves, motion or effects in this build. docs/wiring/WIRING-VIEW.md.
@@ -678,7 +678,7 @@ static void hold_start(void) { /* after tfp_wire_init and tfp_wire_options_start
  * the controller holds a lease through an action or waits for a lease's native exit (tfp_wire_options_busy).
  *
  * The arm drive: only the flag. arms_tick, later in the same tick, does the rest with the discipline it has for
- * F11: on, the render hook goes in (retried every 500 ms, refusals said once); off, the drive is switched off,
+ * The toggle key (U): on, the render hook goes in (retried every 500 ms, refusals said once); off, the drive is switched off,
  * the game's joint values are put back here on the game thread, and only then the hook comes out. */
 static void option_arms(void *user, bool on) { (void)user; arms_live = on; }
 /* The action hold: the controller's switch (an exit an action causes is held back, or taken as in retail), the
@@ -1146,13 +1146,19 @@ static void start(void) {
   }
   stage = RUNNING;
 #ifdef TFP_FEEL
-  say("Ready. F11 toggles True First Person (view, weapon and arm placement, motion; head hiding, sleeves, hand grips and the effects once "
+  char toggle_name[16];
+  const int toggle_now = tfp_wire_menu_toggle_key(&wire);
+  tfp_wire_menu_key_name(toggle_now, toggle_name);
+  say("Keys: %s toggles True First Person%s", toggle_now ? toggle_name : "nothing (the menu's toggle key is not bound)",
+      tfp_wire_menu_toggle_moved(&wire) ? " (the default; F11, the old default, now opens HellForge's Armor LUT editor, so a saved F11 "
+                                          "reads as U; another key can be chosen in the menu)" : "");
+  say("Ready. The toggle key switches True First Person (view, weapon and arm placement, motion; head hiding, sleeves, hand grips and the effects once "
       "their checks pass: see the Ready / Check / Refused lines). F10 opens the settings menu: DBF-MCM's page when DBF-MCM is loaded, "
       "else the mod's own panel through NEST (Goose Overlay Host; also in the host's panel list, Page Down); a file panel_on.txt beside "
       "the DLL asks for the panel. Settings are saved when they change. Page Up (the menu's editor key) opens the placement "
       "editor; F8 is HellForge's own editor. Not in this build: the eye-camera editor, Photo Mode camera sharing.");
 #else
-  say("Ready. F11 toggles the view. Not in this build: arms and weapon placement, sleeves, hand grips, motion, head and body hiding, "
+  say("Ready. U toggles the view (F11 is HellForge's Armor LUT editor). Not in this build: arms and weapon placement, sleeves, hand grips, motion, head and body hiding, "
       "depth of field, vignette, aiming markers, movement policy, the F8 editor, the menu, Photo Mode camera sharing.");
 #endif
 }
@@ -1377,18 +1383,19 @@ static void tick_body(void) {
     stage = WAIT_PINS;
   }
 #ifdef TFP_FEEL
-  /* The toggle key is the menu's (default F11; 0: unbound). Polled as before: the SDK has no key event. */
-  int toggle_key = stage == RUNNING ? tfp_wire_menu_toggle_key(&wire) : VK_F11;
+  /* The toggle key is the menu's (default U, a stored F11 reads as U: src/wire_menu.h; 0: unbound). Polled as before: the SDK
+   * has no key event. */
+  int toggle_key = stage == RUNNING ? tfp_wire_menu_toggle_key(&wire) : TFP_TOGGLE_KEY;
   bool down = toggle_key && tfp_win_focused() && tfp_win_key_down(toggle_key);
   bool pressed = tfp_wire_menu_key_edge(&toggle_edge, toggle_key, down);
 #else
-  bool down = tfp_win_focused() && tfp_win_key_down(VK_F11);
+  bool down = tfp_win_focused() && tfp_win_key_down(TFP_TOGGLE_KEY);
   bool pressed = down && !key_held;
   key_held = down;
 #endif
   if (stage == WAIT_PINS) {
     uint64_t now = GetTickCount64();
-    if (pressed) say("Refused: F11 before the game's code pages could be read; try again once a mission or the ship is loaded");
+    if (pressed) say("Refused: the toggle key before the game's code pages could be read; try again once a mission or the ship is loaded");
     if (now < next_pin_check) return;
     next_pin_check = now + 500;
     int pins = check_pins(true);
@@ -1513,7 +1520,7 @@ static void session_end(HfMod *mod, HfEvent event, void *unused) {
 /* SDK 16, "live": true. HellForge is taking this build out of the running game (reason: removed, or
  * replaced by a new build). Called on the loader's change thread: no game call, no engine call and
  * no helper call from here. It only succeeds when the mod already holds nothing in the game, which
- * the tick's own stop paths (F11 off) bring about; then the dispatch slots are put back as at the
+ * the tick's own stop paths (toggled off) bring about; then the dispatch slots are put back as at the
  * session's end. Anything else: 1, and HellForge keeps this build for the session. */
 __declspec(dllexport) int hellforge_mod_unload(const HfApi *api, HfMod *mod, uint32_t reason) {
   const char *why = NULL;

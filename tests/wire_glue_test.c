@@ -340,10 +340,10 @@ int main(void) {
     tfp_wire_frame(&wire, NULL);
   }
   CHECK(!wire.controller.enabled && wire.rt.idle_clean.kind == TFP_RT_TRUE && !logged("Refused"));
-  wire.toggle_requested = true; /* F11 with no game: the controller refuses with the backend's own text */
+  wire.toggle_requested = true; /* the toggle key with no game: the controller refuses with the backend's own text */
   now_seconds += 1 / 60.0;
   tfp_wire_frame(&wire, NULL);
-  CHECK(!wire.toggle_requested && logged("State: enter requested (F11)") && logged("Refused: F11 enter: Start refused: game.dll unavailable"));
+  CHECK(!wire.toggle_requested && logged("State: enter requested (toggle key)") && logged("Refused: toggle key enter: Start refused: game.dll unavailable"));
   CHECK(!wire.controller.enabled && !wire.controller.lease);
   now_seconds -= 5; /* a clock that goes back: the frame raises as retail's does, and says so once */
   tfp_wire_frame(&wire, NULL);

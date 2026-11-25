@@ -1,6 +1,6 @@
 # True First Person for HellForge
 
-A first-person view for HELLDIVERS 2 running in [HellForge](https://github.com/HWG90/HellForge) (offline, game build 25480438). Press **F11** in a mission and the game's own first-person camera takes over, with your weapon and arms placed, moving and aiming as they do in the retail mod this is rewritten from.
+A first-person view for HELLDIVERS 2 running in [HellForge](https://github.com/HWG90/HellForge) (offline, game build 25480438). Press **U** in a mission and the game's own first-person camera takes over, with your weapon and arms placed, moving and aiming as they do in the retail mod this is rewritten from.
 
 This is a C rewrite of the True First Person mode of Goose Gadget Kit (a Lua mod for the current retail game, version 0.5.41-smooth.66). The retail game and HellForge's pinned build differ, so every address, offset and code check was established again for build 25480438.
 
@@ -39,9 +39,9 @@ game: [docs/design/HARNESS.md](docs/design/HARNESS.md) and the results sections 
 1. Build it (below), or take a build from Releases when there is one.
 2. With HellForge and the game closed, copy `goose_true_first_person.dll`, `hellforge-mod.json` and `settings.json` into `HellForge/mods/true-first-person/`.
 3. Switch the mod on on HellForge's Mods page. Switch any other first-person mod off.
-4. For the settings menu, also have DBF-MCM for HellForge (`goose.mcm`) switched on; it opens with DEL. Without it the mod runs on its saved settings.
+4. **F10** opens the settings: the mod's "True First Person" page in DBF-MCM for HellForge (`goose.mcm`) when it is switched on, else the mod's own panel (needs Goose Overlay Host, NEST).
 
-Keys: **F11** toggles the view (changeable in the menu). What the menu and the mod change is saved to `%LOCALAPPDATA%\Goose\HellForge\TrueFirstPerson\settings.json`; see [docs/guides/POSER-AND-MENU.md](docs/guides/POSER-AND-MENU.md).
+Keys: **U** toggles the view (changeable in the menu; it was F11 until HellForge's Armor LUT editor took F11, and a saved F11 now reads as U), **F10** opens the settings, **Page Up** the placement editor. What the menu and the mod change is saved to `%LOCALAPPDATA%\Goose\HellForge\TrueFirstPerson\settings.json`; see [docs/guides/POSER-AND-MENU.md](docs/guides/POSER-AND-MENU.md).
 
 ## Build
 

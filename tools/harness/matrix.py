@@ -87,8 +87,8 @@ PHASES = {
     "jump-vault": ("hold w 0.4; key space; wait 0.2; hold w 0.6", 2.5),
     "clamber-low": ("down w; wait 0.4; key space; wait 1.0; up w", 2.5),    # facing a low wall: a vault, mask 0x20 (round 24)
     "clamber-high": ("down w; wait 0.4; key space; wait 1.4; up w", 3.0),   # facing a ledge at head height: a clamber, mask 0x22 then 0x20
-    "toggle-off-on": ("key f11; wait 1.0; key f11", 1.5),
-    "toggle-fast": ("key f11; wait 0.08; key f11; wait 0.08; key f11; wait 0.08; key f11", 2.0),   # the key is polled once a frame: 0.11 s up, so no press falls between two polls at 30 frames a second
+    "toggle-off-on": ("key u; wait 1.0; key u", 1.5),   # U: the mod's toggle key (drive.TOGGLE)
+    "toggle-fast": ("key u; wait 0.08; key u; wait 0.08; key u; wait 0.08; key u", 2.0),   # the key is polled once a frame: 0.11 s up, so no press falls between two polls at 30 frames a second
     "ragdoll": ("look 0 900; wait 0.2; key g; wait 0.4; look 0 -900; hold s 0.4", 6.0),
     "death": ("look 0 900; wait 0.2; key g; wait 0.6; key g; wait 0.4; look 0 -900", 9.0),   # the view is put back level for what runs after
 }
@@ -378,7 +378,7 @@ def judge(lines, toggles=False):
         # not fail a phase (a soak has some 70 leaves, each with a frame or two the veil moved up to 0.32 m).
         jump = max([0.0] + [f["bare"] for f in found])
     floated, float_row = trace_reader.largest_float(rows) if traced else (0.0, None)   # round 24
-    ok = held > 0 and missed == 0 and (jump < (POP_M if traced else LIMIT_M) or toggles) and not refused and (floated <= trace_reader.FLOAT_M or toggles)   # F11 itself is a cut by design
+    ok = held > 0 and missed == 0 and (jump < (POP_M if traced else LIMIT_M) or toggles) and not refused and (floated <= trace_reader.FLOAT_M or toggles)   # the toggle itself is a cut by design
     return {"pass": ok, "frames": held, "other_camera_frames": other, "missed": missed, "kinds": sorted(kinds),
             "largest_jump_m": jump, "largest_veil_m": veil_m, "from_trace": traced, "judged": len(found),
             "by_lengths_m": max([0.0] + [f["lengths"] for f in found]), "body_m": max([0.0] + [f["body"] for f in found]),
@@ -456,7 +456,7 @@ def main(argv):
     log = log_path(); results = {}
     with drive.Input() as device:
         if "frames held" not in log.read_text(errors="replace")[-4000:]:
-            device.run("key f11; wait 2.5")   # the view on
+            device.run(f"key {drive.TOGGLE}; wait 2.5")   # the view on
         begun = log.stat().st_size
         before = log.read_text(errors="replace").splitlines()
         style = style_in_force(before)

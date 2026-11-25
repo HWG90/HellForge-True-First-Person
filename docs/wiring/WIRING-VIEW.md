@@ -2,9 +2,9 @@
 
 `bash build.sh --view` builds `dist/true-first-person-view/` (`goose_true_first_person.dll`, `hellforge-mod.json`; id `goose.true-first-person`, version `0.6.0-view.1`, game build 25480438, SDK 16). It was built on 2026-11-16 and **never loaded**: nothing here has run in the game or under Wine.
 
-What it is: F11 toggles the game's own first-person camera through the translated retail units. The per-update order is retail's (`src/tfp_runtime.c`), with the backend, the controller, the camera / FOV / near / blur adapters and their helpers bound for real. Every other module answers "off". No arm or weapon placement, sleeves, hand grips, motion, head hiding, effects, menu or editor.
+What it is: the toggle key (U since round 36: HellForge 0.5's Armor LUT editor has F11, the old default; a stored F11 reads as U) toggles the game's own first-person camera through the translated retail units. The per-update order is retail's (`src/tfp_runtime.c`), with the backend, the controller, the camera / FOV / near / blur adapters and their helpers bound for real. Every other module answers "off". No arm or weapon placement, sleeves, hand grips, motion, head hiding, effects, menu or editor.
 
-Files: `src/mod_view.c` (entry, tick, F11, load checks), `src/wire_win.c` (Windows and HellForge: memory, clocks, locks, the four functions that sit in the dispatch slots, native calls), `src/wire_rt.c` (the runtime host bound to the typed units; no Windows), `src/wire_recovery.c`, `src/wire_off.c` (the off answers), `src/wire_log.c` (the session log). The donor `src/mod.c` and the 0.5.34 policy files are not compiled into this build.
+Files: `src/mod_view.c` (entry, tick, the toggle key, load checks), `src/wire_win.c` (Windows and HellForge: memory, clocks, locks, the four functions that sit in the dispatch slots, native calls), `src/wire_rt.c` (the runtime host bound to the typed units; no Windows), `src/wire_recovery.c`, `src/wire_off.c` (the off answers), `src/wire_log.c` (the session log). The donor `src/mod.c` and the 0.5.34 policy files are not compiled into this build.
 
 ## 1. Bound for real
 
@@ -34,7 +34,7 @@ Files: `src/mod_view.c` (entry, tick, F11, load checks), `src/wire_win.c` (Windo
 | `clock_now` | the performance counter, seconds (section 6, differences) | `src/wire_rt.c:933`; `src/wire_win.c:175` |
 | `mouse_button_index`, `mouse_button` | 'right' / 'middle' and their level from `GetAsyncKeyState`, 0 while the game is not the foreground window | `src/wire_rt.c:939-949`; `src/wire_win.c:338` |
 | `global_get`, `global_set` | a flag | `src/wire_rt.c:950-951` |
-| `menu_update` | takes the F11 press the tick saw and calls the runtime's `toggle_pose`, where retail's menu polls the key: the last call of the frame, inside the owned frame (runtime.lua:639) | `src/wire_rt.c:954-974`; key poll `src/mod_view.c:164-166`, `:181` |
+| `menu_update` | takes the toggle key's press the tick saw and calls the runtime's `toggle_pose`, where retail's menu polls the key: the last call of the frame, inside the owned frame (runtime.lua:639) | `src/wire_rt.c:954-974`; key poll `src/mod_view.c:164-166`, `:181` |
 
 Behind the units:
 
@@ -62,7 +62,7 @@ The helpers decide and order the swaps exactly as retail's DLLs (their C is reta
 
 - **Identity before any write.** `host_cas` (`src/wire_win.c:194`) refuses to install a hook unless the value the helper expects in the slot is the pinned function and its bytes, read through `hf->read_code`, equal the pin (`pinned_target`, `:182`). Otherwise nothing is written, the helper reports its "slot changed" error (11), and the log says `Refused: the <name> slot was not swapped: …`. The four pins were compared with the exe image of this build on 2026-11-16 (`r6_reload_exe_20261017.bin`, file offset = RVA): all equal; the table at exe+0x27cc638 holds exe+0x310050 in the image.
 - **All reads of code go through `hf->read_code`** (`tfp_win_read`, `:56`: any address in an executable section of game.dll or the exe), so the helpers' and the backend's own code pins are judged on the bytes from before any HellForge hook.
-- **Restored on exit.** F11 off runs retail's `stop_pose`: each helper's End clears `armed`, drains its hook through the policy lock and swaps the slot back only if it still holds its own hook.
+- **Restored on exit.** U off runs retail's `stop_pose`: each helper's End clears `armed`, drains its hook through the policy lock and swaps the slot back only if it still holds its own hook.
 - **Restored at session end.** `HF_EVENT_SESSION_END` (`src/mod_view.c:205`) puts back every slot that still holds one of this mod's hooks with one compare-and-swap each and nothing else: no lock, no helper state, no game call (it may run under the loader lock). There is no unload of a HellForge code mod; after a crash nothing runs, as in retail.
 - **Threads.** The slot functions run on whatever thread the game calls the slot from. They touch only their arguments, two counters and the helper. The helpers' locks are real SRW locks (two per helper, `src/wire_win.c:240-248`), used exactly where retail uses them: a hook that matches takes the policy lock, every export takes the control lock, End drains through the policy lock. No log call, no engine call and no tick state is touched from a hook; the tick reports the first call of each hook afterwards.
 
@@ -74,7 +74,7 @@ The helpers decide and order the swaps exactly as retail's DLLs (their C is reta
 |---|---|---|
 | **Pose (editor) helper**, behind the backend | A stand-in `TfpOpsPoseHelper` (`src/wire_rt.c:107-151`): prepare and begin accept at once, statistics say armed, not expired, no error, weight 1 and blend 1, every placement / motion / transition call accepts and does nothing, finish accepts. The lease therefore exists exactly as in retail (the FOV, blur and near leases bind to it), with no `depth_stats` / `input_stats` function, so no zoom identity | **No.** Retail cannot enter without its pose helper. This answer keeps the controller's session stable: it never sees an unarmed or failing helper. What is lost: the weapon and arms sit where the game puts them, there is no draw animation, no entry rotation guard, no look-gain normalisation |
 | Arm pieces, grip hand | `arm_pieces_new`, `grip_hand_new` are NULL: the modules do not exist | **Yes**: runtime.lua:698-706, "a missing or failing sleeve module never stops the first-person view" |
-| Menu | `menu_new` true; `update` is the F11 poll (section 1); `shutdown` true; `native_ads` false; `ads_mode` nil; the four option methods (`fird_person_arms`, `show_torso`, `near_options`, `motion_options`) NULL | **Yes** for the options: the runtime tests each method and falls back to arms wanted, torso hidden, near clip 0 / 0, motion defaults. `native_ads` false is the option switched off |
+| Menu | `menu_new` true; `update` is the toggle key's poll (section 1); `shutdown` true; `native_ads` false; `ads_mode` nil; the four option methods (`fird_person_arms`, `show_torso`, `near_options`, `motion_options`) NULL | **Yes** for the options: the runtime tests each method and falls back to arms wanted, torso hidden, near clip 0 / 0, motion defaults. `native_ads` false is the option switched off |
 | Editor (F8) | `is_active` false, `update` nothing, `cancel` / `shutdown` true, `request_open` false "The placement editor is not part of the view build", `status` nil | **Yes**: the editor closed |
 | Motion | `update` and `reset` accept and do nothing; `result` an empty table (no action, no displacement) | **No** module-level off (retail's `motion_enabled=false` still runs the module). Nothing is published to the pose helper either way, since there is none |
 | Head visibility, model shadows | `update` / `stop` / `shutdown` true, `is_clean` true, `result` `{phase='idle'}`, `sdk_handles` NULL | **No.** Retail always hides the head while the head camera or the rig view is active. Here the body stays as the game draws it (section 6, risk 2) |
@@ -92,7 +92,7 @@ The helpers decide and order the swaps exactly as retail's DLLs (their C is reta
 | `backend_alignment_context` (rig and weapon position of the diagnostics row) | nil: runtime.lua:496 raises inside its own pcall and the fields stay nil | Offsets `+0x80`, `+0x88`, node 5 are retail's and not established on this build: refused rather than guessed |
 | `backend_prepare_pose` (debug `preflight`), `backend_pose_status` (parked capture), `helper_depth_stats`, `helper_input_stats` | false "Preflight is not part of the view build"; nil; never called (the lease has no such function) | debug only |
 
-**Proof** (`tests/run-vectors-view-off.sh`, `tests/wire_off_test.c`, `tools/retail_ref/gen_view_off.py`): the unmodified retail `runtime.lua` (1d0d453) is run under LuaJIT through one session of the view build with scripted collaborators whose stubbed half answers what `wire_off.c` answers: enable, idle, F11 from inside `menu:update()`, the rig view, aim in and out with the mouse edges, a weapon swap, a seat, 27 debug entries, F11 off, idle, disable (55 operations, 2,031 calls into the collaborators). The C runtime order replayed over the same session gives retail's answers, traces and state character for character, and on each of the **1,137** calls into a stubbed module `wire_off.c` is asked too and answers what the collaborator answered retail. A call into any collaborator that is neither wired nor compared fails the test (0 such calls).
+**Proof** (`tests/run-vectors-view-off.sh`, `tests/wire_off_test.c`, `tools/retail_ref/gen_view_off.py`): the unmodified retail `runtime.lua` (1d0d453) is run under LuaJIT through one session of the view build with scripted collaborators whose stubbed half answers what `wire_off.c` answers: enable, idle, U from inside `menu:update()`, the rig view, aim in and out with the mouse edges, a weapon swap, a seat, 27 debug entries, U off, idle, disable (55 operations, 2,031 calls into the collaborators). The C runtime order replayed over the same session gives retail's answers, traces and state character for character, and on each of the **1,137** calls into a stubbed module `wire_off.c` is asked too and answers what the collaborator answered retail. A call into any collaborator that is neither wired nor compared fails the test (0 such calls).
 
 ## 4. What refuses, and why
 
@@ -103,9 +103,9 @@ The helpers decide and order the swaps exactly as retail's DLLs (their C is reta
 | `another mod hooks a function this mod pins …` | any of the 39 pins reads differently now than before HellForge's hooks (`src/mod_view.c:81`): catches the same conflict when the mod list does not |
 | `a code pin of build 25480438 does not match this game` | a pin differs (read with `read_code`); `Pins: … first mismatch <name>` names it |
 | `game.dll or helldivers2.exe is not the image of build 25480438` | PE stamp or size differs |
-| `F11 before the game's code pages could be read …` | F11 while some pinned pages are still unreadable (before a player exists). The mode starts by itself once they read |
+| `toggle key before the game's code pages could be read …` | the toggle key while some pinned pages are still unreadable (before a player exists). The mode starts by itself once they read |
 | `the mode could not start: …` | `on_enable` raised |
-| `F11 enter: <text>` / `F11 exit: <text>` | the runtime's `toggle_pose` refused; the text is retail's (for example `Start refused: …`, `Head-camera cleanup is still pending`) |
+| `toggle key enter: <text>` / `toggle key exit: <text>` | the runtime's `toggle_pose` refused; the text is retail's (for example `Start refused: …`, `Head-camera cleanup is still pending`) |
 | `the <camera/fov/near/blur> slot was not swapped: …` | section 2 |
 | `fov:` / `blur:` / `camera:` / `near:` `<text>` and `Cleared: <name>` | that lease's `error_message` changed (the helper's error number is in the text) |
 | `policy <name> failed (policy_failure): …` | the runtime's recovery recorded a failed update |
@@ -117,9 +117,9 @@ Features that cannot work on this build and say so instead of guessing: the pres
 
 `mod-goose.true-first-person.log` in the session folder under the install's `logs/sessions/`. Besides the lines of section 4:
 
-- `True First Person 0.6.0-view.1 …`, `Tick: game-thread callback on thread N`, `Image: …`, `Pins: 39 ok …`, `Reads: N microseconds per guarded 8-byte read`, `Ready. F11 toggles the view. Not in this build: …`, retail's own `Idle. F11 toggles True First Person; F8 edits arms and weapon placement.` (F8 does nothing here).
+- `True First Person 0.6.0-view.1 …`, `Tick: game-thread callback on thread N`, `Image: …`, `Pins: 39 ok …`, `Reads: N microseconds per guarded 8-byte read`, `Ready. U toggles the view (F11 is HellForge's Armor LUT editor). Not in this build: …`, retail's own `Idle. F11 toggles True First Person; F8 edits arms and weapon placement.` (F8 does nothing here).
 - `Status: <the controller's label>` on every change (retail logs the same label).
-- `State: enter requested (F11)`, `State: entered the native view request=0x… kind=6`, `State: aim in`, `State: aim out`, `State: aim kept (N)`, `State: swap (weapon identity changed)`, `State: seated camera detached (N)`, `State: left the native view: <why>`, `State: exit requested (F11)`, `State: exit complete`.
+- `State: enter requested (toggle key)`, `State: entered the native view request=0x… kind=6`, `State: aim in`, `State: aim out`, `State: aim kept (N)`, `State: swap (weapon identity changed)`, `State: seated camera detached (N)`, `State: left the native view: <why>`, `State: exit requested (toggle key)`, `State: exit complete`.
 - The backend's own lines: `Native entry: aim before=… camera=6 …`, `Native entry error: …`.
 - `Hook: <name> first fired on thread N, called from game+0x…` once per hook.
 - While the mode is on, once a second: `View: t=… frames=N gaps=N on=1 phase=running kind=6 ads=0 safe=1 eye_step=… eye_jump=… fov=… fov_native=… fov_jump=… near=… calls=cam:N,fov:N,near:N,blur:N`. `eye_jump` is the largest part of a frame's camera move that the frame before does not explain (walking gives millimetres, a cut gives its size, in metres); `fov_jump` the same for the applied field of view (radians); `gaps` frames whose camera position could not be read; `calls` total hook calls so far.
@@ -141,7 +141,7 @@ Unproven, ranked by how likely it is to spoil the first session:
 2. **No pose helper, no head hiding.** The rig's weapon and arms are where the game's own first-person evaluation puts them (most likely the sights pose, not the hip). In the head-camera states (waiting, swaps, seats) the player's own head and body are drawn and may cover the view. Expected in this build, not a wiring fault.
 3. **Where HellForge's tick falls in the frame** (before the game's update; retail runs inside the script update) and **which thread calls each slot**: both are logged (`Tick:`, `Hook:`). A one-frame lag of the eye or FOV would show as `eye_jump` / `fov_jump` on entry and exit.
 4. **Cost of `hf->read`.** The helpers read tens of times per hook call. `Reads:` logs the cost; several microseconds per read would cost frames.
-5. **`_Thread_local` in a DLL built by zig for `x86_64-windows-gnu`** (camera, fov, blur helpers) and **`setjmp` / `longjmp`** in `tfp_runtime.c`: compiled, never run on Windows. A fault here would show on the first F11 or the first refused call.
+5. **`_Thread_local` in a DLL built by zig for `x86_64-windows-gnu`** (camera, fov, blur helpers) and **`setjmp` / `longjmp`** in `tfp_runtime.c`: compiled, never run on Windows. A fault here would show on the first U or the first refused call.
 6. **Camera helper open points** (`docs/translation/CAMERA-HELPER-TRANSLATION.md` section 5): the context basis at `+0x0C` (decides "pose invalid" and the eye's forward / up) and the bridge scene test (scene 3 only). Symptom: `Refused: camera: … 14` or `… 18`.
 7. **MinGW's math functions** against retail's (last bits of `expf`, `tanf`): eases could differ in the last bit.
 8. **Session end under the loader lock**: only compare-and-swaps, but untested.
@@ -154,15 +154,15 @@ Install only on the user's word: game and HellForge closed, First Person Control
 | # | Do | Expect in the log |
 |---|---|---|
 | 1 | Start a session, reach the ship | banner, `Tick: …`, `Image: …`, perhaps `Waiting: …`, then `Pins: 39 ok, 0 mismatched, 0 unreadable`, `Reads: …`, `Idle. F11 toggles …`, `Ready. …`. No `Refused:` |
-| 2 | With the Controller left on (once, to see the refusal) | `Refused: goose.first-person-controller is loaded …`; F11 does nothing |
-| 3 | In a mission, weapon in hand, standing: F11 | `State: enter requested (F11)`, `Native entry: aim before=false, after=…; camera=6; …`, `Status: First person enabled until manually stopped`, `State: entered the native view request=0x… kind=6`, `Hook: camera first fired … game+0x127a139`, `Hook: fov … game+0x127a120`, then a `View:` line each second with `phase=running kind=6` |
+| 2 | With the Controller left on (once, to see the refusal) | `Refused: goose.first-person-controller is loaded …`; U does nothing |
+| 3 | In a mission, weapon in hand, standing: U | `State: enter requested (toggle key)`, `Native entry: aim before=false, after=…; camera=6; …`, `Status: First person enabled until manually stopped`, `State: entered the native view request=0x… kind=6`, `Hook: camera first fired … game+0x127a139`, `Hook: fov … game+0x127a120`, then a `View:` line each second with `phase=running kind=6` |
 | 4 | Walk and turn for ten seconds | `View:` lines with `gaps=0`, `eye_jump` of a few millimetres, `fov_jump=0.0000`, rising `calls=` |
 | 5 | Hold aim (right mouse), release | `State: aim in`, later `State: aim out` and `State: aim kept (1)`; no `State: left the native view` in between; `fov_jump` small in those seconds (the 180 ms ease) |
 | 6 | Aim with a scoped weapon | `Hook: blur first fired … game+0x100a80e`; `Hook: near …` at some point; `near=` changes on the `View:` line |
 | 7 | Swap weapons | `State: left the native view: …`, `Status: First person enabled; waiting: …`, `View:` with `phase=waiting kind=4`, then `Native entry: …`, `State: entered the native view …`, `State: swap (weapon identity changed)`, `Status: First person enabled; native camera reacquired`. The `eye_jump` of those seconds is the number to judge the eye hold by |
 | 8 | Stim, grenade, dive | as 7 without the swap line; the view returns by itself |
-| 9 | F11 | `State: exit requested (F11)`, `Status: Stopped: manual stop`, `State: exit complete`; the `View:` lines stop; third person as before |
-| 10 | F11 on, then quit to the ship or die | `State: left the native view: …`; after the respawn `State: entered the native view …` again, or a `Refused:` that says what failed |
+| 9 | U | `State: exit requested (toggle key)`, `Status: Stopped: manual stop`, `State: exit complete`; the `View:` lines stop; third person as before |
+| 10 | U on, then quit to the ship or die | `State: left the native view: …`; after the respawn `State: entered the native view …` again, or a `Refused:` that says what failed |
 | 11 | Quit the game with the view on | `Session end: N dispatch slot(s) put back` (N up to 4), if the game delivers the event |
 
-A session is bad when: any `Refused:` other than #2 and a short-lived `F11 … cleanup is still pending`; `gaps` above 0 in the rig view; `eye_jump` above a few centimetres outside entry, exit and swaps; a `Hook:` caller other than the three listed; the view not coming back after #7 / #8.
+A session is bad when: any `Refused:` other than #2 and a short-lived `toggle key … cleanup is still pending`; `gaps` above 0 in the rig view; `eye_jump` above a few centimetres outside entry, exit and swaps; a `Hook:` caller other than the three listed; the view not coming back after #7 / #8.

@@ -3,6 +3,12 @@
 For HellForge on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
 
+## Changed in the next build
+
+- **U now switches first person on and off, not F11.** HellForge's new Armor LUT editor opens on F11. If you
+  never changed the key, it is U from now on; nothing to do. If you picked another key in the settings, you keep
+  it. F11 can no longer be picked for this mod.
+
 ## Install
 
 1. Close the game and the HellForge launcher.
@@ -23,7 +29,8 @@ own panel with the same pages instead.
 
 ## Use
 
-- **F11** switches first person on and off. Use it in a mission, on foot, with a weapon in hand.
+- **U** switches first person on and off (F11 until now; F11 is HellForge's Armor LUT editor). Use it in a mission,
+  on foot, with a weapon in hand. Another key can be set in the settings: "Toggle True First Person".
 - **F10** opens the settings: the "True First Person" page in DBF-MCM, or without DBF-MCM the mod's own
   panel (also in NEST's list, Page Down). Three pages: First person, Bob and sway, Locked view.
 - **Page Up** opens the weapon placement editor.
@@ -353,7 +360,7 @@ jumped more than 5 cm.
 - **Pass:** standing, walking, backing, strafing, sprinting, looking around, crouching, going prone, diving
   forward and back, standing up, firing, aiming, firing and walking while aiming, reloading, ammo check,
   swapping to secondary, support and primary, quick swaps, pistol fire, aim and reload, grenade, melee,
-  emote, F11 off and on.
+  emote, first person off and on.
 - **Just over the limit, by 1 cm or less:** stim (6 cm), vault (5.5 cm).
 - **Arms:** recorded moving with the body's arms in idle, walk, sprint, fire and aim; seen in captures on
   the rifle in sprint, reload and ammo check, and on the pistol.

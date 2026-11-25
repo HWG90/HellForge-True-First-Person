@@ -31,7 +31,7 @@ static const Control CONTROLS[] = {
   ROW("edit_placement", TFP_MK_BUTTON, "Edit arms and weapon placement", 0, NONE),
   ROW("editor_key", TFP_MK_KEY, "Open / close placement editor", 0, M(editor_key),
       TIP("Default Page Up (F8 is HellForge's own editor). Closing the editor restores unsaved placement and leaves first person on.")),
-  ROW("toggle_key", TFP_MK_KEY, "Toggle True First Person", 0, M(toggle_key), TIP("Default F11. Toggle True First Person; it stays enabled when changing weapons.")),
+  ROW("toggle_key", TFP_MK_KEY, "Toggle True First Person", 0, M(toggle_key), TIP("Default U (F11 is HellForge's Armor LUT editor). Toggle True First Person; it stays enabled when changing weapons.")),
   ROW("true_native_ads", TFP_MK_CHECK, "True First Person: native ADS", 0, M(true_native_ads),
       TIP("Use the game's native sights and zoom while aiming in True First Person.")),
   ROW("show_torso", TFP_MK_CHECK, "True First Person: show torso", 0, M(show_torso),
@@ -228,6 +228,7 @@ bool tfp_wire_menu_default(TfpWire *w, const TfpMenuControl *c, int editor_key, 
     case TFP_MK_KEY:
       value = value >= 0 && value <= 257 ? (int)value : 0;
       if (c->menu == TFP_MENU_editor_key && value == 119) value = editor_key;
+      if (c->menu == TFP_MENU_toggle_key && value == TFP_TOGGLE_KEY_OLD) value = TFP_TOGGLE_KEY; /* retail's F11 is HellForge's */
       break;
     default: return false;
   }
@@ -241,7 +242,14 @@ size_t tfp_wire_menu_definition(TfpWire *w, int editor_key, char *out, size_t si
   if (!s) return 0;
   /* "storage": this mod keeps the values (wire_menu.h); MCM's load answers none, its save is the store's */
   at = put(out, size, at, "{\"id\":\"" TFP_MENU_MOD_ID "\",\"name\":\"True First Person\",\"storage\":true,\"description\":");
-  at = put_text(out, size, at, "Use the game's first-person arms and weapon view. F11 toggles True First Person; F10 opens this page.");
+  {
+    char key[16], text[160];
+    const int toggle = tfp_wire_menu_toggle_key(w);
+    tfp_wire_menu_key_name(toggle, key);
+    snprintf(text, sizeof text, "Use the game's first-person arms and weapon view. %s toggles True First Person; F10 opens this page.",
+             toggle ? key : "The menu's toggle key (not bound now)");
+    at = put_text(out, size, at, text);
+  }
   at = put(out, size, at, ",\"pages\":[");
   for (int page = 0; page < TFP_MENU_PAGES; page++) {
     at = put(out, size, at, page ? ",{\"id\":\"" : "{\"id\":\""), at = put(out, size, at, tfp_wire_menu_page_ids[page]);
@@ -362,8 +370,24 @@ void tfp_wire_menu_unbind(TfpWire *w) { free(state(w)); w->ext[TFP_WIRE_EXT_MENU
 bool tfp_wire_menu_bound(TfpWire *w) { return state(w) != NULL; }
 int tfp_wire_menu_toggle_key(TfpWire *w) {
   TfpSettings *s = tfp_wire_settings(w);
-  double key = s ? tfp_settings_menu_number(s, TFP_MENU_toggle_key) : 122;
+  double key = s ? tfp_settings_menu_number(s, TFP_MENU_toggle_key) : TFP_TOGGLE_KEY;
+  if (key == TFP_TOGGLE_KEY_OLD) return TFP_TOGGLE_KEY;  /* the old default: HellForge's Armor LUT editor has F11 now */
   return key >= 1 && key <= 255 ? (int)key : 0; /* 0: unbound */
+}
+bool tfp_wire_menu_toggle_moved(TfpWire *w) {
+  TfpSettings *s = tfp_wire_settings(w);
+  return s && tfp_settings_menu_number(s, TFP_MENU_toggle_key) == TFP_TOGGLE_KEY_OLD;
+}
+void tfp_wire_menu_key_name(int key, char out[16]) {
+  static const struct { int key; const char *name; } named[] = {
+    {8, "BACKSPACE"}, {9, "TAB"}, {13, "ENTER"}, {16, "SHIFT"}, {17, "CTRL"}, {18, "ALT"}, {19, "PAUSE"}, {20, "CAPS LOCK"}, {27, "ESC"},
+    {32, "SPACE"}, {33, "PAGE UP"}, {34, "PAGE DOWN"}, {35, "END"}, {36, "HOME"}, {37, "LEFT"}, {38, "UP"}, {39, "RIGHT"}, {40, "DOWN"},
+    {45, "INSERT"}, {46, "DELETE"}, {1, "MOUSE 1"}, {2, "MOUSE 2"}, {4, "MOUSE 3"}, {5, "MOUSE 4"}, {6, "MOUSE 5"}};
+  for (size_t i = 0; i < sizeof named / sizeof *named; i++) if (named[i].key == key) { snprintf(out, 16, "%s", named[i].name); return; }
+  if ((key >= '0' && key <= '9') || (key >= 'A' && key <= 'Z')) snprintf(out, 16, "%c", key);
+  else if (key >= 0x60 && key <= 0x69) snprintf(out, 16, "NUM %d", key - 0x60);
+  else if (key >= 0x70 && key <= 0x87) snprintf(out, 16, "F%d", key - 0x6f);
+  else snprintf(out, 16, "KEY %d", key);
 }
 int tfp_wire_menu_editor_key(TfpWire *w, int fallback) {
   TfpSettings *s = tfp_wire_settings(w);
@@ -394,6 +418,16 @@ void tfp_wire_menu_changed(TfpWire *w, const char *id, const TfpMenuValue *value
   Menu *m = state(w);
   const Control *c = control(id);
   if (!m || !c || !value || m->syncing) return;
+  if (c->menu == TFP_MENU_toggle_key && value->kind == TFP_MENU_VALUE_NUMBER && value->number == TFP_TOGGLE_KEY_OLD) {
+    /* F11 opens HellForge's Armor LUT editor; a stored F11 would read as U anyway, so the menu would show F11 for U */
+    char key[16];
+    const int now = tfp_wire_menu_toggle_key(w);
+    const TfpMenuValue back = {TFP_MENU_VALUE_NUMBER, false, now};
+    tfp_wire_menu_key_name(now, key);
+    put_back(w, m, id, &back);
+    say(w, "Menu: F11 opens HellForge's Armor LUT editor, so it cannot toggle True First Person; the toggle key stays %s%s", now ? key : "unbound", "");
+    return;
+  }
   if (stored(c)) { into_store(w, c, value); return; } /* the store only: safe at once */
   if (value->kind == TFP_MENU_VALUE_BOOL) enqueue(w, m, id, value, previous);
 }

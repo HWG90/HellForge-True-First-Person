@@ -1661,7 +1661,7 @@ int main(int argc, char **argv) {
     CHECK(tfp_wire_menu_definition(&wire, 33, NULL, 0) == n);                  /* measuring writes nothing */
     CHECK(strstr(definition, "\"id\":\"motion_strength\",\"type\":\"slider\",\"label\":\"Weapon movement strength\",\"min\":0,\"max\":200,\"step\":5,\"default\":135"));
     CHECK(strstr(definition, "\"id\":\"editor_key\",\"type\":\"keybind\",\"label\":\"Open / close placement editor\",\"default\":33")); /* retail's F8 is HellForge's editor */
-    CHECK(strstr(definition, "\"id\":\"toggle_key\",\"type\":\"keybind\",\"label\":\"Toggle True First Person\",\"default\":122"));
+    CHECK(strstr(definition, "\"id\":\"toggle_key\",\"type\":\"keybind\",\"label\":\"Toggle True First Person\",\"default\":85")); /* retail's F11 is HellForge's Armor LUT editor */
     CHECK(strstr(definition, "\"id\":\"weapon_sway_speed\",\"type\":\"slider\",\"label\":\"Weapon sway response speed\",\"min\":25,\"max\":200,\"step\":5"));
     CHECK(!strstr(definition, "start_free_aim") && !strstr(definition, "start_native_test"));
     /* the whole menu: an id old values cannot be read into, MCM keeps no file of its own, three pages, every control */
@@ -1725,7 +1725,7 @@ int main(int argc, char **argv) {
     mcm_put("weapon_near_hip_cm", TFP_MENU_VALUE_NUMBER, false, 9), mcm_put("weapon_near_aim_cm", TFP_MENU_VALUE_NUMBER, false, 9);
     mcm_put("show_aim_markers", TFP_MENU_VALUE_BOOL, true, 0), mcm_put("family_placement_defaults", TFP_MENU_VALUE_BOOL, false, 0);
     TfpMenuHost host = {NULL, mcm_get, mcm_set, mcm_set_disabled, mcm_set_label, NULL, 0};
-    CHECK(!tfp_wire_menu_bound(&wire) && tfp_wire_menu_toggle_key(&wire) == 122);
+    CHECK(!tfp_wire_menu_bound(&wire) && tfp_wire_menu_toggle_key(&wire) == 'U');
     CHECK(tfp_wire_menu_bind(&wire, &host, TFP_MENU_NO_ARMS, NULL) && tfp_wire_menu_bound(&wire));
     CHECK(tfp_settings_menu_number(s, TFP_MENU_motion_strength) == 150 && tfp_settings_menu_flag(s, TFP_MENU_show_torso));
     CHECK(tfp_wire_menu_toggle_key(&wire) == 121 && tfp_wire_menu_editor_key(&wire, 33) == 33);
@@ -1824,6 +1824,52 @@ int main(int argc, char **argv) {
     host.editor_key = 0;
     CHECK(tfp_wire_menu_bind(&wire, &host, 0, NULL) && tfp_wire_settings_unsaved(&wire));
     tfp_wire_menu_unbind(&wire);
+    tfp_wire_settings_free(&wire);
+  }
+  { /* ---- the toggle key: U by default. HellForge's Armor LUT editor opens on F11, so a stored F11 (retail's default, and this
+     * mod's until now: what a player who never changed it has saved, or nothing) reads as U; a key the player chose is kept ---- */
+    static const char none[] = "{\"format\":1,\"first_person\":{},\"menu\":{}}";
+    static const char old_default[] = "{\"format\":1,\"first_person\":{},\"menu\":{\"toggle_key\":122}}";
+    static const char chosen[] = "{\"format\":1,\"first_person\":{},\"menu\":{\"toggle_key\":117}}";
+    static char definition[60000];
+    char name[16];
+    CHECK(TFP_TOGGLE_KEY == 'U' && TFP_TOGGLE_KEY_OLD == 0x7A);
+    tfp_wire_menu_key_name('U', name); CHECK(!strcmp(name, "U"));
+    tfp_wire_menu_key_name(0x7A, name); CHECK(!strcmp(name, "F11"));
+    tfp_wire_menu_key_name(33, name); CHECK(!strcmp(name, "PAGE UP"));
+    new_wire();
+    CHECK(tfp_wire_menu_toggle_key(&wire) == 'U' && !tfp_wire_menu_toggle_moved(&wire)); /* no store yet */
+    CHECK(tfp_wire_settings_bind(&wire, none, sizeof none - 1, "settings.json"));
+    CHECK(tfp_wire_menu_toggle_key(&wire) == 'U' && tfp_wire_menu_toggle_moved(&wire));
+    tfp_wire_settings_free(&wire);
+    new_wire();
+    CHECK(tfp_wire_settings_bind(&wire, old_default, sizeof old_default - 1, "settings.json"));
+    CHECK(tfp_wire_menu_toggle_key(&wire) == 'U' && tfp_wire_menu_toggle_moved(&wire));
+    CHECK(tfp_wire_menu_definition(&wire, 33, definition, sizeof definition) < sizeof definition);
+    CHECK(strstr(definition, "\"id\":\"toggle_key\",\"type\":\"keybind\",\"label\":\"Toggle True First Person\",\"default\":85"));
+    CHECK(strstr(definition, "U toggles True First Person") && !strstr(definition, "F11 toggles"));
+    /* MCM starts at the registration's default (U): the bind's doing, no change to save */
+    tfp_wire_settings_disk(&wire, &test_disk, true);
+    mcm_count = mcm_sets = mcm_labels = mcm_disables = mcm_state_count = 0, mcm_disabled[0] = 0;
+    mcm_put("toggle_key", TFP_MENU_VALUE_NUMBER, false, 'U');
+    TfpMenuHost host = {NULL, mcm_get, mcm_set, mcm_set_disabled, mcm_set_label, NULL, 33};
+    CHECK(tfp_wire_menu_bind(&wire, &host, 0, NULL) && !tfp_wire_settings_unsaved(&wire) && tfp_wire_menu_toggle_key(&wire) == 'U');
+    /* F11 chosen in MCM: refused (it is HellForge's), put back, said */
+    TfpMenuValue f11 = {TFP_MENU_VALUE_NUMBER, false, 0x7A}, u = {TFP_MENU_VALUE_NUMBER, false, 'U'}, t = {TFP_MENU_VALUE_NUMBER, false, 'T'};
+    mcm_put("toggle_key", TFP_MENU_VALUE_NUMBER, false, 0x7A);
+    tfp_wire_menu_changed(&wire, "toggle_key", &f11, &u);
+    CHECK(tfp_wire_menu_toggle_key(&wire) == 'U' && mcm_slot("toggle_key")->number == 'U');
+    CHECK(logged("Menu: F11 opens HellForge's Armor LUT editor, so it cannot toggle True First Person; the toggle key stays U"));
+    /* another key is the player's: kept, saved */
+    tfp_wire_menu_changed(&wire, "toggle_key", &t, &u);
+    CHECK(tfp_wire_menu_toggle_key(&wire) == 'T' && !tfp_wire_menu_toggle_moved(&wire) && tfp_wire_settings_unsaved(&wire));
+    tfp_wire_menu_unbind(&wire);
+    tfp_wire_settings_free(&wire);
+    new_wire();
+    CHECK(tfp_wire_settings_bind(&wire, chosen, sizeof chosen - 1, "settings.json"));
+    CHECK(tfp_wire_menu_toggle_key(&wire) == 117 && !tfp_wire_menu_toggle_moved(&wire));
+    CHECK(tfp_wire_menu_definition(&wire, 33, definition, sizeof definition) < sizeof definition);
+    CHECK(strstr(definition, "\"id\":\"toggle_key\",\"type\":\"keybind\",\"label\":\"Toggle True First Person\",\"default\":117"));
     tfp_wire_settings_free(&wire);
   }
   if (list_part()) return 1;

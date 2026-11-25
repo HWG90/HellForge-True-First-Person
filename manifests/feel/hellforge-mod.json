@@ -3,7 +3,7 @@
   "id": "goose.true-first-person",
   "name": "True First Person",
   "version": "0.6.0-feel.55",
-  "description": "F11 toggles the game's own first-person view, driven as the retail mod drives it: eye position, field of view, near clip, scope blur, weapon and arm placement with your imported placements, bob and sway, head hiding, sleeves and hand grips. Settings are in DBF-MCM; Page Up opens the placement editor (needs Goose Overlay Host). Switch the First Person Controller off: the two cannot run together.",
+  "description": "U toggles the game's own first-person view (F11 is HellForge's Armor LUT editor; the key can be changed in the settings), driven as the retail mod drives it: eye position, field of view, near clip, scope blur, weapon and arm placement with your imported placements, bob and sway, head hiding, sleeves and hand grips. F10 opens the settings: the mod's page in DBF-MCM when it is loaded, else the mod's own panel (needs Goose Overlay Host). Page Up opens the placement editor (needs Goose Overlay Host). Switch the First Person Controller off: the two cannot run together.",
   "gameplay": false,
   "code": {"dll": "goose_true_first_person.dll", "sdk": 16, "live": true, "prebuilt": true, "game": "25480438"}
 }

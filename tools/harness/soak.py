@@ -136,7 +136,7 @@ def main(argv):
     d = drive.Input()
     log = matrix.log_path()
     if "frames held" not in log.read_text(errors="replace")[-4000:]:
-        d.run("key f11; wait 2.5")   # the view on, as matrix.py does
+        d.run(f"key {drive.TOGGLE}; wait 2.5")   # the view on, as matrix.py does
     whole = log.stat().st_size
     before = log.read_text(errors="replace").splitlines()
     print(matrix.style_header(before), flush=True)

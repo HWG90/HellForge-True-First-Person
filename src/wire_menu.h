@@ -91,8 +91,13 @@ const char *tfp_wire_menu_activate(TfpWire *w, const char *id);
 /* Once per tick after the runtime's update: the status and weapon labels, the per-weapon clipping drafts and the
  * Bodycam-only sliders' disabled state, each sent to the host only when it changed. */
 void tfp_wire_menu_frame(TfpWire *w);
-/* The two keys (virtual-key codes) as the menu holds them. */
+/* The two keys (virtual-key codes) as the menu holds them. The toggle key: a stored 122 (F11, retail's registered default
+ * and what a settings.json of round 35 and older holds for a player who never changed it) is TFP_TOGGLE_KEY, U, since
+ * HellForge's Armor LUT editor has F11; no store: U too. 0: unbound. toggle_moved: the stored key is that old F11. */
 int tfp_wire_menu_toggle_key(TfpWire *w);
+bool tfp_wire_menu_toggle_moved(TfpWire *w);
+/* A key's name as the menus show it ("U", "F11", "PAGE UP", "MOUSE 4", "KEY 200"). */
+void tfp_wire_menu_key_name(int key, char out[16]);
 int tfp_wire_menu_editor_key(TfpWire *w, int fallback);
 /* The press of a bound key, for the caller's poll: true once when `down` turns true. A key that has just become the
  * bound one (the user pressed it to bind it, so it is still down) does nothing until it has been seen up once.

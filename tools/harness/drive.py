@@ -14,7 +14,7 @@ still has focus and refuses to type into another window.
 Command line:
   drive.py focus
   drive.py shot OUT.png
-  drive.py run "wait 0.5; key r; hold w 0.7; click left 0.6; look 0 -40; key f11"
+  drive.py run "wait 0.5; key r; hold w 0.7; click left 0.6; look 0 -40; key u"
   drive.py run "down right; wait 0.35; click middle; wait 2"    full aim (the middle button is the game's aim mode)
   drive.py run "down r; wait 0.8; wheel 1; wait 0.3; up r"      the scope's range: hold R, the wheel up one notch
 """
@@ -98,6 +98,9 @@ VK = {"shift": 0x10, "ctrl": 0x11, "lctrl": 0xA2, "alt": 0x12, "space": 0x20, "t
       # "left" and "right" alone are the mouse buttons (BUTTONS wins), so the arrow keys have their own names
       "arrowup": 0x26, "arrowdown": 0x28, "arrowleft": 0x25, "arrowright": 0x27}
 BUTTONS = {"left": "L", "right": "R", "middle": "M"}
+# The mod's view toggle (a letter: _code gives its VK, U 0x55). U by default since round 36: HellForge 0.5's Armor LUT
+# editor opens on F11, the old default. "f11" stays in VK to reach HellForge's own key on purpose.
+TOGGLE = "u"
 WHEEL_DELTA = 120     # one notch of the wheel (Windows' WHEEL_DELTA)
 WHEEL_GAP_S = 0.1     # between two notches: three frames at 30 a second, so the game reads each one
 WHEEL_MOST = 10       # notches in one step

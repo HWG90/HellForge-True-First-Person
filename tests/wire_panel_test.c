@@ -605,7 +605,7 @@ static int panel_part(void) {
   }
   CHECK(sliders == 16 && checks_drawn == 16 && keys == 2 && choices == 3 && described == 31);
   CHECK(drawn("text:First person through every action, one field of view, and how much your body's movement moves the view."));
-  CHECK(drawn("primary:Enable True First Person") && drawn("cap:F11") && drawn("cap:PAGE UP"));
+  CHECK(drawn("primary:Enable True First Person") && drawn("cap:U") && !drawn("cap:F11") && drawn("cap:PAGE UP")); /* the stored 122 (F11) reads as U */
   CHECK(drawn("slider:Weapon movement strength=120[0..200]") && drawn("slider:Near clip distance (cm)=15[5..40]") && drawn("slider:Weapon bob speed=100[25..200]"));
   CHECK(drawn("text:Status: First person off") && drawn_part("text:Weapon: enable First Person with a firearm"));
   CHECK(drawn("slider:This weapon: hip clearance (cm)=15[5..40] (disabled)") && drawn("button:Save clipping for this weapon (disabled)"));
@@ -693,11 +693,15 @@ static int panel_part(void) {
   /* a key: Change, then the next key pressed; Esc keeps the old one, Delete clears it, the panel's own key is not taken */
   ov.click = "Change##toggle_key";
   draw_frame(); game_update();
-  CHECK(tfp_wire_menu_toggle_key(&wire) == 122 && saves == 4);
+  CHECK(tfp_wire_menu_toggle_key(&wire) == 'U' && saves == 4);
   draw_frame();
   CHECK(drawn_part("Press a key"));
   ov.key = 0x79; draw_frame(); game_update();
-  CHECK(tfp_wire_menu_toggle_key(&wire) == 122 && drawn_part("Press a key"));
+  CHECK(tfp_wire_menu_toggle_key(&wire) == 'U' && drawn_part("Press a key"));
+  /* F11 is HellForge's Armor LUT editor key: the toggle row does not take it, says so, and still asks */
+  ov.key = 0x7A; draw_frame(); game_update(); ov.key = 0;
+  draw_frame();
+  CHECK(tfp_wire_menu_toggle_key(&wire) == 'U' && saves == 4 && drawn_part("F11 opens HellForge's Armor LUT editor") && drawn_part("Press a key") && !ov.bad_colours);
   ov.key = 0x75; draw_frame(); game_update(); ov.key = 0;
   CHECK(tfp_wire_menu_toggle_key(&wire) == 0x75 && saves == 5 && strstr(saved_text, "\"toggle_key\": 117"));
   draw_frame();
@@ -1085,9 +1089,9 @@ static int rebind_part(void) {
   TfpKeyEdge toggle = {0}, editor = {0};
   CHECK(bind_panel());
   /* the keys as they were at the start: an ordinary press acts once, and not again while held */
-  CHECK(tfp_wire_menu_toggle_key(&wire) == 122 && tfp_wire_menu_editor_key(&wire, 33) == 33);
-  CHECK(!tfp_wire_menu_key_edge(&toggle, 122, false) && tfp_wire_menu_key_edge(&toggle, 122, true) && !tfp_wire_menu_key_edge(&toggle, 122, true));
-  CHECK(!tfp_wire_menu_key_edge(&toggle, 122, false) && tfp_wire_menu_key_edge(&toggle, 122, true) && !tfp_wire_menu_key_edge(&toggle, 122, false));
+  CHECK(tfp_wire_menu_toggle_key(&wire) == 'U' && tfp_wire_menu_editor_key(&wire, 33) == 33);
+  CHECK(!tfp_wire_menu_key_edge(&toggle, 'U', false) && tfp_wire_menu_key_edge(&toggle, 'U', true) && !tfp_wire_menu_key_edge(&toggle, 'U', true));
+  CHECK(!tfp_wire_menu_key_edge(&toggle, 'U', false) && tfp_wire_menu_key_edge(&toggle, 'U', true) && !tfp_wire_menu_key_edge(&toggle, 'U', false));
   CHECK(!tfp_wire_menu_key_edge(&editor, 33, false));
   /* the toggle key is bound to T: the panel takes the key on its way down, the game thread stores it ... */
   ov.click = "Change##toggle_key"; draw_frame(); game_update();
