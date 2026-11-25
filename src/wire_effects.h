@@ -95,6 +95,9 @@ typedef struct TfpFxPlatform {
   /* The game's own void (*)(uintptr_t widget, uint8_t shown) at `function`, guarded: false when it
    * faulted (it may have written before). */
   bool (*set_widget_shown)(void *user, uint64_t function, uint64_t widget, uint8_t shown, const char **error);
+  /* Round 28, logging only: a monotonic count (QueryPerformanceCounter in the mod) read around the depth of field's
+   * and the vignette's entries for the Perf line. NULL: nothing is timed. */
+  int64_t (*perf_ticks)(void *user);
 } TfpFxPlatform;
 
 /* The saved per-weapon aiming-marker table as a value, when no settings store is bound:
@@ -146,6 +149,7 @@ typedef struct TfpFx {
   unsigned text_next;
   char status[2 * (TFP_DOF_TEXT + TFP_DOF_KEY) + TFP_DOF_TEXT + TFP_VIGNETTE_TEXT];
   char vignette_status[TFP_VIGNETTE_TEXT + 128];
+  struct { int64_t dof, vignette; } spent; /* round 28: perf_ticks spent since the last take (dof includes the vignette) */
   double vignette_away_since; /* seconds on the runtime clock: the view went away with the vignette still off; 0 otherwise */
   /* the session log: what was last reported */
   struct {
@@ -168,6 +172,9 @@ void tfp_wire_effects_frame(TfpWire *w);
  * Returns the characters written (0: not bound). */
 size_t tfp_wire_effects_second(TfpWire *w, char *out, size_t size);
 TfpFx *tfp_wire_effects_of(TfpWire *w);
+/* Round 28: the perf_ticks the depth of field (without the vignette) and the vignette took since the last call;
+ * zeroes them. Both 0 without a binder or without perf_ticks. */
+void tfp_wire_effects_take_spent(TfpWire *w, int64_t *dof, int64_t *vignette);
 /* What the vignette takes for "the view is there": `active` (the runtime's answer), and for 1.5 s after it went away
  * while first person is still on (a weapon swap), so the vignette is not given back for a swap. */
 bool tfp_wire_effects_vignette_view(TfpFx *fx, bool active);

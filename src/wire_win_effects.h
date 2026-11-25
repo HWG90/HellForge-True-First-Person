@@ -16,4 +16,6 @@ void tfp_win_effects_forget(void);
 /* The last World.entities list the vignette read: its entries, the microseconds reading it took and
  * the worst so far (for the session log). false: none read yet. */
 bool tfp_win_effects_last_scan(uint32_t *entries, uint32_t *microseconds, uint32_t *worst);
+/* How many entity lists were copied in full since the start (round 28: the Perf line logs the difference a second). */
+uint32_t tfp_win_effects_scans(void);
 #endif
