@@ -117,7 +117,7 @@ Features that cannot work on this build and say so instead of guessing: the pres
 
 `mod-goose.true-first-person.log` in the session folder under the install's `logs/sessions/`. Besides the lines of section 4:
 
-- `True First Person 0.6.0-view.1 …`, `Tick: game-thread callback on thread N`, `Image: …`, `Pins: 39 ok …`, `Reads: N microseconds per guarded 8-byte read`, `Ready. U toggles the view (F11 is HellForge's Armor LUT editor). Not in this build: …`, retail's own `Idle. F11 toggles True First Person; F8 edits arms and weapon placement.` (F8 does nothing here).
+- `True First Person 0.6.0-view.1 …`, `Tick: game-thread callback on thread N`, `Image: …`, `Pins: 39 ok …`, `Reads: N microseconds per guarded 8-byte read`, `Ready. U toggles the view (F11 is HellForge's Armor LUT editor). Not in this build: …`, and `Keys: …` lines about the toggle key's guard (round 36b: the key waits while the game's chat or an overlay window has the keyboard). Retail's own `Idle. F11 toggles …` line names retail's keys and is not written since round 36b (src/wire_rt.c).
 - `Status: <the controller's label>` on every change (retail logs the same label).
 - `State: enter requested (toggle key)`, `State: entered the native view request=0x… kind=6`, `State: aim in`, `State: aim out`, `State: aim kept (N)`, `State: swap (weapon identity changed)`, `State: seated camera detached (N)`, `State: left the native view: <why>`, `State: exit requested (toggle key)`, `State: exit complete`.
 - The backend's own lines: `Native entry: aim before=… camera=6 …`, `Native entry error: …`.
@@ -153,7 +153,7 @@ Install only on the user's word: game and HellForge closed, First Person Control
 
 | # | Do | Expect in the log |
 |---|---|---|
-| 1 | Start a session, reach the ship | banner, `Tick: …`, `Image: …`, perhaps `Waiting: …`, then `Pins: 39 ok, 0 mismatched, 0 unreadable`, `Reads: …`, `Idle. F11 toggles …`, `Ready. …`. No `Refused:` |
+| 1 | Start a session, reach the ship | banner, `Tick: …`, `Image: …`, perhaps `Waiting: …`, then `Pins: 39 ok, 0 mismatched, 0 unreadable`, `Reads: …`, `Keys: …`, `Ready. …` (no `Idle. F11 …` since round 36b). No `Refused:` |
 | 2 | With the Controller left on (once, to see the refusal) | `Refused: goose.first-person-controller is loaded …`; U does nothing |
 | 3 | In a mission, weapon in hand, standing: U | `State: enter requested (toggle key)`, `Native entry: aim before=false, after=…; camera=6; …`, `Status: First person enabled until manually stopped`, `State: entered the native view request=0x… kind=6`, `Hook: camera first fired … game+0x127a139`, `Hook: fov … game+0x127a120`, then a `View:` line each second with `phase=running kind=6` |
 | 4 | Walk and turn for ten seconds | `View:` lines with `gaps=0`, `eye_jump` of a few millimetres, `fov_jump=0.0000`, rising `calls=` |

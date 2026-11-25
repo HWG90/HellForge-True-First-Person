@@ -1404,6 +1404,52 @@ static void fov_note(void) { /* once a second, on its own: the field-of-view loc
                                 (double)f.game_radians*57.29578, (double)f.shown_radians*57.29578);
   told_fov = f.applied;
 }
+/* Round 36b: the toggle key (a letter since round 36) is not taken while text is typed (src/key_guard.h). The chat
+ * flag's place is read from the game's code once its pages read (tried every 5 s); until then the text keys are
+ * sampled each tick for the typing fallback. The flag and the host are only asked on a press. */
+#include "key_guard.h"
+#include "goose_overlay.h"
+static TfpKeyGuard key_guard;
+static TfpChatLayout chat_layout;
+static uint64_t chat_next_try;
+static char chat_why[160];
+static bool guard_read(void *u, uint64_t at, void *out, size_t size) { (void)u; return tfp_win_read(at, out, size); }
+static bool guard_key(void *u, int vk) { (void)u; return tfp_win_key_down(vk); }
+static bool guard_overlay(void) { /* a host window open or look capture held: the host has the keyboard */
+  HMODULE host = GetModuleHandleA(OV_HOST_DLL);
+  OvApiFn get = host ? (OvApiFn)(void *)GetProcAddress(host, "ov_api") : NULL;
+  const OvApi *ov = get ? get(3) : NULL; /* every host since API 3 answers; input_captured from API 8 (host 0.6.0) */
+  if (!ov) return false;
+  if (ov->version >= 8 && ov->size >= offsetof(OvApi, input_captured) + sizeof ov->input_captured && ov->input_captured)
+    return ov->input_captured() != 0;
+  return ov->look_capture && ov->look_capture() != 0;
+}
+static void guard_tick(int toggle_key) {
+  const uint64_t now = GetTickCount64();
+  if (!chat_layout.resolved && now >= chat_next_try && tfp_win_game()) {
+    char why[160];
+    chat_next_try = now + 5000;
+    if (tfp_chat_resolve(guard_read, NULL, tfp_win_game(), FP_GAME_SIZE, &chat_layout, why, sizeof why))
+      say("Keys: the toggle key waits while the game's chat is open (its flag at UI root game+0x%llx + 0x%x, from two of the game's "
+          "own chat-gated handlers)", (unsigned long long)(chat_layout.root - tfp_win_game()), (unsigned)chat_layout.flag);
+    else if (strcmp(why, chat_why)) {
+      snprintf(chat_why, sizeof chat_why, "%s", why);
+      say("Keys: the game's chat state is not readable yet (%s); until it is, a toggle press right after other typing is ignored", why);
+    }
+  }
+  if (!chat_layout.resolved) tfp_key_guard_sample(&key_guard, now, toggle_key, guard_key, NULL);
+}
+static bool guard_press(bool pressed) {
+  if (!pressed) return false;
+  TfpKeyContext c = {tfp_chat_open(guard_read, NULL, &chat_layout), guard_overlay(), false};
+#ifdef TFP_FEEL
+  c.panel = tfp_mod_panel_is_open() || tfp_wire_editor_active(&wire);
+#endif
+  char line[200];
+  const bool taken = tfp_key_guard_press(&key_guard, GetTickCount64(), &c, line, sizeof line) == TFP_KEY_TAKEN;
+  if (line[0]) say("Keys: %s", line);
+  return taken;
+}
 static void tick_body(void) {
 #ifdef TFP_FEEL
   int64_t mark = perf_qpc(); /* round 28: the sections of the Perf line */
@@ -1443,7 +1489,10 @@ static void tick_body(void) {
   bool down = tfp_win_focused() && tfp_win_key_down(TFP_TOGGLE_KEY);
   bool pressed = down && !key_held;
   key_held = down;
+  const int toggle_key = TFP_TOGGLE_KEY;
 #endif
+  if (toggle_key && tfp_win_focused()) guard_tick(toggle_key);
+  pressed = guard_press(pressed); /* round 36b: not while text is typed */
   if (stage == WAIT_PINS) {
     uint64_t now = GetTickCount64();
     if (pressed) say("Refused: the toggle key before the game's code pages could be read; try again once a mission or the ship is loaded");

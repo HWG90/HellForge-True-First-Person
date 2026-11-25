@@ -1081,7 +1081,10 @@ static bool rt_diagnostics_record(TfpRtHost *h, double tick, const V *rec) { /* 
 }
 
 /* ---- the mod's own: log, clock, mouse, the debug global, F11 ---------------------------------- */
-static bool rt_mod_log(TfpRtHost *h, const char *text) { io_log(W(h), text); return true; }
+/* Round 36b: retail's on_enable line names retail's keys (F11, F8); the mod's own "Keys:" and "Ready." lines name this
+ * build's, so that one line is not written. The runtime still makes the call (the retail vectors keep it). */
+#define TFP_RT_RETAIL_IDLE "Idle. F11 toggles True First Person; F8 edits arms and weapon placement."
+static bool rt_mod_log(TfpRtHost *h, const char *text) { if (!text || strcmp(text, TFP_RT_RETAIL_IDLE)) io_log(W(h), text); return true; }
 static bool rt_clock_now(TfpRtHost *h, V *o1) {
   TfpWire *w = W(h);
   double now = w->platform.clock ? w->platform.clock(w->platform.user) : NAN;
