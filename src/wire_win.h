@@ -52,4 +52,13 @@ bool tfp_win_writable32(uint64_t at);
 bool tfp_win_executable(uint64_t at);
 bool tfp_win_write(void *out, const void *data, size_t length);
 bool tfp_win_pin(uint64_t address);
+/* Round 28, for the Perf line (src/perf_line.h): cumulative counts since the start, any thread. HOST_WRITE: the
+ * helpers' host.write (their results into the mod's own structs); PROCESS_WRITE: WriteProcessMemory calls (the
+ * effects' game-memory writes count here too); QUERY: VirtualQuery calls of the Windows hosts (tfp_win_query);
+ * LOG: lines of the wire's log (say() in mod_view.c counts its own). */
+enum { TFP_WIN_COUNT_HOST_WRITE, TFP_WIN_COUNT_PROCESS_WRITE, TFP_WIN_COUNT_QUERY, TFP_WIN_COUNT_LOG, TFP_WIN_COUNTS };
+void tfp_win_count(int which);
+void tfp_win_counts(uint64_t out[TFP_WIN_COUNTS]);
+/* VirtualQuery(at, region, size), counted: `region` is a MEMORY_BASIC_INFORMATION. */
+size_t tfp_win_query(uint64_t at, void *region, size_t size);
 #endif

@@ -25,6 +25,7 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "wire_feel.h"
 #include "wire_win_engine.h"
 #include "wire_win_effects.h"
+#include "perf_line.h"
 #include "wire_warp.h"
 #include "engine.h"
 #include "mod_menu.h"
@@ -77,6 +78,31 @@ static TfpWireFeel feel;
 static TfpFxPlatform fx_platform;
 static bool lock_wanted = true;
 static LONG64 tick_cost_total, tick_cost_max, tick_cost_count; /* game thread: the tick's own time, for the Cost line */
+/* Round 28 (src/perf_line.h, docs/design/specs/2026-11-25-performance.md): the tick in sections, for the Perf line.
+ * Logging only: QueryPerformanceCounter at each section's end (about ten a tick), nothing allocated or formatted. */
+static int64_t perf_tick[TFP_PERF_SECTIONS], perf_total[TFP_PERF_SECTIONS], perf_most[TFP_PERF_SECTIONS];
+static int64_t perf_qpc(void) { LARGE_INTEGER t; QueryPerformanceCounter(&t); return t.QuadPart; }
+static void perf_lap(int section, int64_t *mark) { const int64_t now = perf_qpc(); perf_tick[section] += now - *mark; *mark = now; }
+/* The depth of field's and the vignette's time since the last take (src/wire_effects.c), taken out of `from`. */
+static void perf_effects(int from) {
+  int64_t dof = 0, vignette = 0;
+  tfp_wire_effects_take_spent(&wire, &dof, &vignette);
+  perf_tick[TFP_PERF_DOF] += dof, perf_tick[TFP_PERF_VIGNETTE] += vignette;
+  perf_tick[from] -= dof + vignette;
+  if (perf_tick[from] < 0) perf_tick[from] = 0;
+}
+/* After the tick: what is left is rest; each section into the second's sums. */
+static void perf_close(int64_t spent) {
+  perf_effects(TFP_PERF_MENUS); /* a stop from the options or the menu, after the frame */
+  int64_t rest = spent;
+  for (int i = 0; i < TFP_PERF_REST; i++) rest -= perf_tick[i];
+  perf_tick[TFP_PERF_REST] = rest > 0 ? rest : 0;
+  for (int i = 0; i < TFP_PERF_SECTIONS; i++) {
+    perf_total[i] += perf_tick[i];
+    if (perf_tick[i] > perf_most[i]) perf_most[i] = perf_tick[i];
+    perf_tick[i] = 0;
+  }
+}
 /* Three features are switched by options of the settings panel's "Locked view" tab, live (src/wire_options.h): the
  * arm drive (Animated arms), the action hold (Weapon put-away) and the eye's continuity (Smooth eye). Test files
  * beside the DLL, read once at the start, override the option: arms_live.txt / hold_lease.txt force the feature on,
@@ -233,8 +259,10 @@ static bool same_user_file(void *user, TfpSettingsFile which, const char *suffix
 }
 #endif
 
+static uint64_t say_lines; /* round 28: lines said, for the Perf line */
 static void say(const char *format, ...) {
   char line[700];
+  say_lines++;
   va_list args;
   va_start(args, format);
   vsnprintf(line, sizeof line, format, args);
@@ -791,12 +819,15 @@ static void arms_tick(void) {
   next_note = now + 1000;
   TfpArmDriveStats s;
   tfp_arm_drive_stats(&s);
-  if (s.frames == before.frames && s.refused == before.refused && s.idle == before.idle && s.restores == before.restores) return;
-  say("Arms: +%llu frames driven, %llu joints, %llu pieces refreshed, binds %llu, refused %llu (%s); +%llu frames in another camera, %u joints held",
-      (unsigned long long)(s.frames - before.frames), (unsigned long long)(s.joints - before.joints), (unsigned long long)(s.pieces - before.pieces),
-      (unsigned long long)s.binds, (unsigned long long)(s.refused - before.refused),
-      s.refused != before.refused ? tfp_arm_drive_reason_name(s.reason) : "none", (unsigned long long)(s.idle - before.idle), (unsigned)s.owned);
-  before = s;
+  if (s.frames != before.frames || s.refused != before.refused || s.idle != before.idle || s.restores != before.restores) {
+    say("Arms: +%llu frames driven, %llu joints, %llu pieces refreshed, binds %llu, refused %llu (%s); +%llu frames in another camera, %u joints held",
+        (unsigned long long)(s.frames - before.frames), (unsigned long long)(s.joints - before.joints), (unsigned long long)(s.pieces - before.pieces),
+        (unsigned long long)s.binds, (unsigned long long)(s.refused - before.refused),
+        s.refused != before.refused ? tfp_arm_drive_reason_name(s.reason) : "none", (unsigned long long)(s.idle - before.idle), (unsigned)s.owned);
+    before = s;
+  }
+  /* Round 28: every second, whatever the arm stats did (they were the only trigger up to 0.6.0-feel.53, so seconds with
+   * the drive idle were folded into the next line): what the mod costs, then the Perf line. */
   { /* what the mod costs: its tick and the arm drive's part of the draw, per frame, in the second just past */
     uint64_t drawn = 0; double mean = 0, most = 0;
     tfp_render_slot_cost(&drawn, &mean, &most);
@@ -805,6 +836,32 @@ static void arms_tick(void) {
     say("Cost: tick %.0f us mean, %.0f us largest over %ld ticks; arms in the draw %.0f us mean, %.0f us largest over %llu frames",
         tick_cost_count ? (double)tick_cost_total * us / (double)tick_cost_count : 0, (double)tick_cost_max * us, (long)tick_cost_count, mean, most,
         (unsigned long long)drawn);
+    /* the Perf line: the same ticks in sections, the vignette's entity copy, and what was counted in the second */
+    static uint64_t told_counts[TFP_WIN_COUNTS], told_calls, told_logs, told_say;
+    static uint32_t told_scans;
+    TfpPerfSecond p;
+    uint64_t counts[TFP_WIN_COUNTS], calls = 0, logs = 0;
+    memset(&p, 0, sizeof p);
+    p.ticks = (uint32_t)tick_cost_count;
+    for (int i = 0; i < TFP_PERF_SECTIONS; i++) {
+      p.mean_us[i] = tick_cost_count ? (double)perf_total[i] * us / (double)tick_cost_count : 0;
+      p.most_us[i] = (double)perf_most[i] * us;
+      perf_total[i] = perf_most[i] = 0;
+    }
+    tfp_win_effects_last_scan(&p.scan_entries, &p.scan_us, &p.scan_worst_us);
+    const uint32_t scans = tfp_win_effects_scans();
+    p.scans = scans - told_scans, told_scans = scans;
+    tfp_win_counts(counts);
+    eng_counts(&calls, &logs);
+    p.host_writes = (uint32_t)(counts[TFP_WIN_COUNT_HOST_WRITE] - told_counts[TFP_WIN_COUNT_HOST_WRITE]);
+    p.process_writes = (uint32_t)(counts[TFP_WIN_COUNT_PROCESS_WRITE] - told_counts[TFP_WIN_COUNT_PROCESS_WRITE]);
+    p.queries = (uint32_t)(counts[TFP_WIN_COUNT_QUERY] - told_counts[TFP_WIN_COUNT_QUERY]);
+    p.engine_calls = (uint32_t)(calls - told_calls);
+    p.log_lines = (uint32_t)(counts[TFP_WIN_COUNT_LOG] - told_counts[TFP_WIN_COUNT_LOG] + (logs - told_logs) + (say_lines - told_say));
+    memcpy(told_counts, counts, sizeof counts), told_calls = calls, told_logs = logs, told_say = say_lines;
+    char line[700];
+    tfp_perf_line(line, sizeof line, &p);
+    say("%s", line);
     tick_cost_total = tick_cost_max = 0, tick_cost_count = 0;
   }
 }
@@ -1214,9 +1271,13 @@ static void fov_note(void) { /* once a second, on its own: the field-of-view loc
 }
 static void tick_body(void) {
 #ifdef TFP_FEEL
+  int64_t mark = perf_qpc(); /* round 28: the sections of the Perf line */
   if (stage == RUNNING) { gate_note(); steady_note(); ads_seat_tick(); }
 #endif
   if (stage == RUNNING) { quit_guard(); fov_lock_tick(); lock_note(); fov_note(); }   /* not earlier: the game module and the guarded reader are set up in WAIT_MODULES */
+#ifdef TFP_FEEL
+  perf_lap(TFP_PERF_PRE, &mark);
+#endif
   if (stage == REFUSED) return;
   tick_thread = GetCurrentThreadId();
   if (!told_tick_thread) {
@@ -1270,6 +1331,7 @@ static void tick_body(void) {
   /* Engine values made in the tick live in the engine's per-frame buffer (src/engine.h). */
   eng_temp_begin();
   tfp_wire_feel_begin(&wire);
+  mark = perf_qpc();
   /* The editor's key (the menu's; default Page Up), on its edge. The panel is registered before the menu, so
    * the menu knows whether to offer the editor. */
   int editor_key = tfp_wire_menu_editor_key(&wire, TFP_EDITOR_KEY);
@@ -1280,18 +1342,25 @@ static void tick_body(void) {
     if (refused) say("Placement editor: %s", refused);
   }
   if (tfp_mod_editor_settled()) tfp_mod_panel_tick(hf, owner, &wire, panel_wanted, menu_unavailable(), tfp_wire_editor_toggle);
+  perf_lap(TFP_PERF_MENUS, &mark);
   tfp_wire_frame(&wire, extra);
+  perf_lap(TFP_PERF_FRAME, &mark);
+  perf_effects(TFP_PERF_FRAME);
   entry_note();
   head_note();   /* before the trace: a "Head:" line then stands above the rows of the frames it is about */
   warp_note();   /* round 22: the Warp Pack's glow */
   orphan_note(); /* before the trace: its edges open a trace window too */
   trace_note();
+  perf_lap(TFP_PERF_NOTES, &mark);
   tfp_wire_panel_frame(&wire);         /* what the user did in the mod's own panel since the last tick */
   tfp_wire_menu_frame(&wire);          /* the menu's queued buttons and toggles, and the two status rows */
   tfp_wire_options_tick(&wire, &options); /* Animated arms, Weapon put-away, Smooth eye: a changed answer reaches its setter (not during a hold) */
   tfp_wire_settings_save_frame(&wire); /* writes only when the store changed since the last write */
+  perf_lap(TFP_PERF_MENUS, &mark);
   eng_temp_end();
+  perf_lap(TFP_PERF_FRAME, &mark); /* the frame's engine temporaries, released */
   arms_tick();
+  perf_lap(TFP_PERF_ARMS, &mark);
   for (int i = 0; i < TFP_WIN_POSE_HOOKS; i++) {
     const TfpWinHook *hook = tfp_win_pose_hook(i);
     if (hook->refused) {
@@ -1339,6 +1408,9 @@ static void tick(HfMod *mod, float dt, void *unused) {
     const LONG64 spent = t1.QuadPart - t0.QuadPart;
     tick_cost_total += spent, tick_cost_count++;
     if (spent > tick_cost_max) tick_cost_max = spent;
+#ifdef TFP_FEEL
+    perf_close(spent);
+#endif
   }
 #ifdef TFP_FEEL
   else if (!InterlockedCompareExchange(&release_state, 0, 0)) release_on_game_thread();

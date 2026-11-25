@@ -29,6 +29,16 @@ static unsigned code_ranges;
 static SRWLOCK locks[TFP_WIN_HOOKS][2];
 static TfpWinHook hooks[TFP_WIN_HOOKS];
 static uint64_t hook_address[TFP_WIN_HOOKS];
+/* Round 28: what the Perf line counts (see wire_win.h). Relaxed atomics: the hooks may run off the game thread. */
+static atomic_uint_fast64_t counts[TFP_WIN_COUNTS];
+void tfp_win_count(int which) { atomic_fetch_add_explicit(&counts[which], 1, memory_order_relaxed); }
+void tfp_win_counts(uint64_t out[TFP_WIN_COUNTS]) {
+  for (int i = 0; i < TFP_WIN_COUNTS; i++) out[i] = (uint64_t)atomic_load_explicit(&counts[i], memory_order_relaxed);
+}
+size_t tfp_win_query(uint64_t at, void *region, size_t size) { /* VirtualQuery, counted */
+  tfp_win_count(TFP_WIN_COUNT_QUERY);
+  return VirtualQuery((const void *)(uintptr_t)at, (MEMORY_BASIC_INFORMATION *)region, size);
+}
 
 /* The function each dispatch slot must point at before this mod's hook goes in: exe RVA and the
  * bytes there. camera, fov, near: src/native_contract.h (verified in the game by the probe); the
@@ -103,7 +113,7 @@ static bool host_readable_span(void *u, uint64_t at, size_t length) {
   (void)u;
   for (unsigned regions = 0; cursor < end && regions < 4; regions++) {
     MEMORY_BASIC_INFORMATION r;
-    if (VirtualQuery((const void *)(uintptr_t)cursor, &r, sizeof r) != sizeof r || r.State != MEM_COMMIT ||
+    if (tfp_win_query(cursor, &r, sizeof r) != sizeof r || r.State != MEM_COMMIT ||
         (r.Protect & (PAGE_GUARD | PAGE_NOACCESS))) return false;
     const DWORD p = r.Protect & 0xff;
     if (p != PAGE_READONLY && p != PAGE_READWRITE && p != PAGE_WRITECOPY && p != PAGE_EXECUTE_READ && p != PAGE_EXECUTE_READWRITE &&
@@ -118,7 +128,7 @@ static bool host_readable_span(void *u, uint64_t at, size_t length) {
 static bool host_writable_slot(void *u, uint64_t at, uint64_t exe) {
   MEMORY_BASIC_INFORMATION r;
   (void)u;
-  if (VirtualQuery((const void *)(uintptr_t)at, &r, sizeof r) != sizeof r || r.State != MEM_COMMIT ||
+  if (tfp_win_query(at, &r, sizeof r) != sizeof r || r.State != MEM_COMMIT ||
       (r.Protect != PAGE_READWRITE && r.Protect != PAGE_WRITECOPY) || at + 8 > (uint64_t)(uintptr_t)r.BaseAddress + r.RegionSize) return false;
   return section_mapping(&r) && (uint64_t)(uintptr_t)r.AllocationBase == exe;
 }
@@ -126,19 +136,21 @@ static bool host_writable_slot(void *u, uint64_t at, uint64_t exe) {
 static bool host_writable_request_field(void *u, uint64_t at) {
   MEMORY_BASIC_INFORMATION r;
   (void)u;
-  return !(at & 3) && VirtualQuery((const void *)(uintptr_t)at, &r, sizeof r) == sizeof r && r.State == MEM_COMMIT &&
+  return !(at & 3) && tfp_win_query(at, &r, sizeof r) == sizeof r && r.State == MEM_COMMIT &&
          (r.Protect == PAGE_READWRITE || r.Protect == PAGE_WRITECOPY) && at + 4 <= (uint64_t)(uintptr_t)r.BaseAddress + r.RegionSize;
 }
 /* camera:228-232 */
 static bool host_executable(void *u, uint64_t at) {
   MEMORY_BASIC_INFORMATION r;
   (void)u;
-  if (VirtualQuery((const void *)(uintptr_t)at, &r, sizeof r) != sizeof r || r.State != MEM_COMMIT || !section_mapping(&r)) return false;
+  if (tfp_win_query(at, &r, sizeof r) != sizeof r || r.State != MEM_COMMIT || !section_mapping(&r)) return false;
   return r.Protect == PAGE_EXECUTE_READ || r.Protect == PAGE_EXECUTE_READWRITE || r.Protect == PAGE_EXECUTE_WRITECOPY;
 }
 static bool host_write(void *u, void *out, const void *data, size_t length) { /* WriteProcessMemory on this process */
   SIZE_T written = 0;
   (void)u;
+  tfp_win_count(TFP_WIN_COUNT_HOST_WRITE);
+  tfp_win_count(TFP_WIN_COUNT_PROCESS_WRITE);
   return WriteProcessMemory(GetCurrentProcess(), out, data, length, &written) && written == length;
 }
 static bool host_pin(void *u, uint64_t address) { /* camera:1059-1062 */
@@ -287,7 +299,7 @@ static void ops_query(void *u, uint64_t at, TfpOpsRegion *out) {
   MEMORY_BASIC_INFORMATION r;
   (void)u;
   memset(out, 0, sizeof *out);
-  if (VirtualQuery((const void *)(uintptr_t)at, &r, sizeof r) != sizeof r) return;
+  if (tfp_win_query(at, &r, sizeof r) != sizeof r) return;
   out->answered = true;
   out->state = r.State, out->kind = r.Type, out->protect = r.Protect;
   out->allocation = (uint64_t)(uintptr_t)r.AllocationBase;
@@ -328,7 +340,7 @@ static bool ops_call(void *u, TfpOpsNative which, uint64_t address, const uint64
   if (result) *result = value;
   return true;
 }
-static void ops_log(void *u, const char *text) { (void)u; hf->log(owner, "%s", text); }
+static void ops_log(void *u, const char *text) { (void)u; tfp_win_count(TFP_WIN_COUNT_LOG); hf->log(owner, "%s", text); }
 
 /* ---- keys and the mouse ------------------------------------------------------------------------- */
 bool tfp_win_focused(void) {
