@@ -971,3 +971,45 @@ So the whip is out, and soak 36's 0.381, 0.329 and 0.682 m frames are main's aga
 
 - Whether such a flick happens with the view on the native camera too (soak 36's was in the 15 s head-camera wait after
   a stratagem or grenade, which round 29's sceptic left open).
+
+## Round 39: the reload's step (class C, open item 6 of round 13)
+
+Written 2026-11-25 (branch `round39-reload-eye`), from the user's report on 0.6.0-feel.56: "on some weapons, the
+weapon moves forward and then jerks back on reloads", the screencast of 13:46:55 local time and the log of session
+597931bd.
+
+**What it is.** The game's, not the placement's. While request+0x8d is set, the kind-6 evaluator blends the rig's
+whole seating vector v (rig eye, socket term, optic depth D) to a constant vector C of its data as request+0x8f
+changes, over the weight at +0x88 (game+0x1287af6..0x1287b71), holds it at C while +0x8f stays set
+(0x1287ba2..0x1287bb4), and adds C a second time (0x1287bbf..0x1287beb). The eye hangs on the root, so it goes
+v - C back along the view in about 75 ms and forward again at the end: 0.233 m in the user's reload of 18:47:03
+(lines 6985-7100 of the log, kept as `tests/reference/reload/feel56-L6985-7100.log`), every one of the 8 reloads of the
+session 0.21 to 0.26 m. The drawn gun is the body's and stays, so on screen it goes forward and jerks back. The
+screencast's tan rifle with a scope is that weapon: its reload is at 8.6 s of it, 18:47:03.6 UTC, the AR-23 Liberator
+of the log (`request_weapon=472`).
+
+**What is done.** `src/reload_hold.h`: the rig's own forward value of the last frame with none of C in it (with what
+the held depth added there) is put back in the share r of C, r (held - C), on node 5 and the root, the held depth's
+pair; the eye then stands at (1-r) v + r held + C, never at C. Weighted by the hip share: full aim keeps the game's own
+reload, which takes the eye off the sight on purpose (the drawn gun there is the game's aim pose). C is read from the
+evaluator's code: 460 bytes checked, the nine instructions that name it must name the same three floats, which are read
+from the game's memory (the file image has zeros there: a data section the game fills). Logged once a reload:
+"Reload: eye held through the reload (would have slid X m)", or why it was not.
+
+**Tests.** `tests/run-reload-hold.sh` (the rule; made-up reloads at four frame times through a model of the evaluator:
+the Liberator, a vector 0.08 m longer with a C that is not zero, a reload cancelled half way both ways the game could
+turn its blend, a weapon swapped in the reload, the hip share eased in it, the held depth's own term; and a replay of
+the user's window: the eye's offset from the root along the level view 0.233 to 0.235 m held, 0.001 to 0.234 m as the
+game had it). `tests/run-wire-pose.sh` (the real helper on fake game memory: held to 2e-6 m at the hip at 9, 16 and 33
+ms frames, the game's own in full aim, main's slide where the evaluator is not the pinned one; frames without a reload
+the same bits with and without it). `tests/test_harness_reload.py`: the matrix's reload phases now fail on the user's
+window as written (slide 0.233 m) and pass on its replay.
+
+### What only the game can show
+
+1. That C read in the game is what the log implies (the eye in the reload sits about on the root: C near 0), and the
+   "Reload:" line at every reload.
+2. The eye still at a hip reload, and the gun with it, on the Liberator and on a weapon with another optic depth.
+3. A reload begun or ended in full aim, and an aim begun in a reload: the game's own pull off the sight, eased in.
+4. The 2 cm rise of the eye at the Liberator's reload (C's upward part) is left as the game has it.
+5. A reload right after firing: the vector held is the last frame's before the reload, recoil and all.
