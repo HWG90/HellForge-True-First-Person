@@ -664,6 +664,89 @@ int main() {
     CHECK(veil().held_back == 1 && std::fabs(first - TFP_CAMERA_VEIL_CLEAR) < .002f && std::fabs(next - TFP_CAMERA_VEIL_CLEAR) < .002f);
     g.end();
   }
+  // ---- 23. Round 32: a kept release whose view really leaves (soak 37, 10:07:04.745, the P/40-K Bolt Pistol fired in
+  // full aim). The game drops the aim (Drop: kind=4, mask 0) and evaluates the head camera 0.7 ms after the native frame
+  // of full aim; nothing holds the native eye (the lease ended without a native exit) and the continuity takes nothing in
+  // full aim, so main showed that frame 0.425 m from the native eye, unveiled, and the head camera from there on. Now
+  // the kept frame's step from the eye last handed to the game is clamped to tfp_camera_veil_let_in(1) and what is left
+  // is let out over TFP_CAMERA_VEIL_LET_OUT_MS; the Drop's tick (head visibility still active) opens the veil for the
+  // frames after it, which are veiled; the Wait's tick that switched the body off closes it. Scene: the sight 0.13 m in
+  // front of the head camera's eye and 0.27 m below it (the rows: 0.297 m along the view, 0.306 across). The same
+  // script unarmed is main's frame (bare). Why nothing held the eye in the game the log does not say (no swap hold,
+  // and retail's 150 ms correction was not running: the next rows go on at the head camera's own pace); here nothing
+  // is remembered because the release's request names no firearm, with the eye hold and the sight anchor off. ----
+  {
+    float first[2] = {0, 0}, worst[2] = {0, 0}, last_gap[2] = {0, 0}; uint64_t veiled[2] = {0, 0}, clamped = 0, held = 0;
+    for (int armed = 0; armed < 2; ++armed) {
+      Game g; fresh(true, false, false); tfp_camera_set_veil_second(false);
+      g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+      CHECK(tfp_camera_set_cut_hold(g.gen, 0) == 1);                     // no eye hold and no sight anchor: nothing kept the native eye
+      g.eye[0] = -.02f; g.eye[1] = .30f; g.eye[2] = -.26f;                // the sight: 0.31 m in front of the head, 0.23 m below it
+      CHECK(tfp_camera_set_weapon_key(g.gen, 0x1111) == 1);
+      TfpHeadTick t; std::memset(&t, 0, sizeof t);
+      t.bound = t.view = t.active = true; t.phase = "active"; t.kind = 6; t.head = 5; t.torso = 11; t.shoulders = 12; t.rows = 29; t.full = true;
+      if (armed) tfp_camera_veil_from_head(&t); else tfp_camera_set_veil(false);
+      for (int i = 0; i < 30; ++i) { g.native(0, true); g.frame(33.3); }
+      g.s.request[2] = 0; g.native(0, true); g.frame(33.3);             // fired: no firearm in the request, nothing remembered
+      const float native_eye[3] = {g.shown[0], g.shown[1], g.shown[2]};
+      g.hip(0); g.s.aim = 1; g.frame(.7);                                 // the kept frame, mask 0, still in full aim
+      const float d[3] = {g.shown[0] - native_eye[0], g.shown[1] - native_eye[1], g.shown[2] - native_eye[2]};
+      first[armed] = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+      t.kind = 4;
+      if (armed) tfp_camera_veil_from_head(&t);                           // the Drop's tick: head visibility active, nothing drawn yet
+      float prev[3] = {g.shown[0], g.shown[1], g.shown[2]}, step[3] = {d[0], d[1], d[2]};
+      const uint64_t frames_before = veil().frames;
+      for (int i = 0; i < 14; ++i) {
+        if (i == 1 && armed) { t.on_again = 26; t.on_again_head = 5; t.turned_off = 26; tfp_camera_veil_from_head(&t); } // the Wait's tick: the body off
+        if (i == 2 && armed) { t.on_again = t.on_again_head = t.turned_off = 0; tfp_camera_veil_from_head(&t); }
+        if (i == 1) veiled[armed] = veil().frames - frames_before;
+        g.hip(0); g.frame(i == 0 ? 32.6 : 33.3);
+        const float now[3] = {g.shown[0] - prev[0], g.shown[1] - prev[1], g.shown[2] - prev[2]};
+        const float change = std::sqrt((now[0] - step[0]) * (now[0] - step[0]) + (now[1] - step[1]) * (now[1] - step[1]) + (now[2] - step[2]) * (now[2] - step[2]));
+        if (change > worst[armed]) worst[armed] = change;
+        std::memcpy(prev, g.shown, 12); std::memcpy(step, now, 12);
+      }
+      last_gap[armed] = g.from_head_eye();
+      if (armed) { clamped = veil().clamped; held = veil().held_back; }
+      g.end();
+    }
+    std::printf("  a kept release whose view leaves (10:07:04.745): first step %.3f m (bare %.3f), %llu frame(s) veiled after it, "
+                "largest change of step %.3f m (bare %.3f), %.3f m from the head camera's eye at the end; held back %llu, clamped %llu\n",
+                first[1], first[0], (unsigned long long)veiled[1], worst[1], worst[0], last_gap[1], (unsigned long long)held, (unsigned long long)clamped);
+    CHECK(first[0] > .25f);                                               // main's frame: the whole way from the sight
+    CHECK(first[1] <= tfp_camera_veil_let_in(1) + .002f);                 // at most the let-in cap
+    CHECK(held == 1 && clamped == 1 && veiled[1] == 1);                   // kept, clamped, and the frame after the Drop veiled
+    CHECK(worst[1] < .06f && worst[0] > .2f);                             // no change of step at the judge's 0.06 m
+    CHECK(last_gap[1] < .002f && last_gap[0] < .002f);                    // let out: the head camera's own eye after 300 ms
+  }
+  // ---- 24. Round 32: the clamp is the kept frame's only, and it ends with the native view. A kept release with no eye
+  // hold that goes straight back to the native view: the lone frame is clamped (0.04 m out instead of 0.30), the native
+  // frame after it is the game's own, and the head-camera frames of a later leave are not carried. ----
+  {
+    Game g; fresh(true, false, false); tfp_camera_set_veil_second(false);
+    g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+    CHECK(tfp_camera_set_cut_hold(g.gen, 0) == 1);
+    g.eye[0] = -.02f; g.eye[1] = .30f; g.eye[2] = -.26f;
+    CHECK(tfp_camera_set_weapon_key(g.gen, 0x1111) == 1);
+    tfp_camera_set_veil(true);
+    for (int i = 0; i < 30; ++i) { g.native(0, true); g.frame(33.3); }
+    g.s.request[2] = 0; g.native(0, true); g.frame(33.3);
+    const float native_eye[3] = {g.shown[0], g.shown[1], g.shown[2]};
+    g.hip(0); g.s.aim = 1; g.frame(.35);
+    const float lone = std::sqrt((g.shown[0] - native_eye[0]) * (g.shown[0] - native_eye[0]) + (g.shown[1] - native_eye[1]) * (g.shown[1] - native_eye[1])
+                                 + (g.shown[2] - native_eye[2]) * (g.shown[2] - native_eye[2]));
+    g.native(0, false); g.frame(33.0); const float back = g.from_rig_eye();
+    tfp_camera_veil_tick(false);
+    g.s.request[2] = 0x444; g.eye[0] = 0; g.eye[1] = -.22f; g.eye[2] = .13f; CHECK(tfp_camera_set_cut_hold(g.gen, 15) == 1); // a firearm again, held as every swap is
+    for (int i = 0; i < 30; ++i) { g.native(0, false); g.frame(33.3); tfp_camera_veil_tick(false); }
+    standing(g, 4, 33.3, true, 2);                                        // a swap out of the hip, a second later
+    g.hip(2); g.frame(33.3); const float swap = ahead_of_head(g);
+    std::printf("  a kept release straight back, no hold: lone frame %.3f m from the native eye, then %.3f m from the rig's; a swap after: %.3f m in front of the head\n",
+                lone, back, swap);
+    CHECK(lone <= tfp_camera_veil_let_in(1) + .002f && back < .002f && veil().moved == 1 && veil().clamped == 1);
+    CHECK(std::fabs(swap - TFP_CAMERA_VEIL_CLEAR) < .002f);
+    g.end();
+  }
   std::printf("camera veil through the helper: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }
