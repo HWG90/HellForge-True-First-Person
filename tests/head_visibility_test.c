@@ -363,6 +363,21 @@ static int walker_mask(int i) { return vf_byte(walker_mesh[i] + 0xDC); }
 static bool walker_drawn(void) { for (int i = 0; i < 5; i++) if (walker_mask(i) != 255) return false; return true; }
 static bool walker_seen_through(void) { for (int i = 0; i < 4; i++) if (walker_mask(i) != 254) return false; return walker_mask(4) == 255; }
 
+/* Round 38: once the first of the suit's meshes is written and read back, the suit's resource is changed: the write
+ * arms it (flip_walker), the read of that mesh's mask that follows it does it (flip_read). */
+static bool flip_after_walker, flip_armed; static int flipped;
+static void flip_walker(double unit) { if (flip_after_walker && unit == walker_ref * 4) { flip_after_walker = false; flip_armed = true; } }
+static bool flip_read(void *user, double at, size_t n, uint8_t *out, TfpVisText *why) {
+  const bool ok = vf_read(user, at, n, out, why);
+  for (int i = 0; flip_armed && i < 4; i++) if (at == walker_mesh[i] + 0xDC) { flip_armed = false; flipped += 1; vf_poke_byte(WALKER_OBJECT + 0x358, 0); }
+  return ok;
+}
+static bool seat_step_why(const char *script, TfpVisText *why) {
+  char line[512];
+  snprintf(line, sizeof line, "%s", script);
+  vf_begin(line, seat_tokens, sizeof seat_tokens / sizeof seat_tokens[0]);
+  return tfp_head_update(head, why);
+}
 static bool prepare(const char *name, size_t last) {
   size_t count = sizeof head_visibility_vectors / sizeof head_visibility_vectors[0];
   int run = -1;
@@ -428,6 +443,12 @@ static bool seat_cases(void) {
   /* the glide out of the seat: the diver is no longer seated, the seat answer still yes: the diver stays hidden */
   SCHECK(seat_step("Vs_seated=0 Vtick=103750 !update", false));
   tfp_head_result(head, &r); SCHECK(r.phase == TFP_HEAD_ACTIVE && r.seat && all_out(diver, n));
+  /* the glide out running in the native view (camera kind 6, the round 38 check of 2026-11-25): the eye still up to
+   * 3 m away in the cockpit, so the diver (and the first-person rig's clothing) stays hidden whatever the camera kind */
+  SCHECK(seat_step("Vs_kind=6 Vtick=103751 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.phase == TFP_HEAD_ACTIVE && r.seat && all_out(diver, n));
+  SCHECK(seat_step("Vs_kind=4 Vtick=103752 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.phase == TFP_HEAD_ACTIVE && r.seat && all_out(diver, n));
   SCHECK(seat_step("Vs_seated=1 Vtick=103755 !update", false));
   /* the seated head option off: the seat hides all the same */
   SCHECK(seat_step("Vseated_head=0 Vtick=103760 !update", false));
@@ -478,6 +499,22 @@ static bool seat_cases(void) {
   seat_on = false;
   SCHECK(seat_step("Vtick=104780 !update", false));
   tfp_head_result(head, &r); SCHECK(!r.seat && r.hidden_cockpit == 0 && walker_drawn() && r.hidden == 8 && same_masks(diver, n));
+  /* The suit stops being the suit between the look and the hides (its resource gone after its first mesh was written,
+   * the check before each hide, beyond retail): refused as an owner that changed before the hide, not left to the
+   * mesh lookup after it; nothing more of the suit is written. */
+  flip_after_walker = true; vf_after_set = flip_walker; hio.read = flip_read;
+  seat_on = true;
+  TfpVisText why = {0};
+  SCHECK(seat_step_why("Vtick=104790 !update", &why));
+  vf_after_set = NULL; hio.read = vf_read;
+  tfp_head_result(head, &r);
+  SCHECK(flipped == 1 && why.present && strstr(why.text, "Head owner changed before hide") && set_calls(walker, "default") == 1 && r.hidden_cockpit == 0);
+  if (!(why.present && strstr(why.text, "Head owner changed before hide"))) fprintf(stderr, "seat: the suit changed before the hide: %s\n", why.present ? why.text : "(nothing)");
+  vf_poke_byte(WALKER_OBJECT + 0x358, WALKER[0]);
+  for (int i = 0; i < 5; i++) vf_poke_byte(walker_mesh[i] + 0xDC, 255);
+  seat_on = false;
+  SCHECK(seat_step("Vtick=104795 !update", false));
+  tfp_head_result(head, &r); SCHECK(!r.seat && r.hidden_cockpit == 0 && walker_drawn());
   /* switched off (a stop) in the seat: everything given back */
   seat_on = true;
   SCHECK(seat_step("Vtick=104800 !update", false));
