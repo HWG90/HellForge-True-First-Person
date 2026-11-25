@@ -23,12 +23,17 @@ without the veil's move).
 Round 26: the aim actions (matrix.AIMED) go into full aim: aim.full_aim() holds the aim, presses the game's aim-mode
 button (middle) and reads the log until it says "State: aim in". Each such line says whether full aim was reached and
 the summary counts them; before round 26 no soak reached it (one "State: aim in" in soaks 8 to 34).
+
+Round 30: the dive-swap action (matrix.DIVES) is played by dive.dive_swap(): a dive and a swap that leave the game's
+view, for the head of a diving body through the veil. Each says whether the view was left and how low the head was;
+the summary counts them and gives the lowest head (round 26's estimate: 0.55 m below the eye).
 """
 import random
 import sys
 import time
 
 import aim
+import dive
 import drive
 import matrix
 
@@ -82,6 +87,26 @@ def aim_summary(aims, lines):
     return text + (f"; not reached: {', '.join(missed)}" if missed else "")
 
 
+def dive_summary(dives):
+    """The summary's line on the dive + swap actions: how many left the game's view, and the lowest head measured."""
+    left = [r for _, r in dives if r["left"]]
+    lows = [r["lowest_up"] for r in left if r["lowest_up"] is not None]
+    text = f"dive + swap: {len(left)} of {len(dives)} left the game's view"
+    return text + (f"; {sum(len(r['veil_heads']) for r in left)} veiled frames, the head lowest {min(lows):+.3f} m from the eye"
+                   if lows else "; the head in a dive not measured")
+
+
+def act(device, name, script, settle, log, sleep=time.sleep):
+    """One action: a phase of matrix.DRIVEN (the aims, the dive + swap) by matrix.play(), which reads the log as it
+    goes, then `settle`; any other its script with the settle as a wait. Returns matrix.play()'s result, or None."""
+    if name in matrix.DRIVEN:
+        aimed = matrix.play(device, name, log)
+        sleep(settle)
+        return aimed
+    device.run(f"{script}; wait {settle:.2f}")
+    return None
+
+
 def judge_log(lines):
     """A log judged in one piece for each camera style it ran in: one line of text for each stretch between two
     "Camera style:" lines in which a frame was held or traced. Frames on either side of such a line are not measured
@@ -118,6 +143,7 @@ def main(argv):
     end = time.time() + minutes * 60
     worst, veiled, bad, count, seen = 0.0, 0.0, [], 0, set()
     aims = []   # (action number, name, reached) of every aim action
+    dives = []  # (action number, dive.dive_swap's result) of every dive + swap
     while time.time() < end:
         if rng.random() < 0.3:
             name, script, settle = "overlap", rng.choice(OVERLAPS), 3.0
@@ -126,13 +152,8 @@ def main(argv):
             script, settle = matrix.PHASES[name]
         settle *= rng.choice((0.15, 0.4, 1.0))   # often the next action begins before this one is over
         start = log.stat().st_size
-        aimed = None
         try:
-            if name in matrix.AIMED:
-                aimed = matrix.play(d, name, log)
-                time.sleep(settle)
-            else:
-                d.run(f"{script}; wait {settle:.2f}")
+            aimed = act(d, name, script, settle, log)
         except drive.DriveError as error:
             print(f"stopped: {error}")
             break
@@ -149,7 +170,10 @@ def main(argv):
         if flag:
             bad.append((count, name, script, j["missed"], round(j["largest_jump_m"], 3)))
         print(f"{count:3d} {'BAD ' if flag else 'ok  '}{name:16s} missed {j['missed']} {matrix.describe(j)} kinds {j['kinds']}  {script[:60]}", flush=True)
-        if aimed is not None:
+        if aimed is not None and name in matrix.DIVES:
+            dives.append((count, aimed))
+            print(f"      {dive.text(aimed)}", flush=True)
+        elif aimed is not None:
             aims.append((count, name, aimed["reached"]))
             print(f"      {matrix.aim_text({**aimed, **aim.counts(lines)})}", flush=True)
         for text in matrix.pop_lines(j):
@@ -166,6 +190,7 @@ def main(argv):
     print("  " + matrix.style_summary(matrix.style_in_force(before), lines))
     print("  the whole log: " + counted(j["pops"]))
     print("  " + aim_summary(aims, lines))
+    print("  " + dive_summary(dives))
     for row in bad:
         print("  flagged:", row)
     across = unlisted(j["pops"], seen)

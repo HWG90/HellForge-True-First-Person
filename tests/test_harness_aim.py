@@ -50,13 +50,19 @@ class FakeLog:
 
 
 class FakeGame:
-    """Records every script; `react(script, log)` writes what the game would log after it."""
+    """Records every script; `react(script, log)` writes what the game would log after it. With a Clock, a script
+    takes its own time on it (drive.events: the real helper blocks for the whole script), and `times` keeps each
+    script's (start, end)."""
 
-    def __init__(self, log, react=None):
-        self.log, self.react, self.scripts = log, react, []
+    def __init__(self, log, react=None, clock=None):
+        self.log, self.react, self.scripts, self.clock, self.times = log, react, [], clock, []
 
     def run(self, script):
         self.scripts.append(script)
+        begun = self.clock() if self.clock else 0.0
+        if self.clock:
+            self.clock.now += drive.events(script)[1]
+        self.times.append((begun, self.clock() if self.clock else 0.0))
         if self.react:
             self.react(script, self.log, len(self.scripts))
         return ""
@@ -74,6 +80,21 @@ class Events(unittest.TestCase):
     def test_the_weapon_functions_menu_is_r_held_then_an_arrow(self):
         lines, _ = drive.events(f"down r; wait {aim.MENU_S}; key arrowright; wait 0.2; up r")
         self.assertEqual(lines, ["0 d 82", "830 d 39", "910 u 39", "1140 u 82"])
+
+    def test_the_wheel_is_one_line_a_notch_up_or_down(self):
+        # round 30: the game's scope range on PC is hold R and the mouse wheel up
+        lines, total = drive.events("wheel 2")
+        self.assertEqual(lines, ["0 w 120", "100 w 120"])
+        self.assertAlmostEqual(total, 2 * drive.WHEEL_GAP_S)
+        self.assertEqual(drive.events("wheel -1")[0], ["0 w -120"])
+        for bad in ("wheel 0", f"wheel {drive.WHEEL_MOST + 1}"):
+            with self.assertRaises(drive.DriveError):
+                drive.events(bad)
+
+    def test_the_range_step_is_r_held_then_the_wheel_up(self):
+        lines, _ = drive.events(aim.ZOOM_STEP)
+        self.assertEqual(lines, ["0 d 82", "830 w 120", "1230 u 82"])
+        self.assertEqual(drive.held_after(aim.ZOOM_STEP, {"right"}), {"right"})   # the aim stays held through it
 
     def test_what_is_held_after_a_script(self):
         self.assertEqual(drive.held_after("down right; keep right; wait 0.35"), {"right"})
@@ -121,6 +142,20 @@ class Helper(unittest.TestCase):
     def test_the_mode_switch_and_the_release_in_later_runs(self):
         self.assertEqual(self.play("click middle")[1], ["button M down", "button M up"])
         self.assertEqual(self.play("up right")[1], ["button R up"])
+
+    def test_the_wheel_reaches_send_input_with_whole_notches(self):
+        code, sent, result = self.play("down r; wait 0.8; wheel 1; wait 0.3; up r; wheel -2")
+        self.assertEqual(code, 0)
+        self.assertEqual(sent, ["key 82 down", "wheel 120", "key 82 up", "wheel -120", "wheel -120"])
+        self.assertIn("played=5 failed=0", result)
+
+    def test_a_part_notch_or_none_is_refused(self):
+        work = Path(tempfile.mkdtemp(dir=self.dir))
+        (work / "script.txt").write_text("0 w 60\n10 w 0\n20 w 120\n")
+        code = subprocess.run([str(self.exe)], cwd=work).returncode
+        self.assertEqual(code, 4)
+        self.assertEqual([l.split(" ", 1)[1] for l in (work / "sent.txt").read_text().splitlines()], ["wheel 120"])
+        self.assertIn("played=3 failed=2", (work / "result.txt").read_text())
 
     def test_keep_keeps_only_what_it_names(self):
         _, sent, _ = self.play("down right; keep right; down w; wait 0.2")
@@ -206,33 +241,150 @@ class FullAim(unittest.TestCase):
         self.assertEqual(scripts, ["down right; keep right; wait 0.35", "click middle", "click left 0.5; wait 0.4", "up right"])
 
 
+def _aim_line(kind, fov, sight=0.220, depth=0.270, at="10:00:01.000"):
+    return (AIM_IN_LINE.replace("10:00:01.000 Aim: in", f"{at} Aim: {kind}").replace("fov 30.8 shown 30.8", f"fov {fov} shown {fov}")
+            .replace("sight 0.220 m", f"sight {sight:.3f} m").replace("depth 0.270 m", f"depth {depth:.3f} m"))
+
+
 class ZoomCycle(unittest.TestCase):
-    def test_the_first_direction_that_changes_the_zoom_is_kept_and_pressed_again(self):
-        log, clock = FakeLog(self), Clock()
-        fovs = iter([15.0, 7.5])
+    """Round 30: the scope's range is hold R and the mouse wheel up (aim.ZOOM_STEP), in full aim first, then before
+    aiming; each range held aim.ZOOM_HOLD_S in full aim, judged by the field of view of the "Aim:" lines."""
+
+    def setUp(self):
+        self.log, self.clock = FakeLog(self), Clock()
+
+    def zoom(self, react):
+        self.game = game = FakeGame(self.log, react, self.clock)
+        tail = aim.LogTail(self.log.path)
+        result = aim.scope_zoom(game, tail, sleep=self.clock.sleep, clock=self.clock)
+        tail.read()
+        return game.scripts, result, tail
+
+    def free_holds(self, step):
+        """For each run of `step`: the seconds from its end (R let go: the menu shut) to the next script."""
+        times, scripts = self.game.times, self.game.scripts
+        return [round(times[i + 1][0] - times[i][1], 3) for i, s in enumerate(scripts) if s == step]
+
+    def test_the_hold_is_two_seconds(self):
+        # the brief: each range held at least 2 s in full aim (the testers' shake is in a range held)
+        self.assertEqual(aim.ZOOM_HOLD_S, 2.0)
+
+    def test_each_range_in_full_aim_is_held_and_the_ranges_come_round(self):
+        fovs = iter([20.0, 10.0, 30.8])
 
         def react(script, log, n):
             if script == "click middle":
                 log.write("10:00:00.700 State: aim in", AIM_IN_LINE)
-            elif "arrowleft" in script:
-                log.write(AIM_IN_LINE.replace("Aim: in", "Aim: changed").replace("fov 30.8 shown 30.8", "fov {0} shown {0}".format(next(fovs))))
-        game = FakeGame(log, react)
-        tail = aim.LogTail(log.path)
-        result = aim.full_aim(game, tail, 1.0, aim.zoom_cycle, sleep=clock.sleep, clock=clock)
-        menu = f"down r; wait {aim.MENU_S}; key %s; wait 0.2; up r"
-        self.assertEqual(game.scripts, ["down right; keep right; wait 0.35", "click middle", menu % "arrowright", menu % "arrowleft",
-                                        menu % "arrowleft", "up right"])
-        self.assertEqual(result["zoom_key"], "arrowleft")
-        self.assertEqual(aim.zoom_levels(tail.lines), [7.5, 15.0, 30.8])
+            elif script == aim.ZOOM_STEP:
+                fov = next(fovs)
+                log.write(_aim_line("changed", fov, sight=0.22 if fov == 30.8 else 0.35))
+            elif script == "up right":
+                log.write("10:00:08.000 State: aim out", "10:00:08.000 Aim: out after 6.6 s; zoom levels (game fov: sight m, depth m, optic): "
+                          "30.8: sight 0.220, depth 0.270; 20.0: sight 0.350, depth 0.270; 10.0: sight 0.350, depth 0.270 | x")
+        scripts, result, tail = self.zoom(react)
+        self.assertEqual(scripts, ["down right; keep right; wait 0.35", "click middle", aim.ZOOM_STEP, aim.ZOOM_STEP, aim.ZOOM_STEP, "up right"])
+        self.assertEqual(result["zoom_where"], "in aim")
+        self.assertEqual([(z["fov_before"], z["fov_after"], z["zoomed"]) for z in result["zoom_steps"]],
+                         [(30.8, 20.0, True), (20.0, 10.0, True), (10.0, 30.8, True)])
+        self.assertTrue(result["zoom_steps"][0]["seat_moved"])          # 0.220 -> 0.350 m: the game reseated the sight
+        self.assertTrue(all(z["full_aim"] for z in result["zoom_steps"]))
+        # every range, the last too, held 2 s of free full aim after R is let go: the menu's own time is not the hold
+        # (round 30's review: begun before the step left 0.77 s with the menu shut, the last range 1.1 s)
+        holds = self.free_holds(aim.ZOOM_STEP)
+        self.assertEqual(len(holds), 3)
+        self.assertTrue(all(h >= 2.0 for h in holds), holds)
+        self.assertEqual(aim.zoom_levels(tail.lines), [10.0, 20.0, 30.8])
+        self.assertTrue(aim.verdict(result, tail.lines, aim.ZOOM_HOLD_S, zoom=True)["pass"])
 
-    def test_no_direction_changes_the_zoom(self):
-        log, clock = FakeLog(self), Clock()
-        game = FakeGame(log, lambda s, log, n: log.write("10:00:00.700 State: aim in", AIM_IN_LINE) if s == "click middle" else None)
-        tail = aim.LogTail(log.path)
-        result = aim.full_aim(game, tail, 1.0, aim.zoom_cycle, sleep=clock.sleep, clock=clock)
-        self.assertIsNone(result["zoom_key"])
-        self.assertEqual(result["zoom_tries"], list(aim.ZOOM_KEYS))
-        self.assertFalse(aim.verdict(result, tail.lines, 1.0, zoom=True)["pass"])
+    def test_a_new_aim_in_line_at_another_field_of_view_is_a_change(self):
+        # where R in the sights takes the game out of full aim and back, the new range comes as an "Aim: in" line
+        def react(script, log, n):
+            if script == "click middle":
+                log.write("10:00:00.700 State: aim in", AIM_IN_LINE)
+            elif script == aim.ZOOM_STEP and n == 3:
+                log.write(_aim_line("in", 20.0, at="10:00:02.000"))
+        _, result, _ = self.zoom(react)
+        self.assertEqual((result["zoom_steps"][0]["fov_after"], result["zoom_steps"][0]["zoomed"]), (20.0, True))
+        self.assertEqual(result["zoom_where"], "in aim")
+
+    def test_no_change_in_aim_then_the_ranges_before_aiming(self):
+        aims = [0]
+
+        def react(script, log, n):
+            if script == "click middle":
+                aims[0] += 1
+                log.write(f"10:00:{aims[0]:02d}.700 State: aim in", _aim_line("in", 30.8 if aims[0] < 3 else 15.0, at=f"10:00:{aims[0]:02d}.900"))
+            elif script == "up right":
+                log.write(f"10:00:{aims[0]:02d}.990 State: aim out", f"10:00:{aims[0]:02d}.990 Aim: out after 2.4 s; zoom levels (game fov: "
+                          "sight m, depth m, optic): 30.8: sight 0.220, depth 0.270 | x")
+        scripts, result, tail = self.zoom(react)
+        in_aim = [z for z in result["zoom_steps"] if z["where"] == "in aim"]
+        before = [z for z in result["zoom_steps"] if z["where"] == "before aim"]
+        self.assertEqual(len(in_aim), aim.ZOOM_STEPS)
+        self.assertFalse(any(z["zoomed"] for z in in_aim))
+        self.assertEqual(result["zoom_where"], "before aim")
+        self.assertEqual([(z["fov_before"], z["fov_after"], z["zoomed"]) for z in before[:2]], [(30.8, 30.8, False), (30.8, 15.0, True)])
+        # before aiming the step comes with no aim held, then a whole full aim of its own
+        first_before = scripts.index(aim.ZOOM_STEP + "; wait 0.5")
+        self.assertEqual(scripts[first_before - 1], "up right")
+        self.assertEqual(scripts[first_before + 1:first_before + 4], ["down right; keep right; wait 0.35", "click middle", "up right"])
+
+    def test_no_range_changes_the_zoom(self):
+        # feel.53's soak: the BR-14 at fov 30.0 in every Aim: line
+        def react(script, log, n):
+            if script == "click middle":
+                log.write("10:00:00.700 State: aim in", AIM_IN_LINE)
+            elif script == "up right":
+                log.write("10:00:03.000 State: aim out")
+        scripts, result, tail = self.zoom(react)
+        self.assertIsNone(result["zoom_where"])
+        self.assertEqual(len(result["zoom_steps"]), 2 * aim.ZOOM_STEPS)
+        self.assertIn("no range step changed the field of view", result["notes"][-1])
+        self.assertFalse(aim.verdict(result, tail.lines, aim.ZOOM_HOLD_S, zoom=True)["pass"])
+
+    def test_full_aim_lost_by_r_in_the_sights(self):
+        def react(script, log, n):
+            if script == "click middle":
+                log.write("10:00:00.700 State: aim in", AIM_IN_LINE)
+            elif script == aim.ZOOM_STEP and n == 3:
+                log.write("10:00:01.700 State: aim out")
+        _, result, _ = self.zoom(react)
+        self.assertIn("full aim was lost while the scope's range was stepped", " ".join(result["notes"]))
+        self.assertFalse(result["zoom_steps"][0]["full_aim"])
+
+    def test_the_fallback_passes_where_r_in_the_sights_drops_full_aim(self):
+        # the Steam reply's case: R in the sights takes the game out of full aim, and the ranges before aiming change
+        # the field of view. The in-aim step's loss is kept apart, and the phase passes on the fallback's steps.
+        aims = [0]
+
+        def react(script, log, n):
+            if script == "click middle":
+                aims[0] += 1
+                log.write(f"10:00:{aims[0]:02d}.700 State: aim in", _aim_line("in", 30.8 if aims[0] < 3 else 15.0, at=f"10:00:{aims[0]:02d}.900"))
+            elif script == aim.ZOOM_STEP and aims[0] == 1:
+                log.write("10:00:01.700 State: aim out")
+            elif script == "up right" and aims[0] > 1:
+                log.write(f"10:00:{aims[0]:02d}.990 State: aim out", f"10:00:{aims[0]:02d}.990 Aim: out after 2.4 s; zoom levels (game fov: "
+                          "sight m, depth m, optic): 30.8: sight 0.220, depth 0.270 | x")
+        _, result, tail = self.zoom(react)
+        self.assertFalse(result["zoom_steps"][0]["full_aim"])
+        self.assertEqual(result["zoom_where"], "before aim")
+        self.assertIn("full aim was lost while the scope's range was stepped", " ".join(result["in_aim_notes"]))
+        v = aim.verdict(result, tail.lines, aim.ZOOM_HOLD_S, zoom=True)
+        self.assertTrue(v["pass"], v["notes"])
+
+    def test_a_fallback_step_not_held_in_full_aim_still_fails(self):
+        result = {"reached": True, "notes": [], "zoom_where": "before aim",
+                  "zoom_steps": [{"step": 1, "where": "in aim", "full_aim": False}, {"step": 2, "where": "before aim", "full_aim": False}]}
+        lines = [AIM_IN_LINE, _aim_line("in", 15.0), "10:00:05.000 Aim: out after 2.4 s | x"]
+        self.assertEqual(aim.verdict(result, lines, aim.ZOOM_HOLD_S, zoom=True)["notes"], ["range steps [2] were not held in full aim"])
+
+    def test_a_capture_for_each_range(self):
+        shots = []
+        game = FakeGame(self.log, lambda s, log, n: log.write("10:00:00.700 State: aim in", AIM_IN_LINE) if s == "click middle" else None)
+        result = aim.scope_zoom(game, aim.LogTail(self.log.path), self.clock.sleep, self.clock, capture=lambda i: shots.append(i) or f"z-{i}.png")
+        self.assertEqual(shots, list(range(1, 2 * aim.ZOOM_STEPS + 1)))
+        self.assertEqual(result["zoom_steps"][0]["shot"], "z-1.png")
 
 
 class Reading(unittest.TestCase):
@@ -281,17 +433,29 @@ class Phases(unittest.TestCase):
 
     def test_play_hands_an_aim_phase_to_full_aim(self):
         log, calls = FakeLog(self), []
-        original = aim.full_aim
+        original, zoom = aim.full_aim, aim.scope_zoom
         aim.full_aim = lambda device, tail, hold, action: calls.append((hold, action)) or {"reached": False}
+        aim.scope_zoom = lambda device, tail, capture=None: calls.append(("zoom", capture)) or {"reached": False}
         try:
             matrix.play(FakeGame(log), "aim-full", log.path)
             matrix.play(FakeGame(log), "aim-scope-zoom", log.path)
             game = FakeGame(log)
             self.assertIsNone(matrix.play(game, "walk", log.path))
         finally:
-            aim.full_aim = original
-        self.assertEqual(calls, [(aim.HOLD_S, None), (1.0, aim.zoom_cycle)])
+            aim.full_aim, aim.scope_zoom = original, zoom
+        self.assertEqual(calls, [(aim.HOLD_S, None), ("zoom", None)])
         self.assertEqual(game.scripts, ["hold w 1.5"])
+
+    def test_the_zoom_phase_steps_the_range_with_the_wheel(self):
+        # round 30: R held and the wheel up; no arrow key (round 26's guess) is left in any phase
+        self.assertIn("down r; wait 0.8; wheel 1; wait 0.3; up r", matrix.PHASES["aim-scope-zoom"][0])
+        for name, (script, _) in matrix.PHASES.items():
+            self.assertNotIn("arrow", script, name)
+
+    def test_the_zoom_line(self):
+        text = matrix.aim_text({"reached": True, "to_full_s": 0.5, "switches": 1, "zoom_where": "in aim",
+                                "zoom_steps": [{"fov_after": 20.0, "zoomed": True}, {"fov_after": 20.0, "zoomed": False}]})
+        self.assertIn("range steps 2: the zoom changed in aim (fov 20.0* 20.0)", text)
 
 
 class Before(unittest.TestCase):

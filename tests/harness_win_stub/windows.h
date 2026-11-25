@@ -1,6 +1,6 @@
 /* A stand-in for <windows.h> so tools/harness/win_input.c builds and runs on Linux in a test
  * (tests/test_harness_aim.py): one game window, always in front; every SendInput is written to sent.txt as
- * "<ms> key <vk> down|up", "<ms> button L|R|M down|up" or "<ms> move dx dy"; Sleep moves a fake clock. */
+ * "<ms> key <vk> down|up", "<ms> button L|R|M down|up", "<ms> move dx dy" or "<ms> wheel delta"; Sleep moves a fake clock. */
 #ifndef TFP_HARNESS_WIN_STUB_H
 #define TFP_HARNESS_WIN_STUB_H
 #include <stdint.h>
@@ -32,6 +32,8 @@ typedef struct { long x, y; } POINT;
 #define MOUSEEVENTF_RIGHTUP 0x10
 #define MOUSEEVENTF_MIDDLEDOWN 0x20
 #define MOUSEEVENTF_MIDDLEUP 0x40
+#define MOUSEEVENTF_WHEEL 0x800
+#define WHEEL_DELTA 120
 #define MK_LBUTTON 0x1
 #define MK_RBUTTON 0x2
 #define MK_MBUTTON 0x10
@@ -44,7 +46,7 @@ typedef struct { long x, y; } POINT;
 #define WM_LBUTTONUP 0x202
 #define MAKELPARAM(l, h) ((LPARAM)(((uint32_t)(l) & 0xffff) | ((uint32_t)(h) << 16)))
 typedef struct { WORD wVk, wScan; DWORD dwFlags; } KEYBDINPUT;
-typedef struct { long dx, dy; DWORD dwFlags; } MOUSEINPUT;
+typedef struct { long dx, dy; DWORD mouseData, dwFlags; } MOUSEINPUT;
 typedef struct { DWORD type; struct { KEYBDINPUT ki; MOUSEINPUT mi; }; } INPUT;
 typedef BOOL (*WNDENUMPROC)(HWND, LPARAM);
 typedef BOOL (*PHANDLER_ROUTINE)(DWORD);
@@ -74,6 +76,8 @@ static inline unsigned SendInput(unsigned n, INPUT *in, int size) {
   FILE *f = stub_sent();
   if (in->type == INPUT_KEYBOARD)
     fprintf(f, "%llu key %u %s\n", stub_clock, in->ki.wVk, in->ki.dwFlags & KEYEVENTF_KEYUP ? "up" : "down");
+  else if (in->mi.dwFlags == MOUSEEVENTF_WHEEL)   /* mouseData is a DWORD carrying a signed delta, as in Windows */
+    fprintf(f, "%llu wheel %d\n", stub_clock, (int)(int32_t)(uint32_t)in->mi.mouseData);
   else if (in->mi.dwFlags == MOUSEEVENTF_MOVE)
     fprintf(f, "%llu move %ld %ld\n", stub_clock, in->mi.dx, in->mi.dy);
   else {

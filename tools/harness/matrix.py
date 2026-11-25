@@ -23,8 +23,14 @@ eye, the log's "State: aim in") is the game's other aim mode, switched with the 
 in AIMED are played by aim.full_aim(): hold the aim, press the aim-mode button, read the log until it says full aim
 (a second press where it does not), play the phase's action in full aim, hold, let go. Such a phase also fails where
 full aim was not reached or the "Aim:" lines are missing (aim.verdict). aim-full holds full aim 2 s; aim-scope-zoom
-cycles the scope's range through the weapon functions menu (hold R and a direction; the direction is found from the
-log) and needs a scoped rifle with ranges in hand. docs/guides/AIM-TEST.md "The harness".
+steps the scope's range (round 30: hold R and the mouse wheel up, the game's PC input; in full aim first, then before
+aiming, each range held 2 s in full aim: aim.scope_zoom) and needs a scoped rifle with ranges in hand; a capture of
+each range goes beside the phase's. docs/guides/AIM-TEST.md "The harness".
+
+Round 30: dive-swap is a dive and a swap that leave the game's view, to measure the head of a diving body through the
+veil (veil_head on the Trace rows): played by dive.dive_swap(), which brings the primary up, waits for the game's view,
+and tries the swap at several delays into the dive until the log says the view was left. It also fails where no try
+left the view or no veiled row was written (dive.verdict).
 
 The camera style the run was in (Bodycam or Stable) is read from the log's own "Camera style:" lines and printed at
 the top, where it changes, and in the summary; each phase's result carries it. It is never taken from an argument or a
@@ -37,6 +43,7 @@ import time
 from pathlib import Path
 
 import aim
+import dive
 import drive
 
 HF = Path.home() / ".local/share/hellforge-prefix/pfx/drive_c/users/steamuser/Documents/HellForge"
@@ -53,6 +60,7 @@ PHASES = {
     "prone": ("key z; wait 1.5; hold w 0.8; key z", 1.8),
     "dive": ("down w; wait 0.3; key alt; wait 0.6; up w", 2.5),
     "dive-back": ("down s; wait 0.3; key alt; wait 0.6; up s", 2.5),
+    "dive-swap": (dive.script(dive.SWAP_AFTER_S[0]), 2.0),   # played by dive.dive_swap() (DIVES): this is one of its tries
     "stand-up": ("key c; wait 0.2; key c", 1.5),
     "fire": ("click left 0.6", 1.0),
     # The aim phases are played by aim.full_aim() (AIMED below); the scripts are what a plain run of them sends.
@@ -60,7 +68,7 @@ PHASES = {
     "aim-fire": ("down right; wait 0.35; click middle; wait 0.7; click left 0.5; wait 0.4; up right", 1.0),
     "aim-walk": ("down right; wait 0.35; click middle; wait 0.5; hold w 1.0; up right", 1.0),
     "aim-full": ("down right; wait 0.35; click middle; wait 2.5; up right", 1.0),
-    "aim-scope-zoom": ("down right; wait 0.35; click middle; wait 1.0; down r; wait 0.8; key arrowright; wait 0.2; up r; wait 1.5; up right", 1.0),
+    "aim-scope-zoom": ("down right; wait 0.35; click middle; wait 1.0; down r; wait 0.8; wheel 1; wait 0.3; up r; wait 2.0; up right", 1.0),
     "reload": ("click left 0.3; wait 0.3; key r", 4.0),
     "ammo-check": ("hold r 0.8", 2.5),
     "swap-secondary": ("key 2", 2.0),
@@ -85,15 +93,18 @@ PHASES = {
     "death": ("look 0 900; wait 0.2; key g; wait 0.6; key g; wait 0.4; look 0 -900", 9.0),   # the view is put back level for what runs after
 }
 # Round 26: phases played in full aim by aim.full_aim(): name -> (what is played once the log says full aim: an input
-# script, "zoom" for aim.zoom_cycle, or None; seconds held after it). aim.verdict() judges the aim with that hold.
+# script, "zoom" for aim.scope_zoom, or None; seconds held after it). aim.verdict() judges the aim with that hold.
 AIMED = {
     "aim": (None, 1.5),
     "aim-fire": ("click left 0.5; wait 0.4", 0.3),
     "aim-walk": ("hold w 1.0", 0.3),
     "aim-full": (None, aim.HOLD_S),
-    "aim-scope-zoom": ("zoom", 1.0),
+    "aim-scope-zoom": ("zoom", aim.ZOOM_HOLD_S),
     "pistol-aim": (None, 1.5),
 }
+# Round 30: phases played by dive.dive_swap(), judged by dive.verdict().
+DIVES = {"dive-swap"}
+DRIVEN = set(AIMED) | DIVES   # the phases play() hands to a function that reads the log as it goes
 LOCK = re.compile(r"Lock: \+(\d+) frames held \(\+(\d+) in another camera, kind now (\d+)\), \+(\d+) missed \(kind (\d+), helper error (\d+)\), largest kick ([\d.]+)")
 CUT = re.compile(r"Cut: largest camera jump ([\d.]+) m")
 MASK = re.compile(r" (?:Hold|Return|Drop|Wait): .*?\bmask=([0-9a-fA-F]+)")
@@ -375,20 +386,37 @@ def judge(lines, toggles=False):
             "largest_float_m": floated, "float_at": float_row["at"] if float_row else None, "masks": sorted(masks)}
 
 
-def play(device, name, log):
+def play(device, name, log, out=None):
     """Plays phase `name`: its script, or for a phase of AIMED full aim read from the log `log` (aim.full_aim). Returns
-    the aim's result, or None for a plain phase."""
+    the aim's result, or None for a plain phase. With `out`, the zoom captures each range there. A phase of DIVES is
+    played by dive.dive_swap() and returns its result."""
+    if name in DIVES:
+        return dive.dive_swap(device, aim.LogTail(log))
     if name not in AIMED:
         device.run(PHASES[name][0])
         return None
     during, hold = AIMED[name]
-    action = aim.zoom_cycle if during == "zoom" else aim.during_script(during) if during else None
-    return aim.full_aim(device, aim.LogTail(log), hold, action)
+    if during == "zoom":
+        return aim.scope_zoom(device, aim.LogTail(log), capture=_capture(out, name))
+    return aim.full_aim(device, aim.LogTail(log), hold, aim.during_script(during) if during else None)
+
+
+def _capture(out, name):
+    """A capture of the game for each step of a phase, OUT/NAME-N.png; None without `out`."""
+    if out is None:
+        return None
+    return lambda step: drive.shot(Path(out) / f"{name}-{step}.png")
 
 
 def judge_aim(name, result, lines, judged):
     """Adds the aim's verdict to a phase's camera verdict `judged` (in place)."""
     if result is None:
+        return judged
+    if name in DIVES:
+        v = dive.verdict(result)
+        judged["dive"] = result
+        judged["pass"] = judged["pass"] and v["pass"]
+        judged["notes"] = judged["notes"] + v["notes"]
         return judged
     hold = AIMED[name][1]
     v = aim.verdict(result, lines, hold, zoom=name == "aim-scope-zoom")
@@ -399,13 +427,19 @@ def judge_aim(name, result, lines, judged):
 
 
 def aim_text(result):
-    """One line for an aim phase: whether full aim was reached, how fast, and the zoom key found."""
+    """One line for an aim phase: whether full aim was reached, how fast, and the field of view of each range step
+    (* where it changed)."""
     if not result:
         return ""
+    if "attempts" in result:   # a dive + swap (DIVES)
+        return dive.text(result)
     text = (f"full aim after {result['to_full_s']:.2f} s ({result['switches']} aim-mode press{'es' if result['switches'] > 1 else ''})"
             if result["reached"] else f"NO full aim ({result['switches']} aim-mode presses)")
-    if "zoom_key" in result:
-        text += f", zoom key {result['zoom_key'] or 'not found'} (tried {', '.join(result['zoom_tries']) or 'none'})"
+    if "zoom_steps" in result:
+        steps = result["zoom_steps"]
+        text += (f", range steps {len(steps)}: the zoom changed {result['zoom_where']}" if result["zoom_where"] else
+                 f", range steps {len(steps)}: the zoom never changed")
+        text += " (fov " + " ".join(f"{z['fov_after']}" + ("*" if z["zoomed"] else "") for z in steps) + ")"
     if "aim_lines" in result:
         text += f"; Aim: lines {result['aim_lines']}, zoom levels {result['zoom_levels']}"
     return text
@@ -430,7 +464,7 @@ def main(argv):
         for name in names:
             script, settle = PHASES[name]
             start = log.stat().st_size
-            aimed = play(device, name, log)
+            aimed = play(device, name, log, out)
             time.sleep(min(settle, 1.0))
             try:
                 drive.shot(out / f"{name}.png")
@@ -448,7 +482,7 @@ def main(argv):
             print(f"{'pass' if r['pass'] else 'FAIL':4} {name:16} frames {r['frames']:4} other-camera {r['other_camera_frames']:4} missed {r['missed']:3} "
                   f"{describe(r)} kick {r['largest_kick_deg']:.1f} deg kinds {r['kinds']}")
             if aimed is not None:
-                print(f"       {aim_text(r['aim'])}")
+                print(f"       {aim_text(r['dive'] if name in DIVES else r['aim'])}")
             for note in r["notes"] + pop_lines(r, ""):
                 print(f"       {note}")
     (out / "matrix.json").write_text(json.dumps(results, indent=1))

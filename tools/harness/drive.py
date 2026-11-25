@@ -16,6 +16,7 @@ Command line:
   drive.py shot OUT.png
   drive.py run "wait 0.5; key r; hold w 0.7; click left 0.6; look 0 -40; key f11"
   drive.py run "down right; wait 0.35; click middle; wait 2"    full aim (the middle button is the game's aim mode)
+  drive.py run "down r; wait 0.8; wheel 1; wait 0.3; up r"      the scope's range: hold R, the wheel up one notch
 """
 import json
 import os
@@ -97,6 +98,9 @@ VK = {"shift": 0x10, "ctrl": 0x11, "lctrl": 0xA2, "alt": 0x12, "space": 0x20, "t
       # "left" and "right" alone are the mouse buttons (BUTTONS wins), so the arrow keys have their own names
       "arrowup": 0x26, "arrowdown": 0x28, "arrowleft": 0x25, "arrowright": 0x27}
 BUTTONS = {"left": "L", "right": "R", "middle": "M"}
+WHEEL_DELTA = 120     # one notch of the wheel (Windows' WHEEL_DELTA)
+WHEEL_GAP_S = 0.1     # between two notches: three frames at 30 a second, so the game reads each one
+WHEEL_MOST = 10       # notches in one step
 PREFIX = Path.home() / ".local/share/hellforge-prefix/pfx"
 GAME_EXE = r"C:\users\steamuser\Documents\HellForge\game\bin\helldivers2.exe"
 
@@ -112,7 +116,12 @@ def _code(name):
 
 
 def events(script):
-    """Turn 'wait S; key NAME; hold NAME S; click BUTTON [S]; down NAME; up NAME; keep NAME; look DX DY' into timed lines.
+    """Turn 'wait S; key NAME; hold NAME S; click BUTTON [S]; down NAME; up NAME; keep NAME; look DX DY; wheel N' into
+    timed lines.
+
+    wheel N: N notches of the mouse wheel, up (away from the player) for N > 0, down for N < 0; one helper line of
+    +-120 (WHEEL_DELTA) per notch, WHEEL_GAP_S apart so each lands in its own game frame (round 30: the game's scope
+    range on PC is hold R, the weapon functions menu, and the wheel up; down is the flashlight).
 
     keep NAME: what this script pressed with `down NAME` is left down when the helper ends (the helper otherwise lets
     go of everything it still holds). A later run's `up NAME` lets go of it; Input.close() does for what is left. Round
@@ -143,6 +152,13 @@ def events(script):
         elif word == "press":   # press X Y: a click message at a client pixel, for the NEST panel (stays inside the game)
             add(f"c {int(rest[0])} {int(rest[1])}")
             at += 0.25
+        elif word == "wheel":
+            notches = int(rest[0])
+            if not notches or abs(notches) > WHEEL_MOST:
+                raise DriveError(f"wheel takes 1 to {WHEEL_MOST} notches, up or down: {step!r}")
+            for _ in range(abs(notches)):
+                add(f"w {WHEEL_DELTA if notches > 0 else -WHEEL_DELTA}")
+                at += WHEEL_GAP_S
         elif word == "look":
             for _ in range(10):
                 add(f"m {int(rest[0]) // 10} {int(rest[1]) // 10}")
