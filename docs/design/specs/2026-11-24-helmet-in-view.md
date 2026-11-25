@@ -575,3 +575,94 @@ release is veiled the whole way at once).
 - Whether that second evaluation is drawn at all. If it is, it now shows the held eye (the native one) for a frame, 0.25
   to 0.44 m behind the head camera's eye; the body is hidden there, so nothing of the helmet should show.
 - A release of full aim with an action owning the view (a mask other than 0 or 2) is veiled as before.
+
+## Round 32: a kept release whose view really leaves
+
+feel.54's Stable soak (`~/.cache/tfp-soak-37.modlog`, lines 16794 to 16816; soak step 159, aim-fire with the P/40-K
+Bolt Pistol) has the largest pop of the run, 0.434 m, at 10:07:04.745. The pistol was in full aim (native kind 6,
+`quiet=1`) and fired; the game dropped the aim (`Hold: lease ended without a native exit`, `Drop: kind=4 ... mask=00000000`)
+and evaluated the head camera 0.7 ms after the native frame, in the same game frame. That is round 30's kept leave
+(mask 0, `native_full_ads`, under `TFP_CAMERA_VEIL_SAME_FRAME_MS`), so that frame was not veiled. But the view did not
+go back: it stayed on the head camera.
+
+### What the rows say
+
+- **The kept frame jumped the whole way: 0.425 m from the native eye** (`step=0.4249`, 0.297 m along the view and 0.306
+  across: the sight is 0.13 m in front of the head camera's eye and 0.27 m below it). Nothing took it up:
+  - the continuity takes nothing new in full aim (`quiet=1` on that row: `camera_continuity.h`, "the sights stay on the
+    eye"), so `correction=0.0000 taken=-`;
+  - the swap's eye hold and retail's 150 ms correction were not running (the rows after go on at the head camera's own
+    pace). Why is not in the log.
+  - Round 30's own lone frames (soak 36) and the 16 other kept leaves of soaks 37 and 38 showed the native eye in the
+    kept frame (step 0.000 from it; at 10:02:30.590, for one, the continuity took the edge, 0.220 m carried).
+- **The Drop did not discard the leave.** The sceptic of round 31 read the six unveiled frames after it as the pending
+  leave dropped by the Drop. The rows say otherwise: the second head-camera frame carries `veil_head=(0.2487 -0.2939)`,
+  so the veil was open for it (the Drop's tick opened it, with head visibility still active), and closed at the Wait's
+  tick as every veil does after two ticks. It moved nothing because that body was off foot (`off_foot=1`: the veil only
+  looks at a body off foot). Nothing in `src/camera_helper.c` drops `veil_pending` on a Drop: only
+  `tfp_camera_set_veil(false)` (head visibility stopped, or the view off), `tfp_camera_set_veil_second(false)` and the
+  helper's begin and end.
+- **Round 30 did not make it worse.** Before round 30 the kept frame would have been veiled at once: on foot there, the
+  veil would have moved it about 0.35 m forward (the head 0.25 m in front of the eye), away from the sight, a larger step
+  (about 0.46 m) and then taken back in the next frame, which was off foot.
+
+### What changed (`src/camera_helper.c` `veil_clamp_kept`, `veil_carry_step`; `src/camera_helper.h` `TFP_CAMERA_VEIL_CARRY_FAR_M`)
+
+- The hook keeps the eye it last handed to the game, in the world (`veil_eye_last`: written by `smooth_present` for
+  every frame of the lock, and again after the veil for a head-camera frame).
+- A kept leave's frame whose eye is more than `tfp_camera_veil_let_in(1)` (0.04 m) from the eye of the native frame of
+  its own game frame (the one `native6_at` names) is clamped to 0.04 m from it. What the clamp held back is let out over
+  `TFP_CAMERA_VEIL_LET_OUT_MS` (`tfp_camera_veil_let_out`, from rest to rest) in the head-camera frames after it, on top
+  of whatever the veil does in them; the native view coming back, any other frame, a new leave, the body down, and the
+  helper's begin and end drop it. A step over 1.0 m (`TFP_CAMERA_VEIL_CARRY_FAR_M`) is another view, not this eye, and is
+  left. Counted in `TfpCameraVeilStats.clamped` (not in `moved`, and not on the `Head:` line: that is `src/mod_view.c`).
+- The Trace row's `veil=` carries the clamp and the let-out, so `eye_world + veil` stays the eye shown.
+- A kept frame within the hold or the continuity's edge (the native eye kept) is under the cap: unchanged. Round 30's
+  vectors are unchanged (test 21: held back, nothing moved when the view goes straight back; the let-in when it stays
+  away).
+
+### Numbers
+
+Tests (`tests/camera_veil_helper_test.cpp`):
+
+- 23, the 10:07:04.745 scene (the sight 0.13 m in front of the head camera's eye and 0.27 m below; nothing remembered
+  at the release): main's first step 0.300 m and the change of step 0.300 m; now 0.040 m, the largest change of step
+  0.031 m; the frame after the Drop's tick veiled, held back 1, clamped 1, the head camera's own eye 300 ms on.
+- 24, the same release going straight back to the native view: the lone frame 0.040 m out instead of 0.300 m, the native
+  frame after it the game's own; a swap a second later veiled the whole way as before.
+
+Soaks 33 to 38 (`~/.cache/tfp-round32-veil/sim.py`: the logged rows, the continuity untouched so every row's eye is
+main's; the kept frames found as the hook finds them, a head-camera row under 2 ms after a native row of full aim with
+the last mask line at 0; on soak 36, a log from before round 30, the veil taken off the kept frames as main does; the
+clamp and the let-out added to `veil=`; judged with `matrix.measure` on the shown eye):
+
+| Soak | Kept leaves | Clamped | Frames over 0.06 m shown, main / now | Worse by more than 0.02 m |
+|---|---|---|---|---|
+| 33, 34, 35 | 0 | 0 | 256 / 256, 364 / 364, 39 / 39 | 0 |
+| 36 | 6 | 0 | 184 / 184 | 0 |
+| 37 | 10 | 1 (10:07:04.745) | 250 / 249 | 0 |
+| 38 | 7 | 0 | 246 / 246 | 0 |
+
+At 10:07:04.745: 0.426 to 0.044 m; 10:07:04.778 (the frame after) 0.434 to 0.071 m, now the eye's own (the head
+camera's step that frame is 0.071 m by itself: a body off foot); 10:07:04.811 0.170 to 0.149 m, the eye's own.
+
+**What this does not fix.** Soak 37's steps 64 (10:02:30.623, 0.175 m) and 83 (10:03:14.057, 0.184 m) are not this:
+- 64's kept frame (10:02:30.590) showed the native eye (the continuity took the edge, 0.220 m carried); the 0.175 m is
+  the continuity letting go of that edge at the next native frame while the aim's release moved the native eye (`the
+  filter's`).
+- 83 is an entry: the head camera (waiting after a swap, lease 0) to the native view of full aim, 0.184 m, with no
+  lock to carry it.
+Neither has a veil in it, and neither changes here.
+
+**The judge.** `tools/harness/matrix.judge`'s `largest_jump_m` is the eye before the veil (round 19), so a soak judged
+with `soak.py` still prints 0.434 m for step 159 on this build: the clamp is in `veil=`. The shown eye is what changed;
+`matrix.measure`'s `shown` has it.
+
+### What only the game can show
+
+- Why nothing held the eye at that release (no hold, no retail correction): the rule covers it whatever the cause.
+- Whether the frames carried from near the sight show the helmet: the eye is held back toward the native eye for up to
+  300 ms while the body is drawn again; in 10:07:04.745's scene the head was 0.25 m in front of and 0.29 m below the
+  head camera's eye, so the eye let out from near the sight may see the top of the helmet for a frame or two.
+- A bolt-pistol aim-fire (soak step 159's command line) in a Stable soak: the Trace rows' `veil=` on the kept frame
+  should be the clamp, about 0.38 m, and the shown step 0.04 m.
