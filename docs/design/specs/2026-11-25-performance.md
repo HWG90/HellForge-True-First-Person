@@ -205,7 +205,7 @@ Perf snapshots: per second: guarded reads R; snapshots full F, player P, pin N; 
 and once per session, at the first mismatch:
 
 ```
-Memo: first mismatch: a full snapshot taken again in the same frame epoch (E) differed from the one before it, first at controller_bytes (+0x84); the memo stays a shadow (answers are always fresh)
+Memo: first mismatch: a full snapshot taken again in the same frame epoch (E) differed from the one before it, first at controller_bytes (+0x8c); the memo stays a shadow (answers are always fresh)
 ```
 
 **Perf frame** splits `tfp_wire_frame` (`src/wire_rt.c`), over the same ticks as the Perf line. Its laps are gross: each includes

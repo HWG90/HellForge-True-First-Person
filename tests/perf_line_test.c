@@ -77,9 +77,9 @@ int main(void) {
   const int largest_snapshots = n;
 
   /* the first mismatch, once */
-  n = tfp_perf_mismatch_line(line, sizeof line, 0, "controller_bytes", 0x84, 1234);
+  n = tfp_perf_mismatch_line(line, sizeof line, 0, "controller_bytes", 0x8c, 1234);
   want = "Memo: first mismatch: a full snapshot taken again in the same frame epoch (1234) differed from the one before it, first at "
-         "controller_bytes (+0x84); the memo stays a shadow (answers are always fresh)";
+         "controller_bytes (+0x8c); the memo stays a shadow (answers are always fresh)";
   if (strcmp(line, want)) { printf("got:  %s\nwant: %s\n", line, want); return 1; }
   char long_field[200];
   memset(long_field, 'x', sizeof long_field - 1), long_field[sizeof long_field - 1] = 0;
