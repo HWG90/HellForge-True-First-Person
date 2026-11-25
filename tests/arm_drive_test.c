@@ -2119,6 +2119,45 @@ static void test_grip_foregrip_body_on_gun(void) {
   tfp_arm_drive_grip_take(&g);
   CHECK(g.state == TFP_ARM_GRIP_HELD && g.target_unit == 1 && grip_m(&hand, &at) < .001f);
 }
+/* Round 36b (E of the Adjudicator diagnosis): the BR-14's standard vertical grip has its node 0.084 m straight below the gun's
+ * own, nearer than the 0.10 m the latch keeps a node for. Wherever the body's hand is latched (on the gun's own node, on the
+ * attachment's, or between the two inside the keep), the hand holds the attachment's node and never the gun's own. */
+static void test_grip_attachment_never_gun_own(void) {
+  float below[3], between[3];
+  forward_of_socket(0, -.084f, below);
+  forward_of_socket(0, -.05f, between);
+  TfpGraftMatrix hand, socket;
+  fresh();
+  grip_resources();
+  tfp_arm_drive_set(true, true, 1);
+  tfp_arm_drive_set_grip(true, false);
+  uint64_t t = 1000;
+  /* where the two nodes are from the body's hand (the test world puts nodes against the hand, so the hand moving is the
+   * nodes moving the other way): on the gun's own node; 0.05 m below it, the latch keeping the gun's own (0.034 m from
+   * the attachment's: neither pins); on the attachment's; back on the gun's own */
+  float gun[4][3], att[4][3];
+  for (unsigned i = 0; i < 3; i++) {
+    gun[0][i] = 0, att[0][i] = below[i];
+    gun[1][i] = -between[i], att[1][i] = below[i] - between[i];
+    gun[2][i] = -below[i], att[2][i] = 0;
+    gun[3][i] = 0, att[3][i] = below[i];
+  }
+  static const int32_t gate[4] = {0, 0, 1, 0};
+  for (unsigned phase = 0; phase < 4; phase++) {
+    grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], gun[phase], NULL);
+    fit_grip(att[phase]);
+    TfpArmDriveGrip g = {0};
+    for (int i = 0; i < 60; i++) {
+      grip_draw(t += 16, &hand, &socket);
+      tfp_arm_drive_grip_take(&g);
+      CHECK(g.found && g.attachment && g.target_unit == 1); /* every frame: never the gun's own */
+    }
+    CHECK(g.state == TFP_ARM_GRIP_HELD && g.gate_unit == gate[phase]);
+    const TfpGraftMatrix want = grip_on_socket(att[phase]), at = tfp_graft_product(&want, &socket);
+    CHECK(grip_m(&hand, &at) < .001f);
+  }
+  printf("arm drive: grip: an attachment's node 0.084 m below the gun's own: held whichever node the body's hand is latched on\n");
+}
 /* Round 36: a grip unit that is not a child of the gun but hangs on one of its nodes from elsewhere (a child of the rig
  * whose external array is the gun's): seen, listed as from elsewhere, and held. */
 enum { LOOSE_GRIP = 602 };
@@ -2265,6 +2304,7 @@ int main(int argc, char **argv) {
   test_grip_reach_forward();
   test_grip_foregrip();
   test_grip_foregrip_body_on_gun();
+  test_grip_attachment_never_gun_own();
   test_grip_mounted_from_rig();
   test_grip_left_alone();
   test_grip_step_limit();

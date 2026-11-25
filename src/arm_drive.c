@@ -840,7 +840,9 @@ static uint32_t grip_target(const Units *u, const TfpGraftMatrix *body, const Tf
   memcpy(d.grip.last, seen_nodes[use].at, sizeof d.grip.last), d.grip.has_last = true;
   d.grip.held = use_m <= GRIP_PIN_M || (d.grip.held && use_m <= GRIP_LEAVE_M);
   d.grip.pinned = use_m <= GRIP_PIN_M;
-  /* the target: fixed while the gate and the gun's units are (the nodes are rigid on the gun), so it does not drift */
+  /* the target: fixed while the gate and the gun's units are (the nodes are rigid on the gun), so it does not drift. With
+   * an attachment's node anywhere on the gun the gun's own is never the target, whichever node the latch keeps (round 36b,
+   * E: the BR-14's vertical grip node is 0.084 m from the gun's own, inside GRIP_LEAVE_M) */
   int target = use;
   if (!seen_nodes[use].unit) {
     float near_m = FLT_MAX;
