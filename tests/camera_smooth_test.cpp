@@ -1259,6 +1259,36 @@ int main() {
     g.end();
     tfp_camera_set_action_tuning(0, 300, false);
   }
+  // ---- 30. THE SETTLE's switch and gate, in the helper (round 24 review: dropping its mask-0 condition survived).
+  // The native view, then the head camera on a swap's mask 2, then the binder's arm (the native view was left for a
+  // new firearm) and the native view again with the rig 0.3 m under the head camera's eye. Only with the switch on
+  // (settle_on.txt), the arm given and the entry on mask 0 is the eye held (a Trace row says +settle). ----
+  {
+    struct Case { bool on, arm; uint32_t mask; bool held; const char *name; } cases[] = {
+      {false, true, 0, false, "the switch off (the default)"}, {true, true, 0, true, "the switch on, armed, mask 0"},
+      {true, true, 2, false, "the switch on, armed, mask 2"}, {true, false, 0, false, "the switch on, not armed"}};
+    for (const Case &k : cases) {
+      fresh(true, true, true);
+      tfp_camera_set_settle(k.on);
+      Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.native(); g.begin();
+      standing(g, 20, 33.3, true);
+      standing(g, 20, 33.3, false, 2);
+      if (k.arm) tfp_camera_settle_arm();
+      g.eye[2] = -.25f;
+      standing(g, 4, 33.3, true, k.mask);
+      tfp_camera_trace_edge();
+      TfpCameraTraceRow rows[64];
+      const uint32_t count = tfp_camera_trace_read(rows, 64);
+      unsigned held = 0, native = 0;
+      for (uint32_t i = 0; i < count; ++i) { if (rows[i].kind == 6) ++native; if (rows[i].what & TFP_CAMERA_TRACE_SETTLE) ++held; }
+      std::printf("THE SETTLE, %s: %u of %u native frames held\n", k.name, held, native);
+      CHECK(native == 4);
+      CHECK(k.held ? held > 0 : held == 0);
+      CHECK(tfp_camera_error() == 0);
+      g.end();
+    }
+    tfp_camera_set_settle(false);
+  }
   std::printf("camera smooth: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

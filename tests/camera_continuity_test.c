@@ -2026,6 +2026,44 @@ int main(void) {
     CHECK(change[1] <= change[0]+.02f);
     CHECK(gone[1] < .8f);
   }
+  /* THE SETTLE's gate, exit and time limit (round 24 review: mutants of the 3 frames, the 350 ms and the exit on the
+   * rig going away survived). The head camera's eye, then the native view 0.3 m under it with the root still and
+   * the body not turning; `kind` 0: the rig stands still from the entry (steady: the hold ends on the third frame
+   * after it); 1: it re-seats back and forth by 0.08 m every frame (never steady: the hold ends at 350 ms); 2: it goes
+   * 0.15 m further from the held eye in the frame after the entry (the hold ends there, with that frame's own answer).
+   * 3: as 0 with the caller not allowing it (settle_ok false): nothing held. At 8, 16.7, 33.3 and 50 ms a frame. */
+  for (unsigned d = 0; d < 4; ++d) for (int kind = 0; kind < 4; ++kind) {
+    static const float times[] = {8, 16.7f, 33.3f, 50};
+    const float dt = times[d];
+    TfpContinuity c; memset(&c, 0, sizeof c); float out[3];
+    const float basis[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1}, root[3] = {0, 0, 0};
+    double tick = 1000; int entry = -1, held_frames = 0; bool still_at_limit = true; double ended = -1;
+    for (int n = 0; tick < 2200; ++n, tick += dt) {
+      float rel[3] = {0, .15f, 1.75f}; uint32_t source = HEAD;
+      if (tick >= 1500) {
+        if (entry < 0) entry = n;
+        const int k = n-entry;
+        source = NATIVE; rel[2] = 1.45f;
+        if (kind == 1 && k > 0) rel[0] = (k & 1) ? .08f : 0;
+        if (kind == 2 && k > 0) rel[2] = 1.30f;
+      }
+      float world[3]; for (int i = 0; i < 3; ++i) world[i] = root[i]+rel[i];
+      c.settle_ok = source == NATIVE && kind != 3;
+      (void)tfp_continuity_step_in(&c, rel, world, basis, source, false, false, tick, 250, &T, out);
+      if (entry >= 0) {
+        const int k = n-entry;
+        if (c.settling) ++held_frames; else if (ended < 0) ended = k;
+        if (kind == 1 && tick-1500 < TFP_CONTINUITY_SETTLE_MS-dt && !c.settling) still_at_limit = false;
+      }
+    }
+    printf("  THE SETTLE, %s, %g ms a frame: held %d frames, ended %g frames after the entry, %u begun\n",
+           kind == 0 ? "a rig that stands" : kind == 1 ? "a rig that never steadies" : kind == 2 ? "a rig gone further away" : "not allowed",
+           (double)dt, held_frames, ended, (unsigned)c.settles);
+    if (kind == 0) CHECK(c.settles == 1 && ended == TFP_CONTINUITY_SETTLE_FRAMES && held_frames == (int)TFP_CONTINUITY_SETTLE_FRAMES);
+    if (kind == 1) { CHECK(c.settles == 1 && still_at_limit); CHECK(ended >= 0 && ended*dt <= TFP_CONTINUITY_SETTLE_MS+dt+1e-3 && ended*dt >= TFP_CONTINUITY_SETTLE_MS-dt); }
+    if (kind == 2) CHECK(c.settles == 1 && ended == 1);
+    if (kind == 3) CHECK(c.settles == 0 && held_frames == 0);
+  }
   printf("camera continuity: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }
