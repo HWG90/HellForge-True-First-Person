@@ -7,6 +7,8 @@
  *   <ms> d <vk>     key down (decimal virtual key)      <ms> u <vk>     key up
  *   <ms> d L|R|M    mouse button down                   <ms> u L|R|M    mouse button up
  *   <ms> m <dx> <dy>  move the mouse by this many counts
+ *   <ms> w <delta>    turn the mouse wheel: one notch is +120 (up, away from the player) or -120 (down); round 30: the
+ *                     game's scope range is hold R (the weapon functions menu) and the wheel up
  *   <ms> p <x> <y>    put the pointer at this pixel of the game window's client area
  *   <ms> c <x> <y>    a left click posted to the game window at this client pixel (the NEST overlay takes the
  *                     position from the click message itself; nothing leaves the game's process)
@@ -60,6 +62,15 @@ static int move(int dx, int dy) {
   INPUT in = {0};
   in.type = INPUT_MOUSE;
   in.mi.dx = dx, in.mi.dy = dy, in.mi.dwFlags = MOUSEEVENTF_MOVE;
+  return SendInput(1, &in, sizeof in) == 1;
+}
+/* One wheel event; drive.py sends a line per notch, so each lands in its own game frame. Only whole notches of
+ * WHEEL_DELTA (120) are sent: the game counts notches, and a part of one may be dropped or kept back. */
+static int wheel(int delta) {
+  if (!delta || delta % WHEEL_DELTA || delta > 10 * WHEEL_DELTA || delta < -10 * WHEEL_DELTA) return 0;
+  INPUT in = {0};
+  in.type = INPUT_MOUSE;
+  in.mi.mouseData = (DWORD)delta, in.mi.dwFlags = MOUSEEVENTF_WHEEL;
   return SendInput(1, &in, sizeof in) == 1;
 }
 static int place(int x, int y) {
@@ -122,6 +133,7 @@ int main(void) {
     char kind, code[16];
     int dx, dy, ok = 0;
     if (sscanf(line, "%lu m %d %d", &at, &dx, &dy) == 3) kind = 'm';
+    else if (sscanf(line, "%lu w %d", &at, &dx) == 2) kind = 'w';
     else if (sscanf(line, "%lu p %d %d", &at, &dx, &dy) == 3) kind = 'p';
     else if (sscanf(line, "%lu c %d %d", &at, &dx, &dy) == 3) kind = 'c';
     else if (sscanf(line, "%lu %c %15s", &at, &kind, code) != 3 || (kind != 'd' && kind != 'u' && kind != 'k')) continue;
@@ -130,6 +142,7 @@ int main(void) {
     if (!IsWindow(target)) { release_all(); break; }
     if (kind == 'k') ok = keep(code);
     else if (kind == 'm') ok = move(dx, dy);
+    else if (kind == 'w') ok = wheel(dx);
     else if (kind == 'p') ok = place(dx, dy);
     else if (kind == 'c') ok = post_click(dx, dy);
     else if (code[0] == 'L' || code[0] == 'R' || code[0] == 'M') ok = button(code[0], kind == 'd');

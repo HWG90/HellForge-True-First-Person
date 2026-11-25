@@ -75,6 +75,16 @@ class Events(unittest.TestCase):
         lines, _ = drive.events(f"down r; wait {aim.MENU_S}; key arrowright; wait 0.2; up r")
         self.assertEqual(lines, ["0 d 82", "830 d 39", "910 u 39", "1140 u 82"])
 
+    def test_the_wheel_is_one_line_a_notch_up_or_down(self):
+        # round 30: the game's scope range on PC is hold R and the mouse wheel up
+        lines, total = drive.events("wheel 2")
+        self.assertEqual(lines, ["0 w 120", "100 w 120"])
+        self.assertAlmostEqual(total, 2 * drive.WHEEL_GAP_S)
+        self.assertEqual(drive.events("wheel -1")[0], ["0 w -120"])
+        for bad in ("wheel 0", f"wheel {drive.WHEEL_MOST + 1}"):
+            with self.assertRaises(drive.DriveError):
+                drive.events(bad)
+
     def test_what_is_held_after_a_script(self):
         self.assertEqual(drive.held_after("down right; keep right; wait 0.35"), {"right"})
         self.assertEqual(drive.held_after("click middle", {"right"}), {"right"})
@@ -121,6 +131,20 @@ class Helper(unittest.TestCase):
     def test_the_mode_switch_and_the_release_in_later_runs(self):
         self.assertEqual(self.play("click middle")[1], ["button M down", "button M up"])
         self.assertEqual(self.play("up right")[1], ["button R up"])
+
+    def test_the_wheel_reaches_send_input_with_whole_notches(self):
+        code, sent, result = self.play("down r; wait 0.8; wheel 1; wait 0.3; up r; wheel -2")
+        self.assertEqual(code, 0)
+        self.assertEqual(sent, ["key 82 down", "wheel 120", "key 82 up", "wheel -120", "wheel -120"])
+        self.assertIn("played=5 failed=0", result)
+
+    def test_a_part_notch_or_none_is_refused(self):
+        work = Path(tempfile.mkdtemp(dir=self.dir))
+        (work / "script.txt").write_text("0 w 60\n10 w 0\n20 w 120\n")
+        code = subprocess.run([str(self.exe)], cwd=work).returncode
+        self.assertEqual(code, 4)
+        self.assertEqual([l.split(" ", 1)[1] for l in (work / "sent.txt").read_text().splitlines()], ["wheel 120"])
+        self.assertIn("played=3 failed=2", (work / "result.txt").read_text())
 
     def test_keep_keeps_only_what_it_names(self):
         _, sent, _ = self.play("down right; keep right; down w; wait 0.2")
