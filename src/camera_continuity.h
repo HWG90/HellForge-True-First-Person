@@ -218,12 +218,7 @@
  *    caller does not give the head), the held eye let go (0.15 to 0.18 m), a flick of the mouse (the node does not
  *    move), the root moving by itself with the head still in the world (the re-seat's to read), and every native
  *    frame. (Round 19 review: with the eye given, flicks of 95 and 180 degrees and the root alone 0.5 m were cuts.) */
-/*  - THE CLIMB (round 24, `traversal`, told by the caller: a frame under a clamber's or a vault's mask,
- *    src/camera_traversal.h): a run of jumps whose time is over in such a frame hands no speed to the curve; the
- *    presented eye takes the wanted eye's new speed in that frame. In the user's log of 2026-11-24 the run was the
- *    head's crouch onto a ledge read against a root rising 1.8 m in 0.3 s, and the speed handed on (the head going up
- *    with the root) carried the eye 0.6 m above the head.
- *  - THE SETTLE (round 24, `settle_ok`, told by the caller: the native view on mask 0, src/camera_helper.c). Back from
+/*  - THE SETTLE (round 24, `settle_ok`, told by the caller: the native view on mask 0, src/camera_helper.c). Back from
  *    a backpack pick-up (the user's log of 2026-11-24, 20:27:07, 20:32:10, 20:34:19) the rig's eye is 0.22 to 0.25 m
  *    under the head camera's and re-seats itself against the root for about 300 ms (forward 0.32 -> 0 m, up 1.53 ->
  *    1.76 m) while the body turns 0.1 rad a frame: the change of camera was taken up, two or three re-seats more, and
@@ -291,7 +286,6 @@ typedef struct TfpContinuity {
   bool rest_end;                         /* the curve is a cut's: it ends with no acceleration either (tfp_continuity_curve) */
   uint64_t cuts;                         /* frames taken up as a cut */
   float largest;                         /* the largest correction carried since the reader last cleared it */
-  bool traversal;                        /* round 24, set by the caller before each frame: a clamber's or a vault's (THE CLIMB) */
   bool settle_ok;                        /* round 24, set by the caller before each frame: THE SETTLE may begin or go on in it */
   bool settling; uint32_t settle_source, steady; double settle_since; float settle[3], settle_step[3], settle_from; /* THE SETTLE: the eye held, in the root's frame; the new camera's last step there; how far apart the two were when it began */
   uint64_t settles;                      /* settles begun */
@@ -665,11 +659,7 @@ static inline float tfp_continuity_step_cut(TfpContinuity *c, const float *wante
       const float fast = tfp_continuity_length(fresh);
       if (fast > 8) for (unsigned i = 0; i < 3; ++i) fresh[i] *= 8/fast;
       if (placed) for (unsigned k = 0; k < 3; ++k) for (unsigned a = 0; a < 3; ++a) c->loose_speed[k] += (fresh[a]-c->speed[a])*basis[a*3+k];
-      /* THE CLIMB: not in a clamber's or a vault's frame. There the run is the body's own lunge read against the root
-       * (a head that crouches onto a ledge while the root rises), and its speed handed on kept the presented eye
-       * rising after the head had stopped: 0.646 m carried, the eye 0.6 m above the head. The presented eye takes the
-       * wanted eye's speed in this frame instead. */
-      for (unsigned i = 0; i < 3; ++i) { if (!c->traversal) from_speed[i] += c->left*c->speed[i]-fresh[i]; c->speed[i] = fresh[i]; }
+      for (unsigned i = 0; i < 3; ++i) { from_speed[i] += c->left*c->speed[i]-fresh[i]; c->speed[i] = fresh[i]; }
       c->lent = false; /* the new camera's speed is known */
       rate = tfp_continuity_length(from_speed);
     }

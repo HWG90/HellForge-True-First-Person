@@ -19,8 +19,7 @@
  * Round 24: built against a tree that has src/camera_traversal.h (the present one) the helper's own decisions around
  * the filter are made again, as camera_helper.c makes them: jumps are not looked for in a head-camera frame of a
  * clamber while the root moves, nor where only a change into or out of a traversal mask opened the window
- * (rearm_only, which replay.py finds from the log); the filter is told the traversal (THE CLIMB) and, in a native
- * frame on mask 0, that THE SETTLE may hold the eye; and the head camera's eye damping is run again where its rule
+ * (rearm_only, which replay.py finds from the log); in a native frame on mask 0, the filter is told that THE SETTLE may hold the eye; and the head camera's eye damping is run again where its rule
  * changed (not in a traversal), from the logged damping's own state up to the first frame that differs. A logged
  * build's header has none of it, and is run as it was.
  *
@@ -188,7 +187,6 @@ static void rules_apply(Rules *r, TfpContinuity *c, Row *row, const float *basis
   if (detect && row->rearm_only == 1 && !in_run) detect = false;
   if (known) detect = tfp_traversal_detect(detect, row->source == 1, mask, moving);
   row->detect = detect;
-  c->traversal = known && row->source == 1 && tfp_traversal(mask);
 #ifdef TFP_CONTINUITY_SETTLE_MS
   c->settle_ok = known && mask == 0 && row->source == 2 && !row->quiet && ((row->settle_arm >= 0 && row->settle_arm != r->settled_arm) || c->settling);
 #endif

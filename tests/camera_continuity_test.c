@@ -1982,35 +1982,6 @@ int main(void) {
     }
   }
 #endif
-  /* THE CLIMB (round 24). Jumps looked for (the native view held through a vault), the eye going up against the root
-   * at 3 m/s, then in one frame down at 4 m/s for 150 ms (the head crouching onto the ledge while the root rises), then
-   * still. The run is longer than its time: without the traversal the speed it began against (up) is handed to the
-   * curve and the presented eye goes on up after the wanted eye turned; in a clamber's frame it is not. At 8, 16.7,
-   * 33.3 and 50 ms a frame: how far the presented eye goes above where the wanted eye turned, and what is carried
-   * once the wanted eye is still. The frames of a run are still taken up and go on at the kept speed (0.2 to 0.36 m
-   * above here): THE CLIMB takes away the hand-off only. In the head camera of a clamber nothing is looked for at all
-   * (src/camera_traversal.h); the native view held through a low vault keeps its runs, which lower the rig's own dip. */
-  for (unsigned d = 0; d < 4; ++d) {
-    static const float times[] = {8, 16.7f, 33.3f, 50};
-    float above[2] = {0, 0}, still[2] = {0, 0};
-    for (int climb = 0; climb < 2; ++climb) {
-      TfpContinuity c; memset(&c, 0, sizeof c); float z = 1.5f, top = 0, out[3];
-      for (double t = 0; t < 1.2; t += times[d]/1000.0) {
-        const float v = t < .2 ? 3.0f : t < .35 ? -4.0f : 0.0f;
-        z += v*times[d]/1000;
-        if (t < .2) top = z;
-        const float wanted[3] = {0, .2f, z};
-        c.traversal = climb != 0;
-        const float carried = tfp_continuity_step(&c, wanted, NATIVE, true, false, 1000+t*1000, 250, &T, out);
-        if (out[2]-top > above[climb]) above[climb] = out[2]-top;
-        if (t > .35 && carried > still[climb]) still[climb] = carried;
-      }
-    }
-    printf("  a run that turns in a climb, %g ms a frame: the presented eye %.3f m above where the eye turned (%.3f m without THE CLIMB), "
-           "%.3f m carried once it is still (%.3f m)\n", (double)times[d], (double)above[1], (double)above[0], (double)still[1], (double)still[0]);
-    CHECK(above[1] <= above[0]+1e-4f && still[1] <= still[0]+1e-4f);
-    CHECK(still[1] < still[0]-.1f); /* the frames of a run still go on at the kept speed (they are taken up): only the hand-off goes */
-  }
   /* THE SETTLE (round 24): back from a backpack pick-up (20:32:10 of the user's log of 2026-11-24): the head camera's
    * eye, then the native view with the rig 0.33 m off it, re-seated twice in two frames (0.11 m on, 0.33 m back),
    * then climbing evenly against the root for 250 ms (forward 0.1 -> 0, up 1.53 -> 1.76), the body turning at 4 rad/s
