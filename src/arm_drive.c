@@ -867,8 +867,13 @@ static uint32_t grip_target(const Units *u, const TfpGraftMatrix *body, const Tf
   *out = tfp_graft_product(&d.grip.rel, socket_local);
   return TFP_ARM_GRIP_HELD;
 }
-/* Each driven frame, on the poses about to be written (before the blend with the game's own). */
-static void grip_frame(const Units *u, const TfpGraftMatrix *body, TfpGraftMatrix *poses) {
+/* Each driven frame, on the locals about to be written: after the blend with the game's own (round 36b), so the hand
+ * is on the grip at any weight. While aiming (weight 0) the blend is the game's own aim pose, and only the left arm (nodes
+ * 10, 12, 13) is changed from it: the socket and the right arm stay the game's, so the rifle still rises to the shoulder
+ * (src/arm_weight.h) and the eye the game seats by the socket does not move. Until round 36b the reach ran on the copy
+ * before the blend and was not asked for while aiming: the game's aim pose then held the hand some 17 cm short of a
+ * foregrip (retail grip_hand.lua) and the hand slid there at every aim edge. */
+static void grip_frame(const Units *u, const TfpGraftMatrix *body, TfpGraftLocal *mixed) {
   const TfpGraft *m = &d.map;
   TfpArmDriveGrip *seen = &d.grip.seen;
   if (m->fp[TFP_OG_UPPER] != 10 || m->parent[TFP_OG_UPPER] != TFP_GRAFT_RIG_ROOT || m->fp[TFP_OG_FORE] != 12 || m->parent[TFP_OG_FORE] != 10 ||
@@ -884,12 +889,13 @@ static void grip_frame(const Units *u, const TfpGraftMatrix *body, TfpGraftMatri
   } else seconds = (double)(d.now - d.grip.at) / 1000;
   d.grip.at = d.now;
   uint32_t state;
-  TfpGraftMatrix target;
+  TfpGraftMatrix target, arm[3] = {tfp_graft_local_matrix(&mixed[TFP_OG_UPPER]), tfp_graft_local_matrix(&mixed[TFP_OG_FORE]),
+                                   tfp_graft_local_matrix(&mixed[TFP_OG_HAND])};
+  const TfpGraftMatrix socket = tfp_graft_local_matrix(&mixed[TFP_GRAFT_JOINTS - 1]);
   if (!d.grip.on) state = TFP_ARM_GRIP_OFF;
   else if (d.grip.one_handed) state = TFP_ARM_GRIP_ONE_HANDED;
-  else if (!(d.weight > 0)) state = TFP_ARM_GRIP_AIMING;
   else if (u->gun_away || !u->weapon) state = TFP_ARM_GRIP_NO_GUN;
-  else state = grip_target(u, body, &poses[TFP_GRAFT_JOINTS - 1], &target);
+  else state = grip_target(u, body, &socket, &target);
   if (state < TFP_ARM_GRIP_NO_GUN) seen->found = false, seen->nodes = seen->units = 0;
   if (d.grip.on) seen->frames++;
   const bool wanted = state == TFP_ARM_GRIP_HELD;
@@ -898,7 +904,9 @@ static void grip_frame(const Units *u, const TfpGraftMatrix *body, TfpGraftMatri
   d.grip.measure = false;
   if (wanted || d.grip.ik.active || d.grip.ik.weight > 0) {
     d.grip.ik.pinned = wanted && d.grip.pinned; /* walking: the drawn hand swings off a grip the body's hand stays on (round 36b) */
-    r = tfp_offhand_step(&d.grip.ik, &poses[TFP_OG_UPPER], &poses[TFP_OG_FORE], &poses[TFP_OG_HAND], wanted ? &target : NULL, wanted, seconds);
+    r = tfp_offhand_step(&d.grip.ik, &arm[0], &arm[1], &arm[2], wanted ? &target : NULL, wanted, seconds);
+    /* the three locals as the reach left them (untouched ones come back bit for bit) */
+    tfp_graft_set_local(&mixed[TFP_OG_UPPER], &arm[0]), tfp_graft_set_local(&mixed[TFP_OG_FORE], &arm[1]), tfp_graft_set_local(&mixed[TFP_OG_HAND], &arm[2]);
     to = r.to_target_m, step = r.step_degrees, limit = r.limit_degrees, weight = r.weight;
     if (wanted)
       state = r.reason == TFP_OG_HELD ? TFP_ARM_GRIP_HELD : r.reason == TFP_OG_TOO_FAR || r.reason == TFP_OG_OUT_OF_REACH ? TFP_ARM_GRIP_FAR
@@ -962,9 +970,9 @@ static uint32_t drive(const Units *u) {
   } else {
     if (!align(u, body, base)) return TFP_ARM_POSE;
     if (!tfp_graft_pose(&d.map, body, poses)) return TFP_ARM_POSE;
-    if (d.grip.on || d.grip.ik.active || d.grip.ik.weight > 0) grip_frame(u, body, poses);
     for (unsigned i = 0; i < d.joints; ++i)
       if (!tfp_graft_mix(&base[i], &poses[i], d.weight, &target[i])) return TFP_ARM_POSE;
+    if (d.grip.on || d.grip.ik.active || d.grip.ik.weight > 0) grip_frame(u, body, target);
     /* For the log (stats.draw.sock_m): the socket as it is about to be drawn less the game's own, along the view.
      * Both are locals of the socket's parent (the rig's root, which the drive does not write), so the difference
      * goes through that node's axes into the world and onto the forward axis of the rig's eye. */
@@ -1025,7 +1033,7 @@ void tfp_arm_drive_grip_take(TfpArmDriveGrip *out) {
 }
 const char *tfp_arm_drive_grip_state_name(uint32_t state) {
   static const char *const names[TFP_ARM_GRIPS] = {
-      "switched off", "a handgun at the hip: held in one hand", "aiming: the game's own aim pose holds the gun", "no gun on the rig",
+      "switched off", "a handgun: held in one hand", "aiming: the game's own aim pose holds the gun", "no gun on the rig",
       "no grip node on the gun's units", "the gun's units could not be read in the socket's frame", ("the body's left hand is on no grip (a reload, "
       "or a weapon the game does not pin the hand to)"), "on the grip", "easing", "the grip is out of the arm's reach or too far from the drawn hand",
       "the arm's pose was not usable"};

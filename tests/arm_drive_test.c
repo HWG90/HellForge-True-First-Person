@@ -6,6 +6,7 @@
  *   arm_drive_test FIXTURE */
 #include "fake_native.h"
 #include "arm_drive.h"
+#include "arm_weight.h"
 #include "offhand_grip.h"
 #include "snapshot.h"
 #include <stdlib.h>
@@ -2196,8 +2197,71 @@ static void test_grip_mounted_from_rig(void) {
   tfp_arm_drive_grip_take(&g);
   CHECK(g.tree_units == 2 && !g.attachment && g.target_unit == 0);
 }
-/* The body's left hand on no grip node (a reload, a weapon the game does not pin): the arm is the body's. One-handed,
- * aiming (weight 0), and the test switch off: the same. */
+/* Round 36b (C of the Adjudicator diagnosis): while aiming the copy fades out and the game's own aim pose holds the gun
+ * (src/arm_weight.h), and until now the hand went with it, off the grip (retail measured the game's aim hand 17 cm from a
+ * foregrip's node) and slid there over 120 ms at every aim edge. The reach now runs on the mixed pose: the hand stays on the
+ * grip through the fade and the whole aim; while aiming only the left arm (nodes 10, 12, 13) differs from the game's own,
+ * so the socket, the right arm and the camera the game seats by the socket are the game's (the rifle still rises). */
+static void test_grip_while_aiming(void) {
+  static const float zero[3] = {0, 0, 0};
+  TfpGraftMatrix hand, socket, game_hand, game_socket;
+  /* where the game's aim pose has the hand: weight 0, the grip off */
+  fresh();
+  grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], zero, NULL);
+  tfp_arm_drive_set(true, true, 0);
+  grip_draw(1000, &game_hand, &game_socket);
+  const TfpGraftMatrix want = grip_on_socket(zero), game_at = tfp_graft_product(&want, &game_socket);
+  const float game_off = grip_m(&game_hand, &game_at);
+  CHECK(game_off > .02f);
+  /* held at the hip, then aim in (the weight down over 120 ms as arm_weight.h steps it), aim, aim out */
+  fresh();
+  grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], zero, NULL);
+  tfp_arm_drive_set(true, true, 1);
+  tfp_arm_drive_set_grip(true, false);
+  uint64_t t = 1000;
+  for (int i = 0; i < 30; i++) grip_draw(t += 16, &hand, &socket);
+  float weight = 1, worst = 0, jump = 0;
+  TfpArmDriveGrip g;
+  tfp_arm_drive_grip_take(&g);
+  for (int i = 0; i < 90; i++) {
+    weight = tfp_arm_weight_step(weight, i < 60, 16);
+    tfp_arm_drive_set(true, true, weight);
+    grip_draw(t += 16, &hand, &socket);
+    const TfpGraftMatrix at = tfp_graft_product(&want, &socket);
+    worst = fmaxf(worst, grip_m(&hand, &at));
+    /* the hand moves with the gun only: its place on the gun stays */
+    const TfpGraftMatrix on_gun = tfp_graft_relative(&hand, &socket);
+    jump = fmaxf(jump, grip_m(&on_gun, &want));
+    if (i == 40) {
+      tfp_arm_drive_grip_take(&g);
+      CHECK(weight == 0 && g.state == TFP_ARM_GRIP_HELD && g.held == 41 && g.attachment == false);
+      CHECK(!memcmp(&socket, &game_socket, sizeof socket) && stats().draw.sock_m == 0); /* the gun where the game's aim pose has it */
+    }
+  }
+  printf("arm drive: grip while aiming: the game's aim pose has the hand %.3f m from the grip; held, at most %.4f m from it through "
+         "the fade, the aim and back\n", (double)game_off, (double)worst);
+  CHECK(worst < .001f && jump < .001f);
+  /* at weight 0 every node but the left arm is the game's own, also the socket the camera is seated by */
+  tfp_arm_drive_set(true, true, 0);
+  for (int i = 0; i < 10; i++) grip_draw(t += 16, &hand, &socket);
+  TfpGraftLocal drawn_now[TFP_GRAFT_RIG_NODES];
+  tfp_arm_drive_set_rest(t += 16, TFP_ARM_REST_NONE, 0);
+  CHECK(tfp_arm_drive_render(WORLD, true)); /* written: the game's values go back after the draw */
+  rig_locals(drawn_now);
+  tfp_arm_drive_after_render();
+  for (unsigned n = 0; n < TFP_GRAFT_RIG_NODES; n++) {
+    const bool left_arm = n == 10 || n == 12 || n == 13;
+    if (!left_arm) CHECK(!memcmp(&drawn_now[n], &game_locals[n], 64));
+    else CHECK(memcmp(drawn_now[n].basis, game_locals[n].basis, 36) != 0);
+  }
+  TfpGraftLocal after[TFP_GRAFT_RIG_NODES];
+  rig_locals(after);
+  CHECK(!memcmp(after, game_locals, sizeof after)); /* put back: the game finds its own */
+  CHECK(stats().draw.sock_m == 0);
+}
+/* The body's left hand on no grip node (a reload, a weapon the game does not pin): the arm is the body's. One-handed (at
+ * the hip, and aiming: weight 0, nothing written at all), and the test switch off: the same. (Aiming with a two-handed gun
+ * holds the grip since round 36b: test_grip_while_aiming.) */
 static void test_grip_left_alone(void) {
   static const float far[3] = {.2f, 0, 0}, zero[3] = {0, 0, 0};
   TfpGraftMatrix hand, socket, plain_hand, plain_socket;
@@ -2206,15 +2270,16 @@ static void test_grip_left_alone(void) {
     grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], way == 0 ? far : zero, NULL);
     tfp_arm_drive_set(true, true, way == 2 ? 0 : 1);
     grip_draw(1000, &plain_hand, &plain_socket);
-    tfp_arm_drive_set_grip(way != 3, way == 1);
+    tfp_arm_drive_set_grip(way != 3, way == 1 || way == 2);
     uint64_t t = 1000;
     for (int i = 0; i < 10; i++) {
       grip_draw(t += 16, &hand, &socket);
       CHECK(!memcmp(&hand, &plain_hand, sizeof hand) && !memcmp(&socket, &plain_socket, sizeof socket));
+      if (way == 2) CHECK(!stats().owned); /* a handgun aimed: the game's own pose, nothing written */
     }
     TfpArmDriveGrip g;
     tfp_arm_drive_grip_take(&g);
-    static const uint32_t expected[4] = {TFP_ARM_GRIP_FREE, TFP_ARM_GRIP_ONE_HANDED, TFP_ARM_GRIP_AIMING, TFP_ARM_GRIP_OFF};
+    static const uint32_t expected[4] = {TFP_ARM_GRIP_FREE, TFP_ARM_GRIP_ONE_HANDED, TFP_ARM_GRIP_ONE_HANDED, TFP_ARM_GRIP_OFF};
     CHECK(g.state == expected[way] && !g.held && g.frames == (way == 3 ? 0u : 10u));
     if (!way) CHECK(g.nodes == 1 && g.body_m > .19f && strstr(tfp_arm_drive_grip_line(&g), "the body's left hand is on no grip"));
   }
@@ -2306,6 +2371,7 @@ int main(int argc, char **argv) {
   test_grip_foregrip_body_on_gun();
   test_grip_attachment_never_gun_own();
   test_grip_mounted_from_rig();
+  test_grip_while_aiming();
   test_grip_left_alone();
   test_grip_step_limit();
   if (argc == 3) test_rest_recorded(argv[2]);

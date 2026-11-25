@@ -307,7 +307,7 @@ static inline void tfp_og_full(TfpOffhand *s, const TfpOgFrame L[3], const doubl
 /* One frame. upper, fore, hand: the drive's locals of rig nodes 10, 12, 13 (of node 7, 10 and 12), changed in place
  * when a correction is in force (the three rotations, and the upper arm's position by the shoulder's move). target:
  * the grip in node 7's frame, NULL for none. wanted: the hand is to be on the target (the caller's conditions:
- * switched on, the body's hand on that grip, not one-handed, not aiming). seconds: since the previous frame (0: the
+ * switched on, the body's hand on that grip, not one-handed; aiming as well since round 36b). seconds: since the previous frame (0: the
  * same frame again, or unknown: nothing may change). */
 static inline TfpOffhandResult tfp_offhand_step(TfpOffhand *s, TfpGraftMatrix *upper, TfpGraftMatrix *fore, TfpGraftMatrix *hand,
                                                 const TfpGraftMatrix *target, bool wanted, double seconds) {

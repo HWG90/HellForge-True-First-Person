@@ -232,14 +232,15 @@ const char *tfp_arm_drive_held(void);
  * shoulder (node 10) comes forward where the grip is beyond 97 % of the arm (round 26). Round 36: the body's hand on any
  * grip node of the gun says the game pins it; the hand holds a fitted grip's node even when the body's is on the gun's own
  * (the R-4 Hyena's case), and units hanging on the gun's nodes from elsewhere (the rig's or the body's) are searched too.
- * one_handed: a handgun at the hip, held in one hand: the hand stays as the body holds it. While aiming the copy fades out
- * (the drive's weight) and the game's own aim pose holds the gun; the reach is not asked for then. */
+ * one_handed: a handgun, held in one hand: the hand stays as the body (or, aiming, the game's aim pose) holds it. While aiming
+ * the copy fades out (the drive's weight) and the game's own aim pose holds the gun; since round 36b the reach runs on that
+ * blend, so the hand stays on the grip, and only the left arm (nodes 10, 12, 13) differs from the game's own there. */
 void tfp_arm_drive_set_grip(bool on, bool one_handed);
 /* What the grip did in the driven frames since the last call, for the "Grip:" line (the call empties it). */
 enum {
   TFP_ARM_GRIP_OFF = 0,   /* switched off */
   TFP_ARM_GRIP_ONE_HANDED,/* a handgun at the hip */
-  TFP_ARM_GRIP_AIMING,    /* the copy is not shown (the drive's weight is 0): the game's aim pose */
+  TFP_ARM_GRIP_AIMING,    /* not used since round 36b (the hand holds the grip while aiming too); kept for the numbering */
   TFP_ARM_GRIP_NO_GUN,    /* no gun on the rig */
   TFP_ARM_GRIP_NO_NODE,   /* none of the gun's units carries a grip node */
   TFP_ARM_GRIP_STALE,     /* the gun's units were not where the rig puts them, and no earlier reading of the grip is kept */

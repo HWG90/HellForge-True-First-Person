@@ -725,8 +725,8 @@ static void arms_start(void) {
   if (grip_off) say("Test: grip_off.txt: the left hand is not put on the weapon's grip; it stays where the body's arm puts it (as before round 23), "
                     "whatever First Person Arms says");
   else say("Grip: the left hand of the drawn arms holds the weapon's grip node (a foregrip's or vertical grip's own node when one is fitted) "
-           "whenever the body's left hand is on it, while First Person Arms and Animated arms are on; not for a handgun at the hip, and not "
-           "while aiming (the game's own aim pose). A file grip_off.txt beside the DLL leaves the hand as the body puts it, to compare");
+           "whenever the body's left hand is on it, while First Person Arms and Animated arms are on, also while aiming (on the game's own aim "
+           "pose, the left arm only); not for a handgun. A file grip_off.txt beside the DLL leaves the hand as the body puts it, to compare");
   const char *why = tfp_render_slot_contract();
   if (why) {
     snprintf(arms_refusal, sizeof arms_refusal, "%s", why);
