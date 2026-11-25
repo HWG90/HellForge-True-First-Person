@@ -212,3 +212,125 @@ Animated arms and First Person Arms on. Watch the `Grip:` lines, and repeat one 
 8. **Swap weapons** several times: the new weapon's grip is found (the node count may change), with no reach towards
    the weapon on the back.
 9. **`grip_off.txt`**: the hand back by the receiver, as in the screenshot. That confirms the change is this.
+
+## Round 26: the hand on the grip, and steady (2026-11-24)
+
+feel.52 (soaks 33 and 34, the `Grip:` lines) found the node every time (the attachment's, 2 nodes on 2 of the gun's
+units) and never refused one, but held only 2,714 of 19,690 and 7,016 of 21,362 driven frames. While held the hand was
+usually 0.03 to 0.05 m from the grip, at most 0.106 m. The largest joint step reached the frame's allowance (23 to 30
+degrees) in 41 of 228 "on the grip" seconds, and at reloads, out of reach and easing.
+
+### Why the hand stopped short
+
+- In a held frame (full weight, no step cut) the hand is wherever the solve put it, so the miss is the solve's own. The
+  only way the solve misses its target there is the 97 % straightening limit: the hand stops on the line to the grip at
+  0.97 of the arm, and the miss is the grip's distance from the shoulder less that.
+- The most the miss can be is then (REACH − STRETCH) × arm = (1.15 − 0.97) × 0.5899 m = 0.106 m. The log's most while
+  held is 0.106 m. The median 0.043 m is a grip 1.04 to 1.05 arm lengths from the shoulder.
+- Why it is that far: the drawn shoulder is the body's, carried by the alignment that puts the body's right hand on the
+  rig's socket: it sits by the drawn gun as the body's shoulder sits by the body's right hand. The body's real shoulder
+  reaches the grip in the world (0.36 m away on the 0.3.34 capture, 0.62 of the arm), but the body's right hand is not
+  where the drawn gun is. On the capture's gun (grip 0.21 m forward of the socket) the drawn shoulder is 0.78 to 0.85
+  arm lengths from the grip (the rig's own animated shoulder 0.845). Every 0.1 m further forward along the gun adds about 0.12. A fore-end or
+  vertical grip, which feel.52's rifles carried, is 1.0 to 1.15 arm lengths away.
+- Not the cause: the bone lengths (the rig's 0.3027 and 0.2872 m are the body's own), the ease (weight 1.00 in every
+  held line), the target read a frame late (that would miss while moving and match while still; the misses are steady,
+  0.048 m with a 1.0 degree step).
+
+### Why it was held so little
+
+Of the frames with the grip on, by the line's state:
+
+| | soak 33 | soak 34 |
+| --- | --- | --- |
+| a handgun at the hip (one hand, as designed) | 14,026 | 10,585 |
+| the body's hand on no grip (reloads, melee) | 1,303 | 1,368 |
+| out of reach or too far | 540 | 768 |
+| no gun on the rig, aiming | 727 | 1,444 |
+| easing | 331 | 474 |
+| on the grip | 2,763 | 6,723 |
+
+Without the handgun the hand was held in 48 % and 65 % of the frames. The rest: reloads and aiming, which are as
+designed; the refusals, part of them a grip swaying about 1.15 arm lengths (taken, refused, taken); and frames with a
+cut step, which are not counted as held.
+
+### Why the joint steps reached the limit
+
+- **Easing** moved the hand 0.39 m in 0.15 s: about 4.5 frames at 30 frames a second, so each frame wanted more than
+  the allowance. Easing out when the target went (a reload) had no ease at all: the corrections went back to none at
+  the limit's rate.
+- **The ease began and ended with a jump.** The reach at a small weight solved the arm for a hand barely moved, which
+  still put the elbow in the pole's plane at once.
+- **What was limited** was each joint's correction, not the joint as drawn. A body whose arm swings while the grip
+  stays (the body's left arm follows the grip as the view turns) needs a correction that changes as fast as the body,
+  and the limit then made the drawn arm swing instead. On a model arm swinging 20 degrees a frame at 8.3 ms, main held
+  0 of 60 frames with the hand up to 0.079 m off.
+- Not the cause: the target jumping between nodes (the gun's own node is 17 cm from the attachment's and is never taken
+  while the hand is on the attachment's), or the arc's axis turning over (the body's upper arm is 31 to 33 degrees from
+  the line to the grip on the capture, far from 180).
+
+### The fix (`src/offhand_grip.h`)
+
+- **The shoulder comes forward.** Where the grip is further than 0.97 of the arm, node 10's position moves along the
+  line to it by the rest, up to 0.21 of the arm's length (0.124 m), at most 0.6 m/s. It stands in for the clavicle the
+  rig does not have. Within 0.97 of the arm nothing moves and the positions are the drive's bit for bit.
+- **The ease is a share of the full reach.** The full reach is solved every frame, and each joint takes the share of its
+  correction the weight says, the shorter way. Weight 0 is the drive's pose exactly, so it neither starts nor ends with
+  a jump. The ease is a smoothstep over 0.15 s at the quickest, slowed so that it turns no joint by more than half the
+  frame's allowance. When the target goes, it eases out on the last full reach instead of dropping it.
+- **The written joint is limited, not the correction.** Each written rotation turns at most 720 degrees a second and 30
+  in a frame from the last frame's written rotation, so the flip limits stand.
+- **The twist about each bone is the body's.** Each frame's reach is the drive's pose swung onto it (as main solved
+  it); the last reach, swung onto this one, turns its twist towards that at 90 degrees a second at most. The bones point
+  where the reach puts them either way; only the turn about each bone is followed at that rate. (The first version
+  carried the last reach whole, which left the twist unanchored: a grip circling a 3 cm loop once a second at 0.8 of
+  the arm took the upper arm, forearm and hand against the body's from 36.6/81.7/50.1 degrees to 172.6/122.2/168.3 in
+  1000 loops while the hand stayed on the grip. Taken whole from the body each frame, a body arm jittering 20 degrees
+  a frame twisted the drawn one by 12 degrees a frame.)
+- **Out of reach has a margin.** A grip is taken within 1.15 arm lengths and let go beyond 1.18 once held.
+
+### Numbers before and after
+
+The same scenes on main's solver and on this one (`tests/offhand_grip_test.c`, the model arm, 30 frames a second unless
+said):
+
+| scene (from the logged numbers) | main | round 26 |
+| --- | --- | --- |
+| grip at 1.05 arm lengths | held, 0.0472 m off | held, 0.0000 m off, shoulder 0.047 m forward |
+| grip at 1.149 arm lengths | held, 0.1056 m off | held, 0.0000 m off, shoulder 0.106 m forward |
+| grip swaying 1.14 to 1.16 | 2 of 120 frames held, 67 out of reach, step 24.0 | 120 of 120 held, step 0.0 |
+| ease in and out, 0.39 m | 5 frames at the allowance (24.0) | largest step 12.0, on the grip after 8 frames |
+| ease in, target lost | 6 frames at the allowance | largest step 12.0 |
+| body's arm jittering 20 degrees a frame (10 to 30 from its pose), 8.3 ms | 0 of 60 held, 0.091 m off, step 15.8 (allowed 6.0) | 60 of 60 held, 0.000 m off, step 0.9; back on a calm hold's arm 9 frames after it stops |
+| 3 cm loop a second, 0.8 of the arm, 2000 loops | joints against the body's 36.57/82.55/50.29 throughout | the same, 36.57/82.55/50.29 throughout |
+| 1 cm loop, 3000 loops; 1.05 of the arm, 1 and 3 cm | steady | steady: drift 0.000 degrees, the hand 0.0000 m off |
+
+In the drive with the recorded body (`tests/arm_drive_test.c` `test_grip_reach_forward`, the grip 0.19 m further
+forward along the gun, 1.04 arm lengths from the drawn shoulder): the hand 0.0000 m from the grip, the shoulder 0.043 m
+forward, held steps under 1 degree. The moving-body test's largest step is now under the allowance at 17, 33 and 50 ms
+frames (8.3, 13.3, 17.0 against 12.2, 23.8, 30.0); at 8 ms, with the body's hand leaving the grip for a frame every 37,
+it still reaches it.
+
+### The line, for the next game run
+
+`Grip: ... weight 1.00; reach 1.05 of the arm (most 1.08), shoulder forward 0.047 m (most 0.065), held step 0.4 degrees,
+the body's arm turned 2.0 degrees, 0 frames cut, not taken: 0 out of reach, 0 too far; as drawn the hand 0.001 m from
+the gun's grip (most 0.002)`
+
+- **reach / shoulder forward**: how far the grips are in arm lengths, and how far the shoulder came. Over 1.18 means a
+  grip the arm lets go of; a shoulder often near 0.12 m wants a look at the sleeve.
+- **held step**: the largest written turn in a frame held on the grip, the steady case. It should stay well under the
+  allowance; if not, **the body's arm turned** says whether the body's own pose moved that much in a frame.
+- **frames cut / not taken**: the limits holding the arm back, and refusals split into out of reach and too far from
+  the drawn hand (feel.52 counted them together).
+- **as drawn**: after the rig and the gun are evaluated for the draw, the rig's hand from the gun's grip node, both as
+  the game evaluated them, in frames held at full weight (not while aiming fades in or out). The solver's "hand from the grip" is its own number. This one says whether the target was
+  where the gun is drawn: a frame behind, another socket, or a scale on the gun would show here and nowhere else.
+
+### What only the game can show
+
+- Whether "as drawn" is under 0.01 m. The solver's numbers cannot see the evaluated gun.
+- How a shoulder 5 to 12 cm forward looks: the sleeve at the shoulder and whether the upper arm crosses the view.
+- Whether the held step stays small while turning, walking and sprinting.
+- Whether the slower ease (about 0.27 s for a 0.39 m reach at 30 frames a second, against 0.15 s) reads as late
+  after a reload.
