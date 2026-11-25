@@ -26,14 +26,26 @@ typedef bool (*Setter)(void *user, TfpEngineUnit unit, int mesh_index, bool visi
  * 7 is retail. Set once before the view is first used. */
 static unsigned tfp_head_parts = 7;
 void tfp_head_set_parts(unsigned parts) { tfp_head_parts = parts & 7u; }
-typedef enum Part { PART_HEAD, PART_TORSO, PART_SHOULDER, PART_BACKPACK, PART_BODY, PART_MODEL } Part;
-static const char *const PART_NAMES[] = {"head", "torso", "shoulder", "backpack", "body", "model"};
+typedef enum Part { PART_HEAD, PART_TORSO, PART_SHOULDER, PART_BACKPACK, PART_BODY, PART_MODEL, PART_LIMB, PART_COCKPIT } Part;
+static const char *const PART_NAMES[] = {"head", "torso", "shoulder", "backpack", "body", "model", "limb", "cockpit"};
 typedef struct Selected { int slot; Part part; } Selected;
 static const Selected SELECTED[] = {{0, PART_HEAD}, {2, PART_TORSO}, {8, PART_SHOULDER}, {9, PART_SHOULDER}};   /* :5 */
 typedef struct Pass { double mask; const char *name; bool visible; } Pass;
 static const Pass PASSES[] = {{1, "default", false}, {2, "shadow_caster", true}};              /* :7 */
 static const Pass SHADOW_ONLY[] = {{2, "shadow_caster", false}};                                /* :8 */
 static const Pass HIDDEN_NO_SHADOW[] = {{1, "default", false}, {2, "shadow_caster", false}};    /* :9 */
+/* Beyond retail, round 38: an exosuit seen through from its seat loses the camera pass only; its shadow stays. */
+static const Pass CAMERA_ONLY[] = {{1, "default", false}};
+/* The exosuit (every EXO model is this one unit; its weapons are units of their own): the resource name hash of
+ * content/fac_helldivers/vehicles/combat_walker/combat_walker at unit +0x358, and its body mesh and the mesh's three
+ * levels of detail, with their name hashes (Mesh.name). The cockpit, the console and the sticks are UDIM regions of
+ * that one mesh (the game's visibility masks walker_l_front_whole / walker_r_front_whole), not meshes of their own,
+ * so the mesh is seen through whole. The shadow mesh g_combat_walker_shadow is not touched. Checked against the
+ * game data with filediver 2026-11-25 (docs/design/specs/2026-11-25-exosuit-seat.md). */
+static const uint8_t WALKER_RESOURCE[8] = {0xe3, 0x45, 0x5e, 0xda, 0xd2, 0xb3, 0xe4, 0x79};
+typedef struct Named { const char *name; double hash; } Named;
+static const Named WALKER_MESHES[] = {{"g_combat_walker", 0x3F684F2A}, {"g_combat_walker_LOD1", 0x370E4756},
+                                      {"g_combat_walker_LOD2", 0x7231CF3D}, {"g_combat_walker_LOD3", 0x8CCFAAA2}};
 #define TORSO_SETTLE .6
 static const uint8_t RIG_RESOURCE[8] = {237, 139, 160, 60, 73, 77, 207, 208};                   /* :12 */
 typedef struct Pad { const char *name; double hash, node; } Pad;
@@ -58,6 +70,8 @@ typedef struct Spec {
   Part part;
   double offsets[8]; int offset_count;
   bool body_only, rig, shadow_rig, model_shadow, has_backpack, has_model_parent, has_model_owner;
+  bool seat, cockpit;   /* beyond retail, round 38: a seat's row (camera and shadow out, the body's too); the exosuit's */
+  double seat_parent;   /* a seat's clothing: the body or the first-person rig it hangs on (a limb can be on either) */
   TfpVisIdentity backpack;
   double model_parent;
   TfpModelOwner model_owner;
@@ -77,6 +91,8 @@ typedef struct Row {
   double offsets[8]; int offset_count;
   Part part;
   bool body_only, rig, has_backpack, shadow_suppressed, shadow_only, has_model_owner, has_model_parent, has_last, restoring_default;
+  bool seat, cockpit;   /* beyond retail, round 38: as the Spec's */
+  double seat_parent;
   const Pad *rig_pad;
   TfpModelOwner model_owner;
   double model_parent;
@@ -90,6 +106,7 @@ typedef struct Observed {
   TfpEngineWorld sdk_world;
   uint8_t appearance[120];
   bool has_viewmodel, rig_capable, full_body, hide_torso, show_torso, has_model_signature;
+  bool seat; double cockpit;   /* beyond retail, round 38: observed in a seat; the exosuit asked for (0: none) */
   NMap *refs;           /* unit reference -> Spec */
   NMap *kept_layouts;   /* unit reference -> Layout, a = object, b = parent */
   uint8_t *model_signature; size_t model_signature_len;
@@ -123,6 +140,8 @@ struct TfpHead {
   TfpVisText reason;
   double hidden, hidden_head, hidden_torso, hidden_shoulders, hidden_body, hidden_backpack;
   double preserved_partial, writes, restores, retired, foreign_masks, shadows_disabled, steady_observations, full_observations;
+  double hidden_limbs, hidden_cockpit;   /* beyond retail, round 38 */
+  bool seat;                             /* the last update's answer of io->seat */
   char *model_shadow_error; size_t model_shadow_error_len;
   /* upvalues */
   SMap *owned, *ignored;      /* key -> Row; key -> pass bits (entry.num) */
@@ -136,7 +155,7 @@ struct TfpHead {
   TfpEngineWorld cache_sdk_world;
   char *cache_request;
   Setter setter;
-  struct { TfpVisIdentity owner; double kind, record, head, tail, weapon, serial, started; bool ads, aim; } epoch;
+  struct { TfpVisIdentity owner; double kind, record, head, tail, weapon, serial, started; bool ads, aim, seat; } epoch;
   TfpHeadWatch watch;   /* beyond retail: counts of the last call, for the log (head_visibility.h) */
   /* machinery */
   Obj *objects;
@@ -342,11 +361,13 @@ static bool foreign(TfpHead *h) {   /* :278-281 */
   return h->io->foreign_camera(h->io->user) != 0;
 }
 static bool seated_head(TfpHead *h) { return h->io->seated_head && h->io->seated_head(h->io->user); }   /* :282 */
+/* Beyond retail, round 38: an exosuit's seat (TfpHeadIo.seat): only ever a seated frame of camera kind 4. */
+static bool in_seat(TfpHead *h, const TfpVisSnapshot *s) { return s && s->camera_kind == 4 && s->seated && h->io->seat && h->io->seat(h->io->user, s); }
 static bool available(TfpHead *h, const TfpVisSnapshot *s) {   /* :284-291 */
   if (!s || !s->player_identity.present || s->player_identity.len == 0) return false;
   if (pinned_ready(h, s)) return true;
   if ((s->camera_kind == 4 || s->camera_kind == 6) && !s->seated && (s->safe || s->weapon_transition || s->head_camera_transition)) return true;
-  return s->camera_kind == 4 && s->seated && seated_head(h);
+  return s->camera_kind == 4 && s->seated && (seated_head(h) || in_seat(h, s));
 }
 static bool first_person(TfpHead *h, const TfpVisSnapshot *s) {   /* :292-303 */
   TfpHeadActionState state;
@@ -518,6 +539,26 @@ static bool rig_mesh(TfpHead *h, TfpEngineUnit handle, const Pad *pad, double *o
   *out = at;
   return true;
 }
+/* Beyond retail, round 38: one of the exosuit's meshes by name (Unit.has_mesh, Unit.mesh), proven by its name hash
+ * (Mesh.name). false: the suit has no such mesh, or it is another. */
+static bool cockpit_mesh(TfpHead *h, TfpEngineUnit handle, const Named *named, double *out) {
+  const TfpEngineIface *sr = h->engine;
+  TfpEngineError error = {{0}};
+  TfpEngineMesh mesh = NULL;
+  bool present = false;
+  double name = 0;
+  if (!sr->Unit_has_mesh || !sr->Unit_mesh || !sr->Mesh_name) return false;
+  if (!sr->Unit_has_mesh(sr->user, handle, named->name, &present, &error)) engine_raise(h, &error);
+  if (!present) return false;
+  if (!sr->Unit_mesh(sr->user, handle, named->name, &mesh, &error)) engine_raise(h, &error);
+  if (!mesh) return false;
+  if (!sr->Mesh_name(sr->user, mesh, &name, &error)) engine_raise(h, &error);
+  if (lmod(name, 4294967296.0) != named->hash) return false;
+  double at = address(h, mesh);
+  if (!(at >= 65536 && at < HIGH)) return false;
+  *out = at;
+  return true;
+}
 /* :168-182. false: nil. A layout is observed once per renderer in an operation; generation, world,
  * array and slot checks still surround every SDK write. */
 static bool locate(TfpHead *h, Row *row, NMap *layouts, bool check_rig, double *index_out) {
@@ -529,6 +570,7 @@ static bool locate(TfpHead *h, Row *row, NMap *layouts, bool check_rig, double *
   if (!unit(h, true, row->ref, true, row->object, NULL, &object, header) || pointer(h, header, 24) != row->world) return false;
   if (row->rig && (!bytes_at(h, object + 0x358, 8, RIG_RESOURCE)
                    || (check_rig && row->rig_pad && !(rig_mesh(h, row->handle, row->rig_pad, &pad_mesh) && pad_mesh == row->mesh)))) return false;
+  if (row->cockpit && !bytes_at(h, object + 0x358, 8, WALKER_RESOURCE)) return false;   /* beyond retail: not the exosuit any more */
   CHECK(handle_ref(h, row->handle) == row->ref, 174, "Head SDK handle changed");
   double count = mesh_fields(h, object, &has_array, &array);
   NEntry *index = layout ? nget(layout->indices, row->mesh) : NULL;
@@ -551,6 +593,7 @@ static void set_pass(TfpHead *h, Row *row, double index, bool visible, const cha
   CHECK(current_setter(h) == row->setter, 187, "Head mesh SDK binding changed during visibility update");
 }
 static const Pass *passes(const Row *row, int *count) {   /* :10 */
+  if (row->cockpit) { *count = 1; return CAMERA_ONLY; }   /* beyond retail, round 38 */
   if (row->shadow_only) { *count = 1; return SHADOW_ONLY; }
   *count = 2;
   return row->shadow_suppressed ? HIDDEN_NO_SHADOW : PASSES;
@@ -604,15 +647,17 @@ static void restore(TfpHead *h, void *arg) {
   CHECK(!has_problem, 235, problem);
 }
 static double count_owned(TfpHead *h) {   /* :237-247 */
-  double total = 0, head = 0, torso = 0, shoulder = 0, body = 0, backpack = 0, shadows = 0;
+  double total = 0, head = 0, torso = 0, shoulder = 0, body = 0, backpack = 0, shadows = 0, limbs = 0, cockpit = 0;
   for (size_t i = 0; i < h->owned->n; i++) {
     const Row *row = (const Row *)h->owned->e[i].obj;
     total += 1;
     if (row->shadow_suppressed && has(row->bits, 2)) shadows += 1;
     if (row->shadow_only) continue;
     if (row->part == PART_TORSO) torso += 1; else if (row->part == PART_SHOULDER) shoulder += 1;
-    else if (row->part == PART_BODY) body += 1; else if (row->part == PART_BACKPACK) backpack += 1; else head += 1;
+    else if (row->part == PART_BODY) body += 1; else if (row->part == PART_BACKPACK) backpack += 1;
+    else if (row->part == PART_LIMB) limbs += 1; else if (row->part == PART_COCKPIT) cockpit += 1; else head += 1;
   }
+  h->hidden_limbs = limbs; h->hidden_cockpit = cockpit;
   h->hidden = total; h->hidden_head = head; h->hidden_torso = torso; h->hidden_shoulders = shoulder;
   h->hidden_body = body; h->hidden_backpack = backpack;
   h->shadows_disabled = shadows;
@@ -639,7 +684,7 @@ static bool stop(TfpHead *h, TfpVisText *why) {   /* :249-256 */
     if (why) *why = h->reason;
     return false;
   }
-  h->identity.present = false; h->observed = NULL; h->ignored = new_smap(h); h->has_epoch = false;
+  h->identity.present = false; h->observed = NULL; h->ignored = new_smap(h); h->has_epoch = false; h->seat = false;
   report(h, TFP_HEAD_IDLE, NULL);
   if (why) why->present = false;
   return true;
@@ -661,10 +706,25 @@ static void collect(TfpHead *h, void *arg) {
   if (spec->body_only) { object = body; memcpy(header, q->body_header, 32); }
   else found = unit(h, true, ref, false, 0, q->context, &object, header);
   CHECK(found, 307, "Head customization generation retired");
+  /* Beyond retail, round 38: in a seat a clothing renderer may hang on the body or on the first-person rig (the kept
+   * limbs of retail's keep(), :509-522); both are the diver's own. */
+  double seat_parent = 0;
+  bool seat_attached = false;
+  if (spec->seat && !spec->body_only) {
+    seat_parent = ptr(h, object + 0x1D0);
+    seat_attached = seat_parent == body;
+    if (!seat_attached && s->has_viewmodel && s->viewmodel > 0 && s->viewmodel < NONE && s->viewmodel == floor(s->viewmodel)) {
+      double rig;
+      uint8_t rig_header[32];
+      seat_attached = unit(h, true, s->viewmodel, false, 0, q->context, &rig, rig_header) && seat_parent == rig && pointer(h, rig_header, 24) == q->world_native;
+    }
+  }
   CHECK(pointer(h, header, 24) == q->world_native
         && ((spec->body_only && object == body) || (spec->rig && s->has_viewmodel && ref == s->viewmodel)
             || (spec->model_shadow && ptr(h, object + 0x1D0) == spec->model_parent)
-            || (!spec->body_only && !spec->rig && !spec->model_shadow && ptr(h, object + 0x1D0) == body)),
+            || (spec->cockpit && bytes_at(h, object + 0x358, 8, WALKER_RESOURCE))   /* beyond retail: the exosuit, by its resource */
+            || (spec->seat && !spec->body_only && seat_attached)
+            || (!spec->body_only && !spec->rig && !spec->model_shadow && !spec->cockpit && !spec->seat && ptr(h, object + 0x1D0) == body)),
         308, "Head customization attachment changed");
   NEntry *held = nget(h->handles, ref);
   CHECK(held && held->flag, 312, "Head SDK Unit handle unavailable");
@@ -704,6 +764,13 @@ static void collect(TfpHead *h, void *arg) {
     const Pad *selected[2] = {NULL, NULL};
     double selected_mesh[2] = {0, 0};
     bool has_selected = false;
+    /* Beyond retail, round 38: the exosuit's body mesh and its levels of detail, by name; nothing else of the suit. */
+    double walker[sizeof WALKER_MESHES / sizeof *WALKER_MESHES];
+    size_t walker_count = 0;
+    for (size_t i = 0; spec->cockpit && i < sizeof WALKER_MESHES / sizeof *WALKER_MESHES; i++) {
+      double mesh;
+      if (cockpit_mesh(h, handle, &WALKER_MESHES[i], &mesh) && nget(layout->indices, mesh)) walker[walker_count++] = mesh;
+    }
     if (is_rig) {
       CHECK(layout->count == 5, 339, "Known rig shoulder layout changed");
       has_selected = true;
@@ -718,6 +785,11 @@ static void collect(TfpHead *h, void *arg) {
       double mesh = layout->indices->e[i].key;
       const Pad *pad = has_selected ? (selected_mesh[0] == mesh ? selected[0] : selected_mesh[1] == mesh ? selected[1] : NULL) : NULL;
       if (!(!spec->rig || spec->shadow_rig || pad)) continue;
+      if (spec->cockpit) {   /* beyond retail */
+        bool named = false;
+        for (size_t w = 0; w < walker_count; w++) named = named || walker[w] == mesh;
+        if (!named) continue;
+      }
       char key[KEY];
       make_key(key, ref, mesh);
       const SEntry *past = sget(history, key);
@@ -726,11 +798,12 @@ static void collect(TfpHead *h, void *arg) {
                       || earlier->handle != handle || earlier->setter != h->setter || earlier->part != spec->part)) earlier = NULL;
       const SEntry *mine = sget(h->owned, key);
       Row *existing = mine ? (Row *)mine->obj : earlier;
-      bool shadow_suppressed = spec->shadow_rig || spec->model_shadow;
+      bool shadow_suppressed = spec->shadow_rig || spec->model_shadow || spec->seat;
       bool shadow_only = spec->model_shadow || (spec->shadow_rig && !pad);
       Row *row = existing && existing->object == object && existing->body_object == body
         && existing->shadow_suppressed == shadow_suppressed && existing->shadow_only == shadow_only
         && existing->has_model_parent == spec->has_model_parent && (!spec->has_model_parent || existing->model_parent == spec->model_parent)
+        && existing->seat == spec->seat && existing->cockpit == spec->cockpit && existing->seat_parent == seat_parent
         ? existing : NULL;
       if (!row) {
         row = new_obj(h, K_ROW, sizeof *row);
@@ -739,7 +812,7 @@ static void collect(TfpHead *h, void *arg) {
         row->owner = s->player_identity;
       }
       memcpy(row->offsets, spec->offsets, sizeof row->offsets); row->offset_count = spec->offset_count;
-      row->part = spec->part; row->body_only = spec->body_only; row->rig = spec->rig;
+      row->part = spec->part; row->body_only = spec->body_only; row->rig = spec->rig; row->seat = spec->seat; row->cockpit = spec->cockpit; row->seat_parent = seat_parent;
       row->has_backpack = spec->has_backpack; row->backpack = spec->backpack;
       row->rig_pad = pad;
       row->shadow_suppressed = shadow_suppressed;
@@ -845,10 +918,18 @@ static void resolve(TfpHead *h, void *arg) {
   else if (!h->has_torso_steady_since || now < h->torso_steady_since) { h->torso_steady_since = now; h->has_torso_steady_since = true; }
   bool settled = h->has_torso_steady_since && now - h->torso_steady_since >= TORSO_SETTLE;
   bool show_torso = !full_body && settled && h->io->show_torso && h->io->show_torso(h->io->user);
+  /* Beyond retail, round 38: in an exosuit's seat the whole diver is out of sight whatever the options say, and the
+   * suit may be seen through (TfpHeadIo.seat, .cockpit). */
+  const bool seat = in_seat(h, s);
+  double cockpit = 0;
+  if (seat && h->io->cockpit && !(h->io->cockpit(h->io->user, s, &cockpit) && cockpit > 0 && cockpit < NONE && cockpit == floor(cockpit)
+                                  && cockpit != s->body && !(s->has_viewmodel && cockpit == s->viewmodel))) cockpit = 0;
+  h->seat = seat;
+  if (seat) full_body = hide_torso = show_torso = false;
   bool has_models = false, has_model_signature = false;
   const uint8_t *model_signature = NULL;
   size_t model_signature_len = 0;
-  if (!full_body && h->models) {
+  if (!full_body && !seat && h->models) {
     has_models = tfp_model_shadow_probe(h->models, s, appearance, 120, &model_signature, &model_signature_len);
     has_model_signature = true;
     h->has_model_shadow_error = !has_models;
@@ -861,7 +942,7 @@ static void resolve(TfpHead *h, void *arg) {
   } else h->has_model_shadow_error = false;
   static const int KEPT_FULL[] = {3, 4, 5, 6, 7, 8, 9}, KEPT[] = {3, 4, 5, 6, 7};
   const int *kept_slots = full_body && hide_torso ? KEPT_FULL : KEPT;
-  int kept_count = full_body && hide_torso ? 7 : 5;
+  int kept_count = seat ? 0 : full_body && hide_torso ? 7 : 5;   /* a seat keeps nothing */
   bool rig_capable = sr->Unit_has_mesh && sr->Unit_mesh && sr->Mesh_name && sr->Mesh_node && sr->Mesh_num_materials && sr->Mesh_has_material;
   TfpHeadBackpack backpack;
   TfpVisText unused;
@@ -874,12 +955,44 @@ static void resolve(TfpHead *h, void *arg) {
     && memcmp(previous->appearance, appearance, 120) == 0
     && previous->has_viewmodel == s->has_viewmodel && (!s->has_viewmodel || previous->viewmodel == s->viewmodel)
     && previous->rig_capable == rig_capable && previous->full_body == full_body && previous->hide_torso == hide_torso
-    && previous->show_torso == show_torso
+    && previous->show_torso == show_torso && previous->seat == seat && previous->cockpit == cockpit
     && blob_equal(previous->has_model_signature, previous->model_signature, previous->model_signature_len,
                   has_model_signature, model_signature, model_signature_len);
   NMap *refs = unchanged ? previous->refs : new_nmap(h);
   bool changed = !unchanged || q->refresh;
-  if (!unchanged) {
+  if (!unchanged && seat) {
+    /* Beyond retail, round 38: every slot of the three layers (a renderer named by several slots keeps the first
+     * one's part), the backpack and the body's own meshes, camera and shadow; nothing kept, no rig, no model
+     * shadows. Then the exosuit, when one is asked for. */
+    for (int layer = 0; layer <= 2; layer++) for (int slot = 0; slot < 10; slot++) {
+      int offset = layer * 40 + slot * 4;
+      double ref = integer(appearance, (size_t)offset);
+      if (ref == 0 || ref == NONE) continue;
+      CHECK(ref != s->body && !(s->has_viewmodel && ref == s->viewmodel), 436, "Customization reference overlaps player rig");
+      NEntry *entry = nget(refs, ref);
+      if (!entry) {
+        const Part part = slot == 0 ? PART_HEAD : slot == 2 ? PART_TORSO : slot >= 8 ? PART_SHOULDER : PART_LIMB;
+        Spec *spec = new_spec(h, part);
+        spec->seat = true;
+        entry = nset(refs, ref); entry->obj = &spec->o;
+      }
+      Spec *spec = (Spec *)entry->obj;
+      if (spec->offset_count < 8) spec->offsets[spec->offset_count++] = 0xDC + offset;
+    }
+    if (has_backpack && backpack.ref != s->body && !nget(refs, backpack.ref)) {
+      Spec *spec = new_spec(h, PART_BACKPACK);
+      spec->seat = true; spec->has_backpack = backpack.identity.present; spec->backpack = backpack.identity;
+      nset(refs, backpack.ref)->obj = &spec->o;
+    }
+    Spec *body_spec = new_spec(h, PART_BODY);
+    body_spec->body_only = true; body_spec->seat = true;
+    nset(refs, s->body)->obj = &body_spec->o;
+    if (cockpit > 0 && !nget(refs, cockpit)) {
+      Spec *spec = new_spec(h, PART_COCKPIT);
+      spec->cockpit = true;
+      nset(refs, cockpit)->obj = &spec->o;
+    }
+  } else if (!unchanged) {
     for (int layer = 0; layer <= 2; layer++) for (size_t i = 0; i < 4; i++) {
       const Selected *selected = &SELECTED[i];
       if (!(tfp_head_parts & (1u << selected->part))) continue;   /* beyond retail; all parts by default */
@@ -944,7 +1057,7 @@ static void resolve(TfpHead *h, void *arg) {
     const NEntry *held = nget(h->handles, refs->e[i].key);
     if (!held || !held->flag || handle_ref(h, held->raw) != refs->e[i].key) {
       missing = true;
-      required_missing = required_missing || !((const Spec *)refs->e[i].obj)->rig;
+      required_missing = required_missing || !(((const Spec *)refs->e[i].obj)->rig || ((const Spec *)refs->e[i].obj)->cockpit);
     }
   }
   /* No public Unit-created event exists here. Enumerate only on a missing
@@ -979,7 +1092,7 @@ static void resolve(TfpHead *h, void *arg) {
   for (size_t i = 0; i < refs->n; i++) {
     Spec *spec = (Spec *)refs->e[i].obj;
     Collect c = {refs->e[i].key, spec, s, &context, body, header, world_native, base, unchanged, NULL, false};
-    if (spec->rig) {
+    if (spec->rig || spec->cockpit) {   /* beyond retail: the exosuit is optional too */
       /* The FPV rig may be absent during a weapon gap, or use an
        * unsupported armor layout. It is optional; verified body and
        * clothing passes keep working independently of its metadata. */
@@ -1031,6 +1144,7 @@ static void resolve(TfpHead *h, void *arg) {
   if (has_backpack) observed->pack_identity = backpack.identity;
   observed->has_viewmodel = s->has_viewmodel; observed->viewmodel = s->viewmodel; observed->rig_capable = rig_capable;
   observed->full_body = full_body; observed->hide_torso = hide_torso; observed->show_torso = show_torso;
+  observed->seat = seat; observed->cockpit = cockpit;
   observed->refs = refs; observed->kept_layouts = kept_layouts;
   observed->has_model_signature = has_model_signature;
   if (has_model_signature) {
@@ -1047,7 +1161,8 @@ static void resolve(TfpHead *h, void *arg) {
 static bool same_epoch(const TfpHead *h, const TfpVisSnapshot *s) {
   return h->has_epoch && tfp_vis_identity_equal(&h->epoch.owner, &s->player_identity) && h->epoch.kind == s->camera_kind
     && h->epoch.record == s->record && h->epoch.head == s->head && h->epoch.tail == s->tail && h->epoch.weapon == s->request_weapon
-    && h->epoch.ads == s->controller_active && h->epoch.aim == s->aiming;
+    && h->epoch.ads == s->controller_active && h->epoch.aim == s->aiming
+    && h->epoch.seat == h->seat;   /* beyond retail, round 38: a seat begins an epoch of its own, and so does its end */
 }
 static bool new_epoch(TfpHead *h, const TfpVisSnapshot *s) {
   bool changed = !same_epoch(h, s);
@@ -1055,7 +1170,7 @@ static bool new_epoch(TfpHead *h, const TfpVisSnapshot *s) {
     double serial = h->has_epoch ? h->epoch.serial : 0;
     h->epoch.owner = s->player_identity; h->epoch.kind = s->camera_kind; h->epoch.record = s->record;
     h->epoch.head = s->head; h->epoch.tail = s->tail; h->epoch.weapon = s->request_weapon;
-    h->epoch.ads = s->controller_active; h->epoch.aim = s->aiming;
+    h->epoch.ads = s->controller_active; h->epoch.aim = s->aiming; h->epoch.seat = h->seat;
     h->epoch.serial = serial + 1; h->has_epoch = true;
     h->epoch.started = h->io->clock(h->io->user);
   }
@@ -1258,7 +1373,7 @@ static void apply(TfpHead *h, void *arg) {   /* :694-756 */
     int count;
     const Pass *list;
     /* Beyond retail, for the log: the camera pass of a mesh this module wants out of the camera's sight, as found. */
-    const bool camera_row = !row->shadow_only && !row->body_only;
+    const bool camera_row = !row->shadow_only && (!row->body_only || row->seat);
     if (camera_row) {
       h->watch.camera_rows += 1;
       if (has(current, 1)) {
@@ -1274,7 +1389,7 @@ static void apply(TfpHead *h, void *arg) {   /* :694-756 */
     list = passes(row, &count);
     for (int p = 0; p < count; p++) {
       const Pass *pass = &list[p];
-      bool targeted = !row->body_only || pass->mask == 2;
+      bool targeted = !row->body_only || pass->mask == 2 || row->seat;   /* beyond retail: a seat hides the body's own meshes too */
       if (targeted && has(current, pass->mask) != pass->visible
           && (has(row->bits, pass->mask) || (row->has_last && has(row->last, pass->mask) == pass->visible))) {
         row->bits = assign(row->bits, pass->mask, false);
@@ -1289,17 +1404,19 @@ static void apply(TfpHead *h, void *arg) {   /* :694-756 */
     list = passes(row, &count);
     for (int p = 0; p < count; p++) {
       const Pass *pass = &list[p];
-      bool desired = !row->body_only || pass->mask == 2;
+      bool desired = !row->body_only || pass->mask == 2 || row->seat;
       const SEntry *ignored = sget(h->ignored, key);
       if (!(desired && has(current, pass->mask) != pass->visible && !has(row->bits, pass->mask)
             && !has(ignored ? ignored->num : 0, pass->mask))) continue;
       double again, index, unused, pad_mesh;
       uint8_t header[32];
       CHECK(unit(h, true, row->body_ref, true, row->body_object, NULL, &again, header) && again == row->body_object
-            && (row->body_only || row->rig || (row->has_model_owner && ptr(h, row->object + 0x1D0) == row->model_parent)
-                || (!row->has_model_owner && ptr(h, row->object + 0x1D0) == row->body_object))
+            && (row->cockpit ? bytes_at(h, row->object + 0x358, 8, WALKER_RESOURCE)   /* beyond retail: still the exosuit */
+                : row->seat && !row->body_only ? ptr(h, row->object + 0x1D0) == row->seat_parent   /* beyond retail: where the seat found it */
+                : (row->body_only || row->rig || (row->has_model_owner && ptr(h, row->object + 0x1D0) == row->model_parent)
+                   || (!row->has_model_owner && ptr(h, row->object + 0x1D0) == row->body_object)))
             && !foreign(h), 721, "Head owner changed before hide");
-      bool present = row->body_only;
+      bool present = row->body_only || row->cockpit;
       if (row->has_backpack) {
         TfpHeadBackpack pack;
         TfpVisText why;
@@ -1393,7 +1510,7 @@ void tfp_head_free(TfpHead *h) {
   free(h->model_shadow_error); free(h->cache_request);
   free(h);
 }
-bool tfp_head_update(TfpHead *h, TfpVisText *why) { memset(&h->watch, 0, sizeof h->watch); bool ok = update(h, why); collect_garbage(h); return ok; }
+bool tfp_head_update(TfpHead *h, TfpVisText *why) { memset(&h->watch, 0, sizeof h->watch); h->seat = false; bool ok = update(h, why); collect_garbage(h); return ok; }
 bool tfp_head_stop(TfpHead *h, TfpVisText *why) { memset(&h->watch, 0, sizeof h->watch); bool ok = stop(h, why); collect_garbage(h); return ok; }
 bool tfp_head_shutdown(TfpHead *h, TfpVisText *why) { h->closing = true; return tfp_head_stop(h, why); }   /* :257 */
 bool tfp_head_is_clean(const TfpHead *h) { return h->owned->n == 0; }   /* :248 */
@@ -1406,7 +1523,8 @@ void tfp_head_result(TfpHead *h, TfpHeadResult *out) {   /* :265-273 */
   *out = (TfpHeadResult){h->phase, total, h->hidden_head, h->hidden_torso, h->hidden_shoulders, h->hidden_body, h->hidden_backpack,
                          h->preserved_partial, h->writes, h->restores, h->retired, h->foreign_masks, h->phase == TFP_HEAD_CLEANUP_PENDING,
                          h->reason, h->has_model_shadow_error, h->model_shadow_error, h->model_shadow_error_len, h->shadows_disabled,
-                         h->steady_observations, h->full_observations};
+                         h->steady_observations, h->full_observations, h->seat, h->hidden_limbs, h->hidden_cockpit,
+                         h->hidden_cockpit > 0 && h->observed ? h->observed->cockpit : 0};
 }
 size_t tfp_head_status(TfpHead *h, char *out, size_t size) {   /* :274-277 */
   char head[40], torso[40], shoulders[40], body[40];

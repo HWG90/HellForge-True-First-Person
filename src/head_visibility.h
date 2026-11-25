@@ -56,6 +56,16 @@ typedef struct TfpHeadIo {
   bool (*hide_torso)(void *user);
   bool (*show_torso)(void *user);
   bool (*seated_head)(void *user);
+  /* Beyond retail, round 38 (docs/design/specs/2026-11-25-exosuit-seat.md). May be NULL: never a seat.
+   * seat: this snapshot's body is in an exosuit's (or a vehicle's) seat with first person kept (the camera lock's
+   * seat rule: seated, off foot, not in physics). The whole diver is then out of the camera's sight: the 30
+   * appearance slots, the body's own meshes and the backpack, camera and shadow passes; the first-person rig is
+   * left to the game. Asked once per update with the snapshot the update took.
+   * cockpit: while in a seat, the unit reference of the exosuit to see through (its body meshes lose the camera
+   * pass; their shadow stays), or false for none (the option is off, or no suit is proven to be the one the diver
+   * sits in). The unit must carry the exosuit's resource and be in the body's world, or it is left alone. */
+  bool (*seat)(void *user, const TfpVisSnapshot *s);
+  bool (*cockpit)(void *user, const TfpVisSnapshot *s, double *unit);
 } TfpHeadIo;
 
 /* What depends on the game build: the code pins of helldivers2.exe that qualify the SDK setter and the
@@ -93,6 +103,10 @@ typedef struct TfpHeadResult {
   TfpVisText error_message;
   bool has_model_shadow_error; const char *model_shadow_error; size_t model_shadow_error_len;   /* valid until the next update */
   double shadows_disabled, steady_observations, full_observations;
+  /* Beyond retail, round 38: the last update was a seat (TfpHeadIo.seat); rows owned of the limb slots (1, 3 to 7)
+   * and of the exosuit's meshes; the suit being seen through (0: none). */
+  bool seat;
+  double hidden_limbs, hidden_cockpit, cockpit_unit;
 } TfpHeadResult;
 
 typedef struct TfpHead TfpHead;
