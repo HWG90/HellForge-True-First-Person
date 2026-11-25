@@ -334,3 +334,74 @@ the gun's grip (most 0.002)`
 - Whether the held step stays small while turning, walking and sprinting.
 - Whether the slower ease (about 0.27 s for a 0.39 m reach at 30 frames a second, against 0.15 s) reads as late
   after a reload.
+
+## Round 36: the hand on a fitted foregrip (2026-11-25)
+
+The user's report on feel.55: "Hand on foregrip attachments is not working." The user's own play (soak 43, R-4 Hyena,
+weapon key `e067fda8556379e5`) says on every held second `on the grip; the gun's own grip node (1 grip nodes on 1 of the
+gun's units), the body's hand 0.000 m from it; ... as drawn the hand 0.000 m from the gun's grip`. The same session's
+BR-14 Adjudicator says `an attachment's grip node (2 grip nodes on 2 of the gun's units)`, the body's hand 0.000 m from it.
+
+### What the game's files say (filediver, the current retail data, read only)
+
+- The Hyena is `marksman_rifle_drake` (unit `0xe5796355a8fd67e0`, the key's bytes the other way round); the Adjudicator
+  is `battle_rifle` (`0x5fecab819f96a3e8`). Node `67C94E4B` is named `IK_left`.
+- The gun's own `IK_left` is node 13 of the Hyena, at 0.288 m along the gun. Its `attach_underbarrel` (node 17,
+  `7950E36E`) is at 0.462 m, turned 180 degrees about the gun's long axis.
+- Every vertical and angled grip unit carries its own `IK_left` (standard, advanced, 45-degree and flashlight vertical
+  grips; the three angled foregrips). Mounted on the Hyena's `attach_underbarrel`, that node is **0.122 to 0.176 m** from
+  the gun's own (standard vertical grip 0.169 m, 0.16 m forward and 0.055 m lower): "a hand's width short of a vertical
+  grip", as the round 23 photo-mode shot showed. On the Adjudicator the same grips' nodes are 0.074 to 0.107 m from the
+  gun's own.
+- No magazine, muzzle or optic carries `IK_left`. Among all units it is on guns, on these grips, on pump fore-ends and on
+  a few underbarrel parts (the grenadier's launcher, the Legacy Liberator's grip): parts made for the left hand.
+- Every primary with an underbarrel slot has `ik_attach_setting` None in its weapon customization component ("What unit
+  should we attach our left hand to? If set to None, it will default to the weapon"); only the pump shotguns and the
+  pump grenade launcher say Underbarrel.
+
+### Cause
+
+Two things, and the log cannot yet tell which one the Hyena hit.
+
+1. **The drive followed the body's choice of node.** It took the node the body's hand is on (round 23: within 3 cm).
+   The game decides that node. On the Adjudicator it chose the grip's own node, but the round 23 photo-mode shot (the
+   game's own third person) had the body's hand open about a hand's width behind a fitted vertical grip, which is where
+   a body held on the gun's own node puts it. Wherever the game does that, the drawn hand followed it 0.12 to 0.18 m
+   behind the grip.
+2. **The Hyena's grip unit was not among the units searched.** One grip node on one unit means that no unit the search
+   reached carried `IK_left`, and every grip unit does. Either no grip was fitted in that session, or the grip unit is
+   not a child of the gun. The search walked only the gun's own children.
+
+### The fix (`src/arm_drive.c` `grip_target`, `mounted_elsewhere`)
+
+- **Gate and target are two nodes.** The gate is the node the body's hand is on; it says the game pins the hand (held,
+  free, its latch and its trailing frame are as before). The target is the node the hand holds: the gate when it is on an
+  attachment, else the attachment grip node nearest to the gate when one exists, else the gate. The gun's nodes are rigid
+  on it, so the target stays the same while the gate and the gun's units do: no drift. A target that changes eases
+  through the solver's limits (720 degrees a second, 30 a frame), unchanged.
+- **Units mounted from elsewhere.** Units under the rig (three levels) and the body (two) whose external
+  array is the gun's world matrices hang on a gun node without being its children; they are searched too. The walk runs
+  every 250 ms at most (96 units at most); in between, those found are only checked again.
+- **The units line.** `Grip: the gun's units: 3, 2 with a grip node: [0] the gun e5796355a8fd67e0, 39 nodes, grip node
+  13; [1] on [0] node 17 (7950e36e) f9df21c8e52cac95, 13 nodes, grip node 8; ...` whenever the list changes: each unit's
+  resource (filediver's name hash), its node count, the node it hangs on and that node's name, its grip node. A unit from
+  elsewhere says `from elsewhere`. The Grip line says `the body's hand 0.000 m from the gun's own` when the hand holds an
+  attachment's node while the body's is on the gun's.
+
+### Tests
+
+`tests/arm_drive_test.c`: `test_grip_holds` (a gun whose only grip node is its own; the units line lists the optic with
+none), `test_grip_foregrip` (the body's hand on the attachment's node, as before), `test_grip_foregrip_body_on_gun` (held
+on the gun's own node, then a grip unit fitted 0.126 m forward and 0.04 m down while the body's hand stays on the gun's:
+the drawn hand on the grip after 4 frames within every frame's allowance, then steady bit for bit, off for a reload and
+back), `test_grip_mounted_from_rig` (a grip unit that is a child of the rig hanging on gun node 1: held and listed; one
+that hangs on the rig is not taken).
+
+### What only the game can show
+
+- The units line for the Hyena with a grip fitted: whether the grip unit is there (as the gun's child, or `from
+  elsewhere`), and its resource. If the line lists only the gun, the grip is in no unit reachable from the gun, the rig or
+  the body, and the next step is where the game keeps it.
+- How the hand looks on a vertical grip 0.17 m forward of where the body's is: the reach (about 0.1 more arm lengths),
+  the shoulder coming forward, the wrist and the fingers (the body's fingers, shaped by the game for the gun's own node).
+- Whether the elsewhere walk costs anything visible (`Perf:` arms).

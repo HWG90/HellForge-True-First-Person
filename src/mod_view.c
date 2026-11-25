@@ -808,6 +808,8 @@ static void arms_tick(void) {
         next_grip = now + 1000;
         tfp_arm_drive_grip_take(&g);
         if (g.frames) say("Grip: %s", tfp_arm_drive_grip_line(&g));
+        const char *units = g.frames ? tfp_arm_drive_grip_units_line(&g, true) : NULL; /* round 36: whenever the gun's units change */
+        if (units) say("Grip: %s", units);
         if (g.frames && g.state != told_state && g.state != TFP_ARM_GRIP_HELD && g.state != TFP_ARM_GRIP_EASING)
           say("Grip: left as the body holds it: %s", tfp_arm_drive_grip_state_name(g.state));
         if (g.frames) told_state = g.state;
