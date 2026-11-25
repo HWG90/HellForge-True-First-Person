@@ -143,8 +143,8 @@ Run `matrix.py OUT aim-full aim-scope-zoom aim aim-fire pistol-aim` with a scope
   the middle button is not the aim-mode binding in this profile, or the game does not hear it. Then check that
   `drive.py run "click middle"` pings or marks anything in the game.
 - aim-scope-zoom: `zoom key K` with K one of the arrows. Write it down here, and put that key first in `ZOOM_KEYS`.
-  Expect two or three zoom levels (about 30.8, 15.0 and 7.5 for 25 / 50 / 100 m) and the `Aim: out` line listing
-  each with its sight and depth. `zoom key not found` with full aim kept means the menu takes another input; to see
+  Expect one zoom level per range the menu stepped through (two or three) and the `Aim: out` line listing each with
+  its sight and depth. `zoom key not found` with full aim kept means the menu takes another input; to see
   the menu:
   `drive.py run "down right; keep right; wait 0.35; click middle; wait 1; down r; keep r; wait 1"`, then
   `drive.py shot menu.png`, then `drive.py run "up r; up right"`. `full aim was lost before the zoom key ...` means
