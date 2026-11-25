@@ -507,3 +507,56 @@ prone swaps of soak 34 unless their head is below the view too.
 - Whether the frame of helmet from 0.43 m behind it in a lunge (173, "too far") shows, and whether it is worse than the
   0.53 m lurch it replaces. If it is, `TFP_CAMERA_VEIL_MOST` is the one number to raise.
 - How the 300 ms let-out reads after a standing swap (0.32 m eased back where it used to step back in a frame).
+
+## Round 30: a lone head-camera frame at the release of full aim
+
+feel.53's soak (`~/.cache/tfp-soak-36.modlog`, the first to reach full aim) has six leaves of the native view that are
+one head-camera frame long. Each comes 0.22 to 0.35 ms after a native frame of full aim (`quiet=1`), in the same game
+frame, at "State: entered the native view" and "State: aim out", with control mask 0 (`Return: ... mask=00000000`),
+and the next frame is the native view again. The veil opened at each and moved four of them 0.20 to 0.38 m forward
+(`veil_head` 0.10 to 0.28 m in front of the held eye, the head level with it); the native frame after took it back. The
+judge read 0.745, 0.506, 0.399 and 0.390 m: the top four veil frames of the soak. The body is never drawn there: the
+native view never left.
+
+Neither rule proposed after the soak tells them apart on its own:
+
+- **"Under 2 ms after a native frame."** 1,916 of the 1,940 leaves of soaks 8 to 36 have their first head-camera frame
+  that close to the native frame before it (the game evaluates the camera twice in the leave's frame). Keeping all of
+  them pending is `veil_second.txt` for every leave.
+- **"Out of full aim."** Soak 36 also has five ordinary leaves out of full aim, 16 to 22 frames long: a swap made in full
+  aim (07:02:36.769, 07:04:23.133, 07:04:50.374, 07:07:05.517, 07:15:28.508). They differ in the control mask, 2 (the
+  gun leaving the hands) at that same tick (`Hold: mask=00000002 kind=4`, `Drop: ... mask=00000002`).
+
+(The Trace rows' `lease=` is the binder's lease when the window is written, not the frame's, so it tells nothing here.)
+
+### What changed (`src/camera_helper.c` `veil_same_frame_leave`, `src/camera_helper.h` `TFP_CAMERA_VEIL_SAME_FRAME_MS`)
+
+A leave noted in a head-camera frame within 2 ms of a native frame of full aim (`native_full_ads`) is decided once that
+frame's control mask is read (`owner_status`, a few lines later in the hook). Mask 0: the leave is kept pending
+(`veil_pending`), so the frame is not moved, and the tick that sees it opens the veil for the head-camera frames after
+it, which moves nothing when the view went straight back. Any other mask: opened at once, as every other leave. Counted
+in `TfpCameraVeilStats.held_back` (not on the `Head:` line: that is `src/mod_view.c`).
+
+### Numbers (soak 36 replayed: `replay.py`'s continuity on the logged calls, the veil taken off the frames the rule keeps,
+judged with `matrix.measure`; the rule's mask from the last Hold/Return/Drop line written at or before the frame's stamp)
+
+| Frame (the native frame after the lone one) | Before | After |
+|---|---|---|
+| 07:03:36.728 | 0.745 m, the veil's | 0.012 m |
+| 07:07:06.652 | 0.506 | 0.012 |
+| 07:04:24.267 | 0.399 | 0.012 |
+| 07:02:37.937 | 0.390 | 0.012 |
+| 07:15:29.643 | 0.340 | 0.012 |
+
+0.012 m is the continuity letting go of the edge it took (correction 0.25 to 0.44 m held at the native eye). The rule
+keeps six frames (the sixth, 07:04:51.476, had no move: its head was behind the eye); the five swaps in full aim and
+every leave of soaks 8 to 35 are untouched (no frame of theirs changes). The soak's largest veil frame goes from 0.745
+to 0.339 m (an ordinary leave). Tests: `tests/camera_veil_helper_test.cpp` 21 (the release kept, with the view going
+back and staying away; a swap in full aim, a same-frame leave out of the hip and a lone frame a whole frame later
+veiled at once).
+
+### What only the game can show
+
+- Whether that second evaluation is drawn at all. If it is, it now shows the held eye (the native one) for a frame, 0.25
+  to 0.44 m behind the head camera's eye; the body is hidden there, so nothing of the helmet should show.
+- A release of full aim with an action owning the view (a mask other than 0 or 2) is veiled as before.
