@@ -98,6 +98,7 @@ Defaults are the store's defaults (retail's, and the locked view's); on a first 
 | Locked view | One-handed pistols | toggle |  | on | locked_view.json one_handed_pistols |
 | Locked view | Weapon put-away | toggle |  | on | locked_view.json put_away |
 | Locked view | Smooth eye | toggle |  | on | locked_view.json smooth_eye |
+| Locked view | See through the exosuit cockpit | toggle |  | on | locked_view.json see_through_cockpit |
 
 Notes on the list:
 

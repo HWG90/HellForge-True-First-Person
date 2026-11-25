@@ -112,8 +112,11 @@ static int store_part(void) {
   TfpSettings s;
   memset(&s, 0, sizeof s);
   CHECK(tfp_settings_defaults(&s));
-  /* the sixteen options and their defaults (round 20: Aim field of view, its chosen degrees, the sight distance in aim) */
-  CHECK(TFP_LOCKED_COUNT == 16);
+  /* the seventeen options and their defaults (round 20: Aim field of view, its chosen degrees, the sight distance in aim;
+   * round 38: See through the exosuit cockpit, on) */
+  CHECK(TFP_LOCKED_COUNT == 17);
+  CHECK(tfp_settings_locked_flag(&s, TFP_LOCKED_see_through_cockpit) && tfp_settings_locked("see_through_cockpit") == TFP_LOCKED_see_through_cockpit &&
+        tfp_settings_locked_info(TFP_LOCKED_see_through_cockpit)->is_bool);
   CHECK(tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim) == 1 && tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim_degrees) == 50 &&
         tfp_settings_locked_number(&s, TFP_LOCKED_ads_sight_cm) == 0);
   CHECK(tfp_settings_locked_flag(&s, TFP_LOCKED_camera_lock) && tfp_settings_locked_flag(&s, TFP_LOCKED_fov_lock) &&
@@ -571,7 +574,7 @@ static int panel_part(void) {
   CHECK(drawn("tab:First person") && drawn("tab:Bob and sway") && drawn("tab:Locked view"));
   int count = 0, sliders = 0, checks_drawn = 0, keys = 0, described = 0, choices = 0;
   const TfpMenuControl *controls = tfp_wire_menu_controls(&count);
-  CHECK(count == 44);
+  CHECK(count == 45);   /* round 38: See through the exosuit cockpit */
   for (int i = 0; i < count; i++) {
     const TfpMenuControl *c = &controls[i];
     char line[420];
@@ -603,7 +606,7 @@ static int panel_part(void) {
     }
     if (c->description) { snprintf(line, sizeof line, "tip:%s", c->description); CHECK(drawn_part(line)); described++; }
   }
-  CHECK(sliders == 16 && checks_drawn == 16 && keys == 2 && choices == 3 && described == 31);
+  CHECK(sliders == 16 && checks_drawn == 17 && keys == 2 && choices == 3 && described == 32);
   CHECK(drawn("text:First person through every action, one field of view, and how much your body's movement moves the view."));
   CHECK(drawn("primary:Enable True First Person") && drawn("cap:U") && !drawn("cap:F11") && drawn("cap:PAGE UP")); /* the stored 122 (F11) reads as U */
   CHECK(drawn("slider:Weapon movement strength=120[0..200]") && drawn("slider:Near clip distance (cm)=15[5..40]") && drawn("slider:Weapon bob speed=100[25..200]"));
