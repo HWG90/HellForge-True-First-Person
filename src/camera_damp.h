@@ -140,14 +140,17 @@ static inline float tfp_eye_damp_release_slowly(TfpEyeDamp *d, double tick, uint
  * frames after it while the root goes on turning under the held view; then what is carried is let out from rest to rest
  * (1 - smoothstep) over a time that keeps the step's change at TFP_EYE_WHIP_STEP_CHANGE_M a frame (at the whip's own
  * frame time), and no shorter than TFP_EYE_WHIP_LET_OUT_MS. A whip begins where the root's heading turns at
- * TFP_EYE_WHIP_START_RAD_S or more while the view's turns at TFP_EYE_WHIP_VIEW_RAD_S or less, and the point rode the
+ * TFP_EYE_WHIP_START_RAD_S or more, swinging the point at TFP_EYE_WHIP_START_M_S or more (a body that turns after its
+ * view, the head near the root, is no whip), while the view's turns at TFP_EYE_WHIP_VIEW_RAD_S or less, and the point rode the
  * root (it moved against the root less than TFP_EYE_WHIP_RODE of what the turn moved it: a root that turns round a
  * head that stays where it was is no whip); it goes on while the root turns at TFP_EYE_WHIP_ON_RAD_S. Rates, so a
  * frame time of 8 or 50 ms finds the same whips. The player turning (view and root together) is never one; the view
  * turning alone moves no root; a dive's arc, a jump and a crouch are not turns of the root. What is carried is at most
  * TFP_EYE_WHIP_MOST_M. The caller asks only in head-camera frames of a body on foot (a ragdoll, a throw, full aim are
  * not), where a whip under way is still let out but no new one begins. */
-#define TFP_EYE_WHIP_START_RAD_S 9.0f /* 0.30 rad in a frame of 33.3 ms */
+#define TFP_EYE_WHIP_START_RAD_S 9.0f  /* 0.30 rad in a frame of 33.3 ms */
+#define TFP_EYE_WHIP_START_M_S 5.0f    /* and the turn swings the point at 5 m/s or more (soak 36: 12.8 and 16.3; soak 31, the user's log, a
+                                         * body turning after its view at 20:26:37.6: 3.2, its head 0.27 m from the root) */
 #define TFP_EYE_WHIP_ON_RAD_S 1.5f    /* 0.05 rad in a frame of 33.3 ms */
 #define TFP_EYE_WHIP_VIEW_RAD_S 1.5f
 #define TFP_EYE_WHIP_STEP_CHANGE_M .03f
@@ -205,7 +208,7 @@ static inline float tfp_eye_whip_step(TfpEyeWhip *w, const float *offset, const 
     const bool rode = slid <= TFP_EYE_WHIP_RODE*TFP_EYE_WHIP_RODE*swung;
     const float seconds = (float)(tick-w->tick)/1000, root_rate = fabsf(root_turn)/seconds;
     const bool held = isfinite(root_rate) && isfinite(view_turn) && fabsf(view_turn) <= TFP_EYE_WHIP_VIEW_RAD_S*seconds;
-    if (begin && held && rode && (root_rate >= TFP_EYE_WHIP_START_RAD_S || (w->turning && root_rate >= TFP_EYE_WHIP_ON_RAD_S))) {
+    if (begin && held && rode && ((root_rate >= TFP_EYE_WHIP_START_RAD_S && sqrtf(swung) >= TFP_EYE_WHIP_START_M_S*seconds) || (w->turning && root_rate >= TFP_EYE_WHIP_ON_RAD_S))) {
       for (unsigned i = 0; i < 3; ++i) w->carried[i] -= swing[i];
       const float most = sqrtf(w->carried[0]*w->carried[0]+w->carried[1]*w->carried[1]+w->carried[2]*w->carried[2]);
       if (most > TFP_EYE_WHIP_MOST_M) for (unsigned i = 0; i < 3; ++i) w->carried[i] *= TFP_EYE_WHIP_MOST_M/most;

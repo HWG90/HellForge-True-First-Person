@@ -440,7 +440,8 @@ int main(void) {
       CHECK(most == 0 && alone == 0 && w.whips == 0);
     }
     /* 3. A root that turns round a head that stays where it was (soak 27, 13:04:44.367: the heading flipped 180 degrees,
-     * the head did not swing): no whip. A root turning under a held view at 6 rad/s, under the start: none. A whip in a
+     * the head did not swing): no whip. A root turning under a held view at 6 rad/s, under the start: none. A body turning
+     * after its view with the head near the root: none. A whip in a
      * body that is not on foot (begin false: a ragdoll, a throw, full aim): none. */
     {
       TfpEyeWhip w; w.whips = 0; tfp_eye_whip_reset(&w); float add[3], most = 0;
@@ -449,6 +450,11 @@ int main(void) {
       CHECK(most == 0 && w.whips == 0);
       tfp_eye_whip_reset(&w);
       for (double ms = 0; ms <= 300; ms += 33.3) most = fmaxf(most, whip_frame(&w, 6*(float)ms/1000, .7f, 0, true, true, ms, add));
+      CHECK(most == 0 && w.whips == 0);
+      /* soak 31 (the user's log, 20:26:37.6): a body turning after its view at 12 rad/s, the head 0.27 m from the root
+       * (3.2 m/s): no whip. */
+      tfp_eye_whip_reset(&w);
+      for (double ms = 0; ms <= 100; ms += 12.5) most = fmaxf(most, whip_frame(&w, 12*(float)ms/1000, .27f, 0, true, true, ms, add));
       CHECK(most == 0 && w.whips == 0);
       tfp_eye_whip_reset(&w);
       most = fmaxf(most, whip_frame(&w, 0, .7f, 0, false, true, 0, add));
