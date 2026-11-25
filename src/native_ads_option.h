@@ -10,6 +10,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "entity_fields.h"
 
 #define TFP_NATIVE_AIM_TEXT 256
 #define TFP_NATIVE_AIM_IDENTITY 512
@@ -75,6 +76,9 @@ typedef struct TfpNativeAimHost {
   void (*controller_result)(void *user, TfpNativeAimControllerState *out);
   /* The build whose globals and witnesses are used. NULL: retail's. */
   const TfpNativeAimBuild *build;
+  /* Where the player fields lie (src/entity_fields.h). NULL: the game's own (a shipped build hands its own). The
+   * input preference row (+0xd0, +0x2ec) is not followed: the option refuses while the player fields are moved. */
+  const TfpEntityFields *fields;
 } TfpNativeAimHost;
 
 /* Where the preference byte of one owner lives (retail's record `r`). */

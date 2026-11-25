@@ -21,7 +21,7 @@ if [ "${1:-}" = --view ]; then
  TFP_VIEW=(mod_view wire_win wire_rt wire_off wire_recovery wire_log tfp_runtime backend_ops controller recovery transition
   camera_adapter fov_adapter near_adapter blur_adapter camera_helper fov_helper near_helper blur_helper slot_atomic wire_mouse)
  TFP_VIEW_SOURCES=();for tfp_module in "${TFP_VIEW[@]}";do TFP_VIEW_SOURCES+=("$TFP_ROOT/src/$tfp_module.c");done
- "$TFP_ZIG" cc -std=c11 -fms-extensions -target x86_64-windows-gnu -shared -O2 -ffp-contract=off -Wall -Wextra -Werror \
+ "$TFP_ZIG" cc -std=c11 -fms-extensions -target x86_64-windows-gnu -shared -O2 -ffp-contract=off -Wall -Wextra -Werror -DTFP_FIELDS_REQUIRED=1 \
   -I "$TFP_HF/app/sdk" -I "$TFP_ROOT/src" "${TFP_VIEW_SOURCES[@]}" -luser32 \
   -o "$TFP_ROOT/dist/true-first-person-view/goose_true_first_person.dll"
  cp "$TFP_ROOT/manifests/view/hellforge-mod.json" "$TFP_ROOT/dist/true-first-person-view/hellforge-mod.json"
@@ -43,7 +43,7 @@ if [ "${1:-}" = --feel ]; then
   wire_menu mod_menu wire_panel mod_panel wire_editor placement_editor mod_editor
   arm_drive render_slot wire_options warp_glow wire_warp)
  TFP_FEEL_SOURCES=();for tfp_module in "${TFP_FEEL[@]}";do TFP_FEEL_SOURCES+=("$TFP_ROOT/src/$tfp_module.c");done
- "$TFP_ZIG" cc -std=c11 -fms-extensions -target x86_64-windows-gnu -shared -O2 -ffp-contract=off -Wall -Wextra -Werror -DTFP_FEEL=1 \
+ "$TFP_ZIG" cc -std=c11 -fms-extensions -target x86_64-windows-gnu -shared -O2 -ffp-contract=off -Wall -Wextra -Werror -DTFP_FIELDS_REQUIRED=1 -DTFP_FEEL=1 \
   -I "$TFP_HF/app/sdk" -I "$TFP_ROOT/src" "${TFP_FEEL_SOURCES[@]}" "$TFP_ROOT/src/pose_input_thunks.S" -luser32 \
   -o "$TFP_OUT/goose_true_first_person.dll"
  cp "$TFP_ROOT/manifests/feel/hellforge-mod.json" "$TFP_OUT/hellforge-mod.json"

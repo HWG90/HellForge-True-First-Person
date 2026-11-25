@@ -31,7 +31,10 @@ static bool aim_location(const FpMemory *m, const FpSnapshot *s,
       return false;
     r->at = r->rows + (uintptr_t)r->index * 2;
   } else {
-    if (!fp_pointer(m, s->player + 0xe8, &r->descriptor) ||
+    TfpEntityFields own;
+    const TfpEntityFields *f = tfp_fields_use(m->fields, &own); /* src/entity_fields.h */
+    /* +0xd0 and the rows the index picks are not followed: read only while the player fields are the game's own */
+    if (!f || (f->moved & TFP_FIELD_PLAYERS) || !fp_pointer(m, s->player + f->player_descriptors, &r->descriptor) ||
         !fp_read(m, r->descriptor, r->bytes, 20))
       return false;
     memcpy(&r->entity, r->bytes + 8, 4);

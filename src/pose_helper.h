@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include "gate_log.h"
 #include "depth_steady.h"
+#include "entity_fields.h"
 
 /* ---- native_ads_editor.h: the structures, same fields, order and sizes ---- */
 typedef struct TfpPoseConfig {
@@ -218,6 +219,10 @@ uint32_t tfp_pose_set_hold(uint32_t on);
 uint32_t tfp_pose_gate_take(TfpGateSecond *out);
 uint32_t tfp_pose_set_gate_reads(uint32_t on);
 uint32_t tfp_pose_set_depth_off(uint32_t on);
+/* The network-id map, the entity records and the player fields where the game's code has them (src/entity_fields.h),
+ * for the look gain's steering read (the game's EntityOfNetwork, B_PIN_9, whose pin leaves those displacements out).
+ * Call once before the helper runs; 1 taken, 0 refused (not resolved). Without it a shipped build's steering refuses. */
+uint32_t tfp_pose_set_entity_fields(const TfpEntityFields *fields);
 /* ---- the rig's depth held steady (not in retail; src/depth_steady.h, the same spec, "Round 9") ----
  * tfp_pose_set_depth_steady(mode): 0, the start: the helper as retail has it. 1: on every frame of the rig's node 5
  * with an evaluator frame, the game's own depth blend is worked out from the lens locals and the request's state the

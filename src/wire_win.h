@@ -23,6 +23,13 @@ void tfp_win_hosts(TfpOpsHost *memory, TfpWirePlatform *platform, TfpWireHelpers
 bool tfp_win_read(uint64_t at, void *out, size_t size);
 uint64_t tfp_win_game(void);
 uint64_t tfp_win_exe(void);
+/* The manager fields HellForge 0.5 or a mod may move (src/entity_fields.h), read once from game.dll's code by
+ * tfp_win_resolve_fields: each instruction checked as code_matches reads it (before any hook), its displacement read
+ * as the game runs it now. UNREADABLE: a page is still cold, ask again; REFUSED: why says which instruction and what;
+ * the fields stay unresolved, and every reader handed them refuses. tfp_win_fields: the store (never NULL), which the
+ * memory host of tfp_win_hosts and the arm drive's host point at. */
+TfpFieldsResult tfp_win_resolve_fields(char *why, size_t why_size);
+const TfpEntityFields *tfp_win_fields(void);
 const TfpWinHook *tfp_win_hook(int which);
 const char *tfp_win_hook_name(int which);
 void tfp_win_hook_refusal_seen(int which);

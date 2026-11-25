@@ -191,7 +191,7 @@ static bool host_sample(void *user, const TfpMotionRuntimeLease *view, TfpLocomo
     lease.rig_object = l->wire->ops.has_alignment ? (uintptr_t)l->wire->ops.alignment.context.object : 0;
   }
   m->memory = (FpMemory){sampler_read, w, (uintptr_t)w->memory.module(w->memory.user, TFP_OPS_GAME),
-                         (uintptr_t)w->memory.module(w->memory.user, TFP_OPS_EXE)};
+                         (uintptr_t)w->memory.module(w->memory.user, TFP_OPS_EXE), w->memory.fields};
   m->taken_count = 0, m->has_action = false;
   if (tfp_locomotion_sample(&m->sampler, l ? &lease : NULL, out, m->sample_why, sizeof m->sample_why)) return true;
   if (why) *why = m->sample_why;

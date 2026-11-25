@@ -950,7 +950,7 @@ void tfp_wire_effects_bind(TfpWire *w, TfpFx *fx, const TfpFxPlatform *platform,
     .backend_pin_first_person = false, .backend_read = mem_read, .backend_ptr = mem_ptr, .backend_u32 = mem_u32, .backend_u8 = mem_u8,
     .backend_map = mem_map, .backend_foreign_camera = foreign_held, .memory_copy = a_copy, .enabled = a_enabled, .foreign = foreign_held,
     .controller_is_enabled = controller_enabled, .controller_result = a_controller,
-    .build = fx->options.aim_option ? fx->options.aim_option : &tfp_native_aim_build_25480438};
+    .build = fx->options.aim_option ? fx->options.aim_option : &tfp_native_aim_build_25480438, .fields = fx->w->memory.fields};
 
   /* What can be decided without the engine. */
   for (int i = 0; i < TFP_FX_MODULES; i++) {

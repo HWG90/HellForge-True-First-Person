@@ -189,10 +189,11 @@ static bool targets(FpModels *p, const FpMemory *m, const FpSnapshot *s) {
       fp_pointer(m, descriptors + (uintptr_t)index * 8, &d) &&
       d == s->avatar_descriptor && fp_pointer(m, inventory + 80, &rows) &&
       fp_u32(m, rows + (uintptr_t)index * 48 + 12, &entity) && id(entity)) {
-    if (fp_map(m, s->world + FP_ENTITY_MAP, entity, 1048576, &index)) {
+    TfpEntityFields own;
+    const TfpEntityFields *f = tfp_fields_use(m->fields, &own); /* src/entity_fields.h */
+    if (f && fp_map(m, s->world + f->entity_map, entity, 1048576, &index)) {
       uint32_t descriptor[6];
-      if (fp_read(m, s->world + FP_ENTITY_ROWS + (uintptr_t)index * 24,
-                  descriptor, 24) &&
+      if (fp_read(m, tfp_fields_record(s->world, f, index), descriptor, 24) &&
           descriptor[2] == entity && (descriptor[5] & 1) &&
           descriptor[3] != s->body && descriptor[3] != s->viewmodel &&
           descriptor[3] != s->weapon_unit)

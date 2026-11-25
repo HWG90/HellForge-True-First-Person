@@ -48,7 +48,7 @@ static void graph(const FpMemory *m,uint32_t ref,const char *name){
 static void tick(HfMod *mod,float dt,void *unused){
     (void)mod;(void)dt;(void)unused;
     uint64_t now=GetTickCount64();if(now<next_tick)return;next_tick=now+1000;
-    size_t size=0;FpMemory memory={sdk_read,NULL,hf->module_base("game.dll",&size),hf->module_base("helldivers2.exe",&size)};
+    size_t size=0;FpMemory memory={sdk_read,NULL,hf->module_base("game.dll",&size),hf->module_base("helldivers2.exe",&size),NULL};
     if(!fp_image(&memory,memory.game,FP_GAME_STAMP,FP_GAME_SIZE)||!fp_image(&memory,memory.exe,FP_EXE_STAMP,FP_EXE_SIZE))return;
     FpProof proof=fp_prove_profile(&memory);FpSnapshot s;char why[160];
     bool ready=fp_snapshot(&memory,true,&s,why,sizeof why);

@@ -94,9 +94,12 @@ static bool context(const TfpNativeAimHost *h, const TfpNativeAimSnapshot *s, ui
     r->at = values + (uint64_t)index * 2;
     make_key(r, "weapon", weapon);
   } else {
-    if (!mem_u32(h, player + 0x88, &word, e)) return false;
+    TfpEntityFields own;
+    const TfpEntityFields *f = tfp_fields_use(h->fields, &own); /* src/entity_fields.h */
+    if (!f || (f->moved & TFP_FIELD_PLAYERS)) return raised(e, "Native aim: the player fields are not where the game has them");
+    if (!mem_u32(h, player + f->player_live, &word, e)) return false;
     if (word == 0) return fail(e, 19, "Native local input unavailable");
-    if (!mem_ptr(h, player + 0xe8, &selected, e)) return false;
+    if (!mem_ptr(h, player + f->player_descriptors, &selected, e)) return false;
     if (!mem_u32(h, selected + 8, &entity, e)) return false;
     if (!mem_map(h, player + 0xd0, entity, true, 8, &index, e)) return false;
     if (!mem_read(h, selected, 20, r->descriptor, e)) return false;

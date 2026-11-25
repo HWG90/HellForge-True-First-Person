@@ -97,7 +97,7 @@ int main(int argc, char **argv) {
   for (unsigned i = 0; i < count; i++) {
     const ASStep *v = as_steps + i;
     World world = {as_images + v->image, v, true, 0, 0xcbf29ce484222325ULL};
-    FpMemory memory = {world_read, &world, (uintptr_t)0x100000000ULL, (uintptr_t)v->exe};
+    FpMemory memory = {world_read, &world, (uintptr_t)0x100000000ULL, (uintptr_t)v->exe, NULL};
     Host host = {&world, &memory};
     TfpActionStateBackend backend = {&memory, &host, host_player_snapshot, host_alignment_context};
     TfpSnapshot expected, reference;

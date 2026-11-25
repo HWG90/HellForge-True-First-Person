@@ -109,7 +109,7 @@ static bool requests(const FpMemory *m, const TfpSnapshot *s, FpcRequestSnapshot
 static void tick(HfMod *mod, float dt, void *unused) {
   (void)mod; (void)dt; (void)unused;
   size_t size = 0;
-  FpMemory memory = {sdk_read, NULL, hf->module_base("game.dll", &size), hf->module_base("helldivers2.exe", &size)};
+  FpMemory memory = {sdk_read, NULL, hf->module_base("game.dll", &size), hf->module_base("helldivers2.exe", &size), NULL};
   if (!memory.game || !memory.exe) return;
   game_base = memory.game;
   exe_base = memory.exe;

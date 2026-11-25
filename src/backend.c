@@ -109,6 +109,8 @@ bool fp_snapshot(const FpMemory *m, bool need_weapon, FpSnapshot *s, char *why,
   uintptr_t ep = 0, rows = 0, wield = 0, pool = 0;
   uint32_t count = 0, index = 0;
   uint32_t request[5], descriptor[6], wd[6], queue[2];
+  TfpEntityFields own;
+  const TfpEntityFields *f = NULL;
   if (!s || !m)
     return fail(why, size, "Missing native context");
   memset(s, 0, sizeof *s);
@@ -127,15 +129,15 @@ bool fp_snapshot(const FpMemory *m, bool need_weapon, FpSnapshot *s, char *why,
       !ptr(m, m->game + FP_CONTROLLER, &s->controller) ||
       !fp_read(m, s->controller, s->controls, 6) ||
       !ptr(m, m->game + FP_PLAYER, &s->player) ||
-      !u32(m, s->player + 0x88, &count) || count == 0 ||
-      !u32(m, s->player + 0x3a8, &s->local_entity))
+      !(f = tfp_fields_use(m->fields, &own)) ||
+      !u32(m, s->player + f->player_live, &count) || count == 0 ||
+      !u32(m, s->player + f->player_network, &s->local_entity))
     return fail(why, size, "Waiting for local player");
   s->kind = request[0] & 65535;
   s->request_avatar = request[1];
   s->request_weapon = request[2];
-  if (!fp_map(m, s->world + FP_LIGHT_MAP, s->local_entity, 1048576, &index) ||
-      !fp_read(m, s->world + FP_ENTITY_ROWS + (uintptr_t)index * 24, descriptor,
-               24) ||
+  if (!fp_map(m, s->world + f->network_map, s->local_entity, 1048576, &index) ||
+      !fp_read(m, tfp_fields_record(s->world, f, index), descriptor, 24) ||
       descriptor[4] != s->local_entity || !(descriptor[5] & 1) ||
       !id(descriptor[2]))
     return fail(why, size, "Local player descriptor unavailable");
@@ -179,8 +181,8 @@ bool fp_snapshot(const FpMemory *m, bool need_weapon, FpSnapshot *s, char *why,
       !fp_read(m, ep, descriptor, 20) ||
       memcmp(descriptor, s->descriptor, 20) || !ptr(m, wield + 0x60, &rows) ||
       !u32(m, rows + (uintptr_t)index * 0x1d0, &s->weapon) || !id(s->weapon) ||
-      !fp_map(m, s->world + FP_ENTITY_MAP, s->weapon, 1048576, &index) ||
-      !fp_read(m, s->world + FP_ENTITY_ROWS + (uintptr_t)index * 24, wd, 24) ||
+      !fp_map(m, s->world + f->entity_map, s->weapon, 1048576, &index) ||
+      !fp_read(m, tfp_fields_record(s->world, f, index), wd, 24) ||
       wd[2] != s->weapon || !(wd[5] & 1) ||
       !ptr(m, m->game + FP_WEAPONS, &pool) ||
       !fp_map(m, pool + 0x30, s->weapon, 4096, &index) ||
@@ -209,9 +211,11 @@ bool fp_weapon_record(const FpMemory *m, uintptr_t world, uint32_t entity,
   FpWeaponRecord result = {.world = world, .entity = entity};
   uintptr_t current_world = 0, rows = 0, again = 0;
   uint32_t wi = 0, pi = 0, close_index = 0, descriptor[6], pool_record[5];
-  if (!ptr(m, m->game + FP_WORLD, &current_world) || current_world != world ||
-      !fp_map(m, world + FP_ENTITY_MAP, entity, 1048576, &wi) ||
-      !fp_read(m, world + FP_ENTITY_ROWS + (uintptr_t)wi * 24,
+  TfpEntityFields own;
+  const TfpEntityFields *f = tfp_fields_use(m->fields, &own);
+  if (!f || !ptr(m, m->game + FP_WORLD, &current_world) || current_world != world ||
+      !fp_map(m, world + f->entity_map, entity, 1048576, &wi) ||
+      !fp_read(m, tfp_fields_record(world, f, wi),
                descriptor, sizeof descriptor) ||
       descriptor[2] != entity || !(descriptor[5] & 1) || !id(descriptor[3]) ||
       !ptr(m, m->game + FP_WEAPONS, &result.pool) ||
@@ -229,9 +233,9 @@ bool fp_weapon_record(const FpMemory *m, uintptr_t world, uint32_t entity,
   uint32_t closing[6];
   if (!ptr(m, m->game + FP_WORLD, &again) || again != world ||
       !ptr(m, m->game + FP_WEAPONS, &again) || again != result.pool ||
-      !fp_map(m, world + FP_ENTITY_MAP, entity, 1048576, &close_index) ||
+      !fp_map(m, world + f->entity_map, entity, 1048576, &close_index) ||
       close_index != wi ||
-      !fp_read(m, world + FP_ENTITY_ROWS + (uintptr_t)wi * 24,
+      !fp_read(m, tfp_fields_record(world, f, wi),
                closing, sizeof closing) || memcmp(closing, descriptor, sizeof closing) ||
       !fp_map(m, result.pool + 0x30, entity, 4096, &close_index) ||
       close_index != pi || !ptr(m, result.pool + 0x48, &again) || again != rows ||

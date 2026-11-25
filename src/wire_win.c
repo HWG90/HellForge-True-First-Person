@@ -71,6 +71,21 @@ bool tfp_win_read(uint64_t at, void *out, size_t size) {
   return hf->read((uintptr_t)at, out, size) == 0;
 }
 static bool host_read(void *u, uint64_t at, void *out, size_t size) { (void)u; return tfp_win_read(at, out, size); }
+/* The bytes as the game runs them now, code or not: a moved field's displacement (src/entity_fields.h). */
+static bool live_read(void *u, uint64_t at, void *out, size_t size) {
+  (void)u;
+  if (at < 65536 || at >= UINT64_C(0x800000000000) || !size || at + size >= UINT64_C(0x800000000000)) return false;
+  return hf->read((uintptr_t)at, out, size) == 0;
+}
+static bool code_read(void *u, uint64_t at, void *out, size_t size) { (void)u; return tfp_win_read(at, out, size); }
+static TfpEntityFields fields; /* resolved = false until tfp_win_resolve_fields succeeds */
+const TfpEntityFields *tfp_win_fields(void) { return &fields; }
+TfpFieldsResult tfp_win_resolve_fields(char *why, size_t why_size) {
+  TfpEntityFields read;
+  TfpFieldsResult r = tfp_fields_resolve(game_base, code_read, live_read, NULL, &read, why, why_size);
+  if (r == TFP_FIELDS_OK) fields = read; /* once, on the game thread, before anything that reads them runs */
+  return r;
+}
 static void add_code(uint64_t base) { /* the executable sections of a loaded image */
   uint8_t dos[64], nt[24], section[40];
   if (!tfp_win_read(base, dos, sizeof dos) || dos[0] != 'M' || dos[1] != 'Z') return;
@@ -421,6 +436,7 @@ void tfp_win_hosts(TfpOpsHost *memory, TfpWirePlatform *platform, TfpWireHelpers
   memory->wine = wine;
   memory->module = ops_module, memory->read = host_read, memory->write = ops_write, memory->query = ops_query, memory->call = ops_call;
   memory->log = ops_log;
+  memory->fields = &fields;
   platform->user = NULL, platform->clock = platform_clock, platform->mouse = platform_mouse, platform->log = ops_log;
   helpers->camera = &camera_api, helpers->fov = &fov_api, helpers->near_clip = &near_api, helpers->blur = &blur_api;
 }

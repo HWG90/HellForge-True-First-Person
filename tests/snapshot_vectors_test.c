@@ -54,7 +54,7 @@ int main(int argc, char **argv) {
   for (unsigned i = 0; i < count; i++) {
     const SnapshotVector *v = snapshot_vectors + i;
     Scene scene = {v->records, v->count};
-    FpMemory memory = {scene_read, &scene, (uintptr_t)v->base, 0};
+    FpMemory memory = {scene_read, &scene, (uintptr_t)v->base, 0, NULL};
     for (int scope = 0; scope < 2; scope++) {
       TfpSnapshot s;
       char error[200] = "";

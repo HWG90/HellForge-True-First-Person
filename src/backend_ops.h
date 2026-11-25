@@ -27,6 +27,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "entity_fields.h"
 
 typedef enum TfpOpsResult { TFP_OPS_RAISED = -2, TFP_OPS_NIL = -1, TFP_OPS_FALSE = 0, TFP_OPS_TRUE = 1 } TfpOpsResult;
 typedef struct TfpOpsText { bool present; char text[320]; } TfpOpsText;
@@ -144,6 +145,9 @@ typedef struct TfpOpsHost {
   /* Host.require('…/pose.lua').new(Profile.pose) and the alignment one. NULL result: raised. */
   const TfpOpsPoseHelper *(*load_pose)(void *user, TfpOpsText *raised);
   const TfpOpsPoseHelper *(*load_alignment)(void *user, TfpOpsText *raised);
+  /* Where the entity records, the entity maps and the player fields lie (src/entity_fields.h), read from the game's
+   * code once a session. NULL: the game's own, except in a shipped build, where the snapshot then refuses. */
+  const TfpEntityFields *fields;
 } TfpOpsHost;
 
 /* ---- profile.lua, the part that is not build data ---- */

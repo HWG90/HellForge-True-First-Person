@@ -31,7 +31,7 @@ static void image(uintptr_t base,uint32_t stamp,uint32_t size){
     h[0]='M';h[1]='Z';memcpy(h+60,&pe,4);memcpy(h+64,&sig,4);memcpy(h+72,&stamp,4);memcpy(h+88,&magic,2);memcpy(h+144,&size,4);put(base,h,sizeof h);
 }
 static FpMemory setup(void){
-    memset(&f,0,sizeof f);FpMemory m={read_fake,&f,0x100000000ULL,0x200000000ULL};
+    memset(&f,0,sizeof f);FpMemory m={read_fake,&f,0x100000000ULL,0x200000000ULL,NULL};
     uintptr_t ctx=0x300000000ULL,world=0x400000000ULL,ctrl=0x500000000ULL,player=0x600000000ULL;
     uintptr_t avatar=0x700000000ULL,ep=0x800000000ULL,wield=0x900000000ULL,weapons=0xa00000000ULL;
     uint32_t local[6]={11,22,101,401,301,1},weapon[6]={33,44,201,501,601,1};
