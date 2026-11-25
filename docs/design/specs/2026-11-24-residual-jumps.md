@@ -935,62 +935,39 @@ veil, nothing carried by the continuity). It is class W of round 11, now with `v
 - `lock_damp_eye` low-passes the head in the root's frame, where it does not move, so the damping (and its 0.10 m lag
   limit in Bodycam) lets the whole arc through.
 
-### What changed (`src/camera_damp.h` `tfp_eye_whip_step`, `src/camera_helper.c` `lock_damp_eye`)
+### Tried and dropped: the whip (`tfp_eye_whip_step`, commits 2b68644 and 7e98994, reverted)
 
-The part of the eye's move that is the root's turn alone (the damped head where it is, less where it would be with the
-root's axes of the frame before) is carried instead of shown:
+Round 30 carried the part of the eye's move that was the root's turn alone (the root turning at 9 rad/s or more and
+swinging the head at 5 m/s or more under a view held within 1.5 rad/s, the head riding the root) and let it out from
+rest to rest over at least 250 ms, up to 1.0 m carried. On the logged eyes of the b70333e build it took soak 36's three
+frames to 0.066, 0.020 and 0.038 m. The review replayed it through main's own continuity (`replay.py` with the whip's
+carry added to the wanted eye, judged with `matrix.measure`), and it does not hold:
 
-- **When.** A whip begins where the root's heading turns at 9 rad/s or more (0.30 rad at 33.3 ms) and that swings the
-  head at 5 m/s or more, while the view's heading turns at 1.5 rad/s or less, and the head rode the root (it moved
-  against the root less than a quarter of what the turn moved it). It goes on while the root turns at 1.5 rad/s with
-  the view held. Rates, so 8 and 50 ms frames find the same whips. Only in head-camera frames of a body on foot (the
-  damping's own `on_foot`: not down, thrown, in full aim, in the ADS gap or a clamber); a whip under way is let out in
-  any head-camera frame, and any other frame forgets it with the damping.
-- **Let out.** From rest to rest (1 - smoothstep) over a time that keeps the step's change at 0.03 m a frame at the
-  whip's own frame time, and no less than 250 ms; at most 1.0 m carried. What is carried is added with the damping's
-  lag: it is in the Trace row's `damp=` (so `tools/harness/replay.py head_node` and `trace.raw_target` stay right) and in
-  what the way into the native view starts from.
-- **Not a whip.** The player turning (view and root together); the view turning alone; a dive's arc, a jump, a crouch
-  (no turn of the root); a root that turns round a head that stays where it was (soak 27, 13:04:44.367: the heading
-  flipped 180 degrees and the head did not swing); a body turning after its view with the head near the root (the
-  user's soak 31, 20:26:37.6: 11.9 rad/s but 3.2 m/s, its head 0.27 m out). Those two were the only frames the first
-  versions made worse in soaks 27 to 36, and are why the two gates are there.
+- **It fights the continuity's cut.** Soak 27, 12:52:57.770: the body stands in a kind-4 wait with mask 0, the root
+  flips about 200 degrees in one frame under a view held pitched down 0.78, and the head rides the root. Main's
+  continuity takes the cut there (0.473 m carried). With the whip the continuity sees no cut while the whip carries
+  0.47 m sideways: 12:52:57.804 goes 0.071 to 0.146 m and .838 0.030 to 0.102 m, both the eye's own and over 0.06.
+  (The engineer's 0.084 to 0.001 m at that frame was the old build's logged eyes, not main's continuity.)
+- **It glides after the move.** Soak 36, 07:03:01.206 to .507: the root ends 43 degrees from where it started, so the
+  let-out carries 0.48 m when the whip ends, and the eye slides 0.48 m sideways over 10 frames (0.045 to 0.078 m a
+  frame, up to about 2.3 m/s) with the body and the view still. On main the eye is at rest there (0.031 to 0.001 m).
+  The judge reads it as small (0.025 at most) because it measures changes of step, not a slide.
+- **It carries too far.** During the whip the eye is up to 0.84 m off the head.
 
-### Numbers
+So the whip is out, and soak 36's 0.381, 0.329 and 0.682 m frames are main's again.
 
-Soak 36 replayed (`replay.py`'s continuity on the logged calls, with what the whip carries added to the wanted eye and
-the damping, judged with `matrix.measure`):
+### What a future whip must satisfy
 
-| Frame | Before | After |
-|---|---|---|
-| 07:03:01.039 | 0.381 m | 0.066 m |
-| 07:03:01.073 | 0.329 | 0.020 |
-| 07:03:01.105 | 0.682 | 0.038 |
-| 07:03:01.206 | 0.138 | 0.046 |
-
-The 0.066 m left at .039 is the body's own: the root's own step changes by 0.057 m there (its path turns), under the
-judge's 0.06 so not taken off, and the 3 degrees the root turned the frame before (under the start) is in the step
-before it. Carried at most 0.83 m, let out by 07:03:01.6; the soak's largest float goes from 0.134 to 0.251 m (under
-0.26). The soak's largest frame of the eye's own is now 0.370 m, the landing at 07:03:00.472 (the root's axes level out
-from the dive's pitch: not a turn, not changed).
-
-Soaks 8 to 36 the same way (both changes of round 30): no frame worse by more than 0.02 m anywhere. Soaks 8 to 26 have
-no `view=` (before feel.48), so no whip can be found in them; in 27 to 36 the whip runs once in 27 (12:52:57.770, 0.084
-to 0.001 m) and once in 36. Scenes (`tests/camera_damp_test.c`, soak 36's rows played at each frame time, the judge's
-measure of the shown eye; in brackets without the whip, and with the root's heading held, the body's own floor):
-
-| Frame time | Measure | Carried at most | Let out by |
-|---|---|---|---|
-| 8 ms | 0.038 m (0.125; 0.014) | 0.814 m | 472 ms |
-| 16.7 ms | 0.031 (0.344; 0.027) | 0.835 | 568 |
-| 33.3 ms | 0.062 (0.661; 0.054) | 0.828 | 633 |
-| 50 ms | 0.080 (0.702; 0.078) | 0.792 | 800 |
-
-At 33.3 and 50 ms the body's own path is at or over 0.06 m by itself; the whip leaves the eye within 0.01 m of it.
+- **Never fight the continuity's cut.** No whip where the continuity takes (or would take) a cut: replay with the
+  continuity re-run, never on logged eyes. A root turning more than about 1.5 rad in one frame, or a head at rest
+  before the turn, is the cut's, not the whip's.
+- **Never carry more than about 0.25 m.** What is held off the head's arc is capped there; past it the arc shows.
+- **Catch up during the move, not after.** The held part is let out while the root is still turning; once the body
+  and the view are still, the eye is on the head within a frame or two, with no slide under a still view.
+- **Proof.** `~/.cache/tfp-verify41-camera/probe_whip.py` on soaks 27 and 36 (and 8 to 36 for no frame worse by more
+  than 5 mm), with the judge extended to count a slide (steps over 0.03 m a frame with the body and view still).
 
 ### What only the game can show
 
-- How an eye held up to 0.8 m off the head's arc for half a second reads in a dive: the body's own head swings out of
-  where the eye is, so whether the helmet or the shoulders come into the frame while it is let out.
-- Whether such a flick happens with the view on the native camera too (this one was in the 15 s head-camera wait after
+- Whether such a flick happens with the view on the native camera too (soak 36's was in the 15 s head-camera wait after
   a stratagem or grenade, which round 29's sceptic left open).

@@ -555,6 +555,21 @@ to 0.339 m (an ordinary leave). Tests: `tests/camera_veil_helper_test.cpp` 21 (t
 back and staying away; a swap in full aim, a same-frame leave out of the hip and a lone frame a whole frame later
 veiled at once).
 
+### After review: a kept leave whose view stays away (`TFP_CAMERA_VEIL_LET_IN_M`)
+
+The review's minor finding: a leave out of full aim with mask 0 that is not a lone frame (a knock-down or a gun dropped
+in full aim; none in soaks 8 to 36) is kept pending too, so its first head-camera frame is not veiled and its second
+was moved the whole way at once: a jump of up to `TFP_CAMERA_VEIL_MOST` (0.32 m in test 21) between two head-camera
+frames, after the camera change the continuity covers. (A knock-down's frames are only looked at, never moved: the
+veil moves a body on foot only.) After a kept leave the move is now let in: the n-th veiled frame moves the eye at most
+`tfp_camera_veil_let_in(n)` = 0.04 n (n + 1) / 2 m (0.04, then 0.12, 0.24, 0.40), so the step changes by at most 0.04 m
+a frame, and the let-out after the veil closes starts from what was moved. With the veil open for the one tick it
+usually is, that is 0.04 m: those frames are short of the clearance (counted `behind`), a frame or two of the helmet
+where the body is drawn, the cost accepted over a 0.3 m lurch, as `too_far` already is. Any other leave resets the
+let-in. Tests: 21 (the kept leave staying away: 0.04, 0.12, then 0.116 let out; masks 1 and 0x40, any action owning the
+view, veiled at once: the review's surviving mutant opened only on mask 2) and 22 (a swap a second after a lone kept
+release is veiled the whole way at once).
+
 ### What only the game can show
 
 - Whether that second evaluation is drawn at all. If it is, it now shows the held eye (the native one) for a frame, 0.25
