@@ -30,3 +30,6 @@
   says what changed: https://github.com/HWG90/HellForge-True-First-Person/issues/1
 - Discord: the "True First Person - Early Preview" post in HellForge Official's `mod-showcase` is edited to feel.56.
   Nothing posted elsewhere.
+- Later on 2026-11-25, at the user's request ("Add the version number in the post name so people know when its
+  updated"), the Discord post was renamed "True First Person - Early Preview (0.6.0-feel.56)". Each release from now on
+  renames it to its own version.
