@@ -19,20 +19,25 @@ also counts the flagged frames by whose they are, and how many of the eye's own 
 judged is the eye shown (the row's eye plus the helmet veil's move, veil=), and a frame over the limit for the veil
 alone is "the veil's": printed, with its own largest, and neither a flag nor the eye's largest (the eye's is measured
 without the veil's move).
+
+Round 26: the aim actions (matrix.AIMED) go into full aim: aim.full_aim() holds the aim, presses the game's aim-mode
+button (middle) and reads the log until it says "State: aim in". Each such line says whether full aim was reached and
+the summary counts them; before round 26 no soak reached it (one "State: aim in" in soaks 8 to 34).
 """
 import random
 import sys
 import time
 
+import aim
 import drive
 import matrix
 
-SKIP = {"toggle-off-on", "toggle-fast", "ragdoll", "death", "idle"}
+SKIP = {"toggle-off-on", "toggle-fast", "ragdoll", "death", "idle", "aim-scope-zoom"}   # the zoom needs a scoped rifle
 # What is left pressed or changed by a phase and has to be undone before the next (a crouch that is left on).
 OVERLAPS = [   # two inputs at once, as a player does
     "down w; key g; wait 1.5; up w", "down w; key v; wait 2.0; up w", "down shift; down w; wait 0.8; key 2; wait 1.2; up w; up shift",
     "key 2; wait 0.3; key g", "key g; wait 0.4; key 1", "key r; wait 0.5; key 2", "key v; wait 0.6; click right 0.8",
-    "down right; wait 0.4; key 2; wait 1.0; up right", "key c; wait 0.4; key g; wait 2.5; key c", "key z; wait 1.0; key v; wait 3.0; key z",
+    "down right; wait 0.35; click middle; wait 0.6; key 2; wait 1.0; up right",   # a swap in full aim "key c; wait 0.4; key g; wait 2.5; key c", "key z; wait 1.0; key v; wait 3.0; key z",
     "key ctrl; wait 0.6; key g", "key 2; wait 0.15; key 2; wait 0.15; key 1", "down w; wait 0.2; key alt; wait 0.3; key 2; wait 1.0; up w",
     "key b; wait 0.8; key g", "look 300 200; key g; look -300 -200", "key f; wait 0.2; key f; wait 0.2; key r",
 ]
@@ -64,6 +69,16 @@ def counted(pops):
     veil = f"{len(veiled)} the veil's" + (f", largest {max(veiled):.3f} m" if veiled else "") + ", not counted"
     return (f"{len(flagged)} frames flagged ({counts['own']} the eye's own, {counts['along']} of them along the view; {counts['filter']} the filter's), "
             f"largest {max([0.0] + [p.get('bare', p['beyond']) for p in flagged]):.3f} m; {veil}; {counts['body']} the body's own, not counted")
+
+
+def aim_summary(aims, lines):
+    """The summary's line on full aim: how many aim actions reached it, and what the log's aim lines count."""
+    c = aim.counts(lines)
+    reached = sum(1 for _, _, ok in aims if ok)
+    missed = [f"{n} {name}" for n, name, ok in aims if not ok][:6]
+    text = (f"full aim: {reached} of {len(aims)} aim actions reached it; the log: {c['aim_in']} \"State: aim in\", "
+            f"{c['ads_seconds']} View seconds with ads=1, Aim: lines {c['aim_lines']}, {c['not_kept']} releases not kept")
+    return text + (f"; not reached: {', '.join(missed)}" if missed else "")
 
 
 def judge_log(lines):
@@ -101,6 +116,7 @@ def main(argv):
     print(matrix.style_header(before), flush=True)
     end = time.time() + minutes * 60
     worst, veiled, bad, count, seen = 0.0, 0.0, [], 0, set()
+    aims = []   # (action number, name, reached) of every aim action
     while time.time() < end:
         if rng.random() < 0.3:
             name, script, settle = "overlap", rng.choice(OVERLAPS), 3.0
@@ -109,8 +125,13 @@ def main(argv):
             script, settle = matrix.PHASES[name]
         settle *= rng.choice((0.15, 0.4, 1.0))   # often the next action begins before this one is over
         start = log.stat().st_size
+        aimed = None
         try:
-            d.run(f"{script}; wait {settle:.2f}")
+            if name in matrix.AIMED:
+                aimed = matrix.play(d, name, log)
+                time.sleep(settle)
+            else:
+                d.run(f"{script}; wait {settle:.2f}")
         except drive.DriveError as error:
             print(f"stopped: {error}")
             break
@@ -127,6 +148,9 @@ def main(argv):
         if flag:
             bad.append((count, name, script, j["missed"], round(j["largest_jump_m"], 3)))
         print(f"{count:3d} {'BAD ' if flag else 'ok  '}{name:16s} missed {j['missed']} {matrix.describe(j)} kinds {j['kinds']}  {script[:60]}", flush=True)
+        if aimed is not None:
+            aims.append((count, name, aimed["reached"]))
+            print(f"      {matrix.aim_text({**aimed, **aim.counts(lines)})}", flush=True)
         for text in matrix.pop_lines(j):
             print(text, flush=True)
         seen |= listed(j["pops"])
@@ -140,6 +164,7 @@ def main(argv):
     print(f"\n{count} actions, {j['frames']} frames held, {j['missed']} missed, largest step {worst:.3f} m (the veil's {veiled:.3f} m, not counted); {len(bad)} flagged")
     print("  " + matrix.style_summary(matrix.style_in_force(before), lines))
     print("  the whole log: " + counted(j["pops"]))
+    print("  " + aim_summary(aims, lines))
     for row in bad:
         print("  flagged:", row)
     across = unlisted(j["pops"], seen)
