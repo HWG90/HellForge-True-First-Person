@@ -18,6 +18,7 @@
 #include "near_helper.h"
 #include "blur_helper.h"
 #include "slot_platform.h"
+#include "guarded_copy.h"
 
 static const HfApi *hf;
 static HfMod *owner;
@@ -146,12 +147,13 @@ static bool host_executable(void *u, uint64_t at) {
   if (tfp_win_query(at, &r, sizeof r) != sizeof r || r.State != MEM_COMMIT || !section_mapping(&r)) return false;
   return r.Protect == PAGE_EXECUTE_READ || r.Protect == PAGE_EXECUTE_READWRITE || r.Protect == PAGE_EXECUTE_WRITECOPY;
 }
-static bool host_write(void *u, void *out, const void *data, size_t length) { /* WriteProcessMemory on this process */
-  SIZE_T written = 0;
+/* The helpers' results into the struct their caller handed them: always the mod's own memory (the audit in
+ * docs/design/specs/2026-11-25-performance.md). Retail used WriteProcessMemory on this process, which under Wine is a
+ * wineserver round trip per call; since round 28 it is a guarded copy (src/guarded_copy.h), false where it faults. */
+static bool host_write(void *u, void *out, const void *data, size_t length) {
   (void)u;
   tfp_win_count(TFP_WIN_COUNT_HOST_WRITE);
-  tfp_win_count(TFP_WIN_COUNT_PROCESS_WRITE);
-  return WriteProcessMemory(GetCurrentProcess(), out, data, length, &written) && written == length;
+  return tfp_guarded_copy(out, data, length);
 }
 static bool host_pin(void *u, uint64_t address) { /* camera:1059-1062 */
   HMODULE module = NULL;

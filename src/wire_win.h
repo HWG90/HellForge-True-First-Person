@@ -50,11 +50,12 @@ bool tfp_win_code_is(uint64_t at, const char *hex);
 bool tfp_win_writable_slot(uint64_t at, uint64_t exe);
 bool tfp_win_writable32(uint64_t at);
 bool tfp_win_executable(uint64_t at);
+/* The helpers' host.write: a guarded copy into the mod's own memory (round 28; WriteProcessMemory before). */
 bool tfp_win_write(void *out, const void *data, size_t length);
 bool tfp_win_pin(uint64_t address);
 /* Round 28, for the Perf line (src/perf_line.h): cumulative counts since the start, any thread. HOST_WRITE: the
- * helpers' host.write (their results into the mod's own structs); PROCESS_WRITE: WriteProcessMemory calls (the
- * effects' game-memory writes count here too); QUERY: VirtualQuery calls of the Windows hosts (tfp_win_query);
+ * helpers' host.write (their results into the mod's own structs, a guarded copy); PROCESS_WRITE: WriteProcessMemory
+ * calls (only the effects' game-memory writes since round 28); QUERY: VirtualQuery calls of the Windows hosts (tfp_win_query);
  * LOG: lines of the wire's log (say() in mod_view.c counts its own). */
 enum { TFP_WIN_COUNT_HOST_WRITE, TFP_WIN_COUNT_PROCESS_WRITE, TFP_WIN_COUNT_QUERY, TFP_WIN_COUNT_LOG, TFP_WIN_COUNTS };
 void tfp_win_count(int which);
