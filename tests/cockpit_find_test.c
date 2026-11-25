@@ -1,5 +1,6 @@
 /* Round 38: src/cockpit_find.h on a made-up world: a body seated in one suit, another suit nearby, a suit that is
- * something else, dead references, other worlds, and memory that cannot be read. */
+ * something else (an FRV's or a gun's resource, linked or at the seat: never taken), dead references, other worlds, a
+ * registry slot that changes while it is read, and memory that cannot be read. */
 #include "cockpit_find.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,6 +13,9 @@ static int checks, failed;
 static struct { uint64_t base; uint8_t bytes[65536]; } page[PAGES];
 static int pages;
 static uint64_t hole_lo, hole_hi;   /* a range that cannot be read */
+/* A registry slot whose pointer changes between two reads (a unit freed and its slot reused while it is looked up):
+ * from the second read of `moving_slot` on, it reads `moving_to`. */
+static uint64_t moving_slot, moving_to; static int moving_reads;
 static uint8_t *at(uint64_t address, size_t n) {
   for (int i = 0; i < pages; ++i) if (address >= page[i].base && address + n <= page[i].base + 65536) return page[i].bytes + (address - page[i].base);
   return NULL;
@@ -22,6 +26,7 @@ static bool read_fn(void *user, uint64_t address, void *out, size_t n) {
   uint8_t *p = at(address, n);
   if (!p) return false;
   memcpy(out, p, n);
+  if (moving_slot && address == moving_slot && n == 8 && ++moving_reads >= 2) memcpy(out, &moving_to, 8);
   return true;
 }
 static uint64_t map(void) { page[pages].base = UINT64_C(0x100000000) + (uint64_t)pages * 0x100000; memset(page[pages].bytes, 0, 65536); return page[pages++].base; }
@@ -100,6 +105,13 @@ int main(void) {
   put32(suit_object + 8, 0x400000u + 77);
   CHECK(!tfp_cockpit_check(&mem, &b, suit, &f));
   put32(suit_object + 8, suit);
+  /* the slot's pointer moved between the two reads of it (the generation the same): refused; read the same twice, found */
+  uint64_t twin_object = 0; CHECK(tfp_cockpit_object(&mem, twin, &twin_object));
+  moving_slot = registry_units + 2*8; moving_to = twin_object; moving_reads = 0;
+  CHECK(!tfp_cockpit_check(&mem, &b, suit, &f) && moving_reads >= 2);
+  moving_to = suit_object; moving_reads = 0;
+  CHECK(tfp_cockpit_check(&mem, &b, suit, &f) && moving_reads >= 2);
+  moving_slot = 0;
   /* 5. the suit walked away from the body (the seat 1.5 m off): no longer the one */
   uint64_t suit_graph = 0; CHECK(read_fn(NULL, suit_object + 0x88, &suit_graph, 8));
   const float away[3] = {10, 21.5f, 2.7f};
