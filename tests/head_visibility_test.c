@@ -425,6 +425,10 @@ static bool seat_cases(void) {
   const double writes = r.writes;
   SCHECK(seat_step("Vtick=103740 !update", false));
   tfp_head_result(head, &r); SCHECK(r.writes == writes && all_out(diver, n));   /* held: nothing written again */
+  /* the glide out of the seat: the diver is no longer seated, the seat answer still yes: the diver stays hidden */
+  SCHECK(seat_step("Vs_seated=0 Vtick=103750 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.phase == TFP_HEAD_ACTIVE && r.seat && all_out(diver, n));
+  SCHECK(seat_step("Vs_seated=1 Vtick=103755 !update", false));
   /* the seated head option off: the seat hides all the same */
   SCHECK(seat_step("Vseated_head=0 Vtick=103760 !update", false));
   tfp_head_result(head, &r); SCHECK(r.phase == TFP_HEAD_ACTIVE && r.seat && all_out(diver, n));

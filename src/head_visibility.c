@@ -361,8 +361,9 @@ static bool foreign(TfpHead *h) {   /* :278-281 */
   return h->io->foreign_camera(h->io->user) != 0;
 }
 static bool seated_head(TfpHead *h) { return h->io->seated_head && h->io->seated_head(h->io->user); }   /* :282 */
-/* Beyond retail, round 38: an exosuit's seat (TfpHeadIo.seat): only ever a seated frame of camera kind 4. */
-static bool in_seat(TfpHead *h, const TfpVisSnapshot *s) { return s && s->camera_kind == 4 && s->seated && h->io->seat && h->io->seat(h->io->user, s); }
+/* Beyond retail, round 38: an exosuit's seat (TfpHeadIo.seat): only ever a frame of camera kind 4 (the seat, and the
+ * glide out of it, when the diver is no longer seated but the view has not reached the head). */
+static bool in_seat(TfpHead *h, const TfpVisSnapshot *s) { return s && s->camera_kind == 4 && h->io->seat && h->io->seat(h->io->user, s); }
 static bool available(TfpHead *h, const TfpVisSnapshot *s) {   /* :284-291 */
   if (!s || !s->player_identity.present || s->player_identity.len == 0) return false;
   if (pinned_ready(h, s)) return true;

@@ -63,7 +63,8 @@ typedef struct TfpHeadIo {
    * left to the game. Asked once per update with the snapshot the update took.
    * cockpit: while in a seat, the unit reference of the exosuit to see through (its body meshes lose the camera
    * pass; their shadow stays), or false for none (the option is off, or no suit is proven to be the one the diver
-   * sits in). The unit must carry the exosuit's resource and be in the body's world, or it is left alone. */
+   * sits in). The unit must carry the exosuit's resource and be in the body's world, or it is left alone.
+   * Both are asked only for frames of camera kind 4 (the seat itself, and the glide out of it). */
   bool (*seat)(void *user, const TfpVisSnapshot *s);
   bool (*cockpit)(void *user, const TfpVisSnapshot *s, double *unit);
 } TfpHeadIo;
