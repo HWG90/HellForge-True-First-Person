@@ -821,6 +821,7 @@ static void arms_tick(void) {
         next_grip = now + 1000;
         tfp_arm_drive_grip_take(&g);
         if (g.frames) say("Grip: %s", tfp_arm_drive_grip_line(&g));
+        if (g.frames) say("Grip: gate: %s", tfp_arm_drive_grip_gate_line(&g)); /* round 38b: why it holds or lets go */
         const char *drawn = g.frames ? tfp_arm_drive_grip_drawn_line(&g) : NULL; /* round 36b: the hand as drawn, a line of its own */
         if (drawn) say("Grip: %s", drawn);
         const char *units = g.frames ? tfp_arm_drive_grip_units_line(&g, true) : NULL; /* round 36: whenever the gun's units change */
