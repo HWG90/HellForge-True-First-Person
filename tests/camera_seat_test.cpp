@@ -6,9 +6,12 @@
 // Judged here: entering glides from the last first-person view to the seat's eye; in the seat the eye is the root's
 // frozen head anchor plus 0.18 m along the root's level forward and 0.04 m up, whatever the head bob and the game
 // camera's yaw, and follows the suit wherever it walks; the direction is the game's on the same frame, with no
-// kick; leaving glides back to the head camera; the seat body is published for head hiding until the exit glide
-// ends. A valve, a thrown body, a body killed in its seat, the native view and the lock switched off are what they
-// were. No retail source needed. Linux (process_vm_readv).
+// kick; leaving glides back to the head camera, or into the native view, or through both in turn, never with a step
+// and never back from the cockpit (the independent check of 2026-11-25 found a 2.52 m cut into the native view and a
+// 2.46 m step, then 2.21 m back toward the cockpit, when native frames interrupted the glide); the seat body is
+// published for head hiding until the exit glide ends and not after. A valve, a thrown body, a body killed in its
+// seat and the lock switched off are what they were; an FRV's seat is a seat like the suit's. No retail source
+// needed. Linux (process_vm_readv).
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -69,7 +72,7 @@ struct Game {
   Scene s;
   float right[3] = {1, 0, 0}, ahead[3] = {0, 1, 0}, above[3] = {0, 0, 1};
   float neck[3] = {0, 0, 1.4f};
-  float root_yaw = 0, hand_l[3] = {}, hand_r[3] = {};
+  float root_yaw = 0, head_pitch = 0, hand_l[3] = {}, hand_r[3] = {}; // head_pitch: the head node's own nod
   bool ragdoll = false;
   uint64_t gen = 0;
   Q out = {0, 0, 0, 1}; bool own = false; uint32_t error = 0;
@@ -100,9 +103,9 @@ struct Game {
     for (int i = 0; i < 3; ++i) s.argument[i] = s.head[i] - ahead[i] * back + above[i] * high;
     s.argument[3] = 0;
   }
-  void native() {
+  void native(float ahead_m = .1f) { // the rig eye ahead_m ahead of the head
     s.request[0] = 6; s.linked = true; s.mask = 0; s.aim = 0; s.camera_rotation_given = true;
-    for (int i = 0; i < 3; ++i) { s.rig[i] = right[i]; s.rig[4 + i] = ahead[i]; s.rig[8 + i] = above[i]; s.rig[12 + i] = s.head[i] + ahead[i] * .1f + above[i] * .05f; }
+    for (int i = 0; i < 3; ++i) { s.rig[i] = right[i]; s.rig[4 + i] = ahead[i]; s.rig[8 + i] = above[i]; s.rig[12 + i] = s.head[i] + ahead[i] * ahead_m + above[i] * .05f; }
     s.rig[3] = s.rig[7] = s.rig[11] = 0; s.rig[15] = 1;
     s.argument[0] = .02f; s.argument[1] = .01f; s.argument[2] = .03f; s.argument[3] = 0;
     s.camera_split = true; for (int i = 0; i < 3; ++i) { s.camera_local[i] = s.argument[i]; s.camera_world[i] = s.rig[12 + i]; }
@@ -115,7 +118,7 @@ struct Game {
   void write() {
     W.apply(s, 0);
     World::put(W.a[A_BODY_WORLD] + HEAD_PARENT * 64 + 0x30, neck);
-    const float rows[12] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
+    const float hc = std::cos(head_pitch), hn = std::sin(head_pitch), rows[12] = {1, 0, 0, 0, 0, hc, hn, 0, 0, -hn, hc, 0};
     World::put(W.a[A_BODY_WORLD] + HEAD_NODE * 64, rows);
     World::put<uint32_t>(W.a[A_HASHES] + L_HAND * 4, 0x5c0c68d3u); World::put<uint32_t>(W.a[A_HASHES] + R_HAND * 4, 0x248004f5u);
     World::put(W.a[A_BODY_WORLD] + L_HAND * 64 + 0x30, hand_l); World::put(W.a[A_BODY_WORLD] + R_HAND * 64 + 0x30, hand_r);
@@ -181,6 +184,23 @@ static void fresh(bool lock, bool smooth = false) {
 }
 
 static const float sitting[3] = {.03f, .06f, .84f};
+
+// A native frame's argument is parent-local: the camera is drawn at the rig eye plus the argument along its axes.
+static void rig_eye(const Game &g, float *out) {
+  for (int k = 0; k < 3; ++k) out[k] = g.s.rig[12 + k] + g.s.argument[0] * g.s.rig[k] + g.s.argument[1] * g.s.rig[4 + k] + g.s.argument[2] * g.s.rig[8 + k];
+}
+// Where this frame put the camera in the world: the forwarded point, or in the native view that point on the rig eye.
+static void track(const Game &g, float *out) {
+  if (g.s.request[0] == 6 && g.s.linked) {
+    for (int k = 0; k < 3; ++k) out[k] = g.s.rig[12 + k] + sent.position[0] * g.s.rig[k] + sent.position[1] * g.s.rig[4 + k] + sent.position[2] * g.s.rig[8 + k];
+  } else std::memcpy(out, sent.position, 12);
+}
+// On foot, a moment of the native view, then into the suit and settled in it (the checker's probe, 2026-11-25).
+static void board(Game &g) {
+  g.stand(0, 0, .34f); g.look(.4f); g.hip(); g.begin();
+  for (int i = 0; i < 20; ++i) { g.native(); g.frame(8.3); }
+  for (int i = 0; i < 120; ++i) { g.climb_in(.1f, -.2f); g.look(.7f); g.hip(4.0f, 1.0f); g.frame(8.3); }
+}
 
 int main() {
   W.build(HERE);
@@ -360,16 +380,180 @@ int main() {
     g.end();
   }
 
-  // ---- 6. Leaving the seat straight into the native view: the game's own first-person frame, no glide. ----
+  // ---- 6. Leaving the seat straight into the native view (the checker's sequence A, 2026-11-25: a 2.52 m cut):
+  // the glide out runs inside the native frames too. Its first frame is the seat's last eye, no step over 0.15 m, the
+  // rig eye reached within 600 ms; the seat body stays published until the glide ends and not after. With the
+  // continuity (Smooth eye) off and on. ----
+  for (int smooth = 0; smooth < 2; ++smooth) {
+    fresh(true, smooth != 0);
+    Game g; board(g);
+    const float seat_last[3] = {sent.position[0], sent.position[1], sent.position[2]};
+    g.climb_out(2, -.2f); g.look(first); g.native(); g.frame(8.3);
+    float last[3]; track(g, last);
+    CHECK(g.error == 0 && g.own && apart(last, seat_last) < 1e-4f);
+    TfpCameraSeatStats seat{}; tfp_camera_seat_stats(&seat);
+    CHECK(seat.exits == 1 && !seat.seated && seat.out_ms >= 300 && seat.out_ms <= 600 && seat.gliding == 2 && seat.out_metres > 1.5f);
+    CHECK(tfp_camera_lock_seat_body() == BODY);
+    float most = 0; int arrived = -1;
+    for (int i = 1; i < 120; ++i) {
+      g.native(); g.frame(8.3); CHECK(g.error == 0);
+      float shown[3]; track(g, shown); const float step = apart(shown, last); if (step > most) most = step; std::memcpy(last, shown, 12);
+      float rig[3]; rig_eye(g, rig);
+      if (arrived < 0 && apart(shown, rig) < 1e-4f) arrived = i;
+      if (i == 30) CHECK(tfp_camera_lock_seat_body() == BODY);
+    }
+    CHECK(arrived > 0 && arrived <= 73 && most < .15f);
+    TfpCameraSeatStats out{}; tfp_camera_seat_stats(&out);
+    CHECK(out.gliding == 0 && out.exits == 1 && tfp_camera_lock_seat_body() == 0);
+    // The glide over, head-camera frames after it begin no glide from anywhere.
+    for (int i = 0; i < 10; ++i) { g.hip(); g.frame(8.3); CHECK(g.own && g.error == 0); }
+    TfpCameraSeatStats after{}; tfp_camera_seat_stats(&after); CHECK(after.gliding == 0 && after.exits == 1);
+    std::printf("out of the suit into the native view%s: rig eye in %d frames, largest step %.3f m\n", smooth ? " (continuity on)" : "", arrived, (double)most);
+    g.end();
+  }
+
+  // ---- 7. The glide out interrupted by native frames (the checker's sequence B: 2.46 m to the head, then 2.21 m
+  // back toward the cockpit): 8 head-camera frames, 8 native ones, then the head camera. Every change of camera
+  // starts the glide again from the view last shown; it never resumes from the cockpit. Continuity off and on. ----
+  for (int smooth = 0; smooth < 2; ++smooth) {
+    fresh(true, smooth != 0);
+    Game g; board(g);
+    float last[3] = {sent.position[0], sent.position[1], sent.position[2]}, most = 0; int at = -1, back = -1;
+    g.climb_out(2, -.2f); g.look(first);
+    for (int i = 0; i < 120; ++i) {
+      if (i >= 8 && i < 16) g.native(); else g.hip();
+      g.frame(8.3); CHECK(g.error == 0 && g.own);
+      float shown[3]; track(g, shown); const float step = apart(shown, last); if (step > most) { most = step; at = i; } std::memcpy(last, shown, 12);
+      if (i >= 16 && back < 0 && g.from_head(first) < .07f) back = i;
+      if (i == 12 || i == 20) CHECK(tfp_camera_lock_seat_body() == BODY);
+    }
+    CHECK(most < .15f);
+    CHECK(back > 16 && back <= 16 + 73 && g.from_head(first) < .07f);
+    TfpCameraSeatStats out{}; tfp_camera_seat_stats(&out);
+    CHECK(out.gliding == 0 && out.exits == 1 && tfp_camera_lock_seat_body() == 0);
+    std::printf("out of the suit, head/native/head%s: largest step %.3f m (frame %d), head reached at frame %d\n", smooth ? " (continuity on)" : "", (double)most, at, back);
+    g.end();
+  }
+
+  // ---- 7b. Late in the glide out, the native view with its rig eye 0.6 m from the head camera's eye, then the head
+  // camera again: each change of camera begins the glide again from the view last shown, so neither change is a
+  // step (a glide that only changed its target would show most of the 0.6 m at once). Continuity off and on. ----
+  for (int smooth = 0; smooth < 2; ++smooth) {
+    fresh(true, smooth != 0);
+    Game g; board(g);
+    float last[3] = {sent.position[0], sent.position[1], sent.position[2]}, most = 0;
+    g.climb_out(2, -.2f); g.look(first);
+    for (int i = 0; i < 170; ++i) {
+      if (i >= 50 && i < 75) g.native(.7f); else g.hip();
+      g.frame(8.3); CHECK(g.error == 0 && g.own);
+      float shown[3]; track(g, shown); const float step = apart(shown, last); if (step > most) most = step; std::memcpy(last, shown, 12);
+    }
+    CHECK(most < .15f && g.from_head(first) < .07f);
+    TfpCameraSeatStats out{}; tfp_camera_seat_stats(&out); CHECK(out.gliding == 0 && tfp_camera_lock_seat_body() == 0);
+    std::printf("out of the suit, a far rig eye late in the glide%s: largest step %.3f m\n", smooth ? " (continuity on)" : "", (double)most);
+    g.end();
+  }
+
+  // ---- 8. In the middle of the glide out: a camera that is neither the head camera nor the native view is held by
+  // the lock as the head camera is, so the glide runs on through it, continuous; a frame the lock does not show (the
+  // lock off for a frame) ends it, and the head-camera frames after it never glide back from the cockpit. ----
   {
     fresh(true);
+    Game g; board(g);
+    g.climb_out(2, -.2f); g.look(first);
+    float last[3] = {sent.position[0], sent.position[1], sent.position[2]}, most = 0;
+    for (int i = 0; i < 12; ++i) {
+      if (i >= 5 && i < 8) g.hip(4.0f, 1.0f, 3); else g.hip();
+      g.frame(8.3); CHECK(g.own && g.error == 0);
+      const float step = apart(sent.position, last); if (step > most) most = step; std::memcpy(last, sent.position, 12);
+    }
+    TfpCameraSeatStats mid{}; tfp_camera_seat_stats(&mid);
+    CHECK(most < .15f && mid.gliding == 2 && g.from_head(first) > .3f && tfp_camera_lock_seat_body() == BODY);
+    // The camera still linked to the rig in a head-camera request, with no native view to repeat: the game's frame
+    // is shown, not the lock's; the glide ends there and does not come back.
+    g.hip(); g.s.linked = true; g.frame(8.3); CHECK(!g.own);
+    g.hip(); g.frame(8.3); CHECK(g.own && g.error == 0 && g.from_head(first) < .07f);
+    TfpCameraSeatStats gone{}; tfp_camera_seat_stats(&gone);
+    CHECK(gone.gliding == 0 && tfp_camera_lock_seat_body() == 0);
+    // Once more into the suit and out, then the lock off for a frame in the glide out: the glide ends there too.
+    for (int i = 0; i < 120; ++i) { g.climb_in(.1f, -.2f); g.look(.7f); g.hip(4.0f, 1.0f); g.frame(8.3); }
+    g.climb_out(2, -.2f); g.look(first);
+    for (int i = 0; i < 5; ++i) { g.hip(); g.frame(8.3); }
+    TfpCameraSeatStats again{}; tfp_camera_seat_stats(&again); CHECK(again.gliding == 2 && again.exits == 2);
+    tfp_camera_set_lock(false, .35f, 8.0f, 300, .7f, 35.0f, 0, true);
+    g.hip(); g.frame(8.3); // retail's head camera on foot: no seat glide in it
+    TfpCameraSeatStats off{}; tfp_camera_seat_stats(&off);
+    CHECK(off.gliding == 0 && tfp_camera_lock_seat_body() == 0);
+    tfp_camera_set_lock(true, .35f, 8.0f, 300, .7f, 35.0f, 0, true);
+    for (int i = 0; i < 3; ++i) { g.hip(); g.frame(8.3); CHECK(g.own && g.error == 0 && g.from_head(first) < .07f); }
+    TfpCameraSeatStats out{}; tfp_camera_seat_stats(&out);
+    CHECK(out.gliding == 0 && out.exits == 2 && tfp_camera_lock_seat_body() == 0);
+    g.end();
+  }
+
+  // ---- 9. Any seated vehicle (an FRV's seat: no suit, the root driven at 20 m/s and turning, the head lower): first
+  // person kept, the eye on the root's anchor, the game's direction; the diver hidden (the seat body). What is seen
+  // through is the head visibility's business, and only an exosuit is (cockpit_find_test, head_visibility_test). ----
+  {
+    fresh(true);
+    static const float frv[3] = {.35f, -.1f, .62f}; // a passenger's seat: to the side, lower
     Game g; g.stand(0, 0, .34f); g.look(first); g.hip(); g.begin();
-    for (int i = 0; i < 8; ++i) { g.hip(); g.frame(); }
-    g.climb_in(.1f, .5f); g.look(suit);
-    for (int i = 0; i < 25; ++i) { g.hip(4.0f, 1.0f); g.frame(); }
-    g.climb_out(2, .5f); g.look(first); g.native(); g.frame();
-    TfpCameraSeatStats seat{}; tfp_camera_seat_stats(&seat); CHECK(seat.exits == 1 && seat.out_ms == 0 && !seat.seated && seat.gliding == 0);
-    CHECK(g.error == 0);
+    for (int i = 0; i < 8; ++i) { g.hip(); g.frame(8.3); }
+    float x = 0, worst = 0;
+    for (int i = 0; i < 240; ++i) {
+      x += .166f; g.root_yaw = (float)i / 240 * 1.0f;
+      g.seat(true); g.s.state = 25; g.place(x, -.2f, .9f, frv); g.look(.3f + (float)i * .01f); g.hip(5.0f, 1.5f); g.frame(8.3);
+      CHECK(g.own && g.error == 0);
+      if (i >= 80) {
+        float eye[3]; g.seat_eye(frv, eye); const float d = apart(sent.position, eye); if (d > worst) worst = d;
+        const Q q = g.given(); CHECK(!std::memcmp(&g.out, &q, 16)); // the game's own rotation, bit for bit
+      }
+    }
+    CHECK(worst < 1e-3f && tfp_camera_lock_seat_body() == BODY);
+    std::printf("in an FRV's seat: the eye within %.5f m of the seat's anchor at 20 m/s\n", (double)worst);
+    g.end();
+  }
+
+  // ---- 10. The continuity (Smooth eye) begins again from what is shown once the glide out has ended: nothing it
+  // carried through the glide is eased in after it (camera_helper.c seat_out_end). The trace says so: the frame after
+  // the glide's last starts the continuity from nothing (TFP_CAMERA_TRACE_START). ----
+  {
+    fresh(true, true); tfp_camera_set_continuity(true, true);
+    Game g; board(g);
+    g.climb_out(2, -.2f); g.look(first);
+    double after_end = -1; bool was_gliding = true;
+    for (int i = 0; i < 100; ++i) {
+      if (i == 50) tfp_camera_trace_edge();
+      g.hip(); g.frame(8.3); CHECK(g.own && g.error == 0);
+      TfpCameraSeatStats st{}; tfp_camera_seat_stats(&st);
+      if (!was_gliding && after_end < 0) after_end = clock_ms; // the first frame after the one that ended the glide
+      if (was_gliding && st.gliding == 0) was_gliding = false;
+    }
+    static TfpCameraTraceRow rows[512]; const uint32_t count = tfp_camera_trace_read(rows, 512);
+    bool started = false, found = false;
+    for (uint32_t i = 0; i < count; ++i) if (rows[i].tick == after_end) { found = true; started = (rows[i].what & TFP_CAMERA_TRACE_START) != 0; }
+    CHECK(after_end > 0 && found && started);
+    g.end();
+  }
+
+  // ---- 11. No kick carried over a seat. The kick (the Bodycam kick sliders are on) follows the head node against
+  // the view; the seat lets its memory go. Leaving with the view as it was before the seat and the head nodded 20
+  // degrees since (the climb out): the first head-camera frames after the seat begin the kick from that head, and
+  // kick nothing. Kept, the kick would take the 20 degrees as the head nodding in one frame. ----
+  {
+    fresh(true);
+    Game g; board(g);
+    TfpCameraLockStats before{}; tfp_camera_lock_stats(&before);
+    g.climb_out(2, -.2f); g.look(first); g.head_pitch = .35f;
+    float worst = 0;
+    for (int i = 0; i < 120; ++i) {
+      g.hip(); g.frame(8.3); CHECK(g.own && g.error == 0);
+      TfpCameraSeatStats st{}; tfp_camera_seat_stats(&st);
+      if (st.gliding == 0) { const float d = degrees(g.out, yaw_q(first)); if (d > worst) worst = d; }
+    }
+    TfpCameraLockStats after{}; tfp_camera_lock_stats(&after);
+    CHECK(before.peak_kick_degrees < .5f && after.peak_kick_degrees < .5f && worst < .5f);
+    std::printf("out of the suit with the head nodded 20 degrees: %.3f degrees from the game's, peak kick %.3f\n", (double)worst, (double)after.peak_kick_degrees);
     g.end();
   }
 
