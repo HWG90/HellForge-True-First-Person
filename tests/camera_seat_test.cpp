@@ -442,6 +442,22 @@ int main() {
     g.end();
   }
 
+  // ---- 6c. Leaving the seat with no glide (the check's minor items, 2026-11-25: the 250 ms expiry hid these): straight
+  // into the native view 12 m away (over the 8 m a glide covers: a cut), and on a frame the lock does not show (a
+  // head-camera request still linked to the rig, as in case 8). The seat body is let go on that very frame, not 250 ms
+  // later. ----
+  for (int way = 0; way < 2; ++way) {
+    fresh(true);
+    Game g; board(g);
+    CHECK(tfp_camera_lock_seat_body() == BODY);
+    if (way == 0) { g.climb_out(12, -.2f); g.look(first); g.native(); } else { g.climb_out(2, -.2f); g.look(first); g.hip(); g.s.linked = true; }
+    g.frame(8.3); CHECK(way == 1 ? !g.own : g.error == 0); // the unshown frame is the game's
+    TfpCameraSeatStats seat{}; tfp_camera_seat_stats(&seat);
+    CHECK(seat.exits == 1 && !seat.seated && seat.gliding == 0 && seat.out_ms == 0);
+    CHECK(tfp_camera_lock_seat_body() == 0);
+    g.end();
+  }
+
   // ---- 7. The glide out interrupted by native frames (the checker's sequence B: 2.46 m to the head, then 2.21 m
   // back toward the cockpit): 8 head-camera frames, 8 native ones, then the head camera. Every change of camera
   // takes the glide on from the view last shown; it never resumes from the cockpit. Continuity off and on. ----
