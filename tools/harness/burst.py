@@ -64,7 +64,7 @@ def main(argv):
     log = matrix.log_path()
     with drive.Input() as device:
         if "frames held" not in log.read_text(errors="replace")[-4000:]:
-            device.run("key f11; wait 2.5")
+            device.run(f"key {drive.TOGGLE}; wait 2.5")
         for name in names:
             script, count = ACTIONS[name]
             player = threading.Thread(target=device.run, args=(script,)); player.start()

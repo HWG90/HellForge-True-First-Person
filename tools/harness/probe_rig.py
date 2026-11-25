@@ -79,7 +79,7 @@ def main(argv):
         return 1
     with drive.Input() as device:
         for name in names:
-            if name.startswith("key:"):  # e.g. key:f11 between phases
+            if name.startswith("key:"):  # e.g. key:u (the toggle) between phases
                 device.hold(name[4:])
                 time.sleep(1.5)
                 print(f"-- pressed {name[4:]}")

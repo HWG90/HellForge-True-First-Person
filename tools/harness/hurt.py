@@ -5,7 +5,7 @@
   hurt.py set ENTITY HEALTH    write the health (i32) of that entity's record
   hurt.py kill                 the local player dies: health 0 and life 1 (downed) on its own record; the game then
                                runs its death (ELIMINATED, the body falls, a replacement pod). The player is the
-                               avatar of the mod's last "Ids:" log line (written once per lease: F11 must be on)
+                               avatar of the mod's last "Ids:" log line (written once per lease: the view must be on (U))
 
 Layout from HellForge's SDK (hellforge_globals.h, HfHealthManager): game.dll+0x3326688 points to the manager;
 +0x1020 count, +0x1048 descriptor pointers, +0x1058 records (0x1B8 each: health i32 at +0x14, life u32 at +0x19C),
