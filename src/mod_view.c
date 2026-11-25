@@ -427,7 +427,9 @@ static void entry_note(void) {
  *   veil         round 19: how far the helmet veil moved the eye handed to the game in this frame, in the world
  *                (src/camera_helper.h tfp_camera_set_veil), or 0 where it moved nothing. eye_world is the eye before
  *                it, so the eye shown is eye_world + veil (round 18: up to 0.32 m forward at a leave of the native
- *                view, which no row said)
+ *                view, which no row said); round 26: also the veil's move being let out in the frames after it closes
+ *   veil_head    round 26: in a frame the veil was open for, the head node from the eye before the veil: (ahead up), m
+ *                along the level view and up (the veil moves the eye less where the head is below the view); else 0
  * A window is also opened when the body's action changes (src/trace_edges.h); such a window has no State line before
  * it, and "t=" starts again in it. So does one the eye opens itself (eye_edge), unless a window was open. */
 static void trace_note(void) {
@@ -479,9 +481,11 @@ static void trace_note(void) {
     char veil[64] = "0";
     if (r->veil[0] != 0 || r->veil[1] != 0 || r->veil[2] != 0)
       snprintf(veil, sizeof veil, "(%.5f %.5f %.5f)", (double)r->veil[0], (double)r->veil[1], (double)r->veil[2]);
+    char veil_head[48] = "0";
+    if (r->veil_head[0] != 0 || r->veil_head[1] != 0) snprintf(veil_head, sizeof veil_head, "(%.4f %.4f)", (double)r->veil_head[0], (double)r->veil_head[1]);
     say("Trace: t=%.1f kind=%u eye_world=(%.5f %.5f %.5f) step=%.4f wanted=(%.5f %.5f %.5f) correction=%.4f lease=0x%llx pose_armed=%d entry_ease=%.2f source=%s"
         " root=(%.5f %.5f %.5f) axes=(%.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f) looked=%d taken=%s quiet=%d tick=%.3f"
-        " off_foot=%d damped=%d damp=(%.5f %.5f %.5f) view=(%.5f %.5f %.5f) sock=%.5f arms=%u eye_edge=%d veil=%s turn=(%.4f %.4f %.4f)",
+        " off_foot=%d damped=%d damp=(%.5f %.5f %.5f) view=(%.5f %.5f %.5f) sock=%.5f arms=%u eye_edge=%d veil=%s turn=(%.4f %.4f %.4f) veil_head=%s",
         (double)r->ms, r->kind, (double)r->eye[0], (double)r->eye[1], (double)r->eye[2], (double)r->step, (double)r->wanted[0], (double)r->wanted[1],
         (double)r->wanted[2], (double)r->correction, lease, (int)(pose.armed != 0), (double)r->entry_ease, sources[r->source < 4 ? r->source : 0],
         (double)r->root[0], (double)r->root[1], (double)r->root[2], (double)r->axes[0], (double)r->axes[1], (double)r->axes[2], (double)r->axes[3],
@@ -489,7 +493,7 @@ static void trace_note(void) {
         (int)((r->what & TFP_CAMERA_TRACE_LOOKED) != 0), taken[0] ? taken + 1 : "-", (int)((r->what & TFP_CAMERA_TRACE_QUIET) != 0), r->tick,
         (int)((r->what & TFP_CAMERA_TRACE_OFF_FOOT) != 0), (int)((r->what & TFP_CAMERA_TRACE_DAMPED) != 0), (double)r->damp[0], (double)r->damp[1],
         (double)r->damp[2], (double)r->view[0], (double)r->view[1], (double)r->view[2], (double)r->sock, (unsigned)r->arms,
-        (int)((r->what & TFP_CAMERA_TRACE_SELF) != 0), veil, (double)r->turn[0], (double)r->turn[1], (double)r->turn[2]);
+        (int)((r->what & TFP_CAMERA_TRACE_SELF) != 0), veil, (double)r->turn[0], (double)r->turn[1], (double)r->turn[2], veil_head);
   }
 }
 #endif
@@ -551,17 +555,25 @@ static void orphan_note(void) {
 static void head_note(void) {
   static TfpHeadLog seen;
   TfpHeadTick tick;
-  char text[700];
+  char text[800];
   if (!tfp_wire_engine_head_tick(&wire, &tick)) { tfp_camera_veil_from_head(NULL); return; }
   tick.view = wire.controller.enabled;
   tick.now_ms = (double)GetTickCount64(); /* round 24: how long hiding was let go */
   /* Round 14, the veil (src/camera_helper.h tfp_camera_veil_from_head): this tick's update closes the one a leave
    * opened once it found the body drawn again and left none of it drawn; it stays armed while the module is active. */
+  /* Round 26: the field of view the veil judges "the head below the view" with: the wider of the game's and the one
+   * shown (the lock off: shown is 0), the widest of the last two seconds (a swap from full aim widens it after the leave). */
+  static float fov_widest; static double fov_at;
+  TfpFovLockStats fov; tfp_fov_lock_stats(&fov);
+  const float fov_now = fmaxf(isfinite(fov.game_radians) ? fov.game_radians : 0, isfinite(fov.shown_radians) ? fov.shown_radians : 0);
+  if (fov_now >= fov_widest || tick.now_ms-fov_at > 2000) fov_widest = fov_now, fov_at = tick.now_ms;
+  tfp_camera_set_veil_fov(fov_widest);
   tfp_camera_veil_from_head(&tick);
   TfpCameraVeilStats veil;
   tfp_camera_veil_stats(&veil);
   tick.veil_leaves = veil.leaves, tick.veil_frames = veil.frames, tick.veil_moved = veil.moved, tick.veil_behind = veil.behind;
   tick.veil_largest_m = veil.largest_m, tick.veil_second = veil.second; /* round 19 */
+  tick.veil_under = veil.under, tick.veil_far = veil.too_far; /* round 26 */
   if (tfp_head_log_step(&seen, &tick, text, sizeof text)) say("%s", text);
 }
 /* ---- the "Warp:" line (round 22; src/wire_warp.h, docs/design/specs/2026-11-24-warp-pack-glow.md) ----------------- */

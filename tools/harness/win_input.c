@@ -10,7 +10,9 @@
  *   <ms> p <x> <y>    put the pointer at this pixel of the game window's client area
  *   <ms> c <x> <y>    a left click posted to the game window at this client pixel (the NEST overlay takes the
  *                     position from the click message itself; nothing leaves the game's process)
- * Everything still held is released at the end, also after an interrupt. */
+ *   <ms> k <vk>|L|R|M  keep: left down at the end if this script pressed it (round 26: full aim held while the
+ *                     harness reads the log; a later script's "u R" lets go of it)
+ * Everything else still held is released at the end; everything, kept or not, after an interrupt. */
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -19,8 +21,8 @@
 
 static HWND target;
 static unsigned targets;
-static unsigned char key_down[256];
-static WPARAM buttons;
+static unsigned char key_down[256], key_kept[256];
+static WPARAM buttons, buttons_kept;
 static RECT client;
 
 static BOOL CALLBACK collect(HWND window, LPARAM unused) {
@@ -71,12 +73,27 @@ static int post_click(int x, int y) {
   PostMessageW(target, WM_LBUTTONDOWN, MK_LBUTTON, at); Sleep(60);
   return PostMessageW(target, WM_LBUTTONUP, 0, at) != 0;
 }
-static void release_all(void) {
+static WPARAM button_flag(char which) { return which == 'L' ? MK_LBUTTON : which == 'R' ? MK_RBUTTON : which == 'M' ? MK_MBUTTON : 0; }
+static int keep(const char *code) {
+  if (button_flag(code[0])) return buttons_kept |= button_flag(code[0]), 1;
+  unsigned long vk = strtoul(code, NULL, 10);
+  if (!vk || vk > 255) return 0;
+  return key_kept[vk] = 1, 1;
+}
+/* everything: also what a "k" line kept (an interrupt, or the window gone) */
+static void release(int everything) {
   if (!target) return;
-  for (unsigned vk = 1; vk < 256; vk++) if (key_down[vk]) key(vk, 0);
-  if (buttons & MK_LBUTTON) button('L', 0);
-  if (buttons & MK_RBUTTON) button('R', 0);
-  if (buttons & MK_MBUTTON) button('M', 0);
+  for (unsigned vk = 1; vk < 256; vk++) if (key_down[vk] && (everything || !key_kept[vk])) key(vk, 0);
+  for (const char *which = "LRM"; *which; which++)
+    if ((buttons & button_flag(*which)) && (everything || !(buttons_kept & button_flag(*which)))) button(*which, 0);
+}
+static void release_all(void) { release(1); }
+static void release_unkept(void) { release(0); }
+static unsigned kept_count(void) {
+  unsigned n = 0;
+  for (unsigned vk = 1; vk < 256; vk++) n += key_down[vk] && key_kept[vk];
+  for (const char *which = "LRM"; *which; which++) n += (buttons & buttons_kept & button_flag(*which)) != 0;
+  return n;
 }
 static BOOL WINAPI interrupted(DWORD reason) { (void)reason; release_all(); return FALSE; }
 
@@ -95,7 +112,7 @@ int main(void) {
     return 5;
   }
   fprintf(log, "window=%p foreground=%p client=%ldx%ld\n", (void *)target, (void *)GetForegroundWindow(), client.right, client.bottom);
-  atexit(release_all);
+  atexit(release_unkept);
   SetConsoleCtrlHandler(interrupted, TRUE);
   ULONGLONG start = GetTickCount64();
   char line[128];
@@ -107,19 +124,20 @@ int main(void) {
     if (sscanf(line, "%lu m %d %d", &at, &dx, &dy) == 3) kind = 'm';
     else if (sscanf(line, "%lu p %d %d", &at, &dx, &dy) == 3) kind = 'p';
     else if (sscanf(line, "%lu c %d %d", &at, &dx, &dy) == 3) kind = 'c';
-    else if (sscanf(line, "%lu %c %15s", &at, &kind, code) != 3 || (kind != 'd' && kind != 'u')) continue;
+    else if (sscanf(line, "%lu %c %15s", &at, &kind, code) != 3 || (kind != 'd' && kind != 'u' && kind != 'k')) continue;
     ULONGLONG now = GetTickCount64() - start;
     if (at > now) Sleep((DWORD)(at - now));
-    if (!IsWindow(target)) break;
-    if (kind == 'm') ok = move(dx, dy);
+    if (!IsWindow(target)) { release_all(); break; }
+    if (kind == 'k') ok = keep(code);
+    else if (kind == 'm') ok = move(dx, dy);
     else if (kind == 'p') ok = place(dx, dy);
     else if (kind == 'c') ok = post_click(dx, dy);
     else if (code[0] == 'L' || code[0] == 'R' || code[0] == 'M') ok = button(code[0], kind == 'd');
     else ok = key((unsigned)strtoul(code, NULL, 10), kind == 'd');
     played++, failed += !ok;
   }
-  release_all();
-  fprintf(log, "played=%u failed=%u foreground after=%p\n", played, failed, (void *)GetForegroundWindow());
+  release_unkept();
+  fprintf(log, "played=%u failed=%u kept=%u foreground after=%p\n", played, failed, kept_count(), (void *)GetForegroundWindow());
   fclose(log);
   fclose(script);
   return failed ? 4 : 0;

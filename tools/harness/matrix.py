@@ -18,6 +18,14 @@ head height or more for the second, about 1.5 m ahead: tools/harness/walk.py to 
 ledge decides which the game does, and the result says which mask the log shows (0x20 a vault held in the native view,
 0x22 a clamber in the head camera). Run them once in each camera style: the style is the log's, not a phase's.
 
+Round 26: the aim phases reach full aim. The right button alone is the game's shoulder aim; full aim (the sights on the
+eye, the log's "State: aim in") is the game's other aim mode, switched with the middle button while aiming. The phases
+in AIMED are played by aim.full_aim(): hold the aim, press the aim-mode button, read the log until it says full aim
+(a second press where it does not), play the phase's action in full aim, hold, let go. Such a phase also fails where
+full aim was not reached or the "Aim:" lines are missing (aim.verdict). aim-full holds full aim 2 s; aim-scope-zoom
+cycles the scope's range through the weapon functions menu (hold R and a direction; the direction is found from the
+log) and needs a scoped rifle with ranges in hand. docs/guides/AIM-TEST.md "The harness".
+
 The camera style the run was in (Bodycam or Stable) is read from the log's own "Camera style:" lines and printed at
 the top, where it changes, and in the summary; each phase's result carries it. It is never taken from an argument or a
 file name: the two feel.49 soaks of 2026-11-24 were named the wrong way round.
@@ -28,6 +36,7 @@ import sys
 import time
 from pathlib import Path
 
+import aim
 import drive
 
 HF = Path.home() / ".local/share/hellforge-prefix/pfx/drive_c/users/steamuser/Documents/HellForge"
@@ -46,14 +55,17 @@ PHASES = {
     "dive-back": ("down s; wait 0.3; key alt; wait 0.6; up s", 2.5),
     "stand-up": ("key c; wait 0.2; key c", 1.5),
     "fire": ("click left 0.6", 1.0),
-    "aim": ("click right 1.5", 1.0),
-    "aim-fire": ("down right; wait 0.7; click left 0.5; wait 0.4; up right", 1.0),
-    "aim-walk": ("down right; wait 0.5; hold w 1.0; up right", 1.0),
+    # The aim phases are played by aim.full_aim() (AIMED below); the scripts are what a plain run of them sends.
+    "aim": ("down right; wait 0.35; click middle; wait 1.5; up right", 1.0),
+    "aim-fire": ("down right; wait 0.35; click middle; wait 0.7; click left 0.5; wait 0.4; up right", 1.0),
+    "aim-walk": ("down right; wait 0.35; click middle; wait 0.5; hold w 1.0; up right", 1.0),
+    "aim-full": ("down right; wait 0.35; click middle; wait 2.5; up right", 1.0),
+    "aim-scope-zoom": ("down right; wait 0.35; click middle; wait 1.0; down r; wait 0.8; key arrowright; wait 0.2; up r; wait 1.5; up right", 1.0),
     "reload": ("click left 0.3; wait 0.3; key r", 4.0),
     "ammo-check": ("hold r 0.8", 2.5),
     "swap-secondary": ("key 2", 2.0),
     "pistol-fire": ("click left 0.3", 1.0),
-    "pistol-aim": ("click right 1.5", 1.0),
+    "pistol-aim": ("down right; wait 0.35; click middle; wait 1.5; up right", 1.0),
     "pistol-reload": ("key r", 3.5),
     "swap-support": ("key 3", 2.5),
     "swap-primary": ("key 1", 2.0),
@@ -71,6 +83,16 @@ PHASES = {
     "toggle-fast": ("key f11; wait 0.08; key f11; wait 0.08; key f11; wait 0.08; key f11", 2.0),   # the key is polled once a frame: 0.11 s up, so no press falls between two polls at 30 frames a second
     "ragdoll": ("look 0 900; wait 0.2; key g; wait 0.4; look 0 -900; hold s 0.4", 6.0),
     "death": ("look 0 900; wait 0.2; key g; wait 0.6; key g; wait 0.4; look 0 -900", 9.0),   # the view is put back level for what runs after
+}
+# Round 26: phases played in full aim by aim.full_aim(): name -> (what is played once the log says full aim: an input
+# script, "zoom" for aim.zoom_cycle, or None; seconds held after it). aim.verdict() judges the aim with that hold.
+AIMED = {
+    "aim": (None, 1.5),
+    "aim-fire": ("click left 0.5; wait 0.4", 0.3),
+    "aim-walk": ("hold w 1.0", 0.3),
+    "aim-full": (None, aim.HOLD_S),
+    "aim-scope-zoom": ("zoom", 1.0),
+    "pistol-aim": (None, 1.5),
 }
 LOCK = re.compile(r"Lock: \+(\d+) frames held \(\+(\d+) in another camera, kind now (\d+)\), \+(\d+) missed \(kind (\d+), helper error (\d+)\), largest kick ([\d.]+)")
 CUT = re.compile(r"Cut: largest camera jump ([\d.]+) m")
@@ -353,6 +375,42 @@ def judge(lines, toggles=False):
             "largest_float_m": floated, "float_at": float_row["at"] if float_row else None, "masks": sorted(masks)}
 
 
+def play(device, name, log):
+    """Plays phase `name`: its script, or for a phase of AIMED full aim read from the log `log` (aim.full_aim). Returns
+    the aim's result, or None for a plain phase."""
+    if name not in AIMED:
+        device.run(PHASES[name][0])
+        return None
+    during, hold = AIMED[name]
+    action = aim.zoom_cycle if during == "zoom" else aim.during_script(during) if during else None
+    return aim.full_aim(device, aim.LogTail(log), hold, action)
+
+
+def judge_aim(name, result, lines, judged):
+    """Adds the aim's verdict to a phase's camera verdict `judged` (in place)."""
+    if result is None:
+        return judged
+    hold = AIMED[name][1]
+    v = aim.verdict(result, lines, hold, zoom=name == "aim-scope-zoom")
+    judged["aim"] = {**result, **aim.counts(lines)}
+    judged["pass"] = judged["pass"] and v["pass"]
+    judged["notes"] = judged["notes"] + v["notes"]
+    return judged
+
+
+def aim_text(result):
+    """One line for an aim phase: whether full aim was reached, how fast, and the zoom key found."""
+    if not result:
+        return ""
+    text = (f"full aim after {result['to_full_s']:.2f} s ({result['switches']} aim-mode press{'es' if result['switches'] > 1 else ''})"
+            if result["reached"] else f"NO full aim ({result['switches']} aim-mode presses)")
+    if "zoom_key" in result:
+        text += f", zoom key {result['zoom_key'] or 'not found'} (tried {', '.join(result['zoom_tries']) or 'none'})"
+    if "aim_lines" in result:
+        text += f"; Aim: lines {result['aim_lines']}, zoom levels {result['zoom_levels']}"
+    return text
+
+
 def main(argv):
     if len(argv) < 2:
         print(__doc__)
@@ -372,7 +430,7 @@ def main(argv):
         for name in names:
             script, settle = PHASES[name]
             start = log.stat().st_size
-            device.run(script)
+            aimed = play(device, name, log)
             time.sleep(min(settle, 1.0))
             try:
                 drive.shot(out / f"{name}.png")
@@ -381,7 +439,7 @@ def main(argv):
             time.sleep(max(0.0, settle - 1.0) + 1.2)   # the Lock line is written once a second
             with open(log, errors="replace") as handle:
                 handle.seek(start); lines = handle.read().splitlines()
-            results[name] = judge(lines, name.startswith('toggle'))
+            results[name] = judge_aim(name, aimed, lines, judge(lines, name.startswith('toggle')))
             r = results[name]
             for text in style_changes(lines):
                 print(text)
@@ -389,6 +447,8 @@ def main(argv):
             r["camera_style"] = style
             print(f"{'pass' if r['pass'] else 'FAIL':4} {name:16} frames {r['frames']:4} other-camera {r['other_camera_frames']:4} missed {r['missed']:3} "
                   f"{describe(r)} kick {r['largest_kick_deg']:.1f} deg kinds {r['kinds']}")
+            if aimed is not None:
+                print(f"       {aim_text(r['aim'])}")
             for note in r["notes"] + pop_lines(r, ""):
                 print(f"       {note}")
     (out / "matrix.json").write_text(json.dumps(results, indent=1))

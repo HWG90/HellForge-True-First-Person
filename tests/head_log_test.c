@@ -92,6 +92,13 @@ int main(void) {
   CHECK(tfp_head_log_step(&g, &t, text, sizeof text) && strstr(text, "left behind the head on 2, largest move 0.321 m, opens at the first head-camera frame"));
   t.veil_second = true; t.veil_behind = 3;
   CHECK(tfp_head_log_step(&g, &t, text, sizeof text) && strstr(text, "left behind the head on 3, largest move 0.321 m, opens at the tick that sees the leave (veil_second.txt)"));
+  /* Round 26: what kept the veil short (src/camera_helper.h TFP_CAMERA_VEIL_MOST) closes the veil's part, only where
+   * either happened; a frame too far to move is also one left behind the head, which makes the line. */
+  CHECK(!strstr(text, "veil kept short"));
+  t.veil_under = 4; t.veil_far = 2; t.veil_behind = 5;
+  CHECK(tfp_head_log_step(&g, &t, text, sizeof text) && strstr(text, "(veil_second.txt); veil kept short: head below the view on 4, too far to move on 2"));
+  t.veil_under = t.veil_far = 0; t.veil_behind = 3;
+  CHECK(tfp_head_log_step(&g, &t, text, sizeof text) && !strstr(text, "veil kept short"));
   /* Round 22: the backpack's rows (hidden_backpack; the Warp Pack's glow, docs/design/specs/2026-11-24-warp-pack-glow.md):
    * a change of that number is a line by itself, and the line names it. */
   t = tick(4, true, 9, 14, 8); t.veil_leaves = 3; t.veil_frames = 6; t.veil_moved = 2; t.veil_behind = 3; t.veil_largest_m = .3214f; t.veil_second = true;
