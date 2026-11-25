@@ -550,9 +550,11 @@ static void shadow(TfpOps *b, int mode, bool hit, TfpOpsResult result, const Tfp
     b->perf.memo_hits[mode]++;
     if (m->result != result) mismatch(b, mode, 0, "result");
     else if (result == TFP_OPS_TRUE) {
-      const unsigned char *x = (const unsigned char *)&m->s, *y = (const unsigned char *)out;
-      for (size_t i = 0; i < sizeof *out; i++)
-        if (x[i] != y[i]) { mismatch(b, mode, i, tfp_ops_snapshot_field(i)); break; }
+      if (memcmp(&m->s, out, sizeof *out)) { /* the byte walk only when they differ */
+        const unsigned char *x = (const unsigned char *)&m->s, *y = (const unsigned char *)out;
+        for (size_t i = 0; i < sizeof *out; i++)
+          if (x[i] != y[i]) { mismatch(b, mode, i, tfp_ops_snapshot_field(i)); break; }
+      }
     } else if (strcmp(m->why, b->why)) mismatch(b, mode, 0, "why");
   }
   m->has = b->frame_active, m->epoch = b->frame_epoch, m->result = result;
