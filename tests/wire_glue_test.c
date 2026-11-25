@@ -332,7 +332,7 @@ int main(void) {
         !wire.host.menu_fird_person_arms && !wire.host.menu_motion_options);
   CHECK(tfp_wire_call(&wire, TFP_RT_E_on_update, NULL, r) == TFP_RT_OK); /* before enable: nothing */
   CHECK(tfp_wire_call(&wire, TFP_RT_E_on_enable, NULL, r) == TFP_RT_OK);
-  CHECK(logged("Idle. F11 toggles True First Person"));
+  CHECK(!logged("Idle. F11")); /* round 36b: retail's line names retail's keys; the wire does not write it (src/wire_rt.c) */
   CHECK(wire.rt.has[TFP_RT_O_CONTROLLER] && !wire.rt.has[TFP_RT_O_ARM_PIECES] && !wire.rt.has[TFP_RT_O_GRIP_HAND]);
   CHECK(wire.ops.has_pose_placement && wire.ops.pose_placement.x == .15 && wire.ops.pose_placement.z == -.12); /* on_enable's set_placement */
   for (int i = 0; i < 5; i++) {

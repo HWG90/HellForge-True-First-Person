@@ -1547,7 +1547,7 @@ int main(int argc, char **argv) {
   {
     V r[30];
     TfpNearOptions options;
-    CHECK(tfp_wire_call(&wire, TFP_RT_E_on_enable, NULL, r) == TFP_RT_OK && logged("Idle. F11 toggles True First Person"));
+    CHECK(tfp_wire_call(&wire, TFP_RT_E_on_enable, NULL, r) == TFP_RT_OK && !logged("Idle. F11"));
     /* rt:742 assert(controller:set_placement(saved_placement())): no weapon yet, so the global placement */
     CHECK(wire.ops.has_pose_placement && wire.ops.pose_placement.x == .15 && wire.ops.pose_placement.y == 0 && wire.ops.pose_placement.z == -.12);
     for (int i = 0; i < 3; i++) { now_seconds += 1 / 60.0; tfp_wire_frame(&wire, NULL); tfp_wire_settings_frame(&wire); }

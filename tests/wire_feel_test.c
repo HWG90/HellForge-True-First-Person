@@ -214,7 +214,7 @@ int main(void) {
   tfp_wire_feel_begin(&wire);
   CHECK(tfp_wire_call(&wire, TFP_RT_E_on_update, NULL, r) == TFP_RT_OK);
   CHECK(tfp_wire_call(&wire, TFP_RT_E_on_enable, NULL, r) == TFP_RT_OK);
-  CHECK(logged("Idle. F11 toggles True First Person") && wire.rt.has[TFP_RT_O_CONTROLLER] && wire.rt.has[TFP_RT_O_MOTION]);
+  CHECK(!logged("Idle. F11") && wire.rt.has[TFP_RT_O_CONTROLLER] && wire.rt.has[TFP_RT_O_MOTION]); /* round 36b: retail's Idle line is not written (src/wire_rt.c) */
   CHECK(wire.ops.has_pose_placement && wire.ops.pose_placement.x == .15 && wire.ops.pose_placement.z == -.12);
   for (int i = 0; i < 90; i++) {
     now_seconds += 1 / 60.0;
