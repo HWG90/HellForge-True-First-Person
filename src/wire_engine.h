@@ -101,6 +101,24 @@ void tfp_wire_engine_set_held_body(uint32_t (*body)(void));
  * rig's eye sits at the body's head for most of it. Only the head module's snapshots are touched (the flag it takes
  * for a vault and a high clamber). NULL (the default): retail's answers. Process-wide. */
 void tfp_wire_engine_set_lock_view(bool (*lock)(void));
+/* Round 38 (docs/design/specs/2026-11-25-exosuit-seat.md). `body` answers the reference of the body the camera lock
+ * shows from an exosuit's seat, or is gliding out of one from (tfp_camera_lock_seat_body), or 0; `see_through` the
+ * option "See through the exosuit cockpit". For that body head hiding hides the whole diver (TfpHeadIo.seat), and,
+ * with the option on, the suit it sits in is found by guarded reads (src/cockpit_find.h: the body's link, else the
+ * suit whose seat node is at the body's root; looked for at most every 60 frames while none is known) and seen
+ * through (TfpHeadIo.cockpit). The body also counts as held off foot (tfp_wire_engine_set_held_body). Seat lines
+ * are said on entering and leaving, and when a suit is found or lost. NULL (the default): never a seat. */
+void tfp_wire_engine_set_seat(uint32_t (*body)(void), bool (*see_through)(void));
+/* For the "Seat:" line: what head visibility and the suit search hold now. Reads only. false: the module is not bound. */
+typedef struct TfpWireSeat {
+  bool seat, see_through;            /* the head module's last update was a seat; the option */
+  uint32_t body, suit;               /* the seated body; the suit found (0: none) */
+  int how;                           /* src/cockpit_find.h TfpCockpitHow of the suit */
+  float distance;                    /* its seat node from the body's root, m (inf: not measured) */
+  uint32_t searches, looked, suits;  /* searches made since the seat began; units read and suits among them in the last */
+  double hidden, limbs, cockpit;     /* rows head visibility owns: all, the limb slots, the suit's meshes */
+} TfpWireSeat;
+bool tfp_wire_engine_seat(const TfpWire *w, TfpWireSeat *out);
 /* Rows head visibility hides now (its phase is "active"); 0: it hides nothing; -1: the module is not bound. Reads only. */
 int tfp_wire_engine_head_hidden(const TfpWire *w);
 /* For the "Head:" line (src/head_log.h): what head visibility owns after this tick's update and what that update saw
