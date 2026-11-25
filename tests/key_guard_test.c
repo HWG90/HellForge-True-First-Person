@@ -31,6 +31,11 @@ static void game_code(void) { /* the two sites as build 25480438 runs them */
   put(GAME + 0x12f3a08, "488b15299b170280ba507e020000751080ba38e32400000f94c0888238e32400");
   put(GAME + 0xa96e42, "488b05ef669d0280b8507e0200007541488bcfe8c6fbffff84c0");
 }
+/* Round 36c: a site's rip-relative load pointed at `root` (the displacement at +3 counts from the next instruction, +7). */
+static void disp(uint64_t site, uint64_t root) {
+  const int32_t d = (int32_t)(int64_t)(root - (site + 7));
+  put_raw(site + 3, &d, 4);
+}
 static bool keys[256];
 static bool key_down(void *u, int vk) { (void)u; return keys[vk]; }
 
@@ -60,6 +65,31 @@ int main(void) {
   mems = 0; game_code();
   CHECK(!tfp_chat_resolve(rd, NULL, GAME, 0x3000000, &l, why, sizeof why) && strstr(why, "out of bounds"));
   CHECK(!tfp_chat_resolve(rd, NULL, 0, IMAGE, &l, why, sizeof why));
+  /* Round 36c: the handlers agree on the flag but load different roots (the HUD site's global moved by 8, still aligned
+   * and inside the image): refused for the roots alone. */
+  mems = 0; game_code(); disp(GAME + 0x12f3a08, GAME + TFP_CHAT_GAME_ROOT + 8);
+  CHECK(!tfp_chat_resolve(rd, NULL, GAME, IMAGE, &l, why, sizeof why) && !l.resolved && strstr(why, "disagree") &&
+        strstr(why, "root game+0x346d540 / game+0x346d538, flag +0x27e50 / +0x27e50"));
+  /* Round 36c: both handlers agree, and the root or the flag is not where a UI root's global can be. */
+  const struct { uint64_t root; uint32_t flag; bool ok; const char *what; } at[] = {
+    {GAME + TFP_CHAT_GAME_ROOT + 4, TFP_CHAT_GAME_FLAG, false, "root game+0x346d53c or flag +0x27e50 is out of bounds"},  /* misaligned */
+    {GAME - 8, TFP_CHAT_GAME_FLAG, false, "out of bounds"},                                     /* below the image */
+    {GAME + IMAGE - 8, TFP_CHAT_GAME_FLAG, true, NULL},                                         /* the image's last 8 bytes */
+    {GAME + IMAGE, TFP_CHAT_GAME_FLAG, false, "out of bounds"},                                 /* just past it */
+    {GAME + TFP_CHAT_GAME_ROOT, 0xffffffu, true, NULL},                                         /* the largest flag offset */
+    {GAME + TFP_CHAT_GAME_ROOT, 0x1000000u, false, "flag +0x1000000 is out of bounds"},
+  };
+  for (size_t i = 0; i < sizeof at / sizeof at[0]; i++) {
+    char flag_hex[9];
+    for (int k = 0; k < 4; k++) snprintf(flag_hex + 2 * k, 3, "%02x", (unsigned)(at[i].flag >> (8 * k)) & 0xff);
+    mems = 0; game_code();
+    disp(GAME + 0x12f3a08, at[i].root); disp(GAME + 0xa96e42, at[i].root);
+    put(GAME + 0x12f3a08 + 9, flag_hex); put(GAME + 0xa96e42 + 9, flag_hex);
+    const bool ok = tfp_chat_resolve(rd, NULL, GAME, IMAGE, &l, why, sizeof why);
+    CHECK(ok == at[i].ok && l.resolved == at[i].ok);
+    if (ok) CHECK(l.root == at[i].root && l.flag == at[i].flag);
+    else CHECK(strstr(why, at[i].what) != NULL);
+  }
 
   /* Reading the flag: closed, typing, unknown. */
   mems = 0; game_code();
