@@ -411,10 +411,40 @@ int main() {
     std::printf("out of the suit into the native view%s: rig eye in %d frames, largest step %.3f m\n", smooth ? " (continuity on)" : "", arrived, (double)most);
     g.end();
   }
+  // 6, switching (the checker's probe v53c, 2026-11-25: alternating every frame the eye was still 2.48 m from the head
+  // after 1.25 s, 2/2 1.65 m at 2.5 s, 4/4 0.37 m, 8/8 0.14 m, the diver hidden while walking away): the game changing
+  // between the head camera and the native view every 1, 2, 4 or 8 frames, either first. The glide keeps its clock
+  // across the changes: it ends within its 600 ms, the eye then on the frame's own target (the rig eye, or the head
+  // but for the lock's ease out of the native view, which the switching keeps going), the seat body let go; no step
+  // over 0.15 m. Continuity off and on.
+  for (int smooth = 0; smooth < 2; ++smooth) for (int run = 1; run <= 8; run *= 2) for (int phase = 0; phase < 2; ++phase) {
+    fresh(true, smooth != 0);
+    Game g; board(g);
+    float last[3] = {sent.position[0], sent.position[1], sent.position[2]}, most = 0; int ended = -1;
+    g.climb_out(2, -.2f); g.look(first);
+    for (int i = 0; i < 150; ++i) {
+      const bool native = ((i / run + phase) % 2) == 1;
+      if (native) g.native(); else g.hip();
+      g.frame(8.3); CHECK(g.error == 0 && (g.own || native)); // after the glide a native frame may be the game's own
+      float shown[3]; track(g, shown); const float step = apart(shown, last); if (step > most) most = step; std::memcpy(last, shown, 12);
+      TfpCameraSeatStats now{}; tfp_camera_seat_stats(&now);
+      if (ended < 0 && now.gliding == 0) ended = i;
+      if (ended >= 0) {
+        CHECK(now.gliding == 0 && tfp_camera_lock_seat_body() == 0);
+        if (native) { float rig[3]; rig_eye(g, rig); CHECK(apart(shown, rig) < 1e-4f); }
+        else CHECK(g.from_head(first) < .1f); // the head, but for the lock's own ease out of the native view (0.083 m here)
+      }
+    }
+    CHECK(ended > 0 && ended <= 73 && most < .15f);
+    TfpCameraSeatStats out{}; tfp_camera_seat_stats(&out); CHECK(out.exits == 1 && out.gliding == 0);
+    std::printf("out of the suit, switching every %d frame(s) (%s first)%s: glide over at frame %d, largest step %.3f m\n", run,
+                phase ? "native" : "head", smooth ? " (continuity on)" : "", ended, (double)most);
+    g.end();
+  }
 
   // ---- 7. The glide out interrupted by native frames (the checker's sequence B: 2.46 m to the head, then 2.21 m
   // back toward the cockpit): 8 head-camera frames, 8 native ones, then the head camera. Every change of camera
-  // starts the glide again from the view last shown; it never resumes from the cockpit. Continuity off and on. ----
+  // takes the glide on from the view last shown; it never resumes from the cockpit. Continuity off and on. ----
   for (int smooth = 0; smooth < 2; ++smooth) {
     fresh(true, smooth != 0);
     Game g; board(g);
@@ -436,16 +466,18 @@ int main() {
   }
 
   // ---- 7b. Late in the glide out, the native view with its rig eye 0.6 m from the head camera's eye, then the head
-  // camera again: each change of camera begins the glide again from the view last shown, so neither change is a
-  // step (a glide that only changed its target would show most of the 0.6 m at once). Continuity off and on. ----
+  // camera again: the change into the native view takes the glide on from the view last shown, in the time it has
+  // left, and the lock eases the way back out of it, so neither change is a step (a glide that only changed its target
+  // would show most of the 0.6 m at once). Continuity off and on. ----
   for (int smooth = 0; smooth < 2; ++smooth) {
     fresh(true, smooth != 0);
     Game g; board(g);
     float last[3] = {sent.position[0], sent.position[1], sent.position[2]}, most = 0;
     g.climb_out(2, -.2f); g.look(first);
     for (int i = 0; i < 170; ++i) {
-      if (i >= 50 && i < 75) g.native(.7f); else g.hip();
-      g.frame(8.3); CHECK(g.error == 0 && g.own);
+      const bool native = i >= 50 && i < 75;
+      if (native) g.native(.7f); else g.hip();
+      g.frame(8.3); CHECK(g.error == 0 && (g.own || native)); // the glide over inside the native frames, they are the game's
       float shown[3]; track(g, shown); const float step = apart(shown, last); if (step > most) most = step; std::memcpy(last, shown, 12);
     }
     CHECK(most < .15f && g.from_head(first) < .07f);

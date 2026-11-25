@@ -102,7 +102,9 @@ static inline float tfp_seat_glide_ms(float metres) {
   return fminf(TFP_SEAT_GLIDE_MAX_MS, fmaxf(TFP_SEAT_GLIDE_MIN_MS, ms));
 }
 
-typedef struct TfpSeatGlide { float from[3]; TfpQ from_q; double start; float ms, metres; bool active; } TfpSeatGlide;
+/* base: the share of the way already gone when the glide went on from a new start (tfp_seat_glide_rebase); 0 at a
+ * begin. The weight shown is the clock's share past `base`, so the glide ends when its clock does. */
+typedef struct TfpSeatGlide { float from[3]; TfpQ from_q; double start; float ms, metres, base; bool active; } TfpSeatGlide;
 
 static inline void tfp_seat_glide_reset(TfpSeatGlide *g) { memset(g, 0, sizeof *g); g->from_q = tfp_q_identity(); }
 
@@ -117,6 +119,20 @@ static inline bool tfp_seat_glide_begin(TfpSeatGlide *g, const float *from, TfpQ
   return true;
 }
 
+/* Goes on from `from` (and `from_q`) at `tick` with the clock it has: the start point changes, the end time does not,
+ * and the way left is covered in the time left (round 38, checker 2026-11-25: a glide begun again at each change of
+ * camera never ended while the game switched views). False: it is not under way, or its time is up, or the new start
+ * is not a number; the glide is then off. */
+static inline bool tfp_seat_glide_rebase(TfpSeatGlide *g, const float *from, TfpQ from_q, double tick) {
+  if (!g->active || !tfp_finite3(from) || !tfp_q_valid(from_q) || !isfinite(tick)) { tfp_seat_glide_reset(g); return false; }
+  double passed = tick-g->start;
+  if (!(passed >= 0)) passed = 0;
+  if (passed >= g->ms) { tfp_seat_glide_reset(g); return false; }
+  const float t = (float)(passed/g->ms);
+  memcpy(g->from, from, sizeof g->from); g->from_q = tfp_q_normalised(from_q); g->base = t*t*(3-2*t);
+  return true;
+}
+
 /* One frame at `tick`: true, `out` and `out_q` are written (the glide is under way); false, nothing is written (no
  * glide, or it has ended: the caller shows the target untouched). A target rotation that is not one keeps the
  * start's; a clock that went back is the start. */
@@ -125,7 +141,8 @@ static inline bool tfp_seat_glide_apply(TfpSeatGlide *g, const float *target, Tf
   double passed = tick-g->start;
   if (!(passed >= 0)) passed = 0;
   if (passed >= g->ms) { g->active = false; return false; }
-  const float t = (float)(passed/g->ms), w = t*t*(3-2*t);
+  const float t = (float)(passed/g->ms), clock = t*t*(3-2*t);
+  const float w = g->base > 0 && g->base < 1 ? fmaxf(0, (clock-g->base)/(1-g->base)) : clock;
   for (unsigned i = 0; i < 3; ++i) out[i] = g->from[i]+(target[i]-g->from[i])*w;
   *out_q = tfp_q_valid(target_q) ? tfp_slerp(g->from_q, tfp_q_normalised(target_q), w) : g->from_q;
   return true;

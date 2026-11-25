@@ -1510,8 +1510,8 @@ static void seat_back(const Policy *p, const float *native, double tick, float *
  * game draws the camera at the rig eye plus the frame's parent-local argument (smooth_native), so the glide runs here
  * too: from the view last shown to that point, written back as the argument. Leaving the seat straight into the
  * native view showed a 2.5 m cut; a glide out of the seat interrupted by native frames came back to the cockpit's
- * glide. Here a native frame ends the seat (seat_in) and starts the glide out, or begins it again from the view last
- * shown when the frame before was the head camera's; its end, or a rig that cannot be read, ends it (seat_out_end).
+ * glide. Here a native frame ends the seat (seat_in) and starts the glide out, or takes it on from the view last
+ * shown, on its clock, when the frame before was the head camera's; its end, or a rig that cannot be read, ends it (seat_out_end).
  * The direction is the native view's own (lock_rotation): only the position glides. `given` is the 16-byte argument
  * about to be forwarded; true: `adjusted` holds the argument to forward instead. */
 static bool seat_native(Policy *p, const float *given, double tick, float *adjusted) {
@@ -1532,7 +1532,9 @@ static bool seat_native(Policy *p, const float *given, double tick, float *adjus
     atomic_fetch_add_explicit(&seat_exits, 1, memory_order_relaxed);
     if (!seat_out) { atomic_store_explicit(&seat_body, 0, memory_order_relaxed); atomic_store_explicit(&seat_gliding, 0, memory_order_relaxed); }
   } else if (seat_out_kind != 6) {
-    seat_out = readable && seat_from_fresh(p, tick) && tfp_seat_glide_begin(&seat_glide, seat_from, seat_from_q, target, tick);
+    /* From the head camera: the glide goes on from the view last shown, on its own clock (tfp_seat_glide_rebase), so
+     * however often the game switches views the exit ends within its 300-600 ms (camera_seat_test case 6, switching). */
+    seat_out = readable && seat_from_fresh(p, tick) && tfp_seat_glide_rebase(&seat_glide, seat_from, seat_from_q, tick);
     if (!seat_out) { seat_out = true; seat_out_end(); }
   }
   seat_out_kind = 6;
