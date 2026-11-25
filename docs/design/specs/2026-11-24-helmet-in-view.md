@@ -559,7 +559,7 @@ veiled at once).
 
 The review's minor finding: a leave out of full aim with mask 0 that is not a lone frame (a knock-down or a gun dropped
 in full aim; none in soaks 8 to 36) is kept pending too, so its first head-camera frame is not veiled and its second
-was moved the whole way at once: a jump of up to `TFP_CAMERA_VEIL_MOST` (0.32 m in test 21) between two head-camera
+was moved the whole way at once: a jump of up to `TFP_CAMERA_VEIL_MOST` (0.31 m in test 21) between two head-camera
 frames, after the camera change the continuity covers. (A knock-down's frames are only looked at, never moved: the
 veil moves a body on foot only.) After a kept leave the move is now let in: the n-th veiled frame moves the eye at most
 `tfp_camera_veil_let_in(n)` = 0.04 n (n + 1) / 2 m (0.04, then 0.12, 0.24, 0.40), so the step changes by at most 0.04 m

@@ -591,7 +591,7 @@ int main() {
   // A swap in full aim (the gun leaving the hands, mask 2), any other action owning the view (mask 1, a stim's 0x40), a
   // same-frame leave out of the hip and a lone frame a whole frame later are veiled at once as before; a kept leave
   // whose view stays away is veiled from the next frame, its move let in (TFP_CAMERA_VEIL_LET_IN_M: 0.04 m, then
-  // 0.12 m) instead of the whole 0.32 m in one frame, and let out from there after the veil closes. ----
+  // 0.12 m) instead of the whole 0.31 m in one frame, and let out from there after the veil closes. ----
   {
     struct Release { const char *name; bool aim; uint32_t mask; double gap; bool kept; };
     const Release cases[] = {{"aim released, nothing owns the view, 0.35 ms", true, 0, .35, true},
@@ -628,7 +628,7 @@ int main() {
       if (c.kept) {
         CHECK(std::fabs(seen[1] - seen[0]) < .002f && s[1].held_back == 1);
         if (stay) {
-          // The whole move would be 0.32 m; frame 2 takes 0.04, frame 3 0.12 (the step changes by 0.04 m a frame), then the
+          // The whole move would be 0.31 m; frame 2 takes 0.04, frame 3 0.12 (the step changes by 0.04 m a frame), then the
           // let-out from 0.12. Short of TFP_CAMERA_VEIL_CLEAR: counted behind.
           std::printf("    let in: %.3f, %.3f m, then %.3f m let out\n", after[1] - after[0], third[1] - third[0], out[1] - out[0]);
           CHECK(TFP_CAMERA_VEIL_CLEAR - seen[0] > .3f);
