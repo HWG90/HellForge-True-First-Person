@@ -9,7 +9,7 @@ hear what breaks.
 2. Extract the ZIP into HellForge's `mods` folder. Don't put the ZIP itself in `mods`: it holds three mods, and
    HellForge takes a ZIP there as one mod (it says "no hellforge-mod.json ... in its one top-level folder"). It adds three folders:
    - `true-first-person`: the mod.
-   - `mcm`: DBF-MCM 0.1.74-hellforge.3, the settings menu. With it, every option is on the mod's
+   - `mcm`: DBF-MCM 0.1.74-hellforge.4, the settings menu. With it, every option is on the mod's
      "True First Person" page.
    - `overlay-host`: NEST 0.8.3-tfp.1, the shared in-game UI the menu, the settings panel and the weapon
      placement editor draw through.
@@ -33,19 +33,20 @@ own panel with the same pages instead.
 In 0.6.0-feel.40. From playing 0.6.0-feel.39: the camera moved too much, and what was asked for was the bodycam
 look as a choice beside a steadier, traditional first-person camera.
 
-There is a new checkbox **Bodycam** on the Locked view tab, above the kick sliders. It changes at once, no restart.
+**Camera style** on the Locked view page picks it: click `< Stable >` to switch (since 0.6.0-feel.52 a one-click
+selector; before, a Bodycam checkbox). It changes at once, no restart.
 
-- **Off (Stable), the default now.** A steady first-person camera. Walking, strafing, crouching, reloading, a
+- **Stable, the default.** A steady first-person camera. Walking, strafing, crouching, reloading, a
   grenade or a stim no longer turn the view at all. During a grenade, stim, melee or emote the camera follows your
   head slowly, so the head's bobbing mostly stays out of the view; a crouch or going prone is still followed within
   about a second. Being thrown or ragdolled still sways the view, at half the strength and slowly.
-- **On (Bodycam).** The camera as it was in 0.6.0-feel.39: the view moves with your head, takes kicks from your
+- **Bodycam.** The camera as it was in 0.6.0-feel.39: the view moves with your head, takes kicks from your
   body's movement and follows the head through actions.
 
-"View kick strength", "View kick limit" and "Camera damping" belong to Bodycam; they are greyed while it is off and
+"View kick strength", "View kick limit" and "Camera damping" belong to Bodycam; they are greyed in Stable and
 keep their values. "View kick when thrown" works in both.
 
-To get the old behaviour back: tick **Bodycam**. Your slider values are still there.
+To get the old behaviour back: choose **Bodycam**. Your slider values are still there.
 
 Tested in the game: ten actions in each style (Stable: no kick at all; Bodycam: 2.4 to 5.8 degrees); I have not played it yet.
 
@@ -76,6 +77,8 @@ Tested in the game: ten actions in each style (Stable: no kick at all; Bodycam: 
 - The support hand can sit a few centimetres off the grip, and may twitch at reloads and swaps.
 - In Stable, after a swap on a slope the view can trail about 0.4 m for half a second.
 - Not yet tried in the game: the Aim field of view option and the editor while aiming.
+- In DBF-MCM, Enter does not change a `< >` row; click it, or use Left and Right. If the menu's list runs down
+  by itself, tell me what you had plugged in (controller, Steam Input).
 - The Warp Pack's glow still shows in first person. A fix is in this build but off: put a file named
   `warp_hide.txt` beside the DLL to try it, and tell me what you see.
 - Backpack pick-ups can still drift the view briefly.
