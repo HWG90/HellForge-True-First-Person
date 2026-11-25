@@ -3,6 +3,7 @@
  * paths at four frame times, a target going round behind the shoulder, release, and the refusals. */
 #include "offhand_grip.h"
 #include "grip_fingers.h"
+#include "fp_hand_bind.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -623,35 +624,30 @@ static void test_fingers(void) {
   TfpGraftLocal open[TFP_GRAFT_JOINTS], l[TFP_GRAFT_JOINTS];
   for (unsigned i = 0; i < TFP_GRAFT_JOINTS; i++) open[i] = finger_local(i == 18 - 10 ? 85 : 10, i % 3 ? 0 : 12, i);
   for (unsigned i = 0; i < TFP_GRAFT_JOINTS; i++) CHECK(fabs(local_curl(&open[i]) - (i == 18 - 10 ? 85 : 10)) < 1e-3);
-  /* weight 0: nothing; weight 1: each finger joint curled to the closed grip's angle, the thumb's to its own, one already
-   * further curled left as it is; only rotations about each bone's own +Y; positions and the rest of each record kept */
+  /* weight 0: nothing; weight 1: each finger joint at its finger's grip curl, also one the body curls further (ring
+   * joint 2, at 85: it would go into the handle); thumb joint 1 the body's, joints 2 and 3 the body's plus the turn; only
+   * rotations about each bone's own +Y; positions and the rest of each record kept */
   memcpy(l, open, sizeof l);
   tfp_grip_fingers_close(&fingers, l, 0);
   CHECK(!memcmp(l, open, sizeof l));
-  memcpy(l, open, sizeof l);
-  tfp_grip_fingers_close(&fingers, l, 1);
-  for (unsigned i = 0; i < TFP_GRAFT_JOINTS; i++) {
-    const unsigned node = g.fp[i];
-    const bool finger = node >= 14 && node <= 25, thumb = node >= 26 && node <= 28;
-    CHECK(!memcmp(l[i].position, open[i].position, 12) && !memcmp(l[i].preserved, open[i].preserved, 16));
-    if (!finger && !thumb) { CHECK(!memcmp(&l[i], &open[i], 64)); continue; }
-    const double want = node == 18 ? 85 : finger ? TFP_GF_CURL_DEGREES : TFP_GF_THUMB_DEGREES;
-    CHECK(fabs(local_curl(&l[i]) - want) < 1e-3);
-    if (node == 18) CHECK(!memcmp(&l[i], &open[i], 64));
-    const TfpGraftMatrix a = tfp_graft_local_matrix(&l[i]), b = tfp_graft_local_matrix(&open[i]);
-    for (unsigned j = 0; j < 3; j++) CHECK(fabsf(a.values[4 + j] - b.values[4 + j]) < 1e-6f); /* the bone's +Y: the axis it turned about */
-    CHECK(tfp_graft_rigid(&a));
-  }
-  /* weight 0.5: half the curl added */
-  memcpy(l, open, sizeof l);
-  tfp_grip_fingers_close(&fingers, l, .5);
-  for (unsigned f = 0; f < TFP_GF_FINGERS; f++)
-    for (unsigned k = 0; k < 3; k++) {
-      const unsigned i = fingers.joint[f][k];
-      if (g.fp[i] == 18) continue;
-      const double full = (f == TFP_GF_THUMB ? TFP_GF_THUMB_DEGREES : TFP_GF_CURL_DEGREES) - 10;
-      CHECK(fabs(local_curl(&l[i]) - (10 + full / 2)) < 1e-3);
+  for (unsigned half = 0; half < 2; half++) {
+    const double w = half ? .5 : 1;
+    memcpy(l, open, sizeof l);
+    tfp_grip_fingers_close(&fingers, l, w);
+    for (unsigned i = 0; i < TFP_GRAFT_JOINTS; i++) {
+      const unsigned node = g.fp[i];
+      const bool finger = node >= 14 && node <= 25, thumb = node >= 27 && node <= 28;
+      CHECK(!memcmp(l[i].position, open[i].position, 12) && !memcmp(l[i].preserved, open[i].preserved, 16));
+      if (!finger && !thumb) { CHECK(!memcmp(&l[i], &open[i], 64)); continue; } /* thumb joint 1 too */
+      const double was = local_curl(&open[i]);
+      const double want = finger ? was + (tfp_gf_curl_degrees[(node - 14) / 3] - was) * w : was + TFP_GF_THUMB_TURN_DEGREES * w;
+      CHECK(fabs(local_curl(&l[i]) - want) < 1e-3);
+      const TfpGraftMatrix a = tfp_graft_local_matrix(&l[i]), b = tfp_graft_local_matrix(&open[i]);
+      for (unsigned j = 0; j < 3; j++) CHECK(fabsf(a.values[4 + j] - b.values[4 + j]) < 1e-6f); /* the bone's +Y: the axis it turned about */
+      CHECK(tfp_graft_rigid(&a));
     }
+  }
+  CHECK(local_curl(&l[18 - 10]) < 85); /* opened towards the grip's */
   /* no fingers found: nothing */
   TfpGripFingers none = {0};
   memcpy(l, open, sizeof l);
@@ -663,12 +659,121 @@ static void test_fingers(void) {
   rotation(y, 65 * TFP_OG_PI / 180, r);
   const TfpGraftMatrix id = matrix((double[3][3]){{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}, at), turned = matrix(r, at);
   CHECK(fabs(tfp_gf_x_degrees(&id, &turned) - 65) < 1e-3);
-  printf("fingers: closed to %.0f degrees a joint (thumb %.0f) about each bone's own +Y; half at weight 0.5; positions kept\n", TFP_GF_CURL_DEGREES,
-         TFP_GF_THUMB_DEGREES);
+  printf("fingers: pinky, ring, middle, index at %.0f, %.0f, %.0f, %.0f degrees a joint about each bone's own +Y (thumb joints 2 and 3 "
+         "+%.0f, joint 1 the body's); half way at weight 0.5; positions kept\n",
+         tfp_gf_curl_degrees[0], tfp_gf_curl_degrees[1], tfp_gf_curl_degrees[2], tfp_gf_curl_degrees[3], TFP_GF_THUMB_TURN_DEGREES);
+}
+
+/* Round 36b (the independent check of the grip): the fingers on fp_cha_avatar's own bind pose, the hand on the standard
+ * vertical grip's node (the reach gives the wrist the node's place and turn), in the hand's frame. The handle is a cylinder
+ * 4.6 cm across along the node's Y; a fingertip is the third joint plus 2.5 cm along its X (the checker's measure). */
+static void bind_locals(TfpGraft *g, uint32_t fn[TFP_GRAFT_RIG_NODES], TfpGraftLocal locals[TFP_GRAFT_JOINTS]) {
+  memset(g, 0, sizeof *g), memset(fn, 0, TFP_GRAFT_RIG_NODES * 4), memset(locals, 0, TFP_GRAFT_JOINTS * sizeof *locals);
+  for (unsigned i = 0; i < TFP_GRAFT_JOINTS; i++) g->fp[i] = i < 40 ? 10 + i : i == 40 ? 58 : 8, g->parent[i] = 7;
+  g->parent[2] = 10, g->parent[3] = 12;
+  for (unsigned n = FP_HAND_FIRST; n <= FP_HAND_LAST; n++) {
+    fn[n] = fp_hand_name[n - FP_HAND_FIRST], g->parent[n - 10] = fp_hand_parent[n - FP_HAND_FIRST];
+    if (n == FP_HAND_FIRST) continue;
+    TfpGraftMatrix w, p;
+    memcpy(w.values, fp_hand_world[n - FP_HAND_FIRST], 64);
+    memcpy(p.values, fp_hand_world[fp_hand_parent[n - FP_HAND_FIRST] - FP_HAND_FIRST], 64);
+    const TfpGraftMatrix l = tfp_graft_relative(&w, &p);
+    tfp_graft_set_local(&locals[n - 10], &l);
+  }
+}
+/* nodes 13 to 28 in the hand's frame (the hand the identity) */
+static void bind_hand_frame(const TfpGraftLocal locals[TFP_GRAFT_JOINTS], TfpGraftMatrix w[FP_HAND_LAST + 1]) {
+  w[FP_HAND_FIRST] = (TfpGraftMatrix){.values = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}};
+  for (unsigned n = FP_HAND_FIRST + 1; n <= FP_HAND_LAST; n++) {
+    const TfpGraftMatrix l = tfp_graft_local_matrix(&locals[n - 10]);
+    w[n] = tfp_graft_product(&l, &w[fp_hand_parent[n - FP_HAND_FIRST]]);
+  }
+}
+static void bind_tip(const TfpGraftMatrix *third, double out[3]) {
+  for (unsigned j = 0; j < 3; j++) out[j] = third->values[12 + j] + .025 * third->values[j];
+}
+/* the handle's axis in the hand's frame: a point (the box's centre) and its direction; half its length */
+static void vgrip_axis(double at[3], double dir[3], double *half) {
+  double ax[3][3], c[3];
+  for (unsigned i = 0; i < 3; i++) {
+    const double n = tfp_og_len(vgrip_node_axes[i]);
+    for (unsigned j = 0; j < 3; j++) ax[i][j] = vgrip_node_axes[i][j] / n;
+  }
+  for (unsigned j = 0; j < 3; j++) c[j] = (vgrip_handle_min[j] + vgrip_handle_max[j]) / 2 - vgrip_node_origin[j];
+  for (unsigned i = 0; i < 3; i++) at[i] = tfp_og_dot(c, ax[i]), dir[i] = ax[i][2]; /* the gun's Z in the node's axes */
+  const double n = tfp_og_len(dir);
+  for (unsigned i = 0; i < 3; i++) dir[i] /= n;
+  *half = (vgrip_handle_max[2] - vgrip_handle_min[2]) / 2;
+}
+static double vgrip_dist(const double p[3], double *along) {
+  double at[3], dir[3], half, q[3];
+  vgrip_axis(at, dir, &half);
+  for (unsigned j = 0; j < 3; j++) q[j] = p[j] - at[j];
+  const double t = tfp_og_dot(q, dir);
+  if (along) *along = t;
+  for (unsigned j = 0; j < 3; j++) q[j] -= t * dir[j];
+  return tfp_og_len(q);
+}
+static void test_fingers_on_bind(void) {
+  TfpGraft g;
+  uint32_t fn[TFP_GRAFT_RIG_NODES];
+  TfpGraftLocal bind[TFP_GRAFT_JOINTS];
+  TfpGripFingers fingers;
+  bind_locals(&g, fn, bind);
+  CHECK(tfp_grip_fingers_find(&g, fn, &fingers));
+  double at[3], dir[3], half;
+  vgrip_axis(at, dir, &half);
+  CHECK(fabs(dir[1]) > .99 && fabs(vgrip_handle_max[0] - vgrip_handle_min[0] - .046) < 1e-9); /* along the hand's Y; 4.6 cm */
+  const unsigned thumb[3] = {26, 27, 28};
+  double tip_least = 1, tip_most = 0, bone_least = 1, thumb_y[3];
+  static const double weights[3] = {0, .5, 1};
+  for (unsigned wi = 0; wi < 3; wi++) {
+    TfpGraftLocal l[TFP_GRAFT_JOINTS];
+    TfpGraftMatrix w[FP_HAND_LAST + 1];
+    memcpy(l, bind, sizeof l);
+    tfp_grip_fingers_close(&fingers, l, weights[wi]);
+    bind_hand_frame(l, w);
+    /* the thumb: joint 1 the body's; its tip on the thumb's side of the palm (beyond the index knuckle, away from the
+     * pinky), never inside the handle, and not swept across the hand (bind: tip at y -0.086, index knuckle -0.033) */
+    CHECK(!memcmp(&l[thumb[0] - 10], &bind[thumb[0] - 10], sizeof l[0]));
+    double t[3];
+    bind_tip(&w[thumb[2]], t);
+    thumb_y[wi] = t[1];
+    CHECK(t[1] < w[23].values[13] - .01);
+    CHECK(vgrip_dist(t, NULL) >= .020);
+    for (unsigned k = 1; k < 3; k++) /* joints 2 and 3: the body's own curl and a share of the turn */
+      CHECK(fabs((tfp_gf_curl(&l[thumb[k] - 10]) - tfp_gf_curl(&bind[thumb[k] - 10])) * 180 / TFP_OG_PI - TFP_GF_THUMB_TURN_DEGREES * weights[wi]) < 1e-3);
+    /* the four fingers: closed, the tips round the handle's surface, no bone through it */
+    for (unsigned f = TFP_GF_PINKY; f <= TFP_GF_INDEX; f++) {
+      const unsigned n1 = 14 + 3 * f;
+      double p[4][3], along;
+      for (unsigned k = 0; k < 3; k++)
+        for (unsigned j = 0; j < 3; j++) p[k][j] = w[n1 + k].values[12 + j];
+      bind_tip(&w[n1 + 2], p[3]);
+      for (unsigned s = 0; s < 3; s++)
+        for (unsigned u = 0; u <= 10; u++) {
+          double q[3];
+          for (unsigned j = 0; j < 3; j++) q[j] = p[s][j] + (p[s + 1][j] - p[s][j]) * u / 10;
+          const double d = vgrip_dist(q, NULL);
+          CHECK(d >= .020);
+          if (weights[wi] == 1) bone_least = fmin(bone_least, d);
+        }
+      const double tip = vgrip_dist(p[3], &along);
+      if (weights[wi] == 1) {
+        CHECK(tip >= .020 && tip <= .035 && fabs(along) < half);
+        tip_least = fmin(tip_least, tip), tip_most = fmax(tip_most, tip);
+      }
+    }
+  }
+  CHECK(fabs(thumb_y[0] + .086) < .001); /* the checker's bind thumb tip */
+  printf("fingers on fp_cha_avatar's bind pose, on the vertical grip's node: tips %.1f to %.1f cm from the handle's axis "
+         "(radius 2.3), no bone nearer than %.1f cm; thumb tip y %.3f / %.3f / %.3f m at weight 0 / 0.5 / 1 (joint 1 the body's)\n",
+         tip_least * 100, tip_most * 100, bone_least * 100, thumb_y[0], thumb_y[1], thumb_y[2]);
 }
 
 int main(void) {
   test_fingers();
+  test_fingers_on_bind();
   test_long_hold();
   test_logged_reach();
   test_logged_reach_edge();

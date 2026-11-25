@@ -2295,8 +2295,9 @@ static void test_grip_mounted_from_rig(void) {
   CHECK(g.tree_units == 2 && !g.attachment && g.target_unit == 0);
 }
 /* Round 36b (B of the Adjudicator diagnosis): held on an attachment's grip node, the hand closes round the grip: each finger
- * joint (rig nodes 14 to 28) curled about its own +Y to the grip's curl, by the grip's weight; positions kept. Never on the
- * gun's own node (test_grip_holds: only nodes 10, 12, 13 differ there), and back to the body's fingers when let go. */
+ * joint (rig nodes 14 to 28, thumb joint 1 left the body's) turned about its own +Y towards the grip's curl by the grip's
+ * weight; positions kept. Never on the gun's own node (test_grip_holds: only nodes 10, 12, 13 differ there), and back to
+ * the body's fingers when let go. */
 static double rig_curl(const TfpGraftLocal *l) { return tfp_gf_curl(l) * 180 / TFP_OG_PI; }
 static void drawn_locals(uint64_t now, TfpGraftLocal out[TFP_GRAFT_RIG_NODES]) {
   tfp_arm_drive_set_rest(now, TFP_ARM_REST_NONE, 0);
@@ -2329,13 +2330,15 @@ static void test_grip_fingers_close(void) {
     CHECK(g.state == TFP_ARM_GRIP_HELD && g.attachment && g.weight == 1);
     double least = 180;
     for (unsigned n = 14; n <= 28; n++) {
-      const double want = n >= 26 ? TFP_GF_THUMB_DEGREES : TFP_GF_CURL_DEGREES, was = rig_curl(&plain[n]);
+      const double was = rig_curl(&plain[n]), want = n >= 26 ? was + TFP_GF_THUMB_TURN_DEGREES : tfp_gf_curl_degrees[(n - 14) / 3];
       CHECK(!memcmp(held[n].position, plain[n].position, 12) && !memcmp(held[n].preserved, plain[n].preserved, 16));
-      CHECK(fabs(rig_curl(&held[n]) - fmax(want, was)) < .01);
-      if (was < want) {
-        CHECK(fabs(rig_curl(&easing[n]) - was - (want - was) * part) < .05); /* the grip's weight of what it lacks */
-        if (n < 26) least = fmin(least, rig_curl(&held[n]));
-      } else CHECK(!memcmp(&held[n], &plain[n], 64));
+      if (n == 26) { /* thumb joint 1: the body's */
+        CHECK(!memcmp(&held[n], &plain[n], 64) && !memcmp(&easing[n], &plain[n], 64));
+        continue;
+      }
+      CHECK(fabs(rig_curl(&held[n]) - want) < .01);
+      CHECK(fabs(rig_curl(&easing[n]) - was - (want - was) * part) < .05); /* the grip's weight of the way */
+      if (n < 26) least = fmin(least, rig_curl(&held[n]));
     }
     for (unsigned n = 0; n < TFP_GRAFT_RIG_NODES; n++) /* the rest is what the grip alone writes: the left arm */
       if ((n < 14 || n > 28) && n != 10 && n != 12 && n != 13) CHECK(!memcmp(&held[n], &plain[n], 64));
@@ -2353,7 +2356,7 @@ static void test_grip_fingers_close(void) {
     for (int i = 0; i < 40; i++) {
       drawn_locals(t += 16, back);
       const double now = rig_curl(&back[21]);
-      CHECK(now <= last + 1e-6 && last - now < (TFP_GF_CURL_DEGREES - rig_curl(&plain[21])) * 16 / 150.0 + .05);
+      CHECK(now <= last + 1e-6 && last - now < (tfp_gf_curl_degrees[TFP_GF_MIDDLE] - rig_curl(&plain[21])) * 16 / 150.0 + .05);
       last = now;
     }
     for (unsigned n = 14; n <= 28; n++) CHECK(!memcmp(&back[n], &plain[n], 64));

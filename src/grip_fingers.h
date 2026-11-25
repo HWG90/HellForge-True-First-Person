@@ -7,12 +7,25 @@
  * (filediver, standard_verticalgrip on battle_rifle). The body's fingers are shaped for the gun's own handguard, and the
  * round-23 photo showed them nearly flat: with the wrist on the node the hand sat beside the handle and pointed past it.
  *
- * What. Each finger joint (index, middle, ring, pinky, joints 1 to 3) is curled about its own +Y to at least CURL_DEGREES,
- * the thumb's to THUMB_DEGREES, by a share `weight` of what it lacks (the caller's grip weight, so it comes and goes with
- * the hand). A joint already curled further is left as it is; positions and the rest of each record are kept. On this
- * rig each finger bone's +Y is its curl axis (fp_cha_avatar's bind pose: the axis between finger1 and finger2 has a dot
- * of 1.0 with finger1's Y) and a positive turn about it closes the finger (X towards -Z, where the bind fingers bend).
- * The angles are named constants: no vertical-grip hand pose of the game's own was found to take them from.
+ * What. The hand is on the grip node, so the handle is where the node's mesh has it in the hand's own frame, whatever the
+ * body plays: the round-36b check put standard_verticalgrip's handle (4.6 cm across, along the node's Y) 7.2 cm out along
+ * the hand's X and 4.9 cm under the palm. So each finger joint (index, middle, ring, pinky, joints 1 to 3) is set to a
+ * curl of the grip's own about its own +Y, the same for the three joints of a finger and chosen per finger
+ * (tfp_gf_curl_degrees) so that on fp_cha_avatar's bind pose every fingertip lies 2.7 to 3.1 cm from the handle's axis
+ * and no bone comes nearer than 2.6 cm: round the handle's surface (radius 2.3 cm), not into it. The curl is absolute,
+ * not added to the body's: the body's fingers are shaped for the gun's own handguard and change with what it plays, and
+ * a finger the body already curls further would go through the handle (70 degrees on all three joints put the index
+ * and pinky tips 1.5 and 1.7 cm from the axis). `weight` (the caller's grip weight) takes each joint that share of the
+ * way from the body's curl to the grip's, so the hand closes and opens with the reach.
+ * The thumb is the body's at joint 1 and turned a little further closed at joints 2 and 3 (TFP_GF_THUMB_TURN_DEGREES
+ * added to the body's own, by `weight`): an absolute curl measured from the hand's X does not fit thumb joint 1, whose
+ * bind pose is -51.6 degrees that way, and turning it to +30 swept the thumb tip across the palm and through the
+ * handle past the pinky's knuckle (the check's probe). With the turn the tip stays on the thumb's side, beyond the
+ * index knuckle, and round the far side of the handle (tests/offhand_grip_test.c, test_fingers_on_bind).
+ * Positions and the rest of each record are kept. On this rig each finger bone's +Y is its curl axis (fp_cha_avatar's
+ * bind pose: the axis between finger1 and finger2 has a dot of 1.0 with finger1's Y) and a positive turn about it closes
+ * the finger (X towards -Z, where the bind fingers bend). No vertical-grip hand pose of the game's own was found to take
+ * the angles from.
  *
  * The joints are found by name in the drive's map (tfp_grip_fingers_find), never by their numbers. */
 #ifndef TFP_GRIP_FINGERS_H
@@ -20,8 +33,9 @@
 #include "offhand_grip.h"
 
 enum { TFP_GF_PINKY = 0, TFP_GF_RING, TFP_GF_MIDDLE, TFP_GF_INDEX, TFP_GF_THUMB, TFP_GF_FINGERS };
-#define TFP_GF_CURL_DEGREES 70.0  /* index to pinky, each of joints 1 to 3, about the bone's own +Y */
-#define TFP_GF_THUMB_DEGREES 30.0 /* the thumb's three joints */
+/* the grip's curl of each joint of a finger, about the bone's own +Y (pinky, ring, middle, index: the enum's order) */
+static const double tfp_gf_curl_degrees[TFP_GF_THUMB] = {53, 63, 65, 60};
+#define TFP_GF_THUMB_TURN_DEGREES 20.0 /* added to the body's own curl of thumb joints 2 and 3 (joint 1 the body's) */
 
 typedef struct TfpGripFingers {
   bool ok;
@@ -66,22 +80,23 @@ static inline double tfp_gf_curl(const TfpGraftLocal *l) {
   const TfpOgFrame f = tfp_og_frame(&m);
   return tfp_gf_curl_rows(f.r);
 }
-/* Each finger joint closed by `weight` (0..1) of what it lacks of the grip's curl. locals: the 42 joints in the map's order. */
+/* The hand closed on the grip by `weight` (0..1): each finger joint that share of the way from its curl to the grip's, thumb
+ * joints 2 and 3 turned by that share of THUMB_TURN. locals: the 42 joints in the map's order. */
 static inline void tfp_grip_fingers_close(const TfpGripFingers *fingers, TfpGraftLocal *locals, double weight) {
   if (!fingers->ok || !(weight > 0)) return;
   if (weight > 1) weight = 1;
   for (unsigned f = 0; f < TFP_GF_FINGERS; ++f)
-    for (unsigned k = 0; k < 3; ++k) {
+    for (unsigned k = f == TFP_GF_THUMB ? 1 : 0; k < 3; ++k) {
       TfpGraftLocal *l = &locals[fingers->joint[f][k]];
       TfpGraftMatrix m = tfp_graft_local_matrix(l);
       if (!tfp_graft_rigid(&m)) continue;
       TfpOgFrame fr = tfp_og_frame(&m);
-      const double want = (f == TFP_GF_THUMB ? TFP_GF_THUMB_DEGREES : TFP_GF_CURL_DEGREES) * (TFP_OG_PI / 180);
-      const double lack = want - tfp_gf_curl_rows(fr.r);
-      if (!(lack > 0)) continue;
+      const double turn = f == TFP_GF_THUMB ? TFP_GF_THUMB_TURN_DEGREES * (TFP_OG_PI / 180)
+                                            : tfp_gf_curl_degrees[f] * (TFP_OG_PI / 180) - tfp_gf_curl_rows(fr.r);
+      if (turn == 0) continue;
       double axis[3];
       memcpy(axis, fr.r[1], sizeof axis);
-      tfp_og_turn_rows(fr.r, axis, lack * weight);
+      tfp_og_turn_rows(fr.r, axis, turn * weight);
       for (unsigned i = 0; i < 3; ++i)
         for (unsigned j = 0; j < 3; ++j) l->basis[3 * i + j] = (float)fr.r[i][j];
     }
