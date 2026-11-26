@@ -1021,6 +1021,7 @@ static void start(void) {
 #endif
   tfp_wire_init(&wire, &memory, &platform, &helpers);
   wire.mouse_source = tfp_win_mouse_source;
+  tfp_camera_set_clear(true); /* round 44: the head camera's eye kept in front of the head (src/camera_clear.h); clear_off.txt below */
   {
     /* Test switch: a file "head_parts.txt" beside the DLL holding one digit 1-7 (bit 0 head, 1 torso, 2 shoulders). */
     char parts_path[MAX_PATH];
@@ -1094,6 +1095,11 @@ static void start(void) {
         if (veil_file) fclose(veil_file);
         tfp_camera_set_veil_second(veil_file != NULL);
         if (veil_file) say("Test: veil_second.txt: the helmet veil opens at the tick that sees a leave of the native view, so only the frame that draws the body is moved");
+        /* Round 44: the head camera's eye kept in front of the head (src/camera_clear.h), unless clear_off.txt. */
+        strcpy(slash + 1, "clear_off.txt");
+        FILE *clear_file = fopen(parts_path, "r");
+        if (clear_file) fclose(clear_file), tfp_camera_set_clear(false);
+        if (clear_file) say("Test: clear_off.txt: the head camera's eye is not kept in front of the head (a throw's held eye shows the cape, as before round 44)");
         /* Round 22: the Warp Pack's glow (src/warp_glow.h). Off by default: the "Warp:" line only says what plays. */
         strcpy(slash + 1, "warp_hide.txt");
         FILE *warp_file = fopen(parts_path, "r");
