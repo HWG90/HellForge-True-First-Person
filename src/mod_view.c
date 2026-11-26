@@ -1002,7 +1002,7 @@ static void seat_note(void) {
   if (c.frames != told.frames && tfp_wire_engine_seat(&wire, &w)) {
     TfpSeatLine l = {c.frames - told.frames, c.refused - told.refused, c.glided - told.glided, c.settled, c.gliding, c.hands,
                      {c.offset[0], c.offset[1], c.offset[2]}, {c.left[0], c.left[1], c.left[2]}, {c.right[0], c.right[1], c.right[2]},
-                     w.see_through, w.suit, w.how, w.searches, w.hidden, w.limbs, w.cockpit, a.frames - arms_told.frames, a.idle - arms_told.idle};
+                     w.see_through, w.suit, w.how, w.searches, w.hidden, w.limbs, w.cockpit, a.frames - arms_told.frames, a.idle - arms_told.idle, w.gear};
     char line[700];
     tfp_seat_line(line, sizeof line, &l);
     say("%s", line);

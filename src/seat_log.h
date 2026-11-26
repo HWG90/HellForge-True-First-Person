@@ -3,7 +3,7 @@
  *
  * Seat: +<frames> frames from the seat (+<refused> refused, +<glided> gliding), eye (<right> <forward> <up>) m from the
  * suit seat's root, anchor settled|settling, glide in|out|none; hands from the eye L (x y z) R (x y z) | not read;
- * diver: <rows> rows hidden (<limbs> of the limb slots); cockpit: seen through (suit <ref> by <how>, <rows> meshes) |
+ * diver: <rows> rows hidden (<limbs> of the limb slots, <gear> of gear on the body); cockpit: seen through (suit <ref> by <how>, <rows> meshes) |
  * drawn (<why>); arms: rig not drawn by the game here, +<driven> frames driven, +<other> in another camera
  *
  * The hands answer the open question of round 37b (what the shape in front of the console was): the body's own
@@ -24,6 +24,7 @@ typedef struct TfpSeatLine {
   uint32_t searches;
   double hidden, limbs, cockpit;      /* head visibility's rows: all, limb slots, the suit's meshes */
   uint64_t driven, other;             /* arm drive deltas: frames driven, frames in another camera */
+  double gear;                        /* round 43: head visibility's rows of units hung on the body */
 } TfpSeatLine;
 
 static inline size_t tfp_seat_line(char *out, size_t size, const TfpSeatLine *l) {
@@ -39,11 +40,11 @@ static inline size_t tfp_seat_line(char *out, size_t size, const TfpSeatLine *l)
   else snprintf(cockpit, sizeof cockpit, "drawn (no suit proven yet, %u searches)", l->searches);
   const int n = snprintf(out, size,
                          "Seat: +%llu frames from the seat (+%llu refused, +%llu gliding), eye (%.2f %.2f %.2f) m from the seat's root, anchor %s, glide %s; "
-                         "hands from the eye %s; diver: %.0f rows hidden (%.0f of the limb slots); cockpit: %s; arms: rig not drawn by the game here, "
+                         "hands from the eye %s; diver: %.0f rows hidden (%.0f of the limb slots, %.0f of gear on the body); cockpit: %s; arms: rig not drawn by the game here, "
                          "+%llu frames driven, +%llu in another camera",
                          (unsigned long long)l->frames, (unsigned long long)l->refused, (unsigned long long)l->glided, (double)l->offset[0],
                          (double)l->offset[1], (double)l->offset[2], l->settled ? "settled" : "settling",
-                         l->gliding == 1 ? "in" : l->gliding == 2 ? "out" : "none", hands, l->hidden, l->limbs, cockpit,
+                         l->gliding == 1 ? "in" : l->gliding == 2 ? "out" : "none", hands, l->hidden, l->limbs, l->gear, cockpit,
                          (unsigned long long)l->driven, (unsigned long long)l->other);
   return n < 0 ? 0 : (size_t)n;
 }
