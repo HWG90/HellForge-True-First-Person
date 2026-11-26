@@ -192,7 +192,8 @@ typedef struct TfpReloadEnd { bool ended; float would, most; uint32_t frames, mi
 
 /* Round 40: a frame the game scales by main row +0x11ac (TFP_RELOAD_SCALED), `r` its share of C. True: `*delta` is the
  * whole of what goes to node 5's forward part (the held depth's own unscaled term, in->added, included), `*would` how
- * far the eye would have gone from where the hold puts it, `*offset` whether it was held by the eye's offset. */
+ * far the eye (the game's, which the held depth passes in such a frame) is from where the hold puts it at the hip,
+ * `*offset` whether it was held by the eye's offset. */
 static inline bool tfp_reload_scaled(const TfpReloadHold *h, const TfpReloadInput *in, float r, float share, float *delta, float *would, bool *offset) {
   const float a = in->argument, c = in->constant, added = in->added;
   if (!tfp_reload_finite(a) || !tfp_reload_finite(added) || !(fabsf(added) <= TFP_RELOAD_MOST)) return false;
@@ -204,14 +205,14 @@ static inline bool tfp_reload_scaled(const TfpReloadHold *h, const TfpReloadInpu
     if (fits && h->known) fits = fabsf(blended+added-((1-r)*h->held+r*c)) <= (1-r)*TFP_RELOAD_APART+1e-4f;
     if (fits && (r == 0 || h->known)) {
       const float target = blended+c+(r > 0 ? r*(h->held-c) : 0); /* where the eye stands unscaled with the hold (less the held depth's own) */
-      *would = target-a; *delta = added+share*(target-a); *offset = false;
+      *would = added+target-a; *delta = added+share*(target-a); *offset = false;
       return true;
     }
   }
   /* the eye's offset: the rig's own vector as the last frame without C had it */
   if (!h->known) return false;
   const float target = h->held+c-added;
-  *would = target-a; *delta = added+share*(target-a); *offset = true;
+  *would = added+target-a; *delta = added+share*(target-a); *offset = true;
   return true;
 }
 
