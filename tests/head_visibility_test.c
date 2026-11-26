@@ -562,6 +562,189 @@ static bool seat_cases(void) {
   printf("head visibility: seat: %d checks, %d failed\n", seat_checks, seat_failed);
   return seat_failed == 0;
 }
+/* ---- Round 43: gear hung on the body in an exosuit's seat (TfpHeadIo.seat) ----
+ * feel.58: "exosuit interior, helldiver belt equipment like sample holder is still visible". The seat hid the 30
+ * appearance slots, the backpack and the body's own meshes, never the units hung on the body's attach nodes. A fake
+ * tree is hung on the body of the run "gates" (its child list: unit +0x1D8 first child, +0x1E0 next sibling, +8 the
+ * child's reference; +0x1D0 its parent): a pouch at attach_samplepouch, a pistol with a magazine under it, the
+ * torso slot's renderer with an attachment under it, the first-person rig, a unit of a foreign type and the exosuit.
+ * In the seat every gear mesh loses its camera and shadow passes; the rig, the foreign unit and the suit are left;
+ * on foot nothing of it is touched; leaving, a stop, a unit moved to the rig and a unit gone all give back. */
+#define GEAR_BASE 71468255805440.0   /* 0x410000000000: memory no script uses */
+typedef struct FakeUnit { double ref, object, index, mesh[4]; int meshes; } FakeUnit;
+static double gear_registry_capacity(void) { return vf_rawu32(vf_rawptr(V(exe) + REGISTRY_RETAIL) + 0x88 + 16); }
+static FakeUnit fake_unit(int slot, double parent, int meshes) {
+  FakeUnit u = {0};
+  u.index = gear_registry_capacity() - 20 - slot;
+  u.ref = u.index + 0x400000;   /* generation 1 */
+  u.object = GEAR_BASE + slot * 0x10000;
+  u.meshes = meshes;
+  const double body = object_of(V(s_body));
+  for (int i = 0; i < 0x400; i++) vf_poke_byte(u.object + i, vf_byte(body + i));   /* the renderer type and world of the body */
+  poke32(u.object + 8, (uint32_t)u.ref);
+  poke64(u.object + 0x1D0, (uint64_t)parent);
+  poke64(u.object + 0x1D8, 0); poke64(u.object + 0x1E0, 0); poke64(u.object + 0x98, 0);
+  const uint8_t resource[8] = {0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, (uint8_t)slot};
+  poke(u.object + 0x358, resource, 8);
+  poke32(u.object + 0xC8, (uint32_t)meshes);
+  poke64(u.object + 0xD0, (uint64_t)(u.object + 0x1000));
+  for (int i = 0; i < meshes; i++) {
+    u.mesh[i] = u.object + 0x2000 + i * 0x100;
+    poke64(u.object + 0x1000 + i * 16, (uint64_t)u.mesh[i]);
+    vf_poke_byte(u.mesh[i] + 0xDC, 255);
+  }
+  vf_poke_byte(registry_field(24) + u.index, 1);
+  poke64(registry_field(0) + u.index * 8, (uint64_t)u.object);
+  vf.units = realloc(vf.units, (vf.unit_count + 1) * sizeof *vf.units);
+  vf.units[vf.unit_count++] = u.ref * 4;
+  return u;
+}
+/* Hangs `child` last in the child list of `parent`, at node `node` of the parent (link kind 2). */
+static void hang(double parent, double child, uint32_t node) {
+  poke64(child + 0x1D0, (uint64_t)parent);
+  poke64(child + 0x1E0, 0);
+  poke64(child + 0x98, (uint64_t)(child + 0x3000));
+  poke32(child + 0x3000, (node << 16) | 2);
+  double at = parent + 0x1D8;
+  while (vf_rawptr(at)) at = vf_rawptr(at) + 0x1E0;
+  poke64(at, (uint64_t)child);
+}
+static void unhang(double parent, double child) {
+  double at = parent + 0x1D8;
+  while (vf_rawptr(at) && vf_rawptr(at) != child) at = vf_rawptr(at) + 0x1E0;
+  if (vf_rawptr(at) == child) poke64(at, (uint64_t)vf_rawptr(child + 0x1E0));
+  poke64(child + 0x1E0, 0);
+}
+static bool unit_masks(const FakeUnit *u, int mask) {
+  for (int i = 0; i < u->meshes; i++) if (vf_byte(u->mesh[i] + 0xDC) != mask) {
+    fprintf(stderr, "gear: mesh %d of unit %.0f is %d, wanted %d\n", i, u->ref, vf_byte(u->mesh[i] + 0xDC), mask);
+    return false;
+  }
+  return true;
+}
+static size_t unit_writes(const FakeUnit *u) { char name[32]; snprintf(name, sizeof name, "%.0f", u->ref * 4); return set_calls(name, NULL); }
+static bool logged(const char *text) { return vf_ev.vis.data && strstr(vf_ev.vis.data, text); }
+static size_t logged_count(const char *text) { size_t n = 0; for (const char *at = vf_ev.vis.data; at && (at = strstr(at, text)); at++) n++; return n; }
+static bool gear_cases(void) {
+  if (!prepare("gates", 318)) return false;
+  const int before = seat_checks - seat_failed;
+  TfpHeadResult r0, r;
+  TfpVisText why = {0};
+  tfp_head_result(head, &r0);
+  static SeatMesh diver[512];
+  const size_t n = diver_meshes(diver, 512);
+  const double body = object_of(V(s_body)), rig = object_of(V(s_viewmodel));
+  const double torso_ref = vf_rawu32(appearance_base() + 2 * 4), torso = object_of(torso_ref);
+  SCHECK(vf_rawptr(body + 0x1D8) == 0 && rig && torso && vf_rawptr(torso + 0x1D0) == body);
+  /* the body's node names: node 37 is attach_samplepouch (0x000922d7), node 12 the pistol's on the right thigh */
+  poke32(body + 0x70, 100); poke64(body + 0xA0, (uint64_t)(GEAR_BASE + 0x200000));
+  poke32(GEAR_BASE + 0x200000 + 37 * 4, 0x000922d7); poke32(GEAR_BASE + 0x200000 + 12 * 4, 0x5157a11e);
+  FakeUnit pouch = fake_unit(0, body, 2), pistol = fake_unit(1, body, 1), magazine = fake_unit(2, pistol.object, 1);
+  FakeUnit attachment = fake_unit(3, torso, 1), odd = fake_unit(4, body, 1);
+  hang(body, pouch.object, 37); hang(body, pistol.object, 12); hang(pistol.object, magazine.object, 0);
+  hang(body, torso, 2); hang(torso, attachment.object, 5); hang(body, rig, 50); hang(body, odd.object, 9);
+  /* the odd one is of another type: its method table +0xC8 holds other functions */
+  poke64(odd.object, (uint64_t)(GEAR_BASE + 0x300000));
+  for (int i = 0; i < 0x100; i++) vf_poke_byte(GEAR_BASE + 0x300000 + i, 0x41);
+  make_walker();
+  hang(body, WALKER_OBJECT, 0);   /* the exosuit, were it ever hung on the body, is never gear */
+  const FakeUnit *gear[] = {&pouch, &pistol, &magazine, &attachment};
+
+  /* 1. On foot: the tree is there, nothing of it is read into the hide list or written. */
+  SCHECK(seat_step("Vtick=103700 !update", false));
+  tfp_head_result(head, &r);
+  SCHECK(r.phase == TFP_HEAD_ACTIVE && !r.seat && r.hidden == r0.hidden && r.hidden_gear == 0 && r.writes == r0.writes);
+  for (size_t i = 0; i < 4; i++) SCHECK(unit_masks(gear[i], 255) && unit_writes(gear[i]) == 0);
+  SCHECK(!logged("seat gear"));
+
+  /* 2. In the seat, the cockpit option off: every gear mesh goes (camera and shadow), the rest is left; the log lists
+   * every unit under the body once, with its node, why it was or was not taken, and how many of its rows are hidden. */
+  seat_on = true; cockpit_unit = 0;
+  SCHECK(seat_step_why("Vtick=103720 !update", &why) && !why.present);
+  tfp_head_result(head, &r);
+  SCHECK(r.phase == TFP_HEAD_ACTIVE && r.seat && r.hidden_gear == 5 && all_out(diver, n));
+  for (size_t i = 0; i < 4; i++) SCHECK(unit_masks(gear[i], 252));
+  SCHECK(unit_masks(&odd, 255) && unit_writes(&odd) == 0 && walker_drawn());
+  SCHECK(logged("seat gear: 8 units under the body, 4 hidden as gear"));
+  SCHECK(logged("node 37 (hash 0x000922d7)") && logged("node 12 (hash 0x5157a11e)"));
+  SCHECK(logged("resource 0x0070605040302010") && logged("2 rows hidden: gear"));
+  SCHECK(logged("already hidden: appearance slot") && logged("left: the first-person rig") && logged("left: not a renderer unit")
+         && logged("left: the exosuit"));
+  SCHECK(logged_count("log:FPV head visibility: seat gear: unit ") == 8);
+  if (!logged("seat gear: 8 units") || getenv("GEAR_LOG")) fprintf(stderr, "gear: the log was: %s\n", vf_ev.vis.data ? vf_ev.vis.data : "");
+  /* held: nothing written or logged again */
+  SCHECK(seat_step("Vtick=103740 !update", false));
+  tfp_head_result(head, &r);
+  SCHECK(r.hidden_gear == 5 && !logged("seat gear"));
+  for (size_t i = 0; i < 4; i++) SCHECK(unit_masks(gear[i], 252) && unit_writes(gear[i]) == 0);
+
+  /* 3. The cockpit seen through: the suit loses its camera pass, the gear stays hidden; off again, the same. */
+  cockpit_unit = walker_ref;
+  SCHECK(seat_step("Vtick=103760 !update", false));
+  tfp_head_result(head, &r);
+  SCHECK(r.hidden_cockpit == 4 && walker_seen_through() && r.hidden_gear == 5 && all_out(diver, n));
+  for (size_t i = 0; i < 4; i++) SCHECK(unit_masks(gear[i], 252));
+  cockpit_unit = 0;
+  SCHECK(seat_step("Vtick=103780 !update", false));
+  tfp_head_result(head, &r);
+  SCHECK(r.hidden_cockpit == 0 && walker_drawn() && r.hidden_gear == 5);
+
+  /* 4. The magazine gone while seated (its reference retired): never written, no check fails, the rest stays hidden. */
+  vf_poke_byte(registry_field(24) + magazine.index, 2);
+  const double retired = r.retired;
+  SCHECK(seat_step_why("Vtick=103800 !update", &why) && !why.present);
+  tfp_head_result(head, &r);
+  SCHECK(r.phase == TFP_HEAD_ACTIVE && r.hidden_gear == 4 && r.retired == retired + 1 && unit_writes(&magazine) == 0);
+  SCHECK(unit_masks(&pouch, 252) && unit_masks(&pistol, 252) && unit_masks(&attachment, 252));
+  SCHECK(logged("seat gear: 8 units under the body, 3 hidden as gear") && logged("left: reference not current"));
+  vf_poke_byte(registry_field(24) + magazine.index, 1);
+  vf_poke_byte(magazine.mesh[0] + 0xDC, 255);   /* a new magazine, drawn */
+  SCHECK(seat_step("Vtick=103820 !update", false));
+  tfp_head_result(head, &r);
+  SCHECK(r.hidden_gear == 5 && unit_masks(&magazine, 252));
+
+  /* 5. The pistol (and its magazine) moved to the first-person rig while still in the seat: both given back at once,
+   * never left hidden on the rig; then the seat left with the pistol there: nothing of it written again. */
+  unhang(body, pistol.object); hang(rig, pistol.object, 8);
+  SCHECK(seat_step_why("Vtick=103840 !update", &why) && !why.present);
+  tfp_head_result(head, &r);
+  SCHECK(r.phase == TFP_HEAD_ACTIVE && r.seat && r.hidden_gear == 3 && unit_masks(&pistol, 255) && unit_masks(&magazine, 255));
+  SCHECK(unit_masks(&pouch, 252) && unit_masks(&attachment, 252) && all_out(diver, n));
+  seat_on = false;
+  SCHECK(seat_step_why("Vtick=103860 !update", &why) && !why.present);
+  tfp_head_result(head, &r);
+  SCHECK(!r.seat && r.hidden_gear == 0 && r.hidden == r0.hidden && same_masks(diver, n));
+  for (size_t i = 0; i < 4; i++) SCHECK(unit_masks(gear[i], 255));
+  SCHECK(unit_writes(&pistol) == 0 && unit_writes(&magazine) == 0);
+
+  /* 6. Back on the body and into the seat again: hidden, and listed again (a new seat entry). Leaving: all back. */
+  unhang(rig, pistol.object); hang(body, pistol.object, 12);
+  seat_on = true;
+  SCHECK(seat_step("Vtick=103880 !update", false));
+  tfp_head_result(head, &r);
+  SCHECK(r.hidden_gear == 5 && logged("seat gear: 8 units under the body, 4 hidden as gear"));
+  for (size_t i = 0; i < 4; i++) SCHECK(unit_masks(gear[i], 252));
+  seat_on = false;
+  SCHECK(seat_step("Vtick=103900 !update", false));
+  tfp_head_result(head, &r);
+  SCHECK(r.hidden_gear == 0 && r.hidden == r0.hidden && same_masks(diver, n));
+  for (size_t i = 0; i < 4; i++) SCHECK(unit_masks(gear[i], 255));
+
+  /* 7. Switched off (a stop) in the seat: everything given back, clean. */
+  seat_on = true;
+  SCHECK(seat_step("Vtick=103920 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.hidden_gear == 5);
+  SCHECK(seat_step("Vtick=103940", true));
+  tfp_head_result(head, &r);
+  SCHECK(r.phase == TFP_HEAD_IDLE && r.hidden == 0 && r.hidden_gear == 0 && tfp_head_is_clean(head));
+  for (size_t i = 0; i < 4; i++) SCHECK(unit_masks(gear[i], 255));
+  SCHECK(unit_masks(&odd, 255) && walker_drawn());
+  seat_on = false; cockpit_unit = 0;
+  tfp_head_free(head); head = NULL;
+  tfp_model_shadow_free(&model);
+  printf("head visibility: seat gear: %d checks passed\n", seat_checks - seat_failed - before);
+  return seat_failed == 0;
+}
 int main(void) {
   if (!agrees_with_project()) {
     fprintf(stderr, "head visibility: tfp_head_build_25480438 disagrees with feature_contract.h, profile.h or its own displacements\n");
@@ -570,6 +753,7 @@ int main(void) {
   size_t retail = replay(false), here = retail ? replay(true) : 0;
   if (!retail || !here) return 1;
   if (!seat_cases()) return 1;
+  if (!gear_cases()) return 1;
   if (!(watched.again > 0 && watched.again_head > 0 && watched.left > 0 && watched.put_back > 0 && watched.off > 0)) {
     fprintf(stderr, "head watch: the replay never counted one of: drawn again %g (head %g), left drawn %g, put back %g, switched off %g\n",
             watched.again, watched.again_head, watched.left, watched.put_back, watched.off);

@@ -26,8 +26,8 @@ typedef bool (*Setter)(void *user, TfpEngineUnit unit, int mesh_index, bool visi
  * 7 is retail. Set once before the view is first used. */
 static unsigned tfp_head_parts = 7;
 void tfp_head_set_parts(unsigned parts) { tfp_head_parts = parts & 7u; }
-typedef enum Part { PART_HEAD, PART_TORSO, PART_SHOULDER, PART_BACKPACK, PART_BODY, PART_MODEL, PART_LIMB, PART_COCKPIT } Part;
-static const char *const PART_NAMES[] = {"head", "torso", "shoulder", "backpack", "body", "model", "limb", "cockpit"};
+typedef enum Part { PART_HEAD, PART_TORSO, PART_SHOULDER, PART_BACKPACK, PART_BODY, PART_MODEL, PART_LIMB, PART_COCKPIT, PART_GEAR } Part;
+static const char *const PART_NAMES[] = {"head", "torso", "shoulder", "backpack", "body", "model", "limb", "cockpit", "gear"};
 typedef struct Selected { int slot; Part part; } Selected;
 static const Selected SELECTED[] = {{0, PART_HEAD}, {2, PART_TORSO}, {8, PART_SHOULDER}, {9, PART_SHOULDER}};   /* :5 */
 typedef struct Pass { double mask; const char *name; bool visible; } Pass;
@@ -71,7 +71,9 @@ typedef struct Spec {
   double offsets[8]; int offset_count;
   bool body_only, rig, shadow_rig, model_shadow, has_backpack, has_model_parent, has_model_owner;
   bool seat, cockpit;   /* beyond retail, round 38: a seat's row (camera and shadow out, the body's too); the exosuit's */
-  double seat_parent;   /* a seat's clothing: the body or the first-person rig it hangs on (a limb can be on either) */
+  double seat_parent;   /* a seat's clothing: the body or the first-person rig it hangs on (a limb can be on either);
+                         * gear (round 43): the unit object it was found under */
+  bool gear;            /* beyond retail, round 43: a unit hung on the body (directly or deeper), found in a seat */
   TfpVisIdentity backpack;
   double model_parent;
   TfpModelOwner model_owner;
@@ -91,7 +93,7 @@ typedef struct Row {
   double offsets[8]; int offset_count;
   Part part;
   bool body_only, rig, has_backpack, shadow_suppressed, shadow_only, has_model_owner, has_model_parent, has_last, restoring_default;
-  bool seat, cockpit;   /* beyond retail, round 38: as the Spec's */
+  bool seat, cockpit, gear;   /* beyond retail, rounds 38 and 43: as the Spec's */
   double seat_parent;
   const Pad *rig_pad;
   TfpModelOwner model_owner;
@@ -99,6 +101,18 @@ typedef struct Row {
   bool has_reset_epoch, has_reset_default_frame, has_reset_shadow_frame;
   double reset_epoch, reset_bits, reset_default_frame, reset_shadow_frame;
 } Row;
+/* Beyond retail, round 43: what the seat's walk of the body's child list saw (src/head_visibility.h TfpHeadIo.seat). */
+#define GEAR_MAX 64      /* units looked at in one walk */
+#define GEAR_DEPTH 8     /* levels below the body */
+#define GEAR_SIBLINGS 32 /* units in one child list */
+#define GEAR_REPORTS 6   /* reports in one seat entry: the first and changes of the set */
+typedef enum GearWhy { GEAR_TAKEN, GEAR_SLOT, GEAR_PACK, GEAR_RIG, GEAR_SUIT, GEAR_FOREIGN, GEAR_RETIRED, GEAR_WORLD, GEAR_PARENT } GearWhy;
+typedef struct GearSeen {
+  double ref, object, parent, parent_ref;
+  int depth; GearWhy why;
+  bool has_node, has_hash, has_resource; uint32_t link, node, hash, meshes; double vtable;
+  uint8_t resource[8];
+} GearSeen;
 typedef struct Observed {
   Obj o;
   TfpVisIdentity owner, pack_identity;
@@ -110,6 +124,7 @@ typedef struct Observed {
   NMap *refs;           /* unit reference -> Spec */
   NMap *kept_layouts;   /* unit reference -> Layout, a = object, b = parent */
   uint8_t *model_signature; size_t model_signature_len;
+  int gear_n; double gear[GEAR_MAX][2];   /* beyond retail, round 43: the gear taken in a seat, (ref, parent) by ref */
 } Observed;
 typedef struct Shape {
   Obj o;
@@ -141,6 +156,10 @@ struct TfpHead {
   double hidden, hidden_head, hidden_torso, hidden_shoulders, hidden_body, hidden_backpack;
   double preserved_partial, writes, restores, retired, foreign_masks, shadows_disabled, steady_observations, full_observations;
   double hidden_limbs, hidden_cockpit;   /* beyond retail, round 38 */
+  double hidden_gear;                    /* beyond retail, round 43 */
+  /* Beyond retail, round 43: the last seat walk, said after the update that made it when `gear_say` (the first walk of
+   * a seat entry, or the set changed); `gear_reports` counts the reports of this seat entry. */
+  GearSeen gear_seen[GEAR_MAX]; int gear_seen_n, gear_reports; bool gear_say; char gear_walk[96];
   bool seat;                             /* the last update's answer of io->seat */
   char *model_shadow_error; size_t model_shadow_error_len;
   /* upvalues */
@@ -163,6 +182,7 @@ struct TfpHead {
   TfpVisText error;
 };
 
+static bool gear_chain(TfpHead *h, double parent, double body);   /* round 43, with the seat walk below */
 static void *new_obj(TfpHead *h, Kind kind, size_t size) {
   Obj *o = calloc(1, size);
   o->kind = (uint8_t)kind;
@@ -653,7 +673,7 @@ static void restore(TfpHead *h, void *arg) {
   CHECK(!has_problem, 235, problem);
 }
 static double count_owned(TfpHead *h) {   /* :237-247 */
-  double total = 0, head = 0, torso = 0, shoulder = 0, body = 0, backpack = 0, shadows = 0, limbs = 0, cockpit = 0;
+  double total = 0, head = 0, torso = 0, shoulder = 0, body = 0, backpack = 0, shadows = 0, limbs = 0, cockpit = 0, gear = 0;
   for (size_t i = 0; i < h->owned->n; i++) {
     const Row *row = (const Row *)h->owned->e[i].obj;
     total += 1;
@@ -661,9 +681,10 @@ static double count_owned(TfpHead *h) {   /* :237-247 */
     if (row->shadow_only) continue;
     if (row->part == PART_TORSO) torso += 1; else if (row->part == PART_SHOULDER) shoulder += 1;
     else if (row->part == PART_BODY) body += 1; else if (row->part == PART_BACKPACK) backpack += 1;
-    else if (row->part == PART_LIMB) limbs += 1; else if (row->part == PART_COCKPIT) cockpit += 1; else head += 1;
+    else if (row->part == PART_LIMB) limbs += 1; else if (row->part == PART_COCKPIT) cockpit += 1;
+    else if (row->part == PART_GEAR) gear += 1; else head += 1;
   }
-  h->hidden_limbs = limbs; h->hidden_cockpit = cockpit;
+  h->hidden_limbs = limbs; h->hidden_cockpit = cockpit; h->hidden_gear = gear;
   h->hidden = total; h->hidden_head = head; h->hidden_torso = torso; h->hidden_shoulders = shoulder;
   h->hidden_body = body; h->hidden_backpack = backpack;
   h->shadows_disabled = shadows;
@@ -718,8 +739,9 @@ static void collect(TfpHead *h, void *arg) {
   bool seat_attached = false;
   if (spec->seat && !spec->body_only) {
     seat_parent = ptr(h, object + 0x1D0);
-    seat_attached = seat_parent == body;
-    if (!seat_attached && s->has_viewmodel && s->viewmodel > 0 && s->viewmodel < NONE && s->viewmodel == floor(s->viewmodel)) {
+    seat_attached = spec->gear ? seat_parent == spec->seat_parent && gear_chain(h, seat_parent, body)   /* round 43: where the walk found it */
+      : seat_parent == body;
+    if (!seat_attached && !spec->gear && s->has_viewmodel && s->viewmodel > 0 && s->viewmodel < NONE && s->viewmodel == floor(s->viewmodel)) {
       double rig;
       uint8_t rig_header[32];
       seat_attached = unit(h, true, s->viewmodel, false, 0, q->context, &rig, rig_header) && seat_parent == rig && pointer(h, rig_header, 24) == q->world_native;
@@ -809,7 +831,7 @@ static void collect(TfpHead *h, void *arg) {
       Row *row = existing && existing->object == object && existing->body_object == body
         && existing->shadow_suppressed == shadow_suppressed && existing->shadow_only == shadow_only
         && existing->has_model_parent == spec->has_model_parent && (!spec->has_model_parent || existing->model_parent == spec->model_parent)
-        && existing->seat == spec->seat && existing->cockpit == spec->cockpit && existing->seat_parent == seat_parent
+        && existing->seat == spec->seat && existing->cockpit == spec->cockpit && existing->seat_parent == seat_parent && existing->gear == spec->gear
         ? existing : NULL;
       if (!row) {
         row = new_obj(h, K_ROW, sizeof *row);
@@ -818,7 +840,7 @@ static void collect(TfpHead *h, void *arg) {
         row->owner = s->player_identity;
       }
       memcpy(row->offsets, spec->offsets, sizeof row->offsets); row->offset_count = spec->offset_count;
-      row->part = spec->part; row->body_only = spec->body_only; row->rig = spec->rig; row->seat = spec->seat; row->cockpit = spec->cockpit; row->seat_parent = seat_parent;
+      row->part = spec->part; row->body_only = spec->body_only; row->rig = spec->rig; row->seat = spec->seat; row->cockpit = spec->cockpit; row->seat_parent = seat_parent; row->gear = spec->gear;
       row->has_backpack = spec->has_backpack; row->backpack = spec->backpack;
       row->rig_pad = pad;
       row->shadow_suppressed = shadow_suppressed;
@@ -885,6 +907,145 @@ static Spec *new_spec(TfpHead *h, Part part) {
   Spec *spec = new_obj(h, K_SPEC, sizeof *spec);
   spec->part = part;
   return spec;
+}
+/* ---- beyond retail, round 43: gear hung on the body in a seat ----
+ * The body's child list (unit +0x1D8 first child, +0x1E0 next sibling, +8 the child's reference, +0x1D0 its parent;
+ * the walk of src/models.c), read without raising: one odd unit is left out, never the end of all hiding. Every
+ * unit taken is proven like any renderer here (current generation, the object the registry holds, the renderer's
+ * method table, the body's world) and is checked again by collect() and before each write. */
+static bool valid_ptr(double v) { return v >= 65536 && v < HIGH; }
+static bool soft_rd(TfpHead *h, double at, size_t n, uint8_t *out) {
+  TfpVisText unused = {0};
+  return at >= 65536 && at + (double)n < HIGH && n > 0 && n <= 256 && h->io->read(h->io->user, at, n, out, &unused);
+}
+static bool soft_ptr(TfpHead *h, double at, double *out) {   /* any value, 0 included */
+  uint8_t b[8];
+  if (!soft_rd(h, at, 8, b)) return false;
+  *out = integer(b, 0) + integer(b, 4) * 4294967296.0;
+  return true;
+}
+static double raw_ptr(const uint8_t *bytes, size_t offset) { return integer(bytes, offset) + integer(bytes, offset + 4) * 4294967296.0; }
+/* unit() without raising. 0: the current unit at `expected`, of the renderer type; 1: not current; 2: another type. */
+static int gear_unit(TfpHead *h, Registry *context, double ref, double expected, uint8_t header[32], double *vt) {
+  uint8_t b[1], methods[56];
+  double object;
+  if (!(ref > 0 && ref < NONE && ref == floor(ref))) return 1;
+  double index = lmod(ref, 0x400000), generation = lmod(floor(ref / 0x400000), 256);
+  if (index >= context->capacity) return 1;
+  if (!soft_rd(h, context->generations + index, 1, b) || b[0] != generation) return 1;
+  if (!soft_ptr(h, context->objects + index * 8, &object) || object != expected) return 1;
+  if (!soft_rd(h, object, 32, header) || integer(header, 8) != ref) return 1;
+  if (!soft_rd(h, context->generations + index, 1, b) || b[0] != generation || !soft_ptr(h, context->objects + index * 8, &object)
+      || object != expected) return 1;
+  *vt = raw_ptr(header, 0);
+  if (nget(context->types, *vt)) return 0;
+  if (!valid_ptr(*vt) || !soft_rd(h, *vt + 0xC8, 56, methods) || raw_ptr(methods, 48) != h->exe + h->build->renderer_method_6
+      || raw_ptr(methods, 0) != h->exe + h->build->renderer_method_0) return 2;
+  nset(context->types, *vt);
+  return 0;
+}
+/* `parent` is the body, or hangs under it by parent fields (+0x1D0) within GEAR_DEPTH levels. */
+static bool gear_chain(TfpHead *h, double parent, double body) {
+  for (int i = 0; i < GEAR_DEPTH && parent != body; i++) if (!valid_ptr(parent) || !soft_ptr(h, parent + 0x1D0, &parent)) return false;
+  return parent == body;
+}
+typedef struct GearWalk {
+  Registry *context;
+  double body_ref, world_native, viewmodel, cockpit;
+  bool has_viewmodel;
+  NMap *listed;   /* reference -> a: 1 an appearance slot's, 2 the backpack */
+} GearWalk;
+static void gear_note(TfpHead *h, const char *note) { if (!strcmp(h->gear_walk, "complete")) snprintf(h->gear_walk, sizeof h->gear_walk, "stopped: %s", note); }
+static void gear_list(TfpHead *h, GearWalk *w, double parent, double parent_ref, int depth) {
+  double child, next;
+  if (!soft_ptr(h, parent + 0x1D8, &child)) { gear_note(h, "a child list could not be read"); return; }
+  for (int siblings = 0; child != 0; siblings++, child = next) {
+    if (siblings == GEAR_SIBLINGS) { gear_note(h, "more than 32 units in one list"); return; }
+    if (h->gear_seen_n == GEAR_MAX) { gear_note(h, "more than 64 units"); return; }
+    uint8_t bytes[4], header[32];
+    if (!valid_ptr(child) || !soft_rd(h, child + 8, 4, bytes) || !soft_ptr(h, child + 0x1E0, &next)) { gear_note(h, "a unit could not be read"); return; }
+    for (int i = 0; i < h->gear_seen_n; i++) if (h->gear_seen[i].object == child) { gear_note(h, "a unit seen twice"); return; }
+    GearSeen *g = &h->gear_seen[h->gear_seen_n++];
+    memset(g, 0, sizeof *g);
+    g->ref = integer(bytes, 0); g->object = child; g->parent = parent; g->parent_ref = parent_ref; g->depth = depth;
+    double links, hashes, actual;
+    if (soft_ptr(h, child + 0x98, &links) && valid_ptr(links) && soft_rd(h, links, 4, bytes)) {   /* the link of its root node */
+      g->link = (uint32_t)integer(bytes, 0);
+      g->has_node = (g->link & 0xFFFF) == 2; g->node = g->link >> 16;
+      if (g->has_node && soft_rd(h, parent + 0x70, 4, bytes) && g->node < integer(bytes, 0) && soft_ptr(h, parent + 0xA0, &hashes)
+          && valid_ptr(hashes) && soft_rd(h, hashes + g->node * 4.0, 4, bytes)) { g->hash = (uint32_t)integer(bytes, 0); g->has_hash = true; }
+    }
+    bool walk = false;
+    const int kind = gear_unit(h, w->context, g->ref, child, header, &g->vtable);
+    if (kind == 1) g->why = GEAR_RETIRED;
+    else if (kind == 2) g->why = GEAR_FOREIGN;
+    else {
+      g->has_resource = soft_rd(h, child + 0x358, 8, g->resource);
+      if (soft_rd(h, child + 0xC8, 4, bytes)) g->meshes = (uint32_t)integer(bytes, 0);
+      const NEntry *listed = nget(w->listed, g->ref);
+      if (w->has_viewmodel && g->ref == w->viewmodel) g->why = GEAR_RIG;
+      else if (g->ref == w->cockpit || (g->has_resource && !memcmp(g->resource, WALKER_RESOURCE, 8))) g->why = GEAR_SUIT;
+      else if (raw_ptr(header, 24) != w->world_native) g->why = GEAR_WORLD;
+      else if (g->ref == w->body_ref || !soft_ptr(h, child + 0x1D0, &actual) || actual != parent) g->why = GEAR_PARENT;
+      else { g->why = listed ? (listed->a == 2 ? GEAR_PACK : GEAR_SLOT) : GEAR_TAKEN; walk = true; }
+    }
+    if (walk && depth < GEAR_DEPTH) gear_list(h, w, child, g->ref, depth + 1);
+    else if (walk && soft_ptr(h, child + 0x1D8, &actual) && actual != 0) gear_note(h, "deeper than 8 levels");
+  }
+}
+static int gear_order(const void *a, const void *b) { const double *x = a, *y = b; return x[0] < y[0] ? -1 : x[0] > y[0]; }
+static const char *gear_why(const GearSeen *g, char *buffer, size_t size) {
+  switch (g->why) {
+  case GEAR_TAKEN: return "gear";
+  case GEAR_SLOT: return "already hidden: appearance slot";
+  case GEAR_PACK: return "already hidden: backpack";
+  case GEAR_RIG: return "left: the first-person rig, the game's own (nothing under it walked)";
+  case GEAR_SUIT: return "left: the exosuit";
+  case GEAR_FOREIGN: snprintf(buffer, size, "left: not a renderer unit (method table %#llx)", (unsigned long long)g->vtable); return buffer;
+  case GEAR_RETIRED: return "left: reference not current";
+  case GEAR_WORLD: return "left: in another world";
+  case GEAR_PARENT: return "left: its parent field is not the unit it hangs under";
+  }
+  return "?";
+}
+/* Said after the update that walked (the game thread's tick: the module's own update), never from a render callback. */
+static void gear_report(TfpHead *h) {
+  if (!h->io->log) return;
+  int taken = 0, listed = 0;
+  double rows = 0;
+  double per[GEAR_MAX] = {0};
+  for (int i = 0; i < h->gear_seen_n; i++) {
+    const GearSeen *g = &h->gear_seen[i];
+    taken += g->why == GEAR_TAKEN; listed += g->why == GEAR_SLOT || g->why == GEAR_PACK;
+    for (size_t r = 0; r < h->owned->n; r++) {
+      const Row *row = (const Row *)h->owned->e[r].obj;
+      if (row->ref == g->ref && row->seat) per[i] += 1;
+    }
+    if (g->why == GEAR_TAKEN) rows += per[i];
+  }
+  char line[TFP_VIS_TEXT + 64];
+  snprintf(line, sizeof line, "FPV head visibility: seat gear: %d units under the body, %d hidden as gear (%.0f rows), %d already hidden by the "
+           "slots or the backpack, %d left; walk %s", h->gear_seen_n, taken, rows, listed, h->gear_seen_n - taken - listed, h->gear_walk);
+  h->io->log(h->io->user, line);
+  for (int i = 0; i < h->gear_seen_n; i++) {
+    const GearSeen *g = &h->gear_seen[i];
+    char node[64], resource[24], why[96];
+    if (g->has_hash) snprintf(node, sizeof node, "%u (hash 0x%08x)", g->node, g->hash);
+    else if (g->has_node) snprintf(node, sizeof node, "%u (name not read)", g->node);
+    else if (g->link) snprintf(node, sizeof node, "? (root link %#x)", g->link);
+    else snprintf(node, sizeof node, "? (links not read)");
+    if (g->has_resource) {
+      unsigned long long value = 0;
+      for (int b = 7; b >= 0; b--) value = value << 8 | g->resource[b];
+      snprintf(resource, sizeof resource, "0x%016llx", value);
+    } else snprintf(resource, sizeof resource, "not read");
+    snprintf(line, sizeof line, "FPV head visibility: seat gear: unit %d/%d %#llx (depth %d) under %#llx at node %s, resource %s, %u meshes, "
+             "%.0f rows hidden: %s", i + 1, h->gear_seen_n, (unsigned long long)g->ref, g->depth, (unsigned long long)g->parent_ref, node,
+             resource, g->meshes, per[i], gear_why(g, why, sizeof why));
+    h->io->log(h->io->user, line);
+  }
+  h->gear_reports += 1;
+  h->gear_say = false;
 }
 static bool blob_equal(bool has_a, const uint8_t *a, size_t a_len, bool has_b, const uint8_t *b, size_t b_len) {
   if (!has_a || !has_b) return has_a == has_b;
@@ -954,6 +1115,27 @@ static void resolve(TfpHead *h, void *arg) {
   TfpVisText unused;
   bool has_backpack = h->io->backpack && h->io->backpack(h->io->user, s, &backpack, &unused) == 1;
   Observed *previous = h->observed;
+  /* Beyond retail, round 43: in a seat, the units hung on the body (src/head_visibility.h TfpHeadIo.seat). */
+  int gear_n = 0;
+  double gear[GEAR_MAX][2];
+  if (seat) {
+    NMap *listed = new_nmap(h);
+    for (int at = 0; at < 120; at += 4) {
+      const double ref = integer(appearance, (size_t)at);
+      if (ref != 0 && ref != NONE) nset(listed, ref)->a = 1;
+    }
+    if (has_backpack && !nget(listed, backpack.ref)) nset(listed, backpack.ref)->a = 2;
+    GearWalk walk = {&context, s->body, world_native, s->viewmodel, cockpit, s->has_viewmodel, listed};
+    h->gear_seen_n = 0;
+    snprintf(h->gear_walk, sizeof h->gear_walk, "complete");
+    gear_list(h, &walk, body, s->body, 1);
+    for (int i = 0; i < h->gear_seen_n; i++) if (h->gear_seen[i].why == GEAR_TAKEN) {
+      gear[gear_n][0] = h->gear_seen[i].ref; gear[gear_n][1] = h->gear_seen[i].parent; gear_n++;
+    }
+    qsort(gear, (size_t)gear_n, sizeof gear[0], gear_order);
+    const bool gear_changed = !previous || !previous->seat || previous->gear_n != gear_n || memcmp(previous->gear, gear, sizeof gear[0] * (size_t)gear_n);
+    if (h->gear_reports == 0 || (gear_changed && h->gear_reports < GEAR_REPORTS)) h->gear_say = true;
+  }
   bool unchanged = previous && tfp_vis_identity_equal(&previous->owner, &s->player_identity) && previous->body == body
     && previous->body_ref == s->body && previous->world == world_native && previous->sdk_world == world && previous->customization == base
     && blob_equal(previous->pack_identity.present, previous->pack_identity.bytes, previous->pack_identity.len,
@@ -962,6 +1144,7 @@ static void resolve(TfpHead *h, void *arg) {
     && previous->has_viewmodel == s->has_viewmodel && (!s->has_viewmodel || previous->viewmodel == s->viewmodel)
     && previous->rig_capable == rig_capable && previous->full_body == full_body && previous->hide_torso == hide_torso
     && previous->show_torso == show_torso && previous->seat == seat && previous->cockpit == cockpit
+    && previous->gear_n == gear_n && !memcmp(previous->gear, gear, sizeof gear[0] * (size_t)gear_n)   /* beyond retail, round 43 */
     && blob_equal(previous->has_model_signature, previous->model_signature, previous->model_signature_len,
                   has_model_signature, model_signature, model_signature_len);
   NMap *refs = unchanged ? previous->refs : new_nmap(h);
@@ -997,6 +1180,11 @@ static void resolve(TfpHead *h, void *arg) {
       Spec *spec = new_spec(h, PART_COCKPIT);
       spec->cockpit = true;
       nset(refs, cockpit)->obj = &spec->o;
+    }
+    for (int i = 0; i < gear_n; i++) if (!nget(refs, gear[i][0])) {   /* round 43: the gear, camera and shadow, as the slots */
+      Spec *spec = new_spec(h, PART_GEAR);
+      spec->seat = spec->gear = true; spec->seat_parent = gear[i][1];
+      nset(refs, gear[i][0])->obj = &spec->o;
     }
   } else if (!unchanged) {
     for (int layer = 0; layer <= 2; layer++) for (size_t i = 0; i < 4; i++) {
@@ -1063,7 +1251,8 @@ static void resolve(TfpHead *h, void *arg) {
     const NEntry *held = nget(h->handles, refs->e[i].key);
     if (!held || !held->flag || handle_ref(h, held->raw) != refs->e[i].key) {
       missing = true;
-      required_missing = required_missing || !(((const Spec *)refs->e[i].obj)->rig || ((const Spec *)refs->e[i].obj)->cockpit);
+      const Spec *spec = (const Spec *)refs->e[i].obj;
+      required_missing = required_missing || !(spec->rig || spec->cockpit || spec->gear);
     }
   }
   /* No public Unit-created event exists here. Enumerate only on a missing
@@ -1098,7 +1287,7 @@ static void resolve(TfpHead *h, void *arg) {
   for (size_t i = 0; i < refs->n; i++) {
     Spec *spec = (Spec *)refs->e[i].obj;
     Collect c = {refs->e[i].key, spec, s, &context, body, header, world_native, base, unchanged, NULL, false};
-    if (spec->rig || spec->cockpit) {   /* beyond retail: the exosuit is optional too */
+    if (spec->rig || spec->cockpit || spec->gear) {   /* beyond retail: the exosuit and the gear are optional too */
       /* The FPV rig may be absent during a weapon gap, or use an
        * unsupported armor layout. It is optional; verified body and
        * clothing passes keep working independently of its metadata. */
@@ -1151,6 +1340,7 @@ static void resolve(TfpHead *h, void *arg) {
   observed->has_viewmodel = s->has_viewmodel; observed->viewmodel = s->viewmodel; observed->rig_capable = rig_capable;
   observed->full_body = full_body; observed->hide_torso = hide_torso; observed->show_torso = show_torso;
   observed->seat = seat; observed->cockpit = cockpit;
+  observed->gear_n = gear_n; memcpy(observed->gear, gear, sizeof gear[0] * (size_t)gear_n);
   observed->refs = refs; observed->kept_layouts = kept_layouts;
   observed->has_model_signature = has_model_signature;
   if (has_model_signature) {
@@ -1226,7 +1416,7 @@ static void retain_steady(TfpHead *h, void *arg) {
     if (spec->has_retry || !spec->layout || !seen || &spec->layout->o != seen->obj) return;
     Shape *shape = new_obj(h, K_SHAPE, sizeof *shape);
     shape->object = spec->object; shape->layout = spec->layout;
-    if (!spec->body_only && !spec->rig) { shape->has_parent = true; shape->parent = spec->has_model_parent ? spec->model_parent : observed->body; }
+    if (!spec->body_only && !spec->rig) { shape->has_parent = true; shape->parent = spec->gear ? spec->seat_parent : spec->has_model_parent ? spec->model_parent : observed->body; }
     nset(shapes, observed->refs->e[i].key)->obj = &shape->o;
   }
   for (size_t i = 0; i < observed->kept_layouts->n; i++) {
@@ -1422,7 +1612,7 @@ static void apply(TfpHead *h, void *arg) {   /* :694-756 */
                 : (row->body_only || row->rig || (row->has_model_owner && ptr(h, row->object + 0x1D0) == row->model_parent)
                    || (!row->has_model_owner && ptr(h, row->object + 0x1D0) == row->body_object)))
             && !foreign(h), 721, "Head owner changed before hide");
-      bool present = row->body_only || row->cockpit;
+      bool present = row->body_only || row->cockpit || (row->gear && gear_chain(h, row->seat_parent, row->body_object));   /* round 43 */
       if (row->has_backpack) {
         TfpHeadBackpack pack;
         TfpVisText why;
@@ -1472,6 +1662,7 @@ static bool update(TfpHead *h, TfpVisText *why) {
   bool pose_offset = h->io->controller_result_is_pose_offset(h->io->user);
   if (h->closing || !h->io->controller_is_enabled(h->io->user) || !pose_offset || foreign(h)) return stop(h, why);
   bool has_s = view_snapshot(h, &s, &unused);
+  if (!(has_s && in_seat(h, &s))) h->gear_reports = 0;   /* beyond retail, round 43: the next seat is a new entry */
   if (!available(h, has_s ? &s : NULL) || !first_person(h, &s)) return stop(h, why);
   if (h->identity.present && !tfp_vis_identity_equal(&h->identity, &s.player_identity) && !stop(h, why)) return false;
   if (why) why->present = false;
@@ -1499,6 +1690,7 @@ static bool update(TfpHead *h, TfpVisText *why) {
   Apply a = {&s, r.wanted, r.layouts};
   if (!protect(h, apply, &a)) return unavailable(h, why);
   count_owned(h); report(h, TFP_HEAD_ACTIVE, NULL);
+  if (h->gear_say && h->seat) gear_report(h);   /* beyond retail, round 43 */
   if (!protect(h, retain_steady, &a)) h->steady = NULL;
   return true;
 }
@@ -1530,7 +1722,7 @@ void tfp_head_result(TfpHead *h, TfpHeadResult *out) {   /* :265-273 */
                          h->preserved_partial, h->writes, h->restores, h->retired, h->foreign_masks, h->phase == TFP_HEAD_CLEANUP_PENDING,
                          h->reason, h->has_model_shadow_error, h->model_shadow_error, h->model_shadow_error_len, h->shadows_disabled,
                          h->steady_observations, h->full_observations, h->seat, h->hidden_limbs, h->hidden_cockpit,
-                         h->hidden_cockpit > 0 && h->observed ? h->observed->cockpit : 0};
+                         h->hidden_cockpit > 0 && h->observed ? h->observed->cockpit : 0, h->hidden_gear};
 }
 size_t tfp_head_status(TfpHead *h, char *out, size_t size) {   /* :274-277 */
   char head[40], torso[40], shoulders[40], body[40];
