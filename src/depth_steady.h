@@ -33,9 +33,10 @@
  * left in that blend, so this term adds nothing in a reload either. Round 39 puts the rest back: src/reload_hold.h,
  * the vector the rig had before the reload in place of C, the eye held through it.
  *
- * Not undone: in the 75 ms after a reload state changed (request+0x8d set, the weight at +0x88 under 1) with the
- * avatar's bit set ([rsp+0x44]), the game also scales the rig's whole vector by the float at main row +0x11ac
- * (game+0x1287b76). That is passed (TFP_STEADY_SCALED) and counted; the reload's hold passes it too.
+ * Not undone here: in the 75 ms after a reload state changed (request+0x8d set, the weight at +0x88 under 1) with the
+ * avatar's bit set ([rsp+0x44]) and the byte after it clear ([rsp+0x45]), the game also scales the rig's whole vector
+ * by the float at main row +0x11ac (game+0x1287b76). This term passes it (TFP_STEADY_SCALED) and counts it; round 40's
+ * reload hold (src/reload_hold.h) holds the eye through those frames, with this term's own unscaled share in it.
  *
  * The second half is the "Steady:" line's counting, as src/gate_log.h does it for "Gate:". */
 #ifndef TFP_DEPTH_STEADY_H
@@ -72,6 +73,7 @@ typedef struct TfpSteadyInput {
   float current, previous;       /* m: request+0x90, request+0x9c */
   float settled;                 /* m: the distance to rest at (request+0x90, or the mod's own reference for the optic) */
   uint8_t bit, blend, ability;   /* the avatar's packed bit 0; request+0x8d; request+0x8f */
+  uint8_t unscaled;              /* round 40: [rsp+0x45], set: the evaluator does not scale even with the bit set */
   float mix_before, mix_after;   /* request+0x88 when the lens was read, and now (the evaluator has stepped it in between) */
   float share;                   /* 0 to 1: the hip share */
   bool on;                       /* false: depth_steady_off.txt */
@@ -96,12 +98,12 @@ static inline bool tfp_steady_depth(const TfpSteadyInput *in, float *depth) {
   return true;
 }
 /* How much of D is in the rig's vector this frame (game+0x1287a44..0x1287bb4). False: the weights are no numbers, or
- * it is a frame in which the game goes on to scale the whole vector by main row +0x11ac. */
+ * it is a frame in which the game goes on to scale the whole vector by main row +0x11ac (the bit set, [rsp+0x45] clear). */
 static inline bool tfp_steady_gain(const TfpSteadyInput *in, float *gain) {
   if (!in->blend) { *gain = 1; return true; }
   if (!tfp_steady_within(in->mix_before, 0, 1) || !tfp_steady_within(in->mix_after, 0, 1)) return false;
   if (in->mix_before < 1) { /* the blend runs, with the weight as stepped */
-    if (in->bit) return false;
+    if (in->bit && !in->unscaled) return false;
     *gain = in->ability ? 1-in->mix_after : in->mix_after;
     return true;
   }

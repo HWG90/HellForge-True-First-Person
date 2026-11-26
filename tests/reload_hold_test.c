@@ -5,6 +5,10 @@
  *   reload_hold_test [LOG]                 the tests; LOG: the reference window (the replay is skipped without it)
  *   reload_hold_test --rewrite IN OUT      the window's Trace lines with the eye as the hold puts it (for the harness's
  *                                          matrix judge: tests/test_harness_reload.py)
+ *   reload_hold_test --edges IN OUT MODE   round 40: a window written by the round 39 hold (feel.58), its frames the game
+ *                                          scaled by main row +0x11ac put where round 40 holds them. MODE "read": the
+ *                                          scale read (the second's largest +0x11ac of its Gate: line); "none": not read
+ *   reload_hold_test [LOG] [LOG58]         LOG58: the feel.58 window (tests/reference/reload/feel58-L4150-4266.log)
  *
  * TFP_GAME_IMAGE=path: the game.dll image (file offset = RVA) the pinned bytes and C's address are checked against too. */
 #define _POSIX_C_SOURCE 200809L
@@ -32,7 +36,7 @@ static void build_code(uint8_t *code, int32_t shift) {
 }
 
 /* ---- the evaluator, as the listing has it: the rig's forward value request+0x4c for v and C (forward parts) ---- */
-typedef struct Eval { float w; uint8_t blend, ability; } Eval;
+typedef struct Eval { float w; uint8_t blend, ability, bit; float scale; } Eval; /* bit: the avatar's (and [rsp+0x45] clear); scale: main row +0x11ac */
 /* One frame: the weight stepped by dt/75 ms where it is under 1 (game+0x1287aa4..0x1287aeb), then the vector. Returns
  * request+0x4c; `before` and `after` the weight as the frame found and left it. */
 static float eval_frame(Eval *e, float v, float c, float dt, float *before, float *after) {
@@ -42,6 +46,7 @@ static float eval_frame(Eval *e, float v, float c, float dt, float *before, floa
     if (e->w < 1) {
       e->w += dt/75.0f; if (e->w > 1) e->w = 1;
       y = e->ability ? (1-e->w)*v+e->w*c : e->w*v+(1-e->w)*c;
+      if (e->bit) y *= e->scale; /* round 40: game+0x1287b76..0x1287b9b, before C is added the second time */
     } else if (e->ability) y = c;
   }
   *after = e->w;
@@ -51,22 +56,26 @@ static float eval_frame(Eval *e, float v, float c, float dt, float *before, floa
  * round from where it is: w' = 1-w, the same mix of v and C. */
 static void eval_edge(Eval *e, uint8_t ability, bool turn) { e->blend = 1; e->ability = ability; e->w = turn ? 1-e->w : 0; }
 
-typedef struct Run { TfpReloadHold h; float eye_last, step_most, eye_least, eye_most, delta_most; int ended; TfpReloadEnd end; bool started; uint32_t refused; } Run;
+typedef struct Run { TfpReloadHold h; float eye_last, step_most, eye_least, eye_most, delta_most; int ended; TfpReloadEnd end; bool started; uint32_t refused; float read_scale; int no_read; } Run;
+/* read_scale: what the mod reads of main row +0x11ac where it is not the game's (0: the game's); no_read: not read */
 /* One frame of the mod: the hold's delta added to the game's value (what the eye's offset from the root along the view
  * then is, with the root still). `share`: the hip share; `added`: the held depth's own term at rest. */
 static float mod_frame(Run *r, Eval *e, float v, float c, float dt, float share, float added, uint64_t lease) {
   float before = 0, after = 0;
   const float game = eval_frame(e, v, c, dt, &before, &after);
   TfpReloadInput in; memset(&in, 0, sizeof in);
-  in.blend = e->blend; in.ability = e->ability; in.mix_before = before; in.mix_after = after; in.argument = game; in.constant = c;
+  in.blend = e->blend; in.ability = e->ability; in.bit = e->bit; in.mix_before = before; in.mix_after = after; in.argument = game; in.constant = c;
   float r_now = 0; /* the held depth's own term goes with its gain, 1-r (tfp_steady_gain): `added` is its value at rest */
-  if (tfp_reload_share(e->blend, e->ability, 0, before, after, &r_now) == TFP_RELOAD_ADDED) added *= 1-r_now;
+  const uint32_t kind = tfp_reload_share(e->blend, e->ability, e->bit, 0, before, after, &r_now);
+  if (kind == TFP_RELOAD_ADDED || kind == TFP_RELOAD_SCALED) added *= 1-r_now;
   in.constant_known = true; in.added = added; in.share = share; in.on = true;
+  if (kind == TFP_RELOAD_SCALED) { in.scale_known = !r->no_read; in.scale = r->read_scale != 0 ? r->read_scale : e->scale; }
   float delta = 7; TfpReloadEnd end;
   const uint32_t why = tfp_reload_frame(&r->h, &in, lease, &delta, &end);
   if (why != TFP_RELOAD_NONE && why != TFP_RELOAD_ADDED) ++r->refused;
   if (end.ended) { ++r->ended; r->end = end; }
-  const float eye = game+added+delta;
+  /* a frame the game scales: the held depth passes it (its term is in `delta` where the hold took the frame) */
+  const float eye = kind == TFP_RELOAD_SCALED ? game+(why == TFP_RELOAD_ADDED ? delta : 0) : game+added+delta;
   if (r->started) { const float step = fabsf(eye-r->eye_last); if (step > r->step_most) r->step_most = step; if (eye < r->eye_least) r->eye_least = eye; if (eye > r->eye_most) r->eye_most = eye; }
   else { r->eye_least = r->eye_most = eye; r->started = true; }
   if (fabsf(delta) > r->delta_most) r->delta_most = fabsf(delta);
@@ -160,7 +169,110 @@ static void rewrite_line(const Row *r, double delta, FILE *out) {
   } else fputs(ee, out);
 }
 
+/* ---- round 40: the edges of a window the round 39 hold wrote (0.6.0-feel.58) ----
+ * The log has the eye, the root and the view of every traced frame, the "Reload:" line (how far the eye would have
+ * slid: the rig's own vector less C, V) and the "Gate:" lines (the least and largest of main row +0x11ac in their
+ * second). The round 39 hold held every frame of the reload but the ones the game scaled, so the eye's offset F from
+ * the root along the view (view_forward) sits at its rest value F0 except in those frames. Put back:
+ *   - C's forward part 0 (the settled reload's argument is 0.0000 m in the Steady: lines, and it is 2C), the rig's
+ *     own vector V; the argument is F - K with K = F0 - V (the eye hangs on the root: the offset is the argument plus
+ *     the root's place);
+ *   - the scaled frames: those off the rest by more than 1 cm, in two runs (the reload's start, +0x8f set, and its
+ *     end, +0x8f clear); in each the game's s is taken as the largest +0x11ac of the Gate: line of its second, and
+ *     the share r of C is solved from the frame's argument s((1-r) V + r C) + C; the weight before the first frame of
+ *     a run 0, before the others the last frame's after; the avatar's bit set in them and [rsp+0x45] clear;
+ *   - the frames between: the settled reload (weight 1, +0x8f set), argument 2C, which the round 39 hold took (their
+ *     F is checked against what it puts back);
+ *   - after the end's run: weight 1, +0x8f clear (the bit cleared there: the Gate: line has it change twice).
+ * Each scaled frame's eye then goes `delta` along the view (the hold's pair) from where the log has it; every other
+ * row is left as written. `mode_read`: the scale read (else not read: the eye's offset). Returns the number of scaled
+ * frames, -1 where the window is not such a reload. `checked`: the largest the root's place K moved across an edge. */
+static double gate_scale_most(char **text, int lines, const char *stamp) {
+  /* the "Gate:" line of the second a frame stamped `stamp` (hh:mm:ss.mmm) is counted in: the first after it */
+  double most = -1;
+  for (int i = 0; i < lines; ++i) {
+    if (strncmp(text[i], stamp, 12) < 0 || !strstr(text[i], " Gate: ")) continue;
+    const char *p = strstr(text[i], "+0x11ac "); double a = 0, b = 0;
+    if (p && sscanf(p+8, "%lf to %lf", &a, &b) == 2) most = b;
+    break;
+  }
+  return most;
+}
+/* The eye's offset from the root along the view itself (not its level part): the hold's pair moves the eye along the
+ * view, by its whole length; the harness looks down in this phase, so the level part is some 6 % shorter. */
+static double view_forward(const Row *r, const double eye[3]) {
+  const double l = sqrt(r->view[0]*r->view[0]+r->view[1]*r->view[1]+r->view[2]*r->view[2]);
+  return ((eye[0]-r->root[0])*r->view[0]+(eye[1]-r->root[1])*r->view[1]+(eye[2]-r->root[2])*r->view[2])/l;
+}
+static int replay_edges(Row *rows, int n, char **text, int lines, bool mode_read, double *delta_out, double *checked, double *scales) {
+  double F[512]; if (n > 512 || n < 8) return -1;
+  for (int k = 0; k < n; ++k) F[k] = view_forward(&rows[k], rows[k].eye);
+  double V = -1;
+  for (int i = 0; i < lines; ++i) { const char *p = strstr(text[i], "Reload: eye held through the reload (would have slid "); if (p && sscanf(p+54, "%lf", &V) == 1) break; }
+  if (!(V > .05)) return -1;
+  const double F0 = F[0], C = 0;
+  int run[2][2] = {{-1, -1}, {-1, -1}}, runs = 0;
+  for (int k = 0; k < n && runs < 2; ++k) {
+    const bool off = fabs(F[k]-F0) > .01 && fabs(F[k]-F0) > .5*V; /* a scaled frame: most of the way off the rest */
+    if (off && run[runs][0] < 0) run[runs][0] = k;
+    if (!off && run[runs][0] >= 0) { run[runs][1] = k; ++runs; }
+  }
+  if (runs < 2) return -1;
+  for (int e = 0; e < 2; ++e) {
+    char stamp[16]; snprintf(stamp, sizeof stamp, "%.12s", rows[run[e][0]].line);
+    scales[e] = gate_scale_most(text, lines, stamp);
+    if (!(scales[e] > TFP_RELOAD_SCALE_LEAST)) return -1;
+    if (run[e][0] < 1) return -1;
+  }
+  /* The root's place along the view, K: F - V in every frame not scaled (at rest the argument is V; in the settled
+   * reload it is 2C and the round 39 hold put V - C back). It moves as the view turns up or down (the root is the
+   * body's, a metre and more below the eye), so in a scaled frame it is taken between its two neighbours, by the tick. */
+  double K[512]; *checked = 0;
+  for (int k = 0; k < n; ++k) K[k] = F[k]-V;
+  for (int e = 0; e < 2; ++e) {
+    const int a = run[e][0]-1, b = run[e][1];
+    for (int k = run[e][0]; k < b; ++k) K[k] = K[a]+(K[b]-K[a])*(rows[k].tick-rows[a].tick)/(rows[b].tick-rows[a].tick);
+    *checked = fmax(*checked, fabs(K[b]-K[a]));
+  }
+  TfpReloadHold h; memset(&h, 0, sizeof h); float mix = 1; uint8_t ability = 0; int scaled = 0;
+  for (int k = 0; k < n; ++k) {
+    TfpReloadInput in; memset(&in, 0, sizeof in);
+    in.blend = 1; in.constant = (float)C; in.constant_known = true; in.share = 1; in.on = true;
+    const int e = k >= run[0][0] && k < run[0][1] ? 0 : k >= run[1][0] && k < run[1][1] ? 1 : -1;
+    float before = mix;
+    if (e >= 0) {
+      const double s = scales[e], a = F[k]-K[k], keep = (a-C)/s/(V-C); /* (1-r): the share of the rig's own vector */
+      const double r = keep < 0 ? 1 : keep > 1 ? 0 : 1-keep;
+      ability = e == 0; if (k == run[e][0]) before = 0;
+      mix = (float)(e == 0 ? r : 1-r);
+      if (mix < before) mix = before; /* the weight only goes up */
+      in.bit = 1; in.argument = (float)a; in.scale = (float)s; in.scale_known = mode_read;
+      ++scaled;
+    } else if (k >= run[0][1] && k < run[1][0]) { ability = 1; before = mix = 1; in.argument = (float)(2*C); }
+    else { ability = 0; before = mix = 1; in.argument = (float)V; }
+    in.ability = ability; in.mix_before = before; in.mix_after = mix;
+    float delta = 0; TfpReloadEnd end;
+    const uint32_t why = tfp_reload_frame(&h, &in, 1, &delta, &end);
+    delta_out[k] = e >= 0 && why == TFP_RELOAD_ADDED ? delta : 0; /* only the scaled frames move: the rest is as written */
+    if (e >= 0 && why != TFP_RELOAD_ADDED) return -1;
+  }
+  return scaled;
+}
+
 int main(int argc, char **argv) {
+  if (argc == 5 && !strcmp(argv[1], "--edges")) {
+    Row *rows = NULL; char **text = NULL; int lines = 0; const int n = read_rows(argv[2], &rows, &text, &lines);
+    double delta[512], checked = 0, scales[2] = {0, 0};
+    if (n <= 0 || replay_edges(rows, n, text, lines, !strcmp(argv[4], "read"), delta, &checked, scales) <= 0) { fprintf(stderr, "no scaled reload edges in %s\n", argv[2]); return 2; }
+    FILE *out = fopen(argv[3], "w"); if (!out) return 2;
+    int k = 0;
+    for (int i = 0; i < lines; ++i) {
+      if (k < n && !strcmp(text[i], rows[k].line)) { rewrite_line(&rows[k], delta[k], out); ++k; }
+      else fputs(text[i], out);
+    }
+    fclose(out);
+    return k == n ? 0 : 3;
+  }
   if (argc == 4 && !strcmp(argv[1], "--rewrite")) {
     Row *rows = NULL; char **text = NULL; int lines = 0; const int n = read_rows(argv[2], &rows, &text, &lines);
     double delta[512], c = 0;
@@ -210,24 +322,29 @@ int main(int argc, char **argv) {
   /* ---- the share of C: the evaluator's, and 1 less the held depth's gain ---- */
   {
     float r = -1;
-    CHECK(tfp_reload_share(0, 1, 0, 1, 1, &r) == TFP_RELOAD_NONE && r == 0);    /* request+0x8d clear: the game does nothing */
-    CHECK(tfp_reload_share(1, 0, 0, 1, 1, &r) == TFP_RELOAD_NONE && r == 0);    /* settled, +0x8f clear: the rig's own */
-    CHECK(tfp_reload_share(1, 1, 0, 1, 1, &r) == TFP_RELOAD_ADDED && r == 1);   /* settled in a reload: C alone */
-    CHECK(tfp_reload_share(1, 1, 0, .25f, .5f, &r) == TFP_RELOAD_ADDED && r == .5f);
-    CHECK(tfp_reload_share(1, 0, 0, .25f, .5f, &r) == TFP_RELOAD_ADDED && r == .5f);
-    CHECK(tfp_reload_share(1, 0, 0, .75f, 1, &r) == TFP_RELOAD_NONE && r == 0); /* the blend back at its end */
-    CHECK(tfp_reload_share(1, 1, 0, 0, 0, &r) == TFP_RELOAD_NONE && r == 0);    /* the first frame of a reload, nothing of C yet */
-    CHECK(tfp_reload_share(1, 1, 1, .25f, .5f, &r) == TFP_RELOAD_SCALED);       /* the avatar's bit in the blend: scaled by main row +0x11ac */
-    CHECK(tfp_reload_share(1, 1, 1, 1, 1, &r) == TFP_RELOAD_ADDED && r == 1);   /* settled: no scaling there */
-    CHECK(tfp_reload_share(1, 1, 0, NAN, .5f, &r) == TFP_RELOAD_RANGE && tfp_reload_share(1, 1, 0, .5f, 1.5f, &r) == TFP_RELOAD_RANGE);
+    CHECK(tfp_reload_share(0, 1, 0, 0, 1, 1, &r) == TFP_RELOAD_NONE && r == 0);    /* request+0x8d clear: the game does nothing */
+    CHECK(tfp_reload_share(1, 0, 0, 0, 1, 1, &r) == TFP_RELOAD_NONE && r == 0);    /* settled, +0x8f clear: the rig's own */
+    CHECK(tfp_reload_share(1, 1, 0, 0, 1, 1, &r) == TFP_RELOAD_ADDED && r == 1);   /* settled in a reload: C alone */
+    CHECK(tfp_reload_share(1, 1, 0, 0, .25f, .5f, &r) == TFP_RELOAD_ADDED && r == .5f);
+    CHECK(tfp_reload_share(1, 0, 0, 0, .25f, .5f, &r) == TFP_RELOAD_ADDED && r == .5f);
+    CHECK(tfp_reload_share(1, 0, 0, 0, .75f, 1, &r) == TFP_RELOAD_NONE && r == 0); /* the blend back at its end */
+    CHECK(tfp_reload_share(1, 1, 0, 0, 0, 0, &r) == TFP_RELOAD_NONE && r == 0);    /* the first frame of a reload, nothing of C yet */
+    CHECK(tfp_reload_share(1, 1, 1, 0, .25f, .5f, &r) == TFP_RELOAD_SCALED && r == .5f); /* the avatar's bit in the blend: scaled by main row +0x11ac (r still given) */
+    CHECK(tfp_reload_share(1, 0, 1, 0, .25f, 1, &r) == TFP_RELOAD_SCALED && r == 0);  /* the blend back's last frame: scaled, with nothing of C */
+    CHECK(tfp_reload_share(1, 1, 1, 1, .25f, .5f, &r) == TFP_RELOAD_ADDED && r == .5f); /* [rsp+0x45] set: the evaluator skips the scaling */
+    CHECK(tfp_reload_share(1, 1, 1, 0, 1, 1, &r) == TFP_RELOAD_ADDED && r == 1);   /* settled: no scaling there */
+    CHECK(tfp_reload_share(1, 1, 0, 0, NAN, .5f, &r) == TFP_RELOAD_RANGE && tfp_reload_share(1, 1, 0, 0, .5f, 1.5f, &r) == TFP_RELOAD_RANGE);
     srand(39);
     for (int i = 0; i < 20000; ++i) {
       TfpSteadyInput in; memset(&in, 0, sizeof in);
-      in.blend = (uint8_t)(rand() & 1); in.ability = (uint8_t)(rand() & 1); in.bit = (uint8_t)(rand()%4 == 0);
+      in.blend = (uint8_t)(rand() & 1); in.ability = (uint8_t)(rand() & 1); in.bit = (uint8_t)(rand()%4 == 0); in.unscaled = (uint8_t)(rand()%3 == 0);
       in.mix_before = rand()%3 == 0 ? 1 : (float)rand()/(float)RAND_MAX; in.mix_after = rand()%3 == 0 ? 1 : (float)rand()/(float)RAND_MAX;
-      float gain = -1; const bool ok = tfp_steady_gain(&in, &gain); const uint32_t why = tfp_reload_share(in.blend, in.ability, in.bit, in.mix_before, in.mix_after, &r);
+      float gain = -1; const bool ok = tfp_steady_gain(&in, &gain); const uint32_t why = tfp_reload_share(in.blend, in.ability, in.bit, in.unscaled, in.mix_before, in.mix_after, &r);
       CHECK(ok == (why != TFP_RELOAD_SCALED && why != TFP_RELOAD_RANGE));
       if (ok) CHECK(near(r, 1-gain, 1e-7));
+      if (why == TFP_RELOAD_SCALED) { /* the share is the one the frame would have unscaled */
+        TfpSteadyInput u = in; u.unscaled = 1; float g = -1; CHECK(tfp_steady_gain(&u, &g) && near(r, 1-g, 1e-7));
+      }
     }
   }
   /* ---- made-up reloads through the evaluator ---- */
@@ -239,7 +356,7 @@ int main(int argc, char **argv) {
      * the hold (share 0, as full aim) the game's own slide, the whole of v - C. */
     const float V[2] = {.233f, .313f}, C[2] = {0, -.0107f};
     for (int wpn = 0; wpn < 2; ++wpn) for (int hip = 1; hip >= 0; --hip) {
-      Run r; memset(&r, 0, sizeof r); Eval e = {1, 1, 0};
+      Run r; memset(&r, 0, sizeof r); Eval e = {1, 1, 0, 0, 1};
       for (int i = 0; i < second; ++i) mod_frame(&r, &e, V[wpn], C[wpn], dt, (float)hip, 0, 1);
       const float rest = r.eye_last;
       CHECK(r.delta_most == 0 && r.ended == 0);
@@ -260,7 +377,7 @@ int main(int argc, char **argv) {
     /* 2. Cancelled half way: +0x8f clears with the weight at about 0.5, the game starting its weight again (a step of its
      * own: 0.5 (v-C) in one frame) or turning the blend round. Held, either way: no step. */
     for (int turn = 0; turn < 2; ++turn) {
-      Run r; memset(&r, 0, sizeof r); Eval e = {1, 1, 0};
+      Run r; memset(&r, 0, sizeof r); Eval e = {1, 1, 0, 0, 1};
       for (int i = 0; i < second/2; ++i) mod_frame(&r, &e, .233f, 0, dt, 1, 0, 1);
       eval_edge(&e, 1, false);
       while (e.w < .45f) mod_frame(&r, &e, .233f, 0, dt, 1, 0, 1);
@@ -272,7 +389,7 @@ int main(int argc, char **argv) {
      * stays at the old one's (0.233) to the end of the reload and goes to the new one's over the blend back: never
      * further than a frame's share of the difference in a frame, never past either. */
     {
-      Run r; memset(&r, 0, sizeof r); Eval e = {1, 1, 0};
+      Run r; memset(&r, 0, sizeof r); Eval e = {1, 1, 0, 0, 1};
       for (int i = 0; i < second/2; ++i) mod_frame(&r, &e, .233f, 0, dt, 1, 0, 1);
       eval_edge(&e, 1, false);
       for (int i = 0; i < second; ++i) mod_frame(&r, &e, .233f, 0, dt, 1, 0, 1);
@@ -286,7 +403,7 @@ int main(int argc, char **argv) {
     }
     /* 4. The hip share eased in the reload (an aim begun in it): the hold eased with it, the eye between the two */
     {
-      Run r; memset(&r, 0, sizeof r); Eval e = {1, 1, 0};
+      Run r; memset(&r, 0, sizeof r); Eval e = {1, 1, 0, 0, 1};
       for (int i = 0; i < second/2; ++i) mod_frame(&r, &e, .233f, 0, dt, 1, 0, 1);
       eval_edge(&e, 1, false);
       for (int i = 0; i < second; ++i) mod_frame(&r, &e, .233f, 0, dt, 1, 0, 1);
@@ -294,7 +411,7 @@ int main(int argc, char **argv) {
     }
     /* 5. The held depth adds 0.02 m to node 5 at rest: held with it, so the eye stays where the two put it */
     {
-      Run r; memset(&r, 0, sizeof r); Eval e = {1, 1, 0};
+      Run r; memset(&r, 0, sizeof r); Eval e = {1, 1, 0, 0, 1};
       for (int i = 0; i < second/2; ++i) mod_frame(&r, &e, .233f, 0, dt, 1, .02f, 1);
       eval_edge(&e, 1, false);
       for (int i = 0; i < 2*second; ++i) mod_frame(&r, &e, .233f, 0, dt, 1, .02f, 1);
@@ -319,9 +436,9 @@ int main(int argc, char **argv) {
     CHECK(tfp_reload_frame(&h, &in, 2, &delta, &end) == TFP_RELOAD_NO_CODE && delta == 0);
     in.constant_known = true; in.on = false;
     CHECK(tfp_reload_frame(&h, &in, 2, &delta, &end) == TFP_RELOAD_OFF && delta == 0);
-    in.on = true; in.mix_before = .5f; in.bit = 1;
+    in.on = true; in.mix_before = .5f; in.bit = 1; in.argument = NAN; /* round 40: a scaled frame is held unless nothing can be worked out */
     CHECK(tfp_reload_frame(&h, &in, 2, &delta, &end) == TFP_RELOAD_SCALED && delta == 0);
-    in.bit = 0; in.mix_before = in.mix_after = 1;
+    in.argument = .233f; in.bit = 0; in.mix_before = in.mix_after = 1;
     CHECK(tfp_reload_frame(&h, &in, 2, &delta, &end) == TFP_RELOAD_ADDED && near(delta, .233, 1e-7)); /* held where a frame of it comes */
     in.ability = 0; CHECK(tfp_reload_frame(&h, &in, 2, &delta, &end) == TFP_RELOAD_NONE && end.ended && end.missed == 3 && end.frames == 4);
     tfp_reload_line(&end, line, sizeof line);
@@ -346,6 +463,97 @@ int main(int argc, char **argv) {
       in.blend = (uint8_t)(rand() & 1); in.ability = 0; in.mix_before = in.mix_after = 1; in.argument = (float)rand()/(float)RAND_MAX;
       in.constant_known = true; in.share = 1; in.on = true; in.added = .01f;
       CHECK(tfp_reload_frame(&h, &in, 3, &delta, &end) == TFP_RELOAD_NONE && delta == 0 && !end.ended);
+    }
+  }
+  /* ---- round 40: the edges the game scales by main row +0x11ac. The evaluator with the avatar's bit set through the
+   * reload: in every frame with the weight under 1 the rig's vector is s v' + C. s at several values, read as the
+   * game has it or not read; the hip and full aim; the Liberator and a longer vector with a C that is not zero. ---- */
+  printf("  round 40, made up: edges scaled by main row +0x11ac (the eye's place at the hip, least to most, against its rest)\n");
+  {
+    static const float SCALES[8] = {0, .0034f, .02f, .1f, .2895f, .5f, 1, 1.25f};
+    for (int k = 0; k < 4; ++k) for (int si = 0; si < 8; ++si) for (int read = 1; read >= 0; --read) {
+      const float dt = DT[k], scale = SCALES[si]; const int second = (int)(1000.0f/dt);
+      const float V[2] = {.233f, .313f}, C[2] = {0, -.0107f};
+      int edge_frames = 0; { float w = 0; while (w < 1) { w += dt/75.0f; ++edge_frames; } } /* frames of one edge with the weight under 1 at their start */
+      for (int wpn = 0; wpn < 2; ++wpn) for (int hip = 1; hip >= 0; --hip) {
+        Run r; memset(&r, 0, sizeof r); r.no_read = !read; Eval e = {1, 1, 0, 0, scale};
+        for (int i = 0; i < second; ++i) mod_frame(&r, &e, V[wpn], C[wpn], dt, (float)hip, 0, 1);
+        const float rest = r.eye_last;
+        eval_edge(&e, 1, false); e.bit = 1;
+        for (int i = 0; i < 3*second; ++i) mod_frame(&r, &e, V[wpn], C[wpn], dt, (float)hip, 0, 1);
+        eval_edge(&e, 0, false);
+        for (int i = 0; i < second; ++i) mod_frame(&r, &e, V[wpn], C[wpn], dt, (float)hip, 0, 1);
+        const bool offset = !read || scale < TFP_RELOAD_SCALE_LEAST;
+        CHECK(r.ended == 1 && r.refused == 0 && r.end.missed == 0 && (int)r.end.scaled == 2*edge_frames); /* every frame of both edges, the blend back's last (r = 0) included */
+        if (hip) {
+          if (r.step_most > 2e-6f || !near(r.eye_least, rest, 2e-6) || !near(r.eye_most, rest, 2e-6))
+            printf("    %4.1f ms s %.4f %s v %.3f: step %.7f place %.7f to %.7f rest %.7f\n", (double)dt, (double)scale, read ? "read" : "not read", (double)V[wpn],
+                   (double)r.step_most, (double)r.eye_least, (double)r.eye_most, (double)rest);
+          CHECK(r.step_most < 2e-6f && near(r.eye_least, rest, 2e-6) && near(r.eye_most, rest, 2e-6)); /* held, edges and all */
+          CHECK((int)r.end.by_offset == (offset ? 2*edge_frames : 0));
+        } else CHECK(r.delta_most == 0 && r.end.most == 0); /* full aim: the game's own reload, its scaling with it */
+      }
+    }
+    /* A weapon swapped in the reload (the rig's vector 0.31 under C from then on), the end scaled. With s read: the eye
+     * eases from the old vector to the new over the blend back, as unscaled; s not read or 0: it stays on the old one
+     * through the scaled frames and steps to the new at the first frame after them, by the difference and no more. */
+    for (int k = 0; k < 4; ++k) for (int si = 0; si < 3; ++si) {
+      const float dt = DT[k], scale = si == 0 ? .2895f : si == 1 ? 0 : .5f; const int second = (int)(1000.0f/dt);
+      Run r; memset(&r, 0, sizeof r); r.no_read = si == 2; Eval e = {1, 1, 0, 0, scale};
+      for (int i = 0; i < second/2; ++i) mod_frame(&r, &e, .233f, 0, dt, 1, 0, 1);
+      eval_edge(&e, 1, false); e.bit = 1;
+      for (int i = 0; i < second; ++i) mod_frame(&r, &e, .233f, 0, dt, 1, 0, 1);
+      for (int i = 0; i < second; ++i) mod_frame(&r, &e, .31f, 0, dt, 1, 0, 1);
+      eval_edge(&e, 0, false);
+      for (int i = 0; i < second; ++i) mod_frame(&r, &e, .31f, 0, dt, 1, 0, 1);
+      const float share = dt/75.0f > 1 ? 1 : dt/75.0f;
+      CHECK(near(r.eye_last, .31, 1e-6) && r.eye_least >= .233f-1e-6f && r.eye_most <= .31f+1e-6f);
+      if (si == 0) CHECK(r.step_most <= (.31f-.233f)*share+1e-6f && r.end.by_offset == 0);
+      else CHECK(near(r.step_most, .31-.233, 1e-6) && r.end.by_offset == r.end.scaled);
+    }
+    /* A read s that is not the game's: within (1-r) 0.3 m of the hold's own it is used (the eye then off by what the
+     * two disagree), further it is refused and the offset holds the eye. The game's s 0.2895: read 0.02 (the frame's
+     * vector 14 times its size: refused), read 0.5 (used). */
+    for (int si = 0; si < 2; ++si) {
+      const float dt = 16.7f; const int second = 60;
+      Run r; memset(&r, 0, sizeof r); r.read_scale = si == 0 ? .02f : .5f; Eval e = {1, 1, 0, 0, .2895f};
+      for (int i = 0; i < second; ++i) mod_frame(&r, &e, .233f, 0, dt, 1, 0, 1);
+      eval_edge(&e, 1, false); e.bit = 1;
+      for (int i = 0; i < second; ++i) mod_frame(&r, &e, .233f, 0, dt, 1, 0, 1);
+      eval_edge(&e, 0, false);
+      for (int i = 0; i < second; ++i) mod_frame(&r, &e, .233f, 0, dt, 1, 0, 1);
+      if (si == 0) CHECK(r.step_most < 1e-6f && r.end.by_offset > 0 && r.end.scaled > 0); /* (the settled frames' C alone fits any s) */
+      else { CHECK(r.end.by_offset == 0 && r.eye_least >= .233f-(1-.2895f/.5f)*.233f-1e-6f && r.eye_most <= .233f+1e-6f);
+             printf("    a read s 0.5 where the game's is 0.2895: the eye %.4f to %.4f m (rest 0.233; the game's own 0.0000 to 0.233)\n", (double)r.eye_least, (double)r.eye_most); }
+    }
+    /* What cannot be held in a scaled frame: a new lease begun in a reload, with s not read (nothing of the rig's own
+     * vector is known); a value that is no number. Counted, and the line says so. */
+    {
+      TfpReloadHold h; memset(&h, 0, sizeof h); TfpReloadInput in; memset(&in, 0, sizeof in); float delta = 7; TfpReloadEnd end;
+      in.blend = 1; in.ability = 1; in.bit = 1; in.mix_before = .4f; in.mix_after = .6f; in.argument = .02f; in.constant_known = true; in.share = 1; in.on = true;
+      CHECK(tfp_reload_frame(&h, &in, 9, &delta, &end) == TFP_RELOAD_NO_HELD && delta == 0);
+      in.ability = 0; in.mix_before = .4f; in.mix_after = 1; /* r = 0, scaled: the scaled space alone, s not read: nothing */
+      CHECK(tfp_reload_frame(&h, &in, 9, &delta, &end) == TFP_RELOAD_SCALED && delta == 0);
+      in.scale_known = true; in.scale = .25f; in.argument = .05f; /* read: the frame's own vector 0.2, the eye put there */
+      CHECK(tfp_reload_frame(&h, &in, 9, &delta, &end) == TFP_RELOAD_ADDED && near(delta, .15, 1e-7));
+      in.bit = 0; in.mix_before = in.mix_after = 1;
+      CHECK(tfp_reload_frame(&h, &in, 9, &delta, &end) == TFP_RELOAD_NONE && end.ended && end.frames == 3 && end.missed == 2 && end.scaled == 1 && end.by_offset == 0);
+      char line[240]; tfp_reload_line(&end, line, sizeof line);
+      CHECK(!strcmp(line, "Reload: eye held through the reload (would have slid 0.150 m), but not in 2 of its 3 frames: the game scaled the rig by main row +0x11ac; 1 frames the game scaled by main row +0x11ac held, 0 of them by the eye's offset"));
+      end.missed = 0; end.would = .202f; end.scaled = 5; end.by_offset = 2; tfp_reload_line(&end, line, sizeof line);
+      CHECK(!strcmp(line, "Reload: eye held through the reload (would have slid 0.202 m); 5 frames the game scaled by main row +0x11ac held, 2 of them by the eye's offset"));
+    }
+    /* Frames with nothing of C, the game not scaling, whatever the bit, [rsp+0x45], the read scale: nothing added, to
+     * the bit (the scale is not even looked at). */
+    {
+      TfpReloadHold h; memset(&h, 0, sizeof h); srand(40);
+      for (int i = 0; i < 5000; ++i) {
+        TfpReloadInput in; memset(&in, 0, sizeof in); float delta = 7; TfpReloadEnd end;
+        in.blend = (uint8_t)(rand() & 1); in.ability = 0; in.bit = (uint8_t)(rand() & 1); in.unscaled = (uint8_t)(rand() & 1);
+        in.mix_before = in.mix_after = 1; in.argument = (float)rand()/(float)RAND_MAX; in.scale = (float)rand()/(float)RAND_MAX; in.scale_known = rand() & 1;
+        in.constant_known = true; in.share = 1; in.on = true; in.added = .01f;
+        CHECK(tfp_reload_frame(&h, &in, 3, &delta, &end) == TFP_RELOAD_NONE && delta == 0 && !end.ended);
+      }
     }
   }
   /* ---- the replay of the user's reload (0.6.0-feel.56, 2026-11-25 18:47:03 to 18:47:07) ---- */
@@ -378,6 +586,40 @@ int main(int argc, char **argv) {
       CHECK(step_most <= .01 && unmoved_same && moved_rows > 10);
     }
   } else printf("  replay: no log given\n");
+  /* ---- round 40: the replay of the harness's feel.58 reload (23:05:31 to 23:05:34), its scaled edges ---- */
+  if (argc > 2) {
+    Row *rows = NULL; char **text = NULL; int lines = 0; const int n = read_rows(argv[2], &rows, &text, &lines);
+    CHECK(n > 40);
+    for (int mode = 1; mode >= 0 && n > 40; --mode) {
+      double delta[512], checked = 0, scales[2] = {0, 0};
+      const int scaled = replay_edges(rows, n, text, lines, mode == 1, delta, &checked, scales);
+      CHECK(scaled == 5); /* 3 at the start, 2 at the end: the "Reload:" line's 5 of 70 */
+      if (scaled <= 0) break;
+      const double rest = level_forward(&rows[0], rows[0].eye);
+      double least = 1, most = -1, main_least = 1, main_most = -1, step_most = 0, own_most = 0; int moved_rows = 0;
+      for (int k = 0; k < n; ++k) {
+        double eye[3]; moved(&rows[k], delta[k], eye);
+        const double f = level_forward(&rows[k], eye), f0 = level_forward(&rows[k], rows[k].eye);
+        least = fmin(least, f); most = fmax(most, f); main_least = fmin(main_least, f0); main_most = fmax(main_most, f0);
+        moved_rows += delta[k] != 0;
+        if (k && rows[k].tick-rows[k-1].tick <= 80) {
+          double prior[3], step = 0; moved(&rows[k-1], delta[k-1], prior);
+          for (int i = 0; i < 3; ++i) step += (eye[i]-prior[i])*(eye[i]-prior[i]);
+          step_most = fmax(step_most, sqrt(step));
+          /* the game's own motion: a step between two frames neither of which was scaled nor next to one */
+          bool near_scaled = false;
+          for (int j = k-2; j <= k+1; ++j) if (j >= 0 && j < n && delta[j] != 0) near_scaled = true;
+          if (!near_scaled) { double own = 0; for (int i = 0; i < 3; ++i) own += (rows[k].eye[i]-rows[k-1].eye[i])*(rows[k].eye[i]-rows[k-1].eye[i]); own_most = fmax(own_most, sqrt(own)); }
+        }
+      }
+      printf("  replay of %s, s %s (%.4f at the start, %.4f at the end): %d traced frames, %d moved (the scaled ones);\n"
+             "    the root's place along the view moved %.5f m across an edge; the eye's offset from the root along the level view as written %.3f to %.3f m (rest %.3f), held %.3f to %.3f m; the largest step %.4f m (the game's own motion away from the edges: up to %.4f m)\n",
+             argv[2], mode ? "read" : "not read", scales[0], scales[1], n, moved_rows, checked, main_least, main_most, rest, least, most, step_most, own_most);
+      CHECK(checked < .01);                                 /* the view turned little across the edges */
+      CHECK(main_most-main_least > .15 && moved_rows == 5); /* the slide as the harness saw it, and only the scaled frames move */
+      CHECK(least >= rest-.005 && most <= rest+.03 && step_most <= fmax(.01, own_most)); /* held: within the game's own motion after it (0.023 m) */
+    }
+  }
   printf("Reload hold: %d checks, %d failed\n", checks, failed);
   return failed ? 1 : 0;
 }
