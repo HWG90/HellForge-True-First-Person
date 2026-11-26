@@ -36,6 +36,13 @@ The camera style the run was in (Bodycam or Stable) is read from the log's own "
 the top, where it changes, and in the summary; each phase's result carries it. It is never taken from an argument or a
 file name: the two feel.49 soaks of 2026-11-24 were named the wrong way round.
 
+Round 44: the throw phases (THROWS: grenade, grenade-held, stratagem-menu) also fail where a head-camera frame of a
+body on foot showed the eye less than FRONT_M in front of the head node along the level view (behind_head): the
+feel.58 matrix's "grenade" passed while every throw's held eye stood 0.18 to 0.31 m behind the head (the cape and
+the back in view), because the veil's frames were left out of the step judge and the eye was never measured against
+the head. A build from round 44 on writes the head on every head-camera row (head_shown=); on an older log the head is
+taken where the leave's veiled row put it (veil_head=), carried in the body root's frame (estimated).
+
 Round 39: the reload phases (RELOADS) are judged on the traced eye only (a phase with no Trace rows fails), and also
 fail on a slide: the eye's offset from the body root along the level view changing by more than SLIDE_M within
 SLIDE_MS while the root stays within ROOT_STILL_M (reload_slide). The feel.44 matrix's "reload" passed while every
@@ -115,6 +122,9 @@ RELOADS = {"reload", "pistol-reload"}
 SLIDE_M = 0.05      # the eye's offset from the root along the level view may change by this much ...
 SLIDE_MS = 500.0    # ... within this (a reload's edge is 75 ms; the user's slowest, R2, 0.4 s) ...
 ROOT_STILL_M = 0.02 # ... where the root moved less than this in the same time
+# Round 44: phases judged on the eye against the head node too (behind_head).
+THROWS = {"grenade", "grenade-held", "stratagem-menu"}
+FRONT_M = 0.05      # the least in front of the head node an eye shown on foot may be, along the level view
 LOCK = re.compile(r"Lock: \+(\d+) frames held \(\+(\d+) in another camera, kind now (\d+)\), \+(\d+) missed \(kind (\d+), helper error (\d+)\), largest kick ([\d.]+)")
 CUT = re.compile(r"Cut: largest camera jump ([\d.]+) m")
 MASK = re.compile(r" (?:Hold|Return|Drop|Wait): .*?\bmask=([0-9a-fA-F]+)")
@@ -389,7 +399,74 @@ def reload_slide(rows):
     return best, where
 
 
-def judge(lines, toggles=False, reload=False):
+_ROW = re.compile(r"^(\d+):(\d+):(\d+)\.(\d+) Trace: .*? kind=(\d+) eye_world=\(([-\d. ]+)\).*? source=(\w+) root=\(([-\d. ]+)\) axes=\(([-\d. ]+)\)")
+_TICK = re.compile(r" tick=([\d.]+)")
+_OFF_FOOT = re.compile(r" off_foot=(\d)")
+_VIEW = re.compile(r" view=\(([-\d. ]+)\)")
+_VEIL = re.compile(r" veil=\(([-\d. ]+)\)")
+_VEIL_HEAD = re.compile(r" veil_head=\((-?[\d.]+) (-?[\d.]+)\)")
+_HEAD_SHOWN = re.compile(r" head_shown=\((-?[\d.]+) (-?[\d.]+)\)")
+
+
+def behind_head(lines):
+    """Round 44: every head-camera frame (kind 4, source head) of a body on foot (off_foot=0) measured against the head
+    node: how far the eye shown (eye_world + veil) was in front of it along the level view. head_shown= says it for
+    the frame; without it the head is where the last veiled row (veil_head=, the head from the eye before the veil) put
+    it, carried in the body root's frame until the next native frame (estimated); a frame with neither is not measured.
+    Rows are taken once each, in the order of their tick. Returns {frames, measured, estimated, behind, least_m,
+    least_at}: behind, the frames under FRONT_M; least_m, the least in front (None where nothing was measured)."""
+    rows, seen = [], set()
+    for line in lines:
+        m = _ROW.match(line)
+        tick = _TICK.search(line)
+        if not m or not tick or tick[1] in seen:
+            continue
+        seen.add(tick[1])
+        nums = lambda text: [float(x) for x in text.split()]
+        off, view, veil = _OFF_FOOT.search(line), _VIEW.search(line), _VEIL.search(line)
+        vh, hs = _VEIL_HEAD.search(line), _HEAD_SHOWN.search(line)
+        rows.append({"tick": float(tick[1]), "at": line[:12], "kind": int(m[5]), "head": m[7] == "head", "eye": nums(m[6]), "root": nums(m[8]),
+                     "axes": nums(m[9]), "off_foot": int(off[1]) if off else 0, "view": nums(view[1]) if view else None,
+                     "veil": nums(veil[1]) if veil else [0.0, 0.0, 0.0], "veil_head": (float(vh[1]), float(vh[2])) if vh else None,
+                     "head_shown": (float(hs[1]), float(hs[2])) if hs else None})
+    rows.sort(key=lambda r: r["tick"])
+    out = {"frames": 0, "measured": 0, "estimated": 0, "behind": 0, "least_m": None, "least_at": None}
+    local = None   # the head in the root's frame, from the last veiled row
+    for r in rows:
+        if r["kind"] != 4 or not r["head"]:
+            local = None
+            continue
+        if r["off_foot"] or not r["view"] or len(r["axes"]) != 9:
+            continue
+        n = (r["view"][0] ** 2 + r["view"][1] ** 2) ** 0.5
+        if n < 1e-3:
+            continue
+        h = (r["view"][0] / n, r["view"][1] / n)
+        shown = [e + v for e, v in zip(r["eye"], r["veil"])]
+        out["frames"] += 1
+        a = r["axes"]
+        if r["veil_head"] is not None:
+            ahead, up = r["veil_head"]
+            head = [r["eye"][0] + h[0] * ahead, r["eye"][1] + h[1] * ahead, r["eye"][2] + up]
+            d = _sub(head, r["root"])
+            local = [sum(d[c] * a[k * 3 + c] for c in range(3)) for k in range(3)]
+        if r["head_shown"] is not None:
+            front = -r["head_shown"][0]
+        elif local is not None:
+            head = [r["root"][c] + sum(local[k] * a[k * 3 + c] for k in range(3)) for c in range(3)]
+            front = (shown[0] - head[0]) * h[0] + (shown[1] - head[1]) * h[1]
+            out["estimated"] += r["veil_head"] is None   # the veiled row's own head is the row's
+        else:
+            continue
+        out["measured"] += 1
+        if front < FRONT_M:
+            out["behind"] += 1
+        if out["least_m"] is None or front < out["least_m"]:
+            out["least_m"], out["least_at"] = front, r["at"]
+    return out
+
+
+def judge(lines, toggles=False, reload=False, throw=False):
     held = other = missed = 0
     masks = set()
     kick = jump = 0.0
@@ -434,6 +511,16 @@ def judge(lines, toggles=False, reload=False):
         elif slide > SLIDE_M:
             ok = False
             first.append(f"the eye slid {slide:.3f} m along the view with the root still (to {slide_row['at']}): a reload's step, summed over its frames")
+    if throw:   # round 44: the eye against the head node in the head camera
+        head = behind_head(lines)
+        extra.update({"head_measured": head["measured"], "head_estimated": head["estimated"], "behind_frames": head["behind"],
+                      "front_least_m": head["least_m"], "front_least_at": head["least_at"]})
+        if head["behind"]:
+            ok = False
+            first.append(f"the eye was less than {FRONT_M:.2f} m in front of the head in {head['behind']} of {head['measured']} head-camera frames on foot"
+                         f" (least {head['least_m']:+.3f} m, {head['least_at']}): the cape and the back in view")
+        elif head["frames"] and not head["measured"]:
+            first.append("the head was not measured in the head camera (no head_shown or veil_head on the rows)")
     return {**extra, "pass": ok, "frames": held, "other_camera_frames": other, "missed": missed, "kinds": sorted(kinds),
             "largest_jump_m": jump, "largest_veil_m": veil_m, "from_trace": traced, "judged": len(found),
             "by_lengths_m": max([0.0] + [f["lengths"] for f in found]), "body_m": max([0.0] + [f["body"] for f in found]),
@@ -528,7 +615,7 @@ def main(argv):
             time.sleep(max(0.0, settle - 1.0) + 1.2)   # the Lock line is written once a second
             with open(log, errors="replace") as handle:
                 handle.seek(start); lines = handle.read().splitlines()
-            results[name] = judge_aim(name, aimed, lines, judge(lines, name.startswith('toggle'), reload=name in RELOADS))
+            results[name] = judge_aim(name, aimed, lines, judge(lines, name.startswith('toggle'), reload=name in RELOADS, throw=name in THROWS))
             r = results[name]
             for text in style_changes(lines):
                 print(text)
