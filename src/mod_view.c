@@ -1467,6 +1467,7 @@ static bool guard_panel(void *u) {
 #endif
 }
 static void guard_say(void *u, const char *line) { (void)u; say("Keys: %s", line); }
+static void guard_say_line(void *u, const char *line) { (void)u; say("%s", line); }
 static bool guard_edge(void *u, int key, bool down) {
   (void)u;
 #ifdef TFP_FEEL
@@ -1479,6 +1480,27 @@ static bool guard_edge(void *u, int key, bool down) {
 #endif
 }
 static const TfpKeyGuardIo guard_io = {NULL, guard_key, guard_edge, guard_keyboard, guard_chat, guard_overlay, guard_panel, guard_say};
+/* Round 41: F11 (the old toggle key, HellForge's Armor LUT editor now) pressed in the game gets one notice naming the
+ * toggle key (src/f11_hint.h): the host's HUD, the chat/overlay/panel answers of the guard above, F11 only read. */
+#include "f11_hint.h"
+static TfpF11Hint f11_hint;
+static TfpF11HintHud f11_hud;
+static bool f11_show(void *u, const char *notice, char *why, size_t why_size) {
+  (void)u;
+  HMODULE host = GetModuleHandleA(OV_HOST_DLL);
+  OvApiFn get = host ? (OvApiFn)(void *)GetProcAddress(host, "ov_api") : NULL;
+  return tfp_f11_hint_hud_show(&f11_hud, get ? get(3) : NULL, "goose.true-first-person/f11-notice", notice, why, why_size);
+}
+static void f11_hint_tick(int toggle_key, bool focused) {
+  static const TfpF11HintIo io = {NULL, guard_key, guard_chat, guard_overlay, guard_panel, guard_say_line, f11_show};
+  char name[16] = "";
+#ifdef TFP_FEEL
+  if (toggle_key) tfp_wire_menu_key_name(toggle_key, name);
+#else
+  if (toggle_key >= 'A' && toggle_key <= 'Z') snprintf(name, sizeof name, "%c", toggle_key);
+#endif
+  tfp_f11_hint_tick(&f11_hint, &io, GetTickCount64(), toggle_key, name, stage == RUNNING, focused);
+}
 static void guard_resolve(void) {
   const uint64_t now = GetTickCount64();
   if (chat_layout.resolved || now < chat_next_try || !tfp_win_game()) return;
@@ -1532,6 +1554,7 @@ static void tick_body(void) {
   if (toggle_key && focused) guard_resolve();
   /* round 36b/36c: the press, refused while text is typed (src/key_guard.h tfp_key_guard_toggle) */
   const bool pressed = tfp_key_guard_toggle(&key_guard, &guard_io, GetTickCount64(), toggle_key, focused, !chat_layout.resolved);
+  f11_hint_tick(toggle_key, focused); /* round 41: F11 pressed in the game, one notice naming the toggle key */
   if (stage == WAIT_PINS) {
     uint64_t now = GetTickCount64();
     if (pressed) say("Refused: the toggle key before the game's code pages could be read; try again once a mission or the ship is loaded");
