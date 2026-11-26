@@ -871,10 +871,10 @@ static bool steady_frame(Policy *p, const DepthObservation *observation, uint64_
       TfpReloadInput r; memset(&r, 0, sizeof r);
       r.blend = in.blend; r.ability = in.ability; r.bit = in.bit; r.unscaled = in.unscaled; r.mix_before = in.mix_before; r.mix_after = in.mix_after;
       r.argument = argument; r.constant = reload_forward; r.constant_known = reload_known; r.added = reason == TFP_STEADY_WORKED ? *delta : 0;
-      r.share = p->weight; r.on = reason == TFP_STEADY_WORKED || reason == TFP_STEADY_SCALED;
       float r_share = 0;
       const bool scaled = reason == TFP_STEADY_SCALED
           && tfp_reload_share(r.blend, r.ability, r.bit, r.unscaled, r.mix_before, r.mix_after, &r_share) == TFP_RELOAD_SCALED;
+      r.share = p->weight; r.on = reason == TFP_STEADY_WORKED || scaled; /* a frame held is a frame whose number goes out */
       if (scaled) {
         float unscaled_term = 0;
         if (carried) unscaled_term = *delta;
