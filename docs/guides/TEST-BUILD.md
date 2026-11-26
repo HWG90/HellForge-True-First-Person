@@ -1,4 +1,4 @@
-# True First Person for HellForge: test build 0.6.0-feel.56
+# True First Person for HellForge: test build 0.6.0-feel.59
 
 For HellForge 0.4 and 0.5 on game build 25480438. This is a test build: it works, it is not finished, and I want to
 hear what breaks.
@@ -51,6 +51,33 @@ To get the old behaviour back: choose **Bodycam**. Your slider values are still 
 
 Tested in the game: ten actions in each style (Stable: no kick at all; Bodycam: 2.4 to 5.8 degrees); I have not played it yet.
 
+## Changed and fixed in 0.6.0-feel.59
+
+Everything since 0.6.0-feel.56. This is a test build: it has passed my tests, but the items marked *not played yet*
+have not been played in the game, and the grip and reload changes have only run in my automated game tests.
+
+- **Exosuit: first person stays on.** *Not played yet.*
+  - The camera sits at your helmet and turns with the mech.
+  - Your diver is hidden while you are seated.
+  - Getting in and out glides.
+  - New option **See through the exosuit cockpit** (on by default) hides the mech's body from your own view. The
+    console and sticks go with it, because they are one model with the hull. Other players still see your mech.
+- **Reloads at the hip:** the view no longer slides back and forward, so the gun no longer looks like it jumps forward
+  and back. A few frames at the very start and end of a reload can still slide a little; a fix is coming.
+- **Support hand:** it now takes a fitted foregrip much more readily (0.6.0-feel.56 almost never took the
+  Liberator's).
+- **Pressing F11** now shows a one-time note that first person is on U (F11 is HellForge's Armor LUT editor).
+  *Not played yet.*
+
+**Known issues in this build:**
+- On HellForge 0.5 the support hand may still be drawn in the game's own pose, even though the mod places it on the
+  grip. A fix is in progress.
+- In an exosuit, belt gear such as the sample holder can still show. A fix is in progress.
+- At a grenade or item throw the camera can fall behind your head for a moment, so your back and cape show. A fix is
+  in progress.
+- Small camera jumps in dives (about 7 cm).
+- Scope of Authority 2.27.13 can crash HellForge 0.5 at the title screen. That is not this mod.
+
 ## Changed and fixed in 0.6.0-feel.56
 
 Everything since 0.6.0-feel.52. This is a test build: I have played 0.6.0-feel.55 on HellForge 0.5; this build as a
@@ -72,8 +99,7 @@ whole, and the items marked *not played yet*, have passed my tests but have not 
   `memo_off.txt` beside the DLL switches it off; `memo_on.txt` is no longer needed and changes nothing.
 
 **Known issues in this build:**
-- In an exosuit the first-person view is still wrong: your diver's own arm and helmet fill the cockpit. A fix is in
-  progress.
+- In an exosuit the first-person view was still wrong (fixed in 0.6.0-feel.59).
 - Scope of Authority 2.27.13 can crash HellForge 0.5 at the title screen. That is not this mod.
 - From 0.6.0-feel.52, still open: a swap in the middle of a dive can push the view forward for a frame or two; in
   Stable, after a swap on a slope the view can trail for half a second; backpack pick-ups can drift the view briefly;
