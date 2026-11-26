@@ -1041,7 +1041,8 @@ static void gear_report(TfpHead *h) {
     } else snprintf(resource, sizeof resource, "not read");
     snprintf(line, sizeof line, "FPV head visibility: seat gear: unit %d/%d %#llx (depth %d) under %#llx at node %s, resource %s, %u meshes, "
              "%.0f rows hidden: %s", i + 1, h->gear_seen_n, (unsigned long long)g->ref, g->depth, (unsigned long long)g->parent_ref, node,
-             resource, g->meshes, per[i], gear_why(g, why, sizeof why));
+             resource, g->meshes, per[i], g->why == GEAR_TAKEN && per[i] == 0 && g->meshes > 0
+             ? "gear, but no rows taken yet (no engine handle for it, or its meshes not read this frame)" : gear_why(g, why, sizeof why));
     h->io->log(h->io->user, line);
   }
   h->gear_reports += 1;
@@ -1408,7 +1409,8 @@ static void retain_steady(TfpHead *h, void *arg) {
   const Observed *observed = h->observed;
   h->steady = NULL;
   if (s->camera_kind != 6 || !s->safe || !s->has_flags || s->flags_len != 24 || !observed || observed->full_body
-      || h->has_model_shadow_error || !h->models || !tfp_model_shadow_has_observation(h->models)) return;
+      || h->has_model_shadow_error || !h->models || !tfp_model_shadow_has_observation(h->models)
+      || observed->seat) return;   /* beyond retail, round 43: a seat is observed whole every frame (its gear walk with it) */
   NMap *shapes = new_nmap(h);
   for (size_t i = 0; i < observed->refs->n; i++) {
     const Spec *spec = (const Spec *)observed->refs->e[i].obj;

@@ -730,6 +730,17 @@ static bool gear_cases(void) {
   SCHECK(r.hidden_gear == 0 && r.hidden == r0.hidden && same_masks(diver, n));
   for (size_t i = 0; i < 4; i++) SCHECK(unit_masks(gear[i], 255));
 
+  /* 6b. A unit with no engine handle (not in World.units): left drawn and said so; the rest stays hidden. */
+  seat_on = true;
+  FakeUnit loose = fake_unit(5, body, 1);
+  vf.unit_count--;
+  hang(body, loose.object, 40);
+  SCHECK(seat_step_why("Vtick=103910 !update", &why) && !why.present);
+  tfp_head_result(head, &r);
+  SCHECK(r.phase == TFP_HEAD_ACTIVE && r.hidden_gear == 5 && unit_masks(&loose, 255) && logged("1 meshes, 0 rows hidden: gear, but no rows taken yet"));
+  for (size_t i = 0; i < 4; i++) SCHECK(unit_masks(gear[i], 252));
+  unhang(body, loose.object);
+
   /* 7. Switched off (a stop) in the seat: everything given back, clean. */
   seat_on = true;
   SCHECK(seat_step("Vtick=103920 !update", false));
