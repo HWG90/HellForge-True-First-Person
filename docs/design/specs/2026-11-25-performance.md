@@ -285,6 +285,8 @@ mismatches must stay 0. Its proof: the backend_ops vectors identical, the wire a
 
 ## 6. Round 35: the memo live behind `memo_on.txt`, and on_update in parts
 
+> Since round 40 the memo is on by default and `memo_off.txt` switches it off (section 7). What follows is round 35 as it was.
+
 **Nothing here has run in the game.** Without `memo_on.txt` the mod answers exactly as feel.55 does. The only differences are
 the new `Perf update:` line and a few more clock reads (see "Cost" below). With the file present, a repeated snapshot in one
 frame epoch answers the one already taken.
@@ -470,3 +472,70 @@ If all three hold, the next round makes the memo the default:
   `saved reads` × 0.06 to 0.10 µs. At round 31's figures it is about 7 to 15 µs for each served full hit. If about half of
   12 to 20 calls a tick are hits, that is 40 to 120 µs a tick, but nobody has counted them in a mission.
 - **What the 27 µs (title screen) and the larger in-mission `other` really are,** now named by the Perf update parts.
+
+## 7. Round 40: the memo becomes the default
+
+### The A/B in the game (feel.58, HellForge 0.5)
+
+Three 15-minute harness soaks in Stable, the same scenario, logs in `~/.cache`. Per-tick means over about 850 to 940
+Perf lines each:
+
+| run | log | memo | all snapshot calls | guarded reads per second | Perf `frame` |
+|---|---|---|---|---|---|
+| A | `tfp-soak-50-A.modlog` | off | 58.8 µs | 35263 | 269.5 µs |
+| B | `tfp-soak-51-B.modlog` | on (`memo_on.txt`) | 45.1 µs | 24159 | 246.1 µs |
+| C (Bodycam) | `tfp-soak-52-C.modlog` | off | 58.8 µs | 34859 | 242.5 µs |
+
+- **The snapshot work:** `all snapshot calls` is 23 % lower in B (13.7 µs a tick), and guarded reads 31 % lower.
+- **Served:** about 95 hits a second.
+- **The checks:** no `Memo: off` line in any log; mismatches 0 in every second.
+- **The frame:** B is 23 µs below A, but the two memo-off runs A and C differ by 27 µs. So the `frame` figure is within
+  the run-to-run noise. Pass mark 3's second half (section 6: at least 10 µs beyond the noise of two A runs) was not
+  shown. The decision to make the memo the default was taken on the snapshot figures and the clean checks.
+
+### What changed
+
+- **The switch.** `src/mod_view.c` `start()` reads `memo_off.txt` beside the DLL. Without it the memo is on
+  (`tfp_wire_memo_start`, `src/wire_rt.c`), on the current backend and on every backend made after it. With it nothing
+  calls `tfp_ops_set_memo`, so the backend is round 32's shadow, byte for byte. `memo_on.txt` is still read and changes
+  nothing.
+- **The checks are unchanged.** The first live hit and every 16th after it still take fresh and compare. A mismatch or a
+  moved state turns the memo off for the session, and the wire keeps it off on every later backend.
+- **The lines.**
+  - At start, without the file:
+    `Ready: snapshot memo on: ...; memo_off.txt beside the DLL switches it off`.
+  - With it: `Test: memo_off.txt: the snapshot memo is off; ...`.
+  - Either way, a leftover `memo_on.txt` is named as no longer needed (`src/perf_line.h` `tfp_perf_memo_start_line`).
+  - The `Memo: off for the session` line now ends `(on again at the next start unless memo_off.txt is beside the DLL)`.
+  - The Perf snapshots lines are unchanged. Live is the normal case now; `memo (shadow)` means `memo_off.txt`.
+- **The backend's own default is unchanged.** `tfp_ops_init` leaves the memo off and the wire sets it. So the vectors run
+  as before: once with the memo off, as with `memo_off.txt`, and once with `TFP_OPS_MEMO=1`, as the game runs by
+  default.
+
+### Tests (round 40)
+
+- **`tests/perf_line_test.c`:** the start line's four cases (the default, the default with `memo_on.txt`,
+  `memo_off.txt`, both files; at most 329 bytes). Also the new end of the Memo off line.
+- **`tests/wire_feel_test.c`:**
+  - a new wire has the memo on after the start with no file, and on every new backend;
+  - a failed check keeps it off for the session on the next backend;
+  - with `memo_off.txt` it is off, the backend's counts are untouched, and later backends stay off;
+  - the start does not undo a check that already turned it off.
+- **Round 35's two gaps, closed:**
+  - **The moved switch-off** (`src/backend_ops.c` `taken_body`, `check && (field || moved)`), `tests/backend_ops_test.c`,
+    on 371 first images. Between the stored take and the 17th live hit the frame's game check cache is dropped. The checked
+    take reads the module again: the same answer, the state moved. The memo goes off with `off.moved` and field `state`,
+    and later calls take fresh. The M6 mutant (moved ignored), which survived every test in round 35, now fails.
+  - **The effects' `tfp_ops_memo_wrote` calls** (`src/wire_effects.c` `m_write` and `tfp_fx_memory_copy`),
+    `tests/wire_effects_test.c` 5d. With the memo on, the aim option's copy and the movement byte's write each drop
+    every mode's stored answer, and so does a failed write. A copy refused before the write keeps them. With the memo
+    off a write leaves the shadow's stores. Removing either call fails the test.
+
+### What only the game can show
+
+- The default reaches every player. The first log of the next build must start with the `Ready: snapshot memo on` line,
+  and its Perf snapshots lines must read `memo (live, ...)`.
+- What section 6 listed is still open outside the Stable soak: hip, prone and ADS in a mission, Bodycam with the memo on,
+  and the user's own play. The checks will turn the memo off and log the field if the game changes a snapshot field
+  inside an epoch there.
+- Whether the frame-time saving is real beyond the noise. Doing it needs more A runs, or a longer soak.
