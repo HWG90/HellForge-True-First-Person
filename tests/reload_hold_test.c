@@ -511,6 +511,17 @@ int main(int argc, char **argv) {
       if (si == 0) CHECK(r.step_most <= (.31f-.233f)*share+1e-6f && r.end.by_offset == 0);
       else CHECK(near(r.step_most, .31-.233, 1e-6) && r.end.by_offset == r.end.scaled);
     }
+    /* The held depth adds 0.02 m to node 5 at rest, the edges scaled: held with it (its own term goes in unscaled) */
+    for (int k = 0; k < 4; ++k) for (int si = 0; si < 2; ++si) {
+      const float dt = DT[k]; const int second = (int)(1000.0f/dt);
+      Run r; memset(&r, 0, sizeof r); Eval e = {1, 1, 0, 0, si ? 0 : .2895f};
+      for (int i = 0; i < second/2; ++i) mod_frame(&r, &e, .233f, 0, dt, 1, .02f, 1);
+      eval_edge(&e, 1, false); e.bit = 1;
+      for (int i = 0; i < 2*second; ++i) mod_frame(&r, &e, .233f, 0, dt, 1, .02f, 1);
+      eval_edge(&e, 0, false);
+      for (int i = 0; i < second; ++i) mod_frame(&r, &e, .233f, 0, dt, 1, .02f, 1);
+      CHECK(r.step_most < 1e-6f && near(r.eye_least, .253, 1e-6) && near(r.eye_most, .253, 1e-6) && r.end.missed == 0 && r.end.scaled > 0);
+    }
     /* A read s that is not the game's: within (1-r) 0.3 m of the hold's own it is used (the eye then off by what the
      * two disagree), further it is refused and the offset holds the eye. The game's s 0.2895: read 0.02 (the frame's
      * vector 14 times its size: refused), read 0.5 (used). */
