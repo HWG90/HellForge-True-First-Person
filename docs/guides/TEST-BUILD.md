@@ -66,8 +66,10 @@ whole, and the items marked *not played yet*, have passed my tests but have not 
   - It stays there while you aim and while you walk.
   - While aiming, the hand is now placed on every two-handed gun, so aiming looks a little different. Tell me how it
     feels.
-- **Performance.** The mod's time per frame is 13 to 19 % shorter (0.6.0-feel.54). A test switch, a file
-  `memo_on.txt` beside the DLL, turns on a further saving; it is off by default.
+- **Performance.** The mod's time per frame is 13 to 19 % shorter (0.6.0-feel.54). A further saving, the snapshot
+  memo, was a test switch (`memo_on.txt`) up to 0.6.0-feel.58. After the next build it is on by default: in my
+  15-minute game tests the mod's snapshot work took 23 % less time and read the game's memory 31 % less often. A file
+  `memo_off.txt` beside the DLL switches it off; `memo_on.txt` is no longer needed and changes nothing.
 
 **Known issues in this build:**
 - In an exosuit the first-person view is still wrong: your diver's own arm and helmet fill the cockpit. A fix is in
@@ -456,4 +458,5 @@ Empty files beside the DLL, read when the game starts:
 | `trace_off.txt` | no per-frame `Trace:` lines in the log |
 | `depth_off.txt` | the mod's zoom depth is forced to nothing on every frame: neither the rig nor its root is shifted for the optic (to find out whether that shift is part of the unzoom gate's flipping, `docs/design/specs/2026-11-23-gate-flip.md`) |
 | `mcm_on.txt` | the settings go to DBF-MCM instead of the mod's own panel |
+| `memo_off.txt` | the snapshot memo off (after the next build it is on by default): every snapshot of the game is taken fresh; `memo_on.txt` changes nothing |
 | `head_parts.txt` | one digit: which armour parts are hidden from the camera (1 head, 2 torso, 4 shoulders, added) |
