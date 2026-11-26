@@ -99,6 +99,8 @@ Defaults are the store's defaults (retail's, and the locked view's); on a first 
 | Locked view | Weapon put-away | toggle |  | on | locked_view.json put_away |
 | Locked view | Smooth eye | toggle |  | on | locked_view.json smooth_eye |
 | Locked view | See through the exosuit cockpit | toggle |  | on | locked_view.json see_through_cockpit |
+| Locked view | Cockpit frame | toggle |  | on | locked_view.json cockpit_frame |
+| Locked view | Cockpit frame opacity (%) | slider | 20 to 100, step 5 | 90 | locked_view.json cockpit_frame_opacity |
 
 Notes on the list:
 
