@@ -452,12 +452,12 @@ int main(void) {
   CHECK(tfp_wire_call(&wire, TFP_RT_E_on_disable, NULL, r) == TFP_RT_OK && !logged("Refused"));
   CHECK(!tfp_wire_feel_held(&wire));                          /* and nothing is held afterwards */
 
-  /* ---- round 35: the snapshot memo's switch (memo_on.txt): on this backend and every one made after it, until a check
+  /* ---- round 35: the snapshot memo's switch (tfp_wire_set_memo): on this backend and every one made after it, until a check
    * turns it off for the session; off, the backend is as round 32 left it ---- */
   CHECK(!wire.memo_on && !wire.ops.perf.memo_on && tfp_wire_memo_state(&wire) == TFP_PERF_MEMO_SHADOW);
   {
     const TfpOpsPerf before = wire.ops.perf;
-    tfp_wire_set_memo(&wire, false); /* no memo_on.txt: the backend is not touched */
+    tfp_wire_set_memo(&wire, false); /* memo_off.txt: the backend is not touched */
     CHECK(!memcmp(&before, &wire.ops.perf, sizeof before));
   }
   tfp_wire_set_memo(&wire, true);
@@ -472,7 +472,29 @@ int main(void) {
   CHECK(!wire.ops.perf.memo_live);
   tfp_wire_set_memo(&wire, false);
   CHECK(!wire.ops.perf.memo_on && !wire.ops.perf.memo_live && tfp_wire_memo_state(&wire) == TFP_PERF_MEMO_SHADOW);
+  /* ---- round 40: the start's switch files (src/mod_view.c): the memo on by default, memo_off.txt switches it off,
+   * memo_on.txt changes nothing; a check that turned it off still holds for the session ---- */
+  {
+    static TfpWire fresh;
+    tfp_wire_init(&fresh, &memory, &platform, &helpers);
+    CHECK(!fresh.memo_on && tfp_wire_memo_state(&fresh) == TFP_PERF_MEMO_SHADOW); /* before the start reads the files */
+    CHECK(tfp_wire_memo_start(&fresh, false) && fresh.memo_on && fresh.ops.perf.memo_on && fresh.ops.perf.memo_live &&
+          tfp_wire_memo_state(&fresh) == TFP_PERF_MEMO_LIVE); /* no file: on */
+    CHECK(fresh.host.backend_new(&fresh.host) && fresh.ops.perf.memo_live); /* and on every new backend */
+    fresh.ops.perf.off.has = true, fresh.ops.perf.off.moved = true, fresh.ops.perf.off.field = "state", fresh.ops.perf.memo_live = false;
+    CHECK(tfp_wire_memo_state(&fresh) == TFP_PERF_MEMO_TURNED_OFF); /* a check failed (backend_ops_test: a mismatch, a move) */
+    CHECK(fresh.host.backend_new(&fresh.host) && fresh.ops.perf.memo_on && !fresh.ops.perf.memo_live && fresh.memo_off &&
+          fresh.memo_off_cause.moved && tfp_wire_memo_state(&fresh) == TFP_PERF_MEMO_TURNED_OFF); /* off for the session */
+    tfp_wire_init(&fresh, &memory, &platform, &helpers);
+    const TfpOpsPerf before = fresh.ops.perf;
+    CHECK(!tfp_wire_memo_start(&fresh, true) && !fresh.memo_on && tfp_wire_memo_state(&fresh) == TFP_PERF_MEMO_SHADOW &&
+          !memcmp(&before, &fresh.ops.perf, sizeof before)); /* memo_off.txt: the backend untouched, round 32's shadow */
+    CHECK(fresh.host.backend_new(&fresh.host) && !fresh.ops.perf.memo_on);
+  }
+  CHECK(wire.memo_off && tfp_wire_memo_start(&wire, false) && !wire.ops.perf.memo_live &&
+        tfp_wire_memo_state(&wire) == TFP_PERF_MEMO_TURNED_OFF); /* the session's failed check is not undone */
+  tfp_wire_set_memo(&wire, false);
   printf("wire feel: %u checks passed (all five module binders joined with no game: enable, 90 frames, F11 refused, the placement editor opened and refused, disable, what a live replace finds held; the motion "
-         "binder's shapes and presentation calls; the markers table; the Feel line; the laps and parts; the memo switch)\n", checks);
+         "binder's shapes and presentation calls; the markers table; the Feel line; the laps and parts; the memo switch, on by default)\n", checks);
   return 0;
 }

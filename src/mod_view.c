@@ -922,7 +922,7 @@ static void arms_tick(void) {
       say("%s", line);
     }
     { /* round 32: what the backend did in the second, and the shadow memo (src/backend_ops.h TfpOpsPerf); round 35: the
-       * memo live with memo_on.txt */
+       * memo live (the default since round 40; memo_off.txt: the shadow) */
       static uint64_t told_reads, told_takes[3], told_tables, told_invokes, told_bodies, told_memo[3][3], told_moved;
       static uint64_t told_served[3], told_checked[3], told_saved;
       static bool told_mismatch, told_off;
@@ -1058,14 +1058,21 @@ static void start(void) {
         FILE *panel_file = fopen(parts_path, "r");
         if (panel_file) fclose(panel_file);
         panel_wanted = panel_file != NULL;
-        /* Round 35 (docs/design/specs/2026-11-25-performance.md section 6): the snapshot memo live. Off by default: the memo
-         * then only compares, as in round 32. */
+        /* Round 35 (docs/design/specs/2026-11-25-performance.md section 6): the snapshot memo live. On by default since
+         * round 40 (section 7, the A/B in the game); memo_off.txt switches it off (the memo then only compares, as in round
+         * 32). memo_on.txt is still read and changes nothing. */
+        strcpy(slash + 1, "memo_off.txt");
+        FILE *memo_off_file = fopen(parts_path, "r");
+        if (memo_off_file) fclose(memo_off_file);
         strcpy(slash + 1, "memo_on.txt");
-        FILE *memo_file = fopen(parts_path, "r");
-        if (memo_file) fclose(memo_file);
-        tfp_wire_set_memo(&wire, memo_file != NULL);
-        if (memo_file) say("Test: memo_on.txt: a snapshot asked for again in the same frame epoch answers the one already taken; the first "
-                           "and every 16th such answer is still taken fresh and compared, and a difference turns the memo off for the session");
+        FILE *memo_on_file = fopen(parts_path, "r");
+        if (memo_on_file) fclose(memo_on_file);
+        tfp_wire_memo_start(&wire, memo_off_file != NULL);
+        {
+          char memo_line[512];
+          tfp_perf_memo_start_line(memo_line, sizeof memo_line, memo_off_file != NULL, memo_on_file != NULL);
+          say("%s", memo_line);
+        }
 #ifdef TFP_FEEL
         static const char *const arm_files[] = {"arms_live_keep.txt", "arms_live_restore.txt", "arm_bend.txt", "rest_trace.txt", "grip_off.txt"};
         bool *const arm_switches[] = {&arms_keep, &arms_restore, &arms_bend, &arms_rest_trace, &grip_off};
