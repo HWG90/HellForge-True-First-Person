@@ -1214,6 +1214,14 @@ static bool held_off_foot(const TfpOpsSnapshot *ops) {
   const uint32_t body = held_body ? held_body() : 0, seated = seat_body ? seat_body() : 0;
   return ops && ((body && ops->body == body) || (seated && ops->body == seated));
 }
+/* Round 44: TfpHeadIo.eye_held. */
+static uint32_t (*eye_held_body)(void);
+void tfp_wire_engine_set_eye_held(uint32_t (*body)(void)) { eye_held_body = body; }
+static bool io_eye_held(void *user, const TfpVisSnapshot *s) {
+  const uint32_t body = eye_held_body ? eye_held_body() : 0;
+  const TfpOpsSnapshot *ops = body ? recalled(user, s) : NULL;
+  return ops && ops->body == body;
+}
 /* Round 38: TfpHeadIo.seat and .cockpit. */
 static bool io_seat(void *user, const TfpVisSnapshot *s) {
   const TfpOpsSnapshot *ops = recalled(user, s);
@@ -1839,7 +1847,7 @@ bool tfp_wire_engine_bind(TfpWire *w, const TfpWireEngineApi *api, const TfpWire
                                      hi_mesh_has_material};
   st->head_io = (TfpHeadIo){st, io_read, io_ptr, io_executable, io_player_snapshot, io_pin_player_snapshot, io_backpack, io_action_state, io_on_foot,
                             io_foreign_camera, io_address, io_clock, io_log, io_pose_offset, io_enabled, io_fallback_ready, io_pinned_ready, io_full_body,
-                            io_hide_torso, io_show_torso, io_seated_head, io_seat, io_cockpit};
+                            io_hide_torso, io_show_torso, io_seated_head, io_seat, io_cockpit, io_eye_held};
   st->models_io = (TfpModelShadowIo){st, io_full_snapshot, io_alignment_context, io_read, io_ptr, io_u32, io_u8, io_descriptor, io_models_foreign_camera};
   st->arm_backend = (TfpArmBackend){st, ab_object, ab_read, ab_ptr, ab_u32, ab_clock};
   for (int m = TFP_WE_SLEEVES; m <= TFP_WE_GRIP; m++) {

@@ -67,6 +67,9 @@ typedef struct TfpHeadIo {
    * Both are asked only for frames of camera kind 4 (the seat itself, and the glide out of it). */
   bool (*seat)(void *user, const TfpVisSnapshot *s);
   bool (*cockpit)(void *user, const TfpVisSnapshot *s, double *unit);
+  /* Beyond retail, round 44. May be NULL: never. The camera holds this snapshot's body's eye at the native view's (a
+   * throw's or a swap's hold, or its release; src/camera_clear.h): Show torso does not draw the torso meanwhile. */
+  bool (*eye_held)(void *user, const TfpVisSnapshot *s);
 } TfpHeadIo;
 
 /* What depends on the game build: the code pins of helldivers2.exe that qualify the SDK setter and the

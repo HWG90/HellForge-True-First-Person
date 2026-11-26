@@ -1145,6 +1145,7 @@ static void start(void) {
   tfp_wire_engine_set_held_body(tfp_camera_lock_off_foot_body); /* head hiding stays on while the lock holds a body that is off foot */
   tfp_wire_engine_set_lock_view(lock_view_now);                 /* and while the game presents the lease's own first-person request (a stim) */
   tfp_wire_engine_set_seat(tfp_camera_lock_seat_body, see_through_cockpit_now); /* round 38: the whole diver hidden in an exosuit, the suit seen through */
+  tfp_wire_engine_set_eye_held(tfp_camera_lock_eye_held_body); /* round 44: Show torso waits while a throw's held eye is kept or let go */
 #endif
   say(lock_wanted ? "Ready: camera lock: the view stays first person through every action and camera of your own character, death included; "
                     "the camera style is Stable unless Bodycam is switched on in the panel: in Bodycam body movement kicks the view (35 %% up to 8 degrees "
