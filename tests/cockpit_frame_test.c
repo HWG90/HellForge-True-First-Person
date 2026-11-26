@@ -105,7 +105,7 @@ static void hud_kept_clear(void) {
     CHECK(l.lamp[0] + l.lamp_r * 1.7f < l.dash.x1 && l.lamp[1] - l.lamp_r * 1.7f > l.dash.y0);
     /* the open window is most of the screen */
     CHECK((l.window.x1 - l.window.x0) * (l.window.y1 - l.window.y0) > 0.75f * w * h);
-    CHECK(ncalls < 120); /* cheap: one panel, about 60 calls */
+    CHECK(ncalls < 120); /* cheap: one panel, about 95 calls */
   }
 }
 static void colours_are_the_theme_faded(void) {

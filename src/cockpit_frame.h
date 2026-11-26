@@ -16,7 +16,7 @@
  * The heading strip is a static scale: the mod has no camera yaw it can read without the camera helper, which this
  * round does not touch. The lamp is decorative (the suit's state is not read).
  *
- * Cost: while seated, one HUD panel draw a frame (about 60 draw calls; the layout is computed again only when the back
+ * Cost: while seated, one HUD panel draw a frame (about 95 draw calls; the layout is computed again only when the back
  * buffer's size changes). Otherwise none: the panel is closed (the host does not call a closed panel) and the tick asks
  * for it on the seat's edges only (tfp_cockpit_frame_tick).
  *
