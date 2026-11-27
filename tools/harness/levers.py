@@ -15,6 +15,8 @@ backend and nothing the account owns changes: every lever acts on the running mi
   levers.py spawn item NAME [METRES]      a pick-up on the ground ahead
   levers.py spawn exosuit [NAME]          an exosuit ahead
   levers.py spawn beacon NAME             a stratagem called in at the player
+  levers.py vehicles                      the exosuits and vehicles in the world, with their positions
+  levers.py attachments WEAPON            the customization items the game knows near a weapon's defaults
   levers.py names PATTERN                 what a name matches (items, entities, stratagems)
   levers.py undo [N]                      put back the newest N memory writes
   levers.py log                           what the kernel wrote and called this session
@@ -417,6 +419,9 @@ class Levers:
         described = self.game.lua("return K.descriptor(%d) or false" % entity)
         return {"name": full, "resource": resource, "package": package, "entity": entity, "descriptor": described}
 
+    def vehicles(self):
+        return self.game.lua("return K.vehicles()") or []
+
     def attachments(self, name):
         full, resource = self.entity(name)
         self.ready(resource)
@@ -478,6 +483,8 @@ def main(argv):
                 _refuse(NOT_BUILT[rest[0]])
             else:
                 print(__doc__); return 2
+        elif command == "vehicles":
+            out = levers.vehicles()
         elif command == "attachments":
             out = levers.attachments(" ".join(rest))
         elif command == "names":

@@ -576,4 +576,28 @@ function K.add_stratagem(kind)
     K.write(at - 0x188 + 0x788, K.le32(count + 1), string.format('stratagem count %d -> %d', count, count + 1))
     return count + 1, true
 end
+
+-- The vehicles of this machine's world (VehicleManager's entity map): {entity, resource, x, y, z, facing_x, facing_y}.
+function K.vehicles()
+    local v = K.global('VEHICLES')
+    local rows, cap, empty = ptr(v + 0x38), u32(v + 0x40) or 0, u32(v + 0x44)
+    local out = {}
+    if not rows or cap == 0 or cap > 4096 then return out end
+    local raw = read(rows, cap * 8) or refuse('the vehicle map is unreadable')
+    local units = K.global('UNITS'); local records = ptr(units + 0x68)
+    for i = 0, cap - 1 do
+        local e = word(raw, i * 8)
+        if e ~= empty and e ~= 0xffffffff then
+            local d = K.descriptor(e)
+            local u = d and K.hashmap(units + 0x40, e)
+            local q = u and records and read(records + u * 776 + 720, 28)
+            if q then
+                local f = ffi.cast('const float *', ffi.cast('const char *', q))
+                out[#out + 1] = { entity = e, resource = d.resource, x = tonumber(f[4]), y = tonumber(f[5]), z = tonumber(f[6]),
+                    facing_x = 2 * (f[0] * f[1] - f[3] * f[2]), facing_y = 1 - 2 * (f[0] * f[0] + f[2] * f[2]) }
+            end
+        end
+    end
+    return out
+end
 return 'kernel ' .. VERSION .. ' in'
