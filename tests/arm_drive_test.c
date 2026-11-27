@@ -3027,6 +3027,240 @@ static void test_game_ik_refusals(void) {
   CHECK(!g.ik_frames && gik_node_from(gik_game_record().position) == 0 && !tfp_arm_drive_held());
   printf("arm drive: game IK: refused for an IK_left that is not a leaf, a gun without one, a handgun; nothing written\n");
 }
+/* ---- round 42b, the independent check's gaps: each guard of the gun's IK_left with a test that fails without it ---- */
+/* The gun with a grip fitted 0.126 m away and its IK_left on the grip's node: the game's own record returned, *want the
+ * grip's node in the gun's frame. */
+static TfpGraftLocal gik_moved(uint64_t *t, TfpGraftMatrix *want) {
+  static const float zero[3] = {0, 0, 0};
+  float ahead[3];
+  forward_of_socket(.12f, -.04f, ahead);
+  TfpGraftMatrix hand, socket;
+  fresh();
+  grip_resources();
+  grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], zero, NULL);
+  gik_gun();
+  const TfpGraftLocal game = gik_node();
+  fit_grip(ahead);
+  tfp_arm_drive_set(true, true, 1);
+  tfp_arm_drive_set_grip(true, false);
+  tfp_arm_drive_set_game_ik(true);
+  *t = 1000;
+  for (int i = 0; i < 60; i++) grip_draw(*t += 16, &hand, &socket);
+  *want = gik_target();
+  CHECK(gik_node_from(want->values + 12) < 1e-5f && tfp_arm_drive_held() && !gik_is(&game));
+  forget_calls();
+  return game;
+}
+static unsigned gun_sets(uint32_t gun) {
+  unsigned n = 0;
+  for (unsigned i = 0; i < call_count; i++) n += !calls[i].update && calls[i].unit == gun;
+  return n;
+}
+static unsigned gun_updates(uint32_t gun) {
+  unsigned n = 0;
+  for (unsigned i = 0; i < call_count; i++) n += calls[i].update && calls[i].unit == gun;
+  return n;
+}
+/* A second gun with an IK_left of its own, a leaf on its root, as node `node` (the first gun's is node 2). */
+static uint32_t second_node;
+static TfpGraftLocal gik_second_gun(uint32_t node) {
+  second_node = node;
+  make_unit(GUN2, 4, object_of(RIG), (8u << 16) | 2);
+  put(worlds_of(GUN2), &rig_world[TFP_GRAFT_RIG_SOCKET], 64);
+  const TfpGraftMatrix g = body_now[body_left_hand()];
+  n32(names_of(GUN2) + node * 4, GRIP_NAME_T), put(worlds_of(GUN2) + node * 64, &g, 64), n32(links_of(GUN2) + node * 4, (0u << 16) | 1);
+  TfpGraftLocal l = REST;
+  const TfpGraftMatrix local = tfp_graft_relative(&g, &rig_world[TFP_GRAFT_RIG_SOCKET]);
+  tfp_graft_set_local(&l, &local);
+  l.preserved[3] = 9;
+  put(locals_of(GUN2) + node * 64, &l, 64);
+  return l;
+}
+static bool gun2_untouched(const TfpGraftLocal *own) {
+  TfpGraftLocal l[4];
+  CHECK(read_fake(&f, locals_of(GUN2), l, sizeof l));
+  return !memcmp(&l[second_node], own, 64) && !memcmp(&l[5 - second_node], &REST, 64) && !gun_sets(GUN2);
+}
+static TfpGraftLocal gik_marked(const TfpGraftLocal *game) { TfpGraftLocal l = *game; l.preserved[3] = 11; return l; }
+static void test_game_ik_guards(void) {
+  TfpGraftMatrix hand, socket, want;
+  TfpArmDriveGrip g;
+  uint64_t t;
+  /* the gate and the log see the gun's own node where the game keeps it, though the engine has it on the grip now
+   * (grip_node_world): the body's hand, left where the game holds it, is still on that node */
+  TfpGraftLocal game = gik_moved(&t, &want);
+  {
+    TfpGraftMatrix node, grip;
+    CHECK(read_fake(&f, worlds_of(GUN) + 2 * 64, &node, 64) && read_fake(&f, worlds_of(FOREGRIP) + 64, &grip, 64));
+    CHECK(grip_m(&node, &grip) < 1e-5f); /* the engine evaluated the write: World.update_unit(gun) followed it */
+    tfp_arm_drive_grip_take(&g);
+    for (int i = 0; i < 10; i++) grip_draw(t += 16, &hand, &socket);
+    tfp_arm_drive_grip_take(&g);
+    CHECK(g.state == TFP_ARM_GRIP_HELD && g.gate == TFP_ARM_GATE_ON_NODE && g.gate_unit == 0 && g.gate_node == 2 && g.body_m < 1e-4f && g.attachment);
+    const float moved_own = g.hip.own_m;
+    /* the same hand measured with the node really unmoved (switched off): the drawn hand is as far from the gun's own node */
+    tfp_arm_drive_set_game_ik(false);
+    for (int i = 0; i < 10; i++) grip_draw(t += 16, &hand, &socket);
+    tfp_arm_drive_grip_take(&g);
+    CHECK(gik_is(&game) && g.hip.frames && moved_own > .05f && fabsf(g.hip.own_m - moved_own) < 1e-4f);
+    CHECK(tfp_arm_drive_release());
+  }
+  /* every write of the node is followed by the gun's World.update_unit (the slide there: as many updates as writes) */
+  game = gik_moved(&t, &want);
+  tfp_arm_drive_set_hold(true);
+  for (int i = 0; i < 10; i++) grip_draw(t += 16, &hand, &socket);
+  CHECK(gun_sets(GUN) == 10 && gun_updates(GUN) >= 10);
+  for (unsigned i = 0; i + 1 < call_count; i++)
+    if (!calls[i].update && calls[i].unit == GUN) CHECK(calls[i + 1].update && calls[i + 1].unit == GUN);
+  /* ... and the hold's gun away (a stow: the gun goes to the body): back at once, in that frame */
+  break_gun_parent();
+  grip_draw(t += 16, &hand, &socket);
+  CHECK(gik_is(&game) && !tfp_arm_drive_held());
+  mend_gun_parent();
+  tfp_arm_drive_set_hold(false);
+  CHECK(tfp_arm_drive_release());
+  /* the grip switched off (the option): back at once and exactly, not eased */
+  game = gik_moved(&t, &want);
+  tfp_arm_drive_set_grip(false, false);
+  grip_draw(t += 16, &hand, &socket);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(gik_is(&game) && !tfp_arm_drive_held() && g.ik_why == TFP_GIK_OFF && gun_sets(GUN) == 1);
+  /* one hand (a handgun's pose asked while moved): not held, eased back to the game's record */
+  game = gik_moved(&t, &want);
+  tfp_arm_drive_set_grip(true, true);
+  grip_draw(t += 16, &hand, &socket);
+  CHECK(!gik_is(&game) && gik_node_from(want.values + 12) > 1e-4f); /* on its way */
+  for (int i = 0; i < 40; i++) grip_draw(t += 16, &hand, &socket);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(gik_is(&game) && !tfp_arm_drive_held() && g.ik_why == TFP_GIK_NOT_HELD);
+  /* the drive switched off with only the gun's node written (the rig's joints went back after the draw): the next render
+   * still puts it back; not from another thread */
+  game = gik_moved(&t, &want);
+  tfp_arm_drive_set(false, true, 1);
+  CHECK(!tfp_arm_drive_render(WORLD, false) && !gik_is(&game) && tfp_arm_drive_held() && !call_count);
+  CHECK(!tfp_arm_drive_render(WORLD, true) && gik_is(&game) && !tfp_arm_drive_held() && gun_sets(GUN) == 1 && gun_updates(GUN) == 1);
+  /* the gun's unit gone from the registry while moved: nothing is written to it, and nothing is held */
+  game = gik_moved(&t, &want);
+  {
+    const TfpGraftLocal moved = gik_node();
+    gun_dead();
+    grip_draw(t += 16, &hand, &socket);
+    CHECK(!tfp_arm_drive_held() && !gun_sets(GUN) && !gun_updates(GUN) && gik_is(&moved));
+    gun_alive();
+    put(locals_of(GUN) + 2 * 64, &game, 64);
+  }
+  /* another gun that has a leaf IK_left of its own (the same node index, as two guns of a kind have): the first gun's
+   * node goes back on the first frame of the second, on the first gun, and nothing of the first is written into the second */
+  game = gik_moved(&t, &want);
+  {
+    const TfpGraftLocal own = gik_second_gun(2);
+    gun_is(GUN2);
+    grip_draw(t += 16, &hand, &socket);
+    CHECK(gik_is(&game) && !tfp_arm_drive_held() && gun_sets(GUN) == 1 && gun2_untouched(&own));
+    for (int i = 0; i < 20; i++) grip_draw(t += 16, &hand, &socket);
+    tfp_arm_drive_grip_take(&g);
+    CHECK(gik_is(&game) && gun2_untouched(&own) && g.ik_why == TFP_GIK_GUN_OWN);
+    gun_is(GUN);
+  }
+  /* the same swap with the engine's setter faulting: the first gun's node cannot go back in that frame. It stays this
+   * mod's (its unit and its node 2, not the second gun's node 3), the second gun is not touched, and it goes back
+   * exactly on the next frame the setter works */
+  game = gik_moved(&t, &want);
+  {
+    const TfpGraftLocal own = gik_second_gun(3), moved = gik_node();
+    gun_is(GUN2);
+    fault_set_at = sets + 1;
+    grip_draw(t += 16, &hand, &socket);
+    CHECK(tfp_arm_drive_held() && strstr(tfp_arm_drive_held(), "IK_left") && gik_is(&moved) && gun2_untouched(&own) && !gun_sets(GUN));
+    tfp_arm_drive_grip_take(&g);
+    fault_set_at = 0;
+    grip_draw(t += 16, &hand, &socket);
+    CHECK(gik_is(&game) && !tfp_arm_drive_held() && gun_sets(GUN) == 1 && gun2_untouched(&own));
+    for (int i = 0; i < 20; i++) grip_draw(t += 16, &hand, &socket);
+    CHECK(gik_is(&game) && gun2_untouched(&own));
+    gun_is(GUN);
+  }
+  /* the same gun made again with one node more, its IK_left now node 4: what was written to node 2 goes back there, at
+   * once, and the new node is the one moved from then on */
+  game = gik_moved(&t, &want);
+  {
+    TfpGraftMatrix world;
+    CHECK(read_fake(&f, worlds_of(GUN) + 2 * 64, &world, 64)); /* on the grip; the game keeps the new node where the old was */
+    const TfpGraftLocal l = gik_marked(&game);
+    const TfpGraftMatrix local = tfp_graft_local_matrix(&l), root = rig_world[TFP_GRAFT_RIG_SOCKET], at = tfp_graft_product(&local, &root);
+    n32(object_of(GUN) + 0x70, 5), n32(names_of(GUN) + 2 * 4, 0), n32(names_of(GUN) + 4 * 4, GRIP_NAME_T), n32(links_of(GUN) + 4 * 4, (0u << 16) | 1);
+    put(locals_of(GUN) + 4 * 64, &l, 64), put(worlds_of(GUN) + 4 * 64, &at, 64);
+    grip_draw(t += 16, &hand, &socket);
+    CHECK(gik_is(&game) && gun_sets(GUN) >= 1);
+    for (unsigned i = 0; i < call_count; i++) if (!calls[i].update && calls[i].unit == GUN) CHECK(calls[i].node == 2 || calls[i].node == 4);
+    forget_calls();
+    for (int i = 0; i < 60; i++) grip_draw(t += 16, &hand, &socket);
+    TfpGraftLocal four;
+    CHECK(read_fake(&f, locals_of(GUN) + 4 * 64, &four, 64));
+    CHECK(gik_is(&game) && gik_from(&four, want.values + 12) < 1e-5f && tfp_arm_drive_held());
+    for (unsigned i = 0; i < call_count; i++) if (!calls[i].update && calls[i].unit == GUN) CHECK(calls[i].node == 4);
+    CHECK(tfp_arm_drive_release());
+    CHECK(read_fake(&f, locals_of(GUN) + 4 * 64, &four, 64) && !memcmp(&four, &l, 64));
+  }
+  /* a put-back that faults (switched off, the setter faulting): still this mod's to put back, and done on the next frame */
+  game = gik_moved(&t, &want);
+  tfp_arm_drive_set_game_ik(false);
+  fault_set_at = sets + 1;
+  grip_draw(t += 16, &hand, &socket);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(tfp_arm_drive_held() && strstr(tfp_arm_drive_held(), "IK_left") && !gik_is(&game));
+  CHECK(!tfp_arm_drive_release() && tfp_arm_drive_held()); /* the release says it could not */
+  fault_set_at = 0;
+  grip_draw(t += 16, &hand, &socket);
+  CHECK(gik_is(&game) && !tfp_arm_drive_held());
+  /* a unit comes to hang on the gun's IK_left while it is moved (the optic's link, standing in for one): back at once,
+   * and not moved again; it would be dragged along, and a grip on it would run away from its own target */
+  game = gik_moved(&t, &want);
+  tfp_arm_drive_grip_take(&g);
+  n32(links_of(OPTIC), (2u << 16) | 2);
+  grip_draw(t += 16, &hand, &socket);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(gik_is(&game) && !tfp_arm_drive_held() && g.ik_why == TFP_GIK_CARRIES && gun_sets(GUN) == 1);
+  CHECK(strstr(tfp_arm_drive_grip_ik_line(&g), "a unit hangs on the gun's IK_left"));
+  forget_calls();
+  for (int i = 0; i < 20; i++) grip_draw(t += 16, &hand, &socket);
+  CHECK(gik_is(&game) && !gun_sets(GUN));
+  n32(links_of(OPTIC), (1u << 16) | 2);
+  for (int i = 0; i < 40; i++) grip_draw(t += 16, &hand, &socket);
+  CHECK(gik_node_from(want.values + 12) < 1e-5f); /* gone from the node: moved again */
+  /* the same for a unit mounted from elsewhere on the gun's matrices (a child of the rig, as the R-4 Hyena's grip is) */
+  make_unit(LOOSE_GRIP, 2, object_of(RIG), (2u << 16) | 2);
+  p64(object_of(LOOSE_GRIP) + 0x78, worlds_of(GUN));
+  put(worlds_of(LOOSE_GRIP), &rig_world[TFP_GRAFT_RIG_SOCKET], 64), put(worlds_of(LOOSE_GRIP) + 64, &rig_world[TFP_GRAFT_RIG_SOCKET], 64);
+  p64(object_of(RIG) + 0x1d8, object_of(LOOSE_GRIP));
+  for (int i = 0; i < 20; i++) grip_draw(t += 16, &hand, &socket); /* found within ELSEWHERE_MS (250 ms) */
+  tfp_arm_drive_grip_take(&g);
+  CHECK(gik_is(&game) && !tfp_arm_drive_held() && g.ik_why == TFP_GIK_CARRIES);
+  /* the IK_left's own link: a parent in the gun (kind 1) that comes before it, else never moved */
+  for (int k = 0; k < 2; k++) {
+    static const float zero[3] = {0, 0, 0};
+    float ahead[3];
+    forward_of_socket(.12f, -.04f, ahead);
+    fresh();
+    grip_resources();
+    grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], zero, NULL);
+    gik_gun();
+    fit_grip(ahead);
+    evaluates = 0;
+    n32(links_of(GUN) + 2 * 4, k ? (3u << 16) | 1 : (0u << 16) | 2); /* hanging on a later node; not a link to a node of the gun */
+    game = gik_node();
+    tfp_arm_drive_set(true, true, 1);
+    tfp_arm_drive_set_grip(true, false);
+    tfp_arm_drive_set_game_ik(true);
+    t = 1000;
+    for (int i = 0; i < 40; i++) grip_draw(t += 16, &hand, &socket);
+    tfp_arm_drive_grip_take(&g);
+    CHECK(g.attachment && g.ik_why == TFP_GIK_NOT_LEAF && !g.ik_frames && gik_is(&game) && !gun_sets(GUN) && !tfp_arm_drive_held());
+  }
+  printf("arm drive: game IK: guards: the gate sees the node where the game keeps it; an update after every write; back at once for the gun away, "
+         "the grip off, the drive off, another gun with its own IK_left; a dead gun is not written; a faulted put-back is kept and done next frame, "
+         "on its own gun and node; a unit on the IK_left, a parent that is not an earlier node of the gun: not moved\n");
+}
 /* The checker's follow test (round 42b's independent check): the third-person body's left-hand IK has the same target, so
  * the body's hand goes where the gun's IK_left goes, and the gate reads the body's hand. `follows`: the body's hand is on the
  * node as the engine evaluated it last (else it stays where the game keeps the node); `sway_mps`: with a 2 Hz sway of that
@@ -3096,6 +3330,9 @@ static void test_game_ik_follow(void) {
     /* a hand that does not follow (the game may not move the body's hand with the node): the same */
     const GikFollow still = gik_follow(grips[k][0], grips[k][1], 0, 0, false, 200);
     CHECK(!still.fast && !still.far && !still.taken && still.full >= 200 - slide - 2 && still.end_m < 1e-5f);
+    /* ... and its own 0.6 m/s is not made faster by the node's move (the lesser of the two speeds is the hand's) */
+    const GikFollow apart = gik_follow(grips[k][0], grips[k][1], .6f, 0, false, 200);
+    CHECK(!apart.fast && !apart.far && !apart.taken && apart.full >= 200 - slide - 2 && apart.end_m < 1e-5f);
     /* with the hand's own sway against the gun on top: 0.24 m/s (a walk; every phase at the AR-23's 0.126 m, where the
      * check saw one let-go in five), and 0.6 m/s (well under the gate's 0.9 m/s by itself; over it with the slide's own
      * speed added, were the slide counted as the hand's) */
@@ -3199,6 +3436,7 @@ int main(int argc, char **argv) {
   test_game_ik_foregrip();
   test_game_ik_target_change();
   test_game_ik_refusals();
+  test_game_ik_guards();
   test_game_ik_follow();
   if (argc == 3) test_rest_recorded(argv[2]);
   printf("arm drive: %u checks passed\n", checks);

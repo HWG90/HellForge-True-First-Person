@@ -1167,16 +1167,23 @@ static bool gik_bind(uintptr_t gun, uint32_t *why) {
   d.gik.bound = true, d.gik.bound_object = gun, d.gik.bound_nodes = nodes, d.gik.node = node, d.gik.parent = links[node] >> 16;
   return true;
 }
-/* Whether a unit hangs on the gun's node `node` (a child of the gun linked to it), or the gun's children cannot be read.
+/* Whether a unit hangs on the gun's node `node`: a child of the gun linked to it, or a unit mounted from elsewhere on the
+ * gun's matrices (mounted_elsewhere: the R-4 Hyena's vertical grip) linked to it; or the gun's children cannot be read.
  * Asked every frame: an attachment can be fitted without the gun changing. */
-static bool gik_carries(uintptr_t gun, uint32_t node) {
-  uintptr_t child = 0, links;
+static bool gik_carries(uintptr_t gun, uint32_t gun_ref, uint32_t node) {
+  uintptr_t child = 0, links, external, gun_worlds;
   uint32_t link;
-  if (!rd(gun + L_UNIT_CHILD, &child, sizeof child)) return true;
+  if (!rd(gun + L_UNIT_CHILD, &child, sizeof child) || !ptr(gun + L_UNIT_WORLDS, &gun_worlds)) return true;
   for (unsigned n = 0; child; ++n) {
     if (n == TREE_UNITS || !ptr(child + L_UNIT_LINKS, &links) || !u32(links, &link)) return true;
     if ((link & 65535) == 2 && link >> 16 == node) return true;
     if (!rd(child + L_UNIT_SIBLING, &child, sizeof child)) return true;
+  }
+  for (unsigned i = 0; d.grip.elsewhere_weapon == gun_ref && i < d.grip.elsewhere_count; ++i) {
+    const uintptr_t object = d.grip.elsewhere[i].object;
+    if (unit(d.grip.elsewhere[i].ref) != object || !ptr(object + L_UNIT_EXTERNAL, &external) || external != gun_worlds) continue;
+    if (!ptr(object + L_UNIT_LINKS, &links) || !u32(links, &link)) return true;
+    if ((link & 65535) == 2 && link >> 16 == node) return true;
   }
   return false;
 }
@@ -1223,7 +1230,7 @@ static void gik_frame(const Units *u, const Api *a) {
   if (!d.gik.on || !d.grip.on) why = TFP_GIK_OFF;
   else if (u->gun_away || !u->weapon || d.grip.one_handed) why = TFP_GIK_NOT_HELD;
   else if (!gik_bind(u->weapon, &why)) {}
-  else if (gik_carries(u->weapon, d.gik.node)) why = TFP_GIK_CARRIES;
+  else if (gik_carries(u->weapon, u->weapon_ref, d.gik.node)) why = TFP_GIK_CARRIES;
   else if (!(d.grip.held && d.grip.latched && d.grip.target_object)) why = TFP_GIK_NOT_HELD;
   else if (!d.grip.attachment || d.grip.target_object == u->weapon) why = TFP_GIK_GUN_OWN;
   /* the same gun made again with its IK_left on another node: the record kept is of the first */
