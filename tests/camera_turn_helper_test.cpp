@@ -145,6 +145,53 @@ int main() {
     const TfpQ got = handed(); CHECK(std::memcmp(&far, &got, 16) == 0);
     g.end();
   }
+  // ---- 5. The orphan's eye (soak 62 #13 melee, 19:45:25.709; soak 60 19:38:41.799): in the orphaned native frames the
+  // camera node's world matrix is not the view (117 and 90 degrees off the rows either side). The eye was built 0.18 m
+  // along it: 0.255 m from the head camera's own at 90 degrees, so the first head-camera frame wanted another point (a
+  // jump taken) and the veil saw the head in front of the eye and pushed. Now along the direction the frame is shown
+  // with, the rig eye's axes times the argument: the same point, nothing taken, nothing veiled, and the rows say turn=. ----
+  for (float off : {90.f, 117.f, 36.f}) {
+    fresh(true, true, true);
+    Game g; g.eye[1] = -.5f; g.eye[2] = .13f; // the weapon's eye: behind and above the head
+    g.pose(1, 2, 0, LOOK); g.look(LOOK, 0); g.hip(); g.begin();
+    tfp_camera_set_veil(true);
+    standing(g, 12, 33.3, false); standing(g, 40, 33.3, true);
+    g.native(0x40); g.frame(33.3);
+    tfp_camera_set_orphan(true); tfp_camera_continuity_event(); tfp_camera_trace_edge();
+    const float a = LOOK + off * TFP_PI / 180, c = std::cos(a), n = std::sin(a);
+    const float turned[12] = {c, n, 0, 0, -n, c, 0, 0, 0, 0, 1, 0};
+    for (int i = 0; i < 26; ++i) {
+      if (i == 0) g.eye[1] += .28f;
+      if (i == 1) { g.eye[1] += .19f; g.eye[2] -= .09f; }
+      g.native(0x40); std::memcpy(g.s.camera_rotation, turned, sizeof turned); g.frame(33.3);
+    }
+    TfpCameraOrphanStats stats{}; tfp_camera_orphan_stats(&stats);
+    CHECK(stats.frames == 26 && stats.refused == 0);
+    CHECK(g.from_head_eye() < 1e-3f && std::fabs(g.ahead_of_head() - .18f) < 1e-3f); // the head camera's own point
+    const float look[3] = {-std::sin(LOOK), std::cos(LOOK), 0};
+    int orphans = 0, heads = 0, taken = 0, veiled = 0, said = 0;
+    auto read_rows = [&]() {
+      TfpCameraTraceRow rows[64]; const uint32_t count = tfp_camera_trace_read(rows, 64);
+      for (uint32_t i = 0; i < count; ++i) {
+        const bool orphan = rows[i].kind == 6 && rows[i].source == 1, head = rows[i].kind == 4 && rows[i].source == 1;
+        orphans += orphan; heads += head;
+        if (head) { taken += (rows[i].what & (TFP_CAMERA_TRACE_JUMP | TFP_CAMERA_TRACE_CUT)) != 0; veiled += rows[i].veil[0] != 0 || rows[i].veil[1] != 0 || rows[i].veil[2] != 0; }
+        if (orphan || head) said += degrees_apart(rows[i].turn, look) < .05f && degrees_apart(rows[i].view, look) < .05f;
+      }
+    };
+    read_rows();
+    CHECK(orphans >= 10 && said == orphans); // the orphan's rows say which way they were shown (zeros until round 49)
+    const TfpCameraVeilStats before = []{ TfpCameraVeilStats v{}; tfp_camera_veil_stats(&v); return v; }();
+    g.measure_from_here(); tfp_camera_trace_edge();
+    float worst = 0;
+    for (int i = 0; i < 8; ++i) { g.hip(0x40); g.frame(33.3); tfp_camera_veil_tick(i == 1); worst = std::fmax(worst, g.from_head_eye()); }
+    CHECK(worst < 1e-3f && g.travel < 1e-3f); // the game's exit: the head camera wants the point the orphan had
+    const TfpCameraVeilStats after = []{ TfpCameraVeilStats v{}; tfp_camera_veil_stats(&v); return v; }();
+    CHECK(after.moved == before.moved && after.largest_m == before.largest_m); // the veil had nothing to move
+    read_rows();
+    CHECK(heads == 8 && taken == 0 && veiled == 0 && said == orphans + heads);
+    g.end();
+  }
   std::printf("camera turn through the helper: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

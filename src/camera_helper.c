@@ -1282,16 +1282,26 @@ static bool smooth_native(Policy *p, const NativeSample *sample, const float *gi
 /* A native frame the binder called orphaned (orphan_on): the head camera's eye in place of the rig's. `given` is the
  * 16-byte parent-local argument about to be forwarded; true: `adjusted` holds the argument to forward instead. The
  * point is the head camera's (the kind 4 branch below: the head, c.forward along the level view direction, c.up),
- * with the direction of the view last shown, so the first head-camera frame after the game's exit wants the same
+ * with the direction this frame is shown with, so the first head-camera frame after the game's exit wants the same
  * point and the continuity sees no change of camera there. Any read or proof that fails: false, and the frame goes
- * the way of every other native frame (smooth_native). */
-static bool orphan_head(Policy *p, const float *given, uint32_t kind, double tick, float *adjusted) {
-  float local[4] = {0}, root[3] = {0}, head[3] = {0}, root_basis[9] = {0}, forward[3] = {0}, up[3] = {0}, position[3] = {0}, parent_basis[9] = {0};
+ * the way of every other native frame (smooth_native).
+ * Round 49: that direction is THE DIRECTION of src/camera_turn.h, the rig eye's axes times the rotation the game
+ * passes (`native` + L_ARGUMENT_ROTATION, as the game gave it). Until then it was lock_view, the camera node's world
+ * matrix less the kick, which in these frames is not the view: 36, 90 and 117 degrees off the rows either side in
+ * all six orphan runs of soaks 60 and 62, the eye up to 0.10 m behind the head node, a jump of 0.25 to 0.31 m taken
+ * at the leave and the veil pushing. The rig eye's axes go to trace_parent, so the rows carry turn= and lock_rotation
+ * knows the frame's direction for THE CARRY. */
+static bool orphan_head(Policy *p, const float *native, const float *given, uint32_t kind, double tick, float *adjusted) {
+  float local[4] = {0}, root[3] = {0}, head[3] = {0}, root_basis[9] = {0}, forward[3] = {0}, position[3] = {0}, parent_basis[9] = {0};
+  TfpQ rotation = tfp_q_identity();
   const uint32_t why = p->why; const bool far = p->head_far;
   const bool pointed = points(p, root, head, root_basis, false);
   p->why = why; p->head_far = far; /* the head camera's own diagnostics are not this frame's */
-  if (!pointed || !lock_view_known || !held_axes(lock_view, forward, up) || !read((uint64_t)(uintptr_t)given, local, 16) || !finite3(local)
-      || !smooth_parent(p, position, parent_basis)) return false;
+  if (!pointed || !read((uint64_t)(uintptr_t)native + L_ARGUMENT_ROTATION, &rotation, 16) || !tfp_q_valid(rotation)
+      || !read((uint64_t)(uintptr_t)given, local, 16) || !finite3(local) || !smooth_parent(p, position, parent_basis)) return false;
+  tfp_turn_forward(parent_basis, tfp_q_normalised(rotation), forward);
+  if (!finite3(forward)) return false;
+  memcpy(trace_parent, parent_basis, 36); trace_parent_tick = tick;
   float horizontal[3] = {forward[0], forward[1], 0};
   float length = sqrtf(horizontal[0]*horizontal[0]+horizontal[1]*horizontal[1]);
   if (length < .0001f) { horizontal[0] = root_basis[3]; horizontal[1] = root_basis[4]; length = sqrtf(horizontal[0]*horizontal[0]+horizontal[1]*horizontal[1]); }
@@ -1723,7 +1733,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
           const bool orphan = atomic_load_explicit(&orphan_on, memory_order_relaxed) != 0 && !policy.full_ads;
           seat_handled = true;
           if ((seat_native_glide = seat_native(&policy, output, tick, adjusted))) output = adjusted; /* round 38: the glide out of a seat owns the eye */
-          else if (orphan && orphan_head(&policy, output, kind, tick, adjusted)) {
+          else if (orphan && orphan_head(&policy, native, output, kind, tick, adjusted)) {
             /* Not the weapon's eye: nothing of it is held or repeated once the game's exit arrives. */
             output = adjusted; policy.native_eye_valid = false; memcpy(policy.last_native, adjusted, 12);
             atomic_fetch_add_explicit(&orphan_frames, 1, memory_order_relaxed);

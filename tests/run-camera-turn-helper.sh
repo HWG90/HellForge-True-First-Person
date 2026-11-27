@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Round 49: the direction shown across a change of camera (src/camera_turn.h),
+# Round 49: the direction shown across a change of camera, and the orphaned native frame's eye (src/camera_turn.h),
 # through the camera helper on the fake game memory of tests/camera_smooth_test.cpp
 # (tests/camera_turn_helper_test.cpp; needs g++ and Linux, as tests/run-camera-smooth.sh).
 set -euo pipefail

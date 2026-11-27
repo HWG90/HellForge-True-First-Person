@@ -3,6 +3,7 @@ bound (veil_faults), on made-up rows and on rows cut from the soaks of 2026-11-2
 tests/reference/turn; soak 60 is Stable, soak 62 Bodycam)."""
 import math
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,7 @@ PRONE_BACK = "soak62-C-L1960-2012.log"     # the primary back, prone after a div
 FOOT_SWAP = "soak60-A-L3280-3420.log"      # a swap on foot: 0.05 and 0.02 degrees at its two changes
 FLICK = "soak60-A-L6760-6800.log"          # the primary back, prone: the veil 0.248 m, then nothing
 MELEE = "soak62-C-L2760-2815.log"          # #13 melee, prone: the veil 0.196, 0.081 m, then the native view
+STIM = "soak60-A-L6985-7015.log"           # #20 stim, prone: the end of an orphan run, the camera's matrix 90 degrees off
 
 
 def cut(name):
@@ -136,6 +138,46 @@ class VeilBound(unittest.TestCase):
         j = matrix.judge(cut(FOOT_SWAP))
         self.assertEqual(j["veil_faults"], [])
         self.assertAlmostEqual(j["veil_open_m"], 0.191, places=3)
+
+
+class Orphan(unittest.TestCase):
+    """The orphaned native frames' eye (src/camera_helper.c orphan_head) stood 0.18 m from the head along the camera
+    node's world direction (the rows' view=), which was not the view. The same rows with the eye along the direction
+    of the frames either side (round 49: the rig eye's axes times the argument): the first head-camera frame wants the
+    point the last orphaned frame had. Arithmetic on the logged rows; the helper itself is run in
+    tests/camera_turn_helper_test.cpp."""
+    FORWARD = 0.18   # c.forward
+    SOURCE = re.compile(r" kind=(\d+) .*? wanted=\(([-\d. ]+)\).*? source=(\w+) .*? tick=([\d.]+) .*? view=\(([-\d. ]+)\)")
+
+    def leave(self, name):
+        """(the last orphaned row, the head-camera row after it): each (wanted eye, view)."""
+        rows = []
+        for line in cut(name):
+            m = self.SOURCE.search(line) if " Trace: " in line else None
+            if m:
+                rows.append((float(m[4]), int(m[1]), m[3], [float(x) for x in m[2].split()], [float(x) for x in m[5].split()]))
+        rows.sort()
+        orphans = [r for r in rows if r[1] == 6 and r[2] == "head"]
+        head = next(r for r in rows if r[1] == 4 and r[2] == "head" and r[0] > orphans[-1][0])
+        self.assertLess(head[0] - orphans[-1][0], 5.0)   # the two calls of one game frame: the head has not moved between them
+        return orphans[-1][3:], head[3:]
+
+    def level(self, v):
+        n = (v[0] ** 2 + v[1] ** 2) ** 0.5
+        return [v[0] / n, v[1] / n, 0.0]
+
+    def check(self, name, degrees, jump):
+        (wanted, wrong), (after, view) = self.leave(name)
+        self.assertAlmostEqual(matrix._degrees(self.level(wrong), self.level(view)), degrees, delta=0.6)
+        self.assertAlmostEqual(matrix._length(matrix._sub(after, wanted)), jump, delta=0.002)   # as logged: the jump the leave made
+        along = [w + self.FORWARD * (t - o) for w, t, o in zip(wanted, self.level(view), self.level(wrong))]
+        self.assertLess(matrix._length(matrix._sub(after, along)), 0.001)   # along the view: the same point, to a millimetre
+
+    def test_the_melee_of_soak_62(self):
+        self.check(MELEE, 117.2, 0.307)
+
+    def test_the_stim_of_soak_60(self):
+        self.check(STIM, 90.0, 0.254)
 
 
 class Carried(unittest.TestCase):
