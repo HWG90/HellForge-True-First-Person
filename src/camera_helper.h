@@ -242,6 +242,10 @@ void tfp_camera_settle_arm(void);
 /* Round 24: THE SETTLE itself, a test switch (settle_on.txt beside the DLL); off by default and after
  * tfp_camera_reset_for_tests. Off, an armed entry is presented as without it. */
 void tfp_camera_set_settle(bool on);
+/* Round 49: the frame the head camera's eye is damped in, a test switch (damp_frame_on.txt beside the DLL); off by
+ * default and after tfp_camera_reset_for_tests. Off, the root's own axes, as before. On, a level frame that turns
+ * with the root only as far as the view turns the same way (src/camera_damp.h tfp_damp_frame_step). */
+void tfp_camera_set_damp_frame(bool on);
 /* Beyond retail, and only in frames the camera lock holds. `on`: the game still presents the first-person request
  * (kind 6) although its exit has been asked for and the gun has left the first-person rig (a stim keeps the request
  * for about 0.85 s). The rig's eye then sits at the body's head; while this is on, a native frame presents the head

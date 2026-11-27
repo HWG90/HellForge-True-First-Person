@@ -6,6 +6,7 @@
  * A row: tick(ms) source detect quiet fresh  wanted x y z  root x y z  logged eye x y z  root axes (9, rows; "run" only)
  *        given  head x y z
  *        mask kind damped off_foot  damp x y z  stable rearm_only settle_arm   (round 24; -1: not known)
+ *        view x y z   (round 49: the logged view direction; 0 0 0: the line does not say)
  *        quiet: full aim (the filter takes nothing up); fresh: 1 the filter starts from nothing in this row (the helper
  *        forgot it), 2 the log carries no correction in this row and the filter's was not known: it is let go before
  *        the row, and the rest of the state (the eye's speed, the root's course) is kept
@@ -25,6 +26,25 @@
  * changed (not in a traversal), from the logged damping's own state up to the first frame that differs. A logged
  * build's header has none of it, and is run as it was.
  *
+ * Round 49: the damping's frame (src/camera_damp.h tfp_damp_frame_step: level, turning with the root only as far as
+ * the view turns the same way) is a test switch in the helper, off by default (damp_frame_on.txt), and so it is
+ * here: without a further argument nothing of it is run. Built against a camera_damp.h that has it, further
+ * arguments, any of:
+ *   "dampframe"  the eye damping is run again in that frame. A run of damped rows is as logged while the frame is the
+ *                root's own axes (a level root whose turns the view made with it); from the first row where it is not,
+ *                the damping is run on from the state the log gives for the row before (for a run that begins with
+ *                such a row: from that row's own logged lag, read in the new frame). What is low-passed is the head
+ *                node the row gives (replay.py head_node: the wanted eye less the damping and the eye's place in front
+ *                of the head). Where a swap holds or glides the eye the helper damped another point than that, the
+ *                log does not say which, and the run is off the log by up to 0.1 m in either frame.
+ *   "rootframe"  the damping is run again in exactly those rows, but in the root's own axes, as before round 49: what
+ *                "dampframe" is compared with, row for row, run the same way
+ *   "floor"      round 44's FLOOR (src/camera_clear.h tfp_clear_floor) is applied to the eye presented, as the helper
+ *                does after the filter: in a head-camera row of a body on foot the eye is at least TFP_CAMERA_CLEAR_M
+ *                in front of the head node along the level view. The helper also needs head visibility active and
+ *                leaves out a kept leave's frames and a run that began far behind the head; the log says none of that,
+ *                and here the floor is on in every such row. The presented eye in the output is the floored one.
+ *
  * The Trace lines of 0.6.0-feel.39 and before do not say how the root's axes stood. "fit" looks for them: in each
  * frame the turn of the axes from the frame before (any axis) with which this filter presents the eye the log
  * shows, the smallest such turn, or the turn of the frame before again (a root that goes on turning). Where nothing
@@ -43,10 +63,14 @@
 #include "camera_damp.h"
 #include "camera_traversal.h"
 #endif
+#if __has_include("camera_clear.h")
+#define FLOOR 1
+#include "camera_clear.h"
+#endif
 #endif
 
 typedef struct Row { double tick; unsigned source; int detect, quiet, fresh, given; float wanted[3], root[3], logged[3], head[3];
-                     int mask, kind, damped, off_foot, stable, rearm_only, settle_arm; float damp[3]; } Row;
+                     int mask, kind, damped, off_foot, stable, rearm_only, settle_arm; float damp[3], view[3]; } Row;
 static const TfpContinuityTuning tuning = TFP_CONTINUITY_DEFAULT;
 
 static float present(TfpContinuity *c, const Row *row, const float *basis, float *shown) {
@@ -142,11 +166,30 @@ static void fit_stretch(const TfpContinuity *begin, const Row *rows, int count, 
   free(beam); free(next);
 }
 
-static bool settle_on; /* argv[2] "settle": the helper's settle_on.txt */
+static bool settle_on; /* an argument "settle": the helper's settle_on.txt */
+static bool damp_frame, root_frame, floor_on; /* round 49, the arguments "dampframe", "rootframe" and "floor" */
+/* The level view direction of a row, of unit length; false: the line does not say, or it is straight up or down. */
+static bool level_view(const Row *row, float *h) {
+  const float length = sqrtf(row->view[0]*row->view[0]+row->view[1]*row->view[1]);
+  if (!(length >= 1e-4f)) return false;
+  h[0] = row->view[0]/length; h[1] = row->view[1]/length;
+  return true;
+}
 #ifdef RULES
 /* The helper's decisions around the filter (camera_helper.c smooth_detect, lock_damp_eye, smooth_present), made again. */
-typedef struct Rules { TfpRootMotion root; TfpTraversalWatch climb; TfpEyeDamp damp; bool diverged, synced; float bodycam_ms; int settled_arm; } Rules;
-static void rules_stretch(Rules *r) { memset(&r->root, 0, sizeof r->root); memset(&r->climb, 0, sizeof r->climb); tfp_eye_damp_reset(&r->damp); r->diverged = r->synced = false; }
+typedef struct Rules { TfpRootMotion root; TfpTraversalWatch climb; TfpEyeDamp damp; bool diverged, synced; float bodycam_ms; int settled_arm;
+#ifdef TFP_DAMP_FRAME
+  TfpDampFrame frame;
+#endif
+} Rules;
+static void frame_reset(Rules *r) {
+#ifdef TFP_DAMP_FRAME
+  tfp_damp_frame_reset(&r->frame);
+#else
+  (void)r;
+#endif
+}
+static void rules_stretch(Rules *r) { memset(&r->root, 0, sizeof r->root); memset(&r->climb, 0, sizeof r->climb); tfp_eye_damp_reset(&r->damp); frame_reset(r); r->diverged = r->synced = false; }
 static void to_root(const float *v, const float *basis, float *out) { for (int a = 0; a < 3; ++a) { out[a] = 0; for (int k = 0; k < 3; ++k) out[a] += v[k]*basis[a*3+k]; } }
 static void to_world(const float *v, const float *basis, float *out) { for (int k = 0; k < 3; ++k) { out[k] = 0; for (int a = 0; a < 3; ++a) out[k] += v[a]*basis[a*3+k]; } }
 static void rules_apply(Rules *r, TfpContinuity *c, Row *row, const float *basis) {
@@ -154,12 +197,26 @@ static void rules_apply(Rules *r, TfpContinuity *c, Row *row, const float *basis
   /* the eye damping: in a head-camera frame other than the native view's (the helper's head-camera branch) */
   const bool climbing = known && tfp_traversal_recent(&r->climb, mask, row->tick, 250);
   if (row->damped >= 0 && row->source == 1 && row->kind != 6) {
-    float raw[3], raw_rel[3], behind[3], offset[3];
+    float raw[3], raw_rel[3], behind[3], offset[3], frame[9];
     for (int k = 0; k < 3; ++k) { raw[k] = row->wanted[k]-row->damp[k]; offset[k] = raw[k]-row->root[k]; }
-    to_root(offset, basis, raw_rel); to_root(row->damp, basis, behind);
+    /* Round 49: the frame the damping works in (lock_damp_eye); `own`: it is the root's axes, as the log's was. */
+    bool own = true; memcpy(frame, basis, sizeof frame);
+#ifdef TFP_DAMP_FRAME
+    if (damp_frame || root_frame) {
+      if (!r->damp.known) tfp_damp_frame_reset(&r->frame);
+      own = tfp_damp_frame_step(&r->frame, basis, row->view, row->tick, 250, frame);
+      if (root_frame) memcpy(frame, basis, sizeof frame);
+    }
+#endif
+    /* What is low-passed is the head node against the root, not the eye built on it (0.18 m along the level view and
+     * 0.04 m up, which the helper does not filter): in axes that turn or tilt under a still view the two differ, by
+     * 0.075 m in the frame the root's tilt went in soak 60. The eye stands in only where the row has no head. */
+    if (row->given && (damp_frame || root_frame)) for (int k = 0; k < 3; ++k) offset[k] = row->head[k]-row->root[k];
+    to_root(offset, frame, raw_rel); to_root(row->damp, frame, behind);
     const bool on_foot = row->kind == 4 && !row->off_foot && !row->quiet, ruled = tfp_traversal_damps(on_foot, climbing);
     const float ms = row->stable == 1 ? TFP_STABLE_EYE_DAMP_MS : r->bodycam_ms, lag = row->stable == 1 ? TFP_STABLE_EYE_LAG_M : TFP_EYE_DAMP_LAG_M;
-    if (!r->diverged && ruled == on_foot) { /* as logged: the state is the logged one */
+    /* as logged: the state is the logged one. A run's first row is, whatever its frame: nothing came before it. */
+    if (!r->diverged && ruled == on_foot && (own || !r->synced)) {
       if (row->damped == 1) {
         if (r->synced && r->damp.known && !r->damp.releasing && row->stable == 0 && row->tick > r->damp.tick) { /* Bodycam: the time constant from the log */
           float move = 0, way = 0;
@@ -174,15 +231,16 @@ static void rules_apply(Rules *r, TfpContinuity *c, Row *row, const float *basis
         for (int a = 0; a < 3; ++a) r->damp.behind[a] = behind[a];
       } else tfp_eye_damp_reset(&r->damp);
       r->synced = true;
+      if (!own) r->diverged = true; /* from here the log's lag is in other axes than this run's */
     } else {
       r->diverged = true;
       float lagged[3] = {0, 0, 0}, out[3];
       if (ruled && ms > 0) { tfp_eye_damp_follow(&r->damp, raw_rel, row->tick, 250, ms, lag, out); for (int a = 0; a < 3; ++a) lagged[a] = out[a]-raw_rel[a]; }
       else tfp_eye_damp_let_go(&r->damp, row->tick, 250, ruled, lagged);
-      float added[3]; to_world(lagged, basis, added);
+      float added[3]; to_world(lagged, frame, added);
       for (int k = 0; k < 3; ++k) row->wanted[k] = raw[k]+added[k];
     }
-  } else { tfp_eye_damp_reset(&r->damp); r->diverged = r->synced = false; }
+  } else { tfp_eye_damp_reset(&r->damp); frame_reset(r); r->diverged = r->synced = false; }
   /* jumps looked for */
   const bool moving = tfp_root_motion_step(&r->root, row->root, row->tick, 250);
   bool detect = row->detect != 0;
@@ -198,7 +256,12 @@ static void rules_apply(Rules *r, TfpContinuity *c, Row *row, const float *basis
 
 int main(int argc, char **argv) {
   const bool fit = argc > 1 && !strcmp(argv[1], "fit");
-  settle_on = argc > 2 && !strcmp(argv[2], "settle");
+  for (int i = 2; i < argc; ++i) {
+    if (!strcmp(argv[i], "settle")) settle_on = true;
+    if (!strcmp(argv[i], "dampframe")) damp_frame = true;
+    if (!strcmp(argv[i], "rootframe")) root_frame = true;
+    if (!strcmp(argv[i], "floor")) floor_on = true;
+  }
   int count = 0, room = 1024; Row *rows = malloc((size_t)room*sizeof *rows); float *axes = malloc((size_t)room*9*sizeof *axes);
   for (;;) {
     Row row;
@@ -209,6 +272,7 @@ int main(int argc, char **argv) {
     if (scanf("%d %f %f %f", &row.given, row.head, row.head+1, row.head+2) != 4) return 1;
     if (scanf("%d %d %d %d %f %f %f %d %d %d", &row.mask, &row.kind, &row.damped, &row.off_foot, row.damp, row.damp+1, row.damp+2, &row.stable,
               &row.rearm_only, &row.settle_arm) != 10) return 1;
+    if (scanf("%f %f %f", row.view, row.view+1, row.view+2) != 3) return 1;
     rows[count++] = row;
   }
   TfpContinuity c; memset(&c, 0, sizeof c);
@@ -239,6 +303,11 @@ int main(int argc, char **argv) {
       if (!fit) rules_apply(&rules, &c, &given, axes+n*9);
 #endif
       const float carried = present(&c, &given, axes+n*9, shown);
+#ifdef FLOOR
+      float level[2]; /* round 44's FLOOR, after the filter as in the helper: the filter's own state is not touched */
+      if (floor_on && !fit && given.source == 1 && given.kind == 4 && given.given && !given.off_foot && !given.quiet && level_view(&given, level))
+        (void)tfp_clear_floor(shown, given.head, level, TFP_CAMERA_CLEAR_M);
+#endif
 #if defined(RULES) && defined(TFP_CONTINUITY_SETTLE_MS)
       if (c.settles != settles) rules.settled_arm = rows[n].settle_arm; /* one settle for one arm, as the helper */
 #endif

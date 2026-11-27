@@ -1,6 +1,9 @@
 /* Head-camera eye damping (src/camera_damp.h): the eye follows the head through a low-pass, with a limited lag. */
 #include "camera_damp.h"
+#include "camera_continuity.h"
 #include <stdio.h>
+#include <string.h>
+#include "reference/soak-60-standup.h"
 static int checks, failed;
 #define CHECK(c) do { ++checks; if (!(c)) { ++failed; printf("FAILED line %d: %s\n", __LINE__, #c); } } while (0)
 static float apart(const float *a, const float *b) {
@@ -31,6 +34,49 @@ static float play(int which, float size, float damp_ms, double fps, double until
   }
   if (last) memcpy(last, out, 12);
   return peak;
+}
+/* Round 49, the damping's frame. A root's axes (rows: right, forward, up) at heading `degrees`, level. */
+static void level_axes(float degrees, float *axes) {
+  const float c = cosf(degrees*TFP_PI/180), s = sinf(degrees*TFP_PI/180);
+  const float made[9] = {s, -c, 0, c, s, 0, 0, 0, 1}; memcpy(axes, made, sizeof made);
+}
+static void level_view(float degrees, float pitch, float *view) {
+  const float c = cosf(pitch*TFP_PI/180);
+  view[0] = cosf(degrees*TFP_PI/180)*c; view[1] = sinf(degrees*TFP_PI/180)*c; view[2] = sinf(pitch*TFP_PI/180);
+}
+/* The heading of a frame's forward row, in degrees. */
+static float heading(const float *frame) { return atan2f(frame[4], frame[3])*180/TFP_PI; }
+static float turned(float from, float to) { float d = to-from; while (d > 180) d -= 360; while (d < -180) d += 360; return d; }
+static bool level_frame(const float *f) { /* level, of unit axes, right-handed as the root's are */
+  return f[2] == 0 && f[5] == 0 && f[6] == 0 && f[7] == 0 && f[8] == 1 && fabsf(f[3]*f[3]+f[4]*f[4]-1) < 1e-5f && fabsf(f[0]-f[4]) < 1e-6f && fabsf(f[1]+f[3]) < 1e-6f;
+}
+/* The logged stand-up (tests/reference/soak-60-standup.h) through the eye damping and the continuity as the helper
+ * runs them (lock_damp_eye, then smooth_present): `level` false the damping in the root's own axes (as built before
+ * round 49), true in the frame of tfp_damp_frame_step. `change` takes, for every row from the third, how much the
+ * step of the eye shown changed, as a vector (the judge's measure, tools/harness/matrix.py; the root stands still). */
+static void standup(bool level, float *change) {
+  static const TfpContinuityTuning tuning = TFP_CONTINUITY_DEFAULT;
+  const TfpCameraStyle stable = tfp_camera_style(false, 0);
+  const int count = (int)(sizeof standup_rows/sizeof standup_rows[0]);
+  TfpContinuity c; memset(&c, 0, sizeof c); TfpEyeDamp d; tfp_eye_damp_reset(&d); TfpDampFrame frame; tfp_damp_frame_reset(&frame);
+  float shown[3][3] = {{0}};
+  for (int i = 0; i < count; ++i) {
+    const StandupFrame *f = &standup_rows[i]; const double tick = 1000.0+(double)f->ms;
+    const float flat = sqrtf(f->view[0]*f->view[0]+f->view[1]*f->view[1]);
+    const float node[3] = {f->wanted[0]-f->damp[0]-f->view[0]/flat*.18f, f->wanted[1]-f->damp[1]-f->view[1]/flat*.18f, f->wanted[2]-f->damp[2]-.04f};
+    float axes[9], relative[3] = {0}, damped[3], eye[3], wanted[3] = {0}, head[3] = {0}, out[3];
+    memcpy(axes, f->axes, sizeof axes);
+    if (level) tfp_damp_frame_step(&frame, f->axes, f->view, tick, 250, axes);
+    for (int a = 0; a < 3; ++a) for (int k = 0; k < 3; ++k) relative[a] += (node[k]-f->root[k])*axes[a*3+k];
+    const float lag = tfp_eye_damp_follow(&d, relative, tick, 250, stable.eye_damp_ms, stable.eye_lag_m, damped);
+    for (int k = 0; k < 3; ++k) { eye[k] = f->wanted[k]-f->damp[k]; if (lag > 0) for (int a = 0; a < 3; ++a) eye[k] += (damped[a]-relative[a])*axes[a*3+k]; }
+    for (int a = 0; a < 3; ++a) for (int k = 0; k < 3; ++k) { wanted[a] += (eye[k]-f->root[k])*f->axes[a*3+k]; head[a] += (node[k]-f->root[k])*f->axes[a*3+k]; }
+    const float carried = tfp_continuity_step_cut(&c, wanted, eye, f->axes, head, (uint32_t)f->source, f->looked != 0, false, tick, 250, &tuning, out);
+    memcpy(shown[0], shown[1], 12); memcpy(shown[1], shown[2], 12); memcpy(shown[2], eye, 12);
+    if (carried > 1e-6f) for (int k = 0; k < 3; ++k) { shown[2][k] = f->root[k]; for (int a = 0; a < 3; ++a) shown[2][k] += out[a]*f->axes[a*3+k]; }
+    change[i] = 0;
+    if (i >= 2) { float square = 0; for (int k = 0; k < 3; ++k) { const float v = shown[2][k]-2*shown[1][k]+shown[0][k]; square += v*v; } change[i] = sqrtf(square); }
+  }
 }
 int main(void) {
   /* The option's percentage as a time constant: 0 none, 100 % 300 ms, linear; anything else is kept inside that. */
@@ -314,6 +360,151 @@ int main(void) {
         CHECK(tfp_eye_damp_release_slowly(&a, 5000+2*dt, 250, behind) == tfp_eye_damp_release(&b, 5000+2*dt, 250, other) && same(behind, other) && behind[2] > 0);
       }
     }
+  }
+  /* Round 49, the frame the eye is damped in (tfp_damp_frame_step): level, and it turns with the root's heading only as
+   * far as the view's heading turns the same way in that frame. */
+  {
+    TfpDampFrame f; tfp_damp_frame_reset(&f);
+    float axes[9], view[3], frame[9];
+    /* The first frame is the root's own, to the bit; a level root that turns with the view stays the frame, to the bit
+     * (what the damping worked in before round 49), whether the view turns as far or further. */
+    for (int i = 0; i < 60; ++i) {
+      level_axes(20+3.0f*i, axes); level_view(-70+(i < 30 ? 3.0f : 5.0f)*i-(i < 30 ? 0 : 60), -10, view);
+      CHECK(tfp_damp_frame_step(&f, axes, view, 5000+i*16.0, 250, frame) && !memcmp(frame, axes, sizeof axes));
+    }
+    /* The other way round too, and at a turn of nothing. */
+    tfp_damp_frame_reset(&f);
+    for (int i = 0; i < 20; ++i) {
+      level_axes(200-4.0f*(i < 10 ? i : 10), axes); level_view(100-6.0f*(i < 10 ? i : 10), 25, view);
+      CHECK(tfp_damp_frame_step(&f, axes, view, 5960+i*16.0, 250, frame) && !memcmp(frame, axes, sizeof axes));
+    }
+  }
+  { /* The root spins under a still view (the get-up of soak 60, round 30's whip): the frame stands still. */
+    TfpDampFrame f; tfp_damp_frame_reset(&f);
+    float axes[9], view[3], first[9], frame[9]; level_view(164, 14, view);
+    level_axes(-110.7f, axes);
+    CHECK(tfp_damp_frame_step(&f, axes, view, 5000, 250, first) && !memcmp(first, axes, sizeof axes));
+    for (int i = 1; i <= 8; ++i) {
+      level_axes(-110.7f+16.5f*i, axes);
+      CHECK(!tfp_damp_frame_step(&f, axes, view, 5000+i*33.0, 250, frame) && level_frame(frame) && fabsf(turned(heading(first), heading(frame))) < 1e-3f);
+    }
+    /* From there the root turns with the view again: the frame turns as far as they do, from where it stood. */
+    float before = heading(frame);
+    for (int i = 1; i <= 6; ++i) {
+      level_axes(-110.7f+16.5f*8+5.0f*i, axes); level_view(164+5.0f*i, 14, view);
+      CHECK(!tfp_damp_frame_step(&f, axes, view, 5264+i*33.0, 250, frame) && level_frame(frame) && fabsf(turned(before, heading(frame))-5) < 1e-3f);
+      before = heading(frame);
+    }
+  }
+  { /* Only the view turns (a flick of the mouse over a still body): the frame is the root's, still. */
+    TfpDampFrame f; tfp_damp_frame_reset(&f);
+    float axes[9], view[3], frame[9]; level_axes(40, axes);
+    for (int i = 0; i < 12; ++i) {
+      level_view(40+25.0f*i, 0, view);
+      CHECK(tfp_damp_frame_step(&f, axes, view, 5000+i*16.0, 250, frame) && !memcmp(frame, axes, sizeof axes));
+    }
+  }
+  { /* Opposite senses: not at all. The same sense, the view less far: as far as the view. */
+    TfpDampFrame f; tfp_damp_frame_reset(&f);
+    float axes[9], view[3], first[9], frame[9];
+    level_axes(10, axes); level_view(10, 0, view); tfp_damp_frame_step(&f, axes, view, 5000, 250, first);
+    for (int i = 1; i <= 5; ++i) {
+      level_axes(10+8.0f*i, axes); level_view(10-6.0f*i, 0, view);
+      CHECK(!tfp_damp_frame_step(&f, axes, view, 5000+i*16.0, 250, frame) && level_frame(frame) && fabsf(turned(heading(first), heading(frame))) < 1e-3f);
+    }
+    for (int i = 1; i <= 5; ++i) {
+      level_axes(50-9.0f*i, axes); level_view(-20-2.0f*i, 0, view);
+      CHECK(!tfp_damp_frame_step(&f, axes, view, 5080+i*16.0, 250, frame) && level_frame(frame) && fabsf(turned(heading(first), heading(frame))+2.0f*i) < 1e-3f);
+    }
+  }
+  { /* Across +-180 degrees a turn is the short way round, for the root and for the view. */
+    TfpDampFrame f; tfp_damp_frame_reset(&f);
+    float axes[9], view[3], frame[9];
+    level_axes(175, axes); level_view(-178, 0, view); tfp_damp_frame_step(&f, axes, view, 5000, 250, frame);
+    level_axes(-175, axes); level_view(172, 0, view); /* the root +10, the view -10: opposite */
+    CHECK(!tfp_damp_frame_step(&f, axes, view, 5016, 250, frame) && fabsf(turned(175, heading(frame))) < 1e-3f);
+    level_axes(-179, axes); level_view(-170, 0, view); /* the root -4 (the short way), the view +18 across the seam: opposite */
+    CHECK(!tfp_damp_frame_step(&f, axes, view, 5032, 250, frame) && fabsf(turned(175, heading(frame))) < 1e-3f);
+    level_axes(171, axes); level_view(175, 0, view);   /* the root -10 across the seam, the view -15 across it: the root's 10 */
+    CHECK(!tfp_damp_frame_step(&f, axes, view, 5048, 250, frame) && fabsf(turned(175, heading(frame))+10) < 1e-3f);
+  }
+  { /* It starts again at the root's heading after a pause, a clock that went back, and what is not a number. */
+    TfpDampFrame f; tfp_damp_frame_reset(&f);
+    float axes[9], view[3], frame[9]; level_view(0, 0, view);
+    for (int i = 0; i <= 4; ++i) { level_axes(30.0f*i, axes); tfp_damp_frame_step(&f, axes, view, 5000+i*16.0, 250, frame); }
+    CHECK(fabsf(turned(0, heading(frame))) < 1e-3f);
+    level_axes(150, axes);
+    CHECK(tfp_damp_frame_step(&f, axes, view, 5064+251, 250, frame) && !memcmp(frame, axes, sizeof axes));
+    level_axes(180, axes);
+    CHECK(!tfp_damp_frame_step(&f, axes, view, 5064+251+16, 250, frame) && fabsf(turned(150, heading(frame))) < 1e-3f);
+    CHECK(tfp_damp_frame_step(&f, axes, view, 5064, 250, frame) && !memcmp(frame, axes, sizeof axes));
+    float broken[9]; memcpy(broken, axes, sizeof axes); broken[3] = NAN;
+    CHECK(tfp_damp_frame_step(&f, broken, view, 5080, 250, frame) && !f.known);
+    level_axes(-90, axes);
+    CHECK(tfp_damp_frame_step(&f, axes, view, 5096, 250, frame) && !memcmp(frame, axes, sizeof axes));
+    tfp_damp_frame_reset(&f);
+    CHECK(!f.known);
+  }
+  { /* Without a view to compare with (none given, straight up or down, not a number) the frame turns with the root. */
+    TfpDampFrame f; tfp_damp_frame_reset(&f);
+    float axes[9], frame[9]; const float up[3] = {0, 0, 1}, nan[3] = {NAN, 0, 0};
+    for (int i = 0; i < 12; ++i) {
+      level_axes(12.0f*i, axes);
+      CHECK(tfp_damp_frame_step(&f, axes, i < 4 ? NULL : i < 8 ? up : nan, 5000+i*16.0, 250, frame) && !memcmp(frame, axes, sizeof axes));
+    }
+  }
+  { /* A root that is not level (lying, on a slope): the frame is level, at the heading of the root's forward axis. */
+    TfpDampFrame f; tfp_damp_frame_reset(&f);
+    const float tilted[9] = {-0.269517f, -0.924934f, 0.268060f, 0.901390f, -0.340268f, -0.267794f, 0.338904f, 0.169452f, 0.925435f};
+    float view[3], frame[9]; level_view(164, 14, view);
+    CHECK(!tfp_damp_frame_step(&f, tilted, view, 5000, 250, frame) && level_frame(frame) && fabsf(turned(heading(tilted), heading(frame))) < 1e-3f);
+    /* The tilt going in one frame, the heading with it, the view still: the frame stays. */
+    float axes[9]; level_axes(heading(tilted)+21, axes);
+    CHECK(!tfp_damp_frame_step(&f, axes, view, 5033, 250, frame) && level_frame(frame) && fabsf(turned(heading(tilted), heading(frame))) < 1e-3f);
+  }
+  { /* A turn of the root of more than a quarter circle in one frame is no turn: the game has set the root's axes anew
+     * (out of an emote into a dive backwards the heading flips 157 to 180 degrees in a frame, soaks 28 and 29), which
+     * the continuity reads as a cut of the pose in the root's own axes (THE CUT). The frame goes with it, as before. */
+    TfpDampFrame f; tfp_damp_frame_reset(&f);
+    float axes[9], view[3], frame[9]; level_view(5, 0, view);
+    level_axes(-17.6f, axes); tfp_damp_frame_step(&f, axes, view, 5000, 250, frame);
+    level_axes(-174.5f, axes);
+    CHECK(tfp_damp_frame_step(&f, axes, view, 5033, 250, frame) && !memcmp(frame, axes, sizeof axes));
+    level_axes(-174.5f+89, axes); /* under it: a turn, and the view did not make it */
+    CHECK(!tfp_damp_frame_step(&f, axes, view, 5066, 250, frame) && fabsf(turned(-174.5f, heading(frame))) < 1e-3f);
+    level_axes(-174.5f+89-91, axes); /* over it, from a frame that already stands off the root: it keeps standing off as far */
+    CHECK(!tfp_damp_frame_step(&f, axes, view, 5099, 250, frame) && fabsf(turned(-174.5f-91, heading(frame))) < 1e-3f);
+  }
+  { /* A forward axis straight up (a body thrown, while a lag is let go): the frame of the frame before stands. */
+    TfpDampFrame f; tfp_damp_frame_reset(&f);
+    const float upright[9] = {1, 0, 0, 0, 0, 1, 0, -1, 0};
+    float axes[9], view[3], frame[9], kept[9]; level_view(30, 0, view);
+    CHECK(tfp_damp_frame_step(&f, upright, view, 5000, 250, frame) && !memcmp(frame, upright, sizeof upright) && !f.known); /* nothing before it: the axes */
+    level_axes(30, axes); tfp_damp_frame_step(&f, axes, view, 5016, 250, frame);
+    level_axes(50, axes); CHECK(!tfp_damp_frame_step(&f, axes, view, 5032, 250, kept) && fabsf(turned(30, heading(kept))) < 1e-3f);
+    CHECK(!tfp_damp_frame_step(&f, upright, view, 5048, 250, frame) && level_frame(frame) && fabsf(turned(30, heading(frame))) < 1e-3f);
+    level_axes(50, axes); CHECK(!tfp_damp_frame_step(&f, axes, view, 5064, 250, frame) && fabsf(turned(30, heading(frame))) < 1e-3f);
+  }
+  /* The get-up of soak 60 (tests/reference/soak-60-standup.h). In the root's axes, as built before round 49, the eye's
+   * step changes by 0.31 m in a frame; in the frame of tfp_damp_frame_step the first frame is 0.06 m at most and no
+   * frame over 0.10 m. */
+  {
+    enum { ROWS = sizeof standup_rows/sizeof standup_rows[0] };
+    float old[ROWS], now[ROWS], old_most = 0, now_most = 0; int first = -1;
+    standup(false, old); standup(true, now);
+    for (int i = 0; i < ROWS; ++i) {
+      if (first < 0 && old[i] >= .06f) first = i;
+      if (old[i] > old_most) old_most = old[i];
+      if (now[i] > now_most) now_most = now[i];
+    }
+    printf("stand-up from lying on the back (soak 60, Stable), the change of the shown eye's step, row by row from row %d:\n  root's axes:", first);
+    for (int i = first; i >= 0 && i < ROWS; ++i) printf(" %.3f", old[i]);
+    printf("\n  round 49:   ");
+    for (int i = first; i >= 0 && i < ROWS; ++i) printf(" %.3f", now[i]);
+    printf("\n");
+    CHECK(first == 6 && fabsf(old[6]-.291f) < .01f && fabsf(old_most-.312f) < .01f && fabsf(old[8]-old_most) < 1e-6f);
+    CHECK(first >= 0 && now[first] <= .06f);
+    CHECK(now_most <= .10f);
   }
   printf("camera damp: %d checks, %d failed\n", checks, failed);
   return failed != 0;

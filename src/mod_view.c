@@ -1132,6 +1132,15 @@ static void start(void) {
         tfp_camera_set_settle(settle_file != NULL);
         if (settle_file) say("Test: settle_on.txt: the native view coming back on mask 0 after it was left for a new request or firearm holds the "
                              "eye against the root until the rig is steady (3 frames, 350 ms at most), then eases once (THE SETTLE)");
+        /* Round 49: the frame the head camera's eye is damped in (src/camera_damp.h tfp_damp_frame_step), off by default:
+         * it takes the 0.31 m out of a get-up from lying on the back, and replayed over the soaks (tools/harness/replay.py
+         * --damp-frame against --root-frame) it made other frames worse by more than 5 mm; on only to compare in the game. */
+        strcpy(slash + 1, "damp_frame_on.txt");
+        FILE *damp_frame_file = fopen(parts_path, "r");
+        if (damp_frame_file) fclose(damp_frame_file);
+        tfp_camera_set_damp_frame(damp_frame_file != NULL);
+        if (damp_frame_file) say("Test: damp_frame_on.txt: the head camera's eye is damped in a level frame that turns with the body only as far as "
+                                 "the view turns the same way (a body that turns under a still view does not swing the eye)");
         /* The overrides of the three live features (src/wire_options.h): for testing only. */
         static const struct { const char *name; TfpFeature feature; bool on; } forced[] = {
           {"arms_live.txt", TFP_FEATURE_ARMS, true}, {"arms_off.txt", TFP_FEATURE_ARMS, false},
