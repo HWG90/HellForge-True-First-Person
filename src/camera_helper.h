@@ -250,6 +250,14 @@ void tfp_camera_set_settle(bool on);
  * whose head or rig eye cannot be proven is presented as any other native frame and counted as refused. Off (the
  * default) and without the lock: nothing is reached or read. */
 void tfp_camera_set_orphan(bool on);
+/* Beyond retail, round 49: the binder says each tick whether the body is in a dive (the motion runtime's action,
+ * TFP_ACT_DIVE: from the launch to the landing, where it becomes prone). A dive is "on foot" to the layer the lock
+ * reads, so the Stable style's eye damping ran through it: with the continuity's carry on top the eye stood 0.36 to
+ * 0.38 m above the rig eye when the native view came back, and floated down after the landing (soak 60: 0.355 m).
+ * While this is on, in the Stable style, the head camera's eye is not damped and a lag carried is let go on 40 ms, as
+ * in a clamber or a vault (src/camera_traversal.h). Bodycam is as before. The Trace rows say dive=1 while it is on.
+ * Off (the default) and without the lock: nothing changes. */
+void tfp_camera_set_dive(bool on);
 /* Counts since the start; behind_m: on the last such frame, how far behind the presented point the game's own eye
  * was, along the level view direction. */
 typedef struct TfpCameraOrphanStats { uint64_t frames, refused; float behind_m; } TfpCameraOrphanStats;
@@ -432,6 +440,10 @@ typedef struct TfpCameraTraceRow { float ms; uint32_t kind, source; float eye[3]
    * and with it the probe: game_turn, the game's own direction in the world (what `turn` would have been), and
    * game_cam, where the game last put its ordinary camera (game_cam_known). */
   float turn_carry, turn_edge, game_turn[3], game_cam[3]; bool game_cam_known;
+  /* Round 49, the log only. hold: in a head-camera frame whose eye a swap holds (the held eye, or its glide to the
+   * incoming weapon's eye or its release), the held difference: the eye from the head camera's own, in the body root's
+   * frame (m), with hold_known. dive: the binder said the body is in a dive (tfp_camera_set_dive). */
+  float hold[3]; bool hold_known, dive;
 } TfpCameraTraceRow;
 void tfp_camera_trace_edge(void);
 /* The arm drive's figures of the last primary draw, for the newest frame presented. The draw comes after the frame's

@@ -22,6 +22,7 @@ FOOT_SWAP = "soak60-A-L3280-3420.log"      # a swap on foot: 0.05 and 0.02 degre
 FLICK = "soak60-A-L6760-6800.log"          # the primary back, prone: the veil 0.248 m, then nothing
 MELEE = "soak62-C-L2760-2815.log"          # #13 melee, prone: the veil 0.196, 0.081 m, then the native view
 UNDER = "soak62-C-L2155-2200.log"          # a dive + swap: the veil 0.120 m, then 0.055 with the head below the view
+DIVE = "soak60-A-L6590-6715.log"           # a dive + swap on open ground, Stable: the float 0.355 m after the landing
 STIM = "soak60-A-L6985-7015.log"           # #20 stim, prone: the end of an orphan run, the camera's matrix 90 degrees off
 
 
@@ -211,6 +212,56 @@ class VeilKept(unittest.TestCase):
         self.assertEqual(matrix.veil_faults(kept)[2], [])
         moves = [round(matrix._length(r["veil"]), 3) for r in kept if r["veil"]]
         self.assertEqual(moves[:2], [0.120, 0.116])
+
+
+class Dive(unittest.TestCase):
+    """Round 49, in a dive (src/camera_helper.h tfp_camera_set_dive): the Stable style's eye damping is not run in the
+    head camera's frames of a dive. The logged rows with the damping taken off those frames (the lag was built in them:
+    the leave is 470 ms into the dive), through this tree's continuity (tools/harness/replay.py)."""
+    MOTION = re.compile(r"^(\d+):(\d+):(\d+)\.(\d+) Motion: action=([\w-]+)")
+
+    def replayed(self, told):
+        import replay
+        lines = cut(DIVE)
+        spans, start = [], None
+        for line in lines:
+            m = self.MOTION.match(line)
+            if m:
+                ms = ((int(m[1]) * 60 + int(m[2])) * 60 + int(m[3])) * 1000 + int(m[4])
+                if m[5] == "dive":
+                    start = ms
+                elif start is not None:
+                    spans.append((start, ms))
+                    start = None
+        self.assertEqual(len(spans), 1)   # 19:38:33.398 to 34.569
+        rows, changed = replay.read(lines), 0
+        for row in rows:
+            if told and row["kind"] == 4 and row["source"] == "head" and row.get("damp") and any(a <= row["stamp"] <= b for a, b in spans):
+                row["wanted"] = [w - d for w, d in zip(row["wanted"], row["damp"])]
+                row["damp"] = [0.0, 0.0, 0.0]
+                changed += 1
+        out, given = replay.replay(rows, logged="85f18b8")
+        self.assertTrue(given)
+        floated = max(held for _, held in trace.held_offsets([dict(r) for r in out], eye="new_eye"))
+        judged = matrix.measure([dict(r, written=r["at"], eye=r["new_eye"], carried=r["new_carried"], veil=None) for r in out])
+        left = min(r["tick"] for r in out if r["kind"] == 4)   # from the leave on (the launch before it is the game's own, 0.073 m)
+        judged = [f for f in judged if f["tick"] >= left]
+        return changed, floated, max(f["beyond"] for f in judged), sum(f["beyond"] >= matrix.POP_M for f in judged)
+
+    def test_the_float_after_the_landing(self):
+        changed, floated, step, over = self.replayed(False)
+        self.assertEqual(changed, 0)
+        self.assertAlmostEqual(floated, 0.355, delta=0.002)   # as logged
+        self.assertAlmostEqual(step, 0.065, delta=0.002)
+        self.assertEqual(over, 1)
+        changed, floated, step, over = self.replayed(True)
+        self.assertEqual(changed, 11)                      # the head camera's frames of the dive
+        self.assertAlmostEqual(floated, 0.142, delta=0.003)
+        self.assertLess(floated, trace.FLOAT_M)
+        # Not all gain: the two head-camera frames over the limit go (0.065, 0.054 to 0.035, 0.030) and the second
+        # native frame of the entry comes in their place, larger (0.043 to 0.083): one frame over the limit either way.
+        self.assertAlmostEqual(step, 0.083, delta=0.002)
+        self.assertEqual(over, 1)
 
 
 class Orphan(unittest.TestCase):

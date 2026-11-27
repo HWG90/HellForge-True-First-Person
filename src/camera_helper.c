@@ -206,6 +206,8 @@ static TfpKick lock_kick; static TfpQ lock_view = {0, 0, 0, 1}, lock_last_kick =
  * the native view and the ordinary camera. lock_game_cam: where the game last put its own ordinary camera (the kind 4
  * position argument, before the head camera's eye replaces it), for the log. Policy lock. */
 static TfpTurn lock_turn; static float lock_game_cam[3]; static double lock_game_cam_tick = -1;
+/* Round 49 (camera_helper.h tfp_camera_set_dive): the binder's word that the body is in a dive. */
+static _Atomic uint32_t dive_on;
 #define LOCK_DOWN_MS 1000.0   /* a refused frame this long after a down frame still counts as the down body's */
 #define LOCK_OFF_FOOT_MS 250.0
 static TfpQ lock_carry = {0, 0, 0, 1}; static bool lock_was_held; static double lock_down_until;
@@ -304,7 +306,8 @@ static _Atomic uint32_t settle_arm, settle_on; static double settle_armed_at; /*
 #define TRACE_MS 500.0
 typedef struct TraceFrame { double tick; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease, root[3]; uint32_t what; float axes[9], damp[3], view[3], sock; uint32_t arms; float veil[3], turn[3], veil_head[2];
   float head_shown[2], clear; bool head_known; /* round 44 */
-  float turn_carry, turn_edge, game_turn[3], game_cam[3]; bool game_cam_known; /* round 49 */ } TraceFrame;
+  float turn_carry, turn_edge, game_turn[3], game_cam[3]; bool game_cam_known; /* round 49 */
+  float hold[3]; bool hold_known, dive; /* round 49 */ } TraceFrame;
 /* Round 24, the log only: the native view's parent (the rig eye's axis rows) in the frame being presented, for the
  * direction shown (lock_rotation: the argument there is parent-local). trace_parent_tick: whose frame; policy lock. */
 static float trace_parent[9]; static double trace_parent_tick = -1;
@@ -1188,6 +1191,8 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
     memset(row->head_shown, 0, sizeof row->head_shown); row->head_known = false; row->clear = 0; /* and from the eye shown (round 44) */
     memset(row->turn, 0, sizeof row->turn); /* lock_rotation says it, after the rotation is final (round 24) */
     row->turn_carry = row->turn_edge = 0; memset(row->game_turn, 0, sizeof row->game_turn); memset(row->game_cam, 0, sizeof row->game_cam); row->game_cam_known = false; /* and these (round 49) */
+    memset(row->hold, 0, sizeof row->hold); row->hold_known = false; /* the head camera's branch says it */
+    row->dive = atomic_load_explicit(&dive_on, memory_order_relaxed) != 0;
     if (trace.head-trace.sent > TRACE_RING) trace.sent = trace.head-TRACE_RING;
     /* The log only: the eye opens a window itself where its step changes by TFP_TRACE_SELF_M or more
      * (src/trace_edges.h: a melee has no State line and no change of action). In an open window the time goes on and
@@ -1227,7 +1232,12 @@ static bool lock_damp_eye(Policy *p, uint32_t kind, const float *root, const flo
    * held the eye above a head that crouched against a rising root, and below it as the body stood up. What is carried
    * is let go on 40 ms, as at full aim. */
   const bool climbing = tfp_traversal_recent(&damp_climb, p->control_mask, tick, p->c.max_gap_ms);
-  const bool on_foot = tfp_traversal_damps(kind == 4 && !p->lock_down && !p->lock_off_foot && !p->full_ads && !p->ads_gap_active, climbing);
+  /* Round 49: nor in a dive in the Stable style (camera_helper.h tfp_camera_set_dive): a dive is "on foot" to the
+   * layer lock_off_foot reads, and Stable's lag with the continuity's carry held the eye 0.36 to 0.38 m above the rig
+   * eye at the landing. Replayed over soak 60's dive + swap (19:38:33.9 to 34.6) without it: the float 0.355 m to
+   * 0.142. Bodycam's 0.10 m follows the head as before. */
+  const bool diving = atomic_load_explicit(&dive_on, memory_order_relaxed) != 0 && atomic_load_explicit(&lock_bodycam, memory_order_relaxed) == 0;
+  const bool on_foot = tfp_traversal_damps(kind == 4 && !p->lock_down && !p->lock_off_foot && !p->full_ads && !p->ads_gap_active, climbing || diving);
   const bool damp = on_foot && damp_ms > 0;
   trace_damp.off_foot = p->lock_off_foot;
   float relative[3] = {0}, damped[3] = {0}, behind[3] = {0}, lag = 0;
@@ -2052,6 +2062,9 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
                 if (row->tick == tick) {
                   for (unsigned i = 0; i < 3; ++i) row->veil[i] = adjusted[i]-before[i];
                   if (veil_logged) { row->veil_head[0] = (head[0]-before[0])*horizontal[0]+(head[1]-before[1])*horizontal[1]; row->veil_head[1] = head[2]-before[2]; }
+                  /* Round 49, the log only: the difference a swap holds the eye at in this frame (the glide's part
+                   * in a dive's float was inferred from timing; nothing said the delta). */
+                  if (eye_held) { memcpy(row->hold, policy.eye_delta, 12); row->hold_known = true; }
                   /* Round 44: where the head node was from the eye shown, and the push (src/camera_clear.h). */
                   if (policy.lock_now && kind == 4) {
                     row->head_shown[0] = -tfp_clear_ahead(adjusted, head, horizontal); row->head_shown[1] = head[2]-adjusted[2]; row->head_known = true;
@@ -2356,6 +2369,7 @@ void tfp_camera_continuity_event(void) { atomic_store(&smooth_event, 1u); }
 void tfp_camera_settle_arm(void) { atomic_store(&settle_arm, 1u); }
 void tfp_camera_set_settle(bool on) { atomic_store(&settle_on, on ? 1u : 0u); }
 void tfp_camera_set_orphan(bool on) { atomic_store(&orphan_on, on ? 1u : 0u); }
+void tfp_camera_set_dive(bool on) { atomic_store(&dive_on, on ? 1u : 0u); }
 void tfp_camera_set_veil(bool on) {
   atomic_store(&veil_armed, on ? 1u : 0u);
   if (!on) { atomic_store(&veil_open, 0); atomic_store(&veil_pending, 0); }
@@ -2442,6 +2456,7 @@ uint32_t tfp_camera_trace_read(TfpCameraTraceRow *rows, uint32_t capacity) {
     memcpy(row->veil, frame->veil, 12); memcpy(row->turn, frame->turn, 12); memcpy(row->veil_head, frame->veil_head, 8);
     memcpy(row->head_shown, frame->head_shown, 8); row->head_known = frame->head_known; row->clear = frame->clear;
     row->turn_carry = frame->turn_carry; row->turn_edge = frame->turn_edge; memcpy(row->game_turn, frame->game_turn, 12); memcpy(row->game_cam, frame->game_cam, 12); row->game_cam_known = frame->game_cam_known;
+    memcpy(row->hold, frame->hold, 12); row->hold_known = frame->hold_known; row->dive = frame->dive;
   }
   policy_release();
   return count;
@@ -2519,7 +2534,7 @@ void tfp_camera_reset_for_tests(void) {
   atomic_store(&lock_missed_why, 0); atomic_store(&lock_down_frames, 0); atomic_store(&lock_down_refused, 0); atomic_store(&lock_down_kind, 0);
   atomic_store(&lock_down_error, 0); atomic_store(&lock_down_why, 0); atomic_store(&lock_body_ragdoll, 0); atomic_store(&lock_body_off_foot, 0);
   atomic_store(&lock_off_foot_body, 0); atomic_store(&lock_off_foot_at, 0); atomic_store(&lock_body_distance, 0); atomic_store(&lock_down_distance, 0);
-  lock_carry = tfp_q_identity(); lock_was_held = false; lock_down_until = 0; lock_view_known = false; lock_first_known = false; lock_tick = 0; tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity(); tfp_turn_reset(&lock_turn); lock_game_cam_tick = -1;
+  lock_carry = tfp_q_identity(); lock_was_held = false; lock_down_until = 0; lock_view_known = false; lock_first_known = false; lock_tick = 0; tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity(); tfp_turn_reset(&lock_turn); lock_game_cam_tick = -1; atomic_store(&dive_on, 0);
   lock_damp_ms = 0; atomic_store(&lock_bodycam, 1); tfp_eye_damp_reset(&lock_eye_damp);
   seat_forget(); seat_from_tick = 0; seat_from_q = tfp_q_identity(); seat_hand_hashes = 0; seat_hand_count = 0;
   atomic_store(&seat_frames, 0); atomic_store(&seat_refused, 0); atomic_store(&seat_glided, 0); atomic_store(&seat_entries, 0);

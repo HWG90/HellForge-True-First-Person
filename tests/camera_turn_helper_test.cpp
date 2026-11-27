@@ -192,6 +192,40 @@ int main() {
     CHECK(heads == 8 && taken == 0 && veiled == 0 && said == orphans + heads);
     g.end();
   }
+  // ---- 6. In a dive (tfp_camera_set_dive): the Stable style's eye damping is let go on 40 ms and nothing new is damped,
+  // as in a clamber; Bodycam is as before. The head camera, the head dropping 0.9 m in 0.3 s (a dive's launch) and then
+  // going on level: the lag behind the head's own eye. [0] Stable, not told; [1] Stable, told at the launch; [2] and
+  // [3] Bodycam with the camera damping option at 150 ms, not told and told. ----
+  {
+    float lag[4][60] = {}; float sent_at[4][60][4] = {}; int n[4] = {0, 0, 0, 0}; int dives[4] = {0, 0, 0, 0};
+    for (int run = 0; run < 4; ++run) {
+      fresh(true, true, true, run >= 2 ? 150.f : 0.f, run >= 2);
+      clock_ms = 600000;
+      Game g; g.pose(1, 2, 0, LOOK); g.look(LOOK, 0); g.hip(); g.begin();
+      standing(g, 30, 16.7, false);
+      for (int i = 0; i < 50; ++i) {
+        if (i == 12 && (run & 1)) tfp_camera_set_dive(true);
+        if (i == 12) tfp_camera_trace_edge();
+        const float drop = i < 12 ? 0 : std::fmin(.9f, .05f * (i - 11));
+        g.pose(1, 2 + .1f * std::fmax(0, i - 11), 0, LOOK, 1.5f - drop); g.hip(0); g.frame(16.7);
+        lag[run][n[run]] = g.from_head_eye(); std::memcpy(sent_at[run][n[run]], sent.position, 16); ++n[run];
+      }
+      TfpCameraTraceRow rows[64]; const uint32_t count = tfp_camera_trace_read(rows, 64);
+      for (uint32_t i = 0; i < count; ++i) dives[run] += rows[i].dive;
+      tfp_camera_set_dive(false);
+      g.end();
+    }
+    float most[4] = {0, 0, 0, 0}, late[4] = {0, 0, 0, 0};
+    for (int run = 0; run < 4; ++run) for (int i = 12; i < 50; ++i) { most[run] = std::fmax(most[run], lag[run][i]); if (i >= 20) late[run] = std::fmax(late[run], lag[run][i]); }
+    std::printf("  a dive in the head camera: Stable %.3f m behind the head at most (%.3f from 130 ms on), told %.3f (%.3f); Bodycam %.3f, told %.3f\n",
+                most[0], late[0], most[1], late[1], most[2], most[3]);
+    CHECK(late[0] > .15f);                    // Stable as it was: the eye up to its 0.25 m behind a head that drops
+    // told: what was carried is let go on 40 ms and nothing new is damped. (What is left is not the eye damping's: the
+    // head camera's own smoothing of the head, retail's, 0.06 m at most.)
+    CHECK(most[1] < .061f && late[1] < .061f && late[0] - late[1] > .2f);
+    CHECK(most[2] > .03f && std::memcmp(sent_at[2], sent_at[3], sizeof sent_at[2]) == 0); // Bodycam: the same bytes, told or not
+    CHECK(dives[0] == 0 && dives[1] > 0 && dives[3] > 0); // and the rows say it
+  }
   std::printf("camera turn through the helper: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }
