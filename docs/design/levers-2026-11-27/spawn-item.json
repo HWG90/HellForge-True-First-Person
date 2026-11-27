@@ -1,0 +1,17 @@
+{
+ "name": "MG-43 Machine Gun",
+ "resource": "11c27d3babb38956",
+ "package": "c024a2e8ae639757",
+ "entity": 555,
+ "pickup": {
+  "settled": 2,
+  "zone0": {
+   "category": 13,
+   "handle": -1
+  },
+  "zone1": {
+   "category": 3,
+   "handle": 150
+  }
+ }
+}

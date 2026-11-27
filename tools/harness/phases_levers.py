@@ -152,7 +152,7 @@ def main(argv):
     log = matrix.log_path(); results = {}
     with drive.Input() as device:
         if "frames held" not in log.read_text(errors="replace")[-4000:]:
-            device.run(f"key {drive.TOGGLE}; wait 2.5")
+            device.run(f"hold {drive.TOGGLE} 0.2; wait 2.5")   # a tap is too short for the mod's once-a-tick poll (seen live, round 51)
         for name in names:
             start = log.stat().st_size
             report = setup(name, device=device)
