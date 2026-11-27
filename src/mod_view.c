@@ -1415,7 +1415,9 @@ static void ads_seat_tick(void) {
   float sight = 0, native = 0, applied = 0;
   const bool near_on = tfp_near_ads_probe(&sight, &native, &applied);
   const TfpEditor *editor = tfp_wire_editor_of(&wire);
-  tfp_aim_bind_tick(near_on, sight, tfp_locked_view_ads_sight_cm(&wire), tfp_editor_motion_editing_ads(editor)); /* src/aim_bind.h */
+  const double aim_in_ms = tfp_locked_view_ads_transition_ms(&wire); /* round 42: "Aim-in time" */
+  tfp_wire_set_aim_in(&wire, aim_in_ms); /* the shared clock's ADS_ENTER (src/transition.h), before this tick's runtime update */
+  tfp_aim_bind_tick(near_on, sight, tfp_locked_view_ads_sight_cm(&wire), tfp_editor_motion_editing_ads(editor), aim_in_ms); /* src/aim_bind.h */
   TfpPoseAdsProbe ads;
   const bool pose_on = tfp_pose_ads_probe(&ads) && ads.armed;
   TfpFovLockStats f; tfp_fov_lock_stats(&f);
@@ -1425,7 +1427,8 @@ static void ads_seat_tick(void) {
     .aim_field = tfp_locked_view_aim_field(&wire), .sight = near_on && sight > 0 ? sight : NAN,
     .wanted = (float)(tfp_locked_view_ads_sight_cm(&wire)/100), .pull = ads.pull, .closer = ads.closer, .ads_forward = ads.ads_forward,
     .near_clip = near_on ? applied : NAN, .depth = ads.depth, .editor = editor && tfp_editor_is_active(editor),
-    .editor_action = editor ? tfp_editor_preview_action(editor) : NULL, .now_ms = (double)GetTickCount64()};
+    .editor_action = editor ? tfp_editor_preview_action(editor) : NULL, .now_ms = (double)GetTickCount64(),
+    .aim_in_ms = aim_in_ms};
   TfpFovAimSecond frames; tfp_fov_aim_take(&frames); tfp_aim_log_add_fov(&aim_log, &frames); /* round 20c: the frames since the last tick */
   char line[TFP_AIM_LINE];
   if (tfp_aim_log_step(&aim_log, &sample, line, sizeof line)) say("%s", line);

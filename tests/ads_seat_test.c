@@ -139,19 +139,33 @@ int main(void) {
   CHECK(near(tfp_ads_lead(&lead, .015f, 164), .015f, 1e-7));                                 /* going out: the gun itself */
   CHECK(near(tfp_ads_lead(&lead, .05f, 600), .05f, 1e-7));                                   /* after a pause: no step is known */
   CHECK(tfp_ads_lead(&lead, NAN, 616) == 0 && tfp_ads_lead(&lead, -.1f, 632) == 0);
+  /* round 42: "Aim-in time" 0, the frame the gun comes in all at once is not led; the frame after it measures from it */
+  memset(&lead, 0, sizeof lead);
+  CHECK(tfp_ads_lead_snap(&lead, 0, 100, false) == 0);
+  CHECK(near(tfp_ads_lead_snap(&lead, .073f, 116, true), .073f, 1e-7));                    /* in at once: the gun itself */
+  CHECK(near(tfp_ads_lead_snap(&lead, .073f, 132, false), .073f, 1e-7));                   /* standing after it: nothing to lead */
+  CHECK(near(tfp_ads_lead_snap(&lead, .083f, 148, false), .113f + TFP_ADS_SNAP, 1e-6));    /* the pull's glide after it: led as before */
+  CHECK(tfp_ads_lead_snap(&lead, NAN, 164, true) == 0);
+  /* and snap false is tfp_ads_lead, to the bit */
+  {
+    TfpAdsLead a1, b1; memset(&a1, 0, sizeof a1); memset(&b1, 0, sizeof b1);
+    bool all = true; float c = 0;
+    for (int i = 0; i < 40; i++) { c = i < 20 ? c + .004f*(float)(i % 3) : c - .003f; all = all && tfp_ads_lead(&a1, c, 100 + 16.0*i) == tfp_ads_lead_snap(&b1, c, 100 + 16.0*i, false); }
+    CHECK(all);
+  }
   /* ---- the "Aim:" line ---- */
   TfpAimLog log; tfp_aim_log_reset(&log);
   char line[700];
   TfpAimSample s; memset(&s, 0, sizeof s);
   s.weapon = "LAS-5 Scythe"; s.game_fov = DEG(61.5); s.shown_fov = DEG(105); s.aim_field = TFP_FOV_AIM_ZOOM; s.sight = .173f; s.wanted = .10f;
-  s.pull = 0; s.closer = 0; s.near_clip = .10f; s.depth = NAN; s.now_ms = 5000;
+  s.pull = 0; s.closer = 0; s.near_clip = .10f; s.depth = NAN; s.now_ms = 5000; s.aim_in_ms = 180; /* round 42: the Aim-in time said */
   CHECK(!tfp_aim_log_step(&log, &s, line, sizeof line));                                       /* at the hip: nothing */
   s.full_ads = true; s.now_ms += 16;
   CHECK(!tfp_aim_log_step(&log, &s, line, sizeof line));                                       /* in, settling: not yet */
   for (int i = 0; i < 30; i++) { s.now_ms += 16; s.pull = .073f; s.closer = .073f; s.shown_fov = DEG(61.5); s.near_clip = .10f; s.depth = .2102f;
     if (tfp_aim_log_step(&log, &s, line, sizeof line)) break; }
   CHECK(strstr(line, "Aim: in: \"LAS-5 Scythe\"; fov 61.5 shown 61.5 (Aim field of view: the game's zoom); "
-                     "sight 0.173 m (near clip), wanted 0.100: pull 0.073, closer 0.073 (ADS fwd +0.000), near clip 0.100 m; depth 0.210 m; editor closed | "
+                     "sight 0.173 m (near clip), wanted 0.100: pull 0.073, closer 0.073 (ADS fwd +0.000), near clip 0.100 m; depth 0.210 m; editor closed; aim-in 180 ms | "
                      "0 frames counted; game/lens not seen; rig depth not worked out") == line);
   for (int i = 0; i < 20; i++) { s.now_ms += 16; CHECK(!tfp_aim_log_step(&log, &s, line, sizeof line)); }   /* steady: nothing more */
   /* a zoom level: the game's lens and sight change; said once it has settled */
@@ -199,6 +213,10 @@ int main(void) {
   for (int i = 0; i < 40 && !tfp_aim_log_step(&log, &s, line, sizeof line); i++) s.now_ms += 16;
   CHECK(strstr(line, "Aim: in: no weapon known; fov not read shown not read (Aim field of view: a chosen 50.0 degrees)") == line);
   CHECK(strstr(line, "sight not known, wanted 0.000") && strstr(line, "depth not read"));
+  CHECK(strstr(line, "editor closed; aim-in 0 ms | "));                                           /* round 42: 0 (instant) is said too */
+  tfp_aim_log_reset(&log); s.aim_in_ms = NAN; s.full_ads = false; s.now_ms += 16; tfp_aim_log_step(&log, &s, line, sizeof line); s.full_ads = true;
+  for (int i = 0; i < 40 && !tfp_aim_log_step(&log, &s, line, sizeof line); i++) s.now_ms += 16;
+  CHECK(strstr(line, "Aim: in: ") == line && !strstr(line, "aim-in") && strstr(line, "editor closed | "));   /* not known: not said */
   /* the longest line: under 700 characters (src/mod_view.c say()) */
   {
     TfpAimLog big; tfp_aim_log_reset(&big);
@@ -206,6 +224,7 @@ int main(void) {
     w.weapon = "A weapon name of sixty characters, the most the line takes...xxxxxxxxxx"; w.game_fov = DEG(123.4); w.shown_fov = DEG(111.1);
     w.aim_field = DEG(88.8); w.sight = .999f; w.wanted = .30f; w.pull = -.25f; w.closer = .25f; w.ads_forward = -1.234f; w.near_clip = 1.234f;
     w.depth = -3.999f; w.editor = true; w.editor_action = "an action name long"; w.full_ads = true; w.now_ms = 100;
+    w.aim_in_ms = 300;
     TfpFovAimSecond f; memset(&f, 0, sizeof f);
     f.frames = 4000000000u; f.noted = 4000000000u; f.gated = 1; f.changes = 4000000000u; f.corrected = 4000000000u; f.third_person = 179.9f;
     f.clear_least = DEG(.1); f.clear_most = DEG(179.9); f.lens_least = DEG(.1); f.lens_most = DEG(179.9); f.game_least = DEG(.1); f.game_most = DEG(179.9);
