@@ -72,7 +72,7 @@ int main(void) {
          "memo (shadow) calls 540/180/30, hits 480/120/0, mismatches 3/0/0, moved 1";
   if (strcmp(line, want)) { printf("got:  %s\nwant: %s\n", line, want); return 1; }
   memset(&s, 0xff, sizeof s);
-  s.memo = TFP_PERF_MEMO_SHADOW; /* no memo_on.txt */
+  s.memo = TFP_PERF_MEMO_SHADOW; /* memo_off.txt */
   n = tfp_perf_snapshots_line(line, sizeof line, &s);
   assert(n > 0 && n < (int)sizeof line && (size_t)n == strlen(line) && strstr(line, "moved 4294967295") && strstr(line, "memo (shadow)"));
   const int largest_shadow = n;
@@ -112,11 +112,11 @@ int main(void) {
   }
   n = tfp_perf_memo_off_line(line, sizeof line, 0, false, "controller_bytes", 0x8c, 1234);
   want = "Memo: off for the session: a check of a full snapshot in frame epoch 1234 found the stored answer differs from a fresh take, "
-         "first at controller_bytes (+0x8c); every answer is fresh from here (memo_on.txt is still read at the next start)";
+         "first at controller_bytes (+0x8c); every answer is fresh from here (on again at the next start unless memo_off.txt is beside the DLL)";
   if (strcmp(line, want)) { printf("got:  %s\nwant: %s\n", line, want); return 1; }
   n = tfp_perf_memo_off_line(line, sizeof line, 1, true, "state", 0, 7);
   want = "Memo: off for the session: a check of a player snapshot in frame epoch 7 found that a fresh take changed the backend's own "
-         "state, which a served hit skips; every answer is fresh from here (memo_on.txt is still read at the next start)";
+         "state, which a served hit skips; every answer is fresh from here (on again at the next start unless memo_off.txt is beside the DLL)";
   if (strcmp(line, want)) { printf("got:  %s\nwant: %s\n", line, want); return 1; }
   int largest_off = 0;
   for (int moved = 0; moved < 2; moved++) {
@@ -124,6 +124,31 @@ int main(void) {
     assert(n > 0 && n < (int)sizeof line && (size_t)n == strlen(line) && strstr(line, "a ? snapshot"));
     if (n > largest_off) largest_off = n;
   }
+
+  /* Round 40: the start's line: the memo on by default, memo_off.txt switches it off, memo_on.txt changes nothing */
+  int largest_start = 0;
+  n = tfp_perf_memo_start_line(line, sizeof line, false, false);
+  want = "Ready: snapshot memo on: a snapshot asked for again in the same frame epoch answers the one already taken; the first and "
+         "every 16th such answer is still taken fresh and compared, and a difference turns the memo off for the session; "
+         "memo_off.txt beside the DLL switches it off";
+  if (strcmp(line, want)) { printf("got:  %s\nwant: %s\n", line, want); return 1; }
+  n = tfp_perf_memo_start_line(line, sizeof line, false, true);
+  if (strncmp(line, want, strlen(want)) || strcmp(line + strlen(want), " (memo_on.txt is no longer needed and changes nothing)")) {
+    printf("got:  %s\n", line);
+    return 1;
+  }
+  if (n > largest_start) largest_start = n;
+  n = tfp_perf_memo_start_line(line, sizeof line, true, false);
+  want = "Test: memo_off.txt: the snapshot memo is off; every snapshot is taken fresh and the memo only compares (the shadow, "
+         "\"memo (shadow)\" in the Perf snapshots line)";
+  if (strcmp(line, want)) { printf("got:  %s\nwant: %s\n", line, want); return 1; }
+  n = tfp_perf_memo_start_line(line, sizeof line, true, true);
+  if (strncmp(line, want, strlen(want)) || strcmp(line + strlen(want), "; memo_on.txt is no longer needed and does not turn it on")) {
+    printf("got:  %s\n", line);
+    return 1;
+  }
+  if (n > largest_start) largest_start = n;
+  assert(n > 0 && (size_t)n == strlen(line) && n < 700);
 
   /* Round 35: on_update in parts */
   double upd_mean[TFP_UPDS], upd_most[TFP_UPDS];
@@ -146,5 +171,6 @@ int main(void) {
          largest_shadow, largest_mismatch);
   printf("Perf update / the memo's Perf snapshots and Memo off lines (round 35): as documented; the largest are %d, %d and %d of 700 bytes\n",
          largest_update, largest_snapshots, largest_off);
+  printf("Memo start line (round 40, on by default, memo_off.txt): as documented; the largest is %d of 700 bytes\n", largest_start);
   return 0;
 }

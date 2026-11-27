@@ -516,6 +516,10 @@ void tfp_wire_set_memo(TfpWire *w, bool on) {
   w->memo_on = on;
   if (on || was) memo_apply(w); /* off and never on: the backend is not touched (round 32's, byte for byte) */
 }
+bool tfp_wire_memo_start(TfpWire *w, bool memo_off_file) {
+  tfp_wire_set_memo(w, !memo_off_file);
+  return w->memo_on;
+}
 int tfp_wire_memo_state(const TfpWire *w) {
   if (!w->memo_on) return TFP_PERF_MEMO_SHADOW;
   return w->memo_off || w->ops.perf.off.has ? TFP_PERF_MEMO_TURNED_OFF : TFP_PERF_MEMO_LIVE;
@@ -525,7 +529,7 @@ static bool rt_backend_new(TfpRtHost *h) {
   memo_keep_off(w);
   tfp_ops_init(&w->ops, &w->ops_host, NULL, w->pose_helper ? w->pose_helper : &w->null_pose);
   if (w->hold.on) tfp_ops_set_hold(&w->ops, true); /* the action hold probe; off without its switch file */
-  if (w->memo_on) memo_apply(w); /* round 35: memo_on.txt */
+  if (w->memo_on) memo_apply(w); /* round 35; on by default since round 40 (memo_off.txt) */
   w->ops.perf.clock = w->laps.clock; /* round 35: the snapshot calls' time (NULL: not timed) */
   return true;
 }

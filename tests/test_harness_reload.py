@@ -4,7 +4,11 @@ eye 0.21 to 0.26 m back and forward again: it judged single-frame jumps only, an
 
 The user's reload of 2026-11-25 (0.6.0-feel.56, tests/reference/reload/) is judged as it was (main: fails) and as the
 hold of src/reload_hold.h puts it (the C replay of tests/reload_hold_test.c --rewrite: passes). Needs a C compiler for
-the second; without one that test is skipped."""
+the second; without one that test is skipped.
+
+Round 40: the harness's feel.58 reload (tests/reference/reload/feel58-L4150-4266.log), which round 39 held but in the
+frames the game scaled by main row +0x11ac, fails as written (slide 0.185 m) and passes with those frames put where
+round 40 holds them (tests/reload_hold_test.c --edges, the scale read or not)."""
 import os
 import shutil
 import subprocess
@@ -18,6 +22,7 @@ sys.path.insert(0, str(ROOT / "tools/harness"))
 import matrix  # noqa: E402
 
 WINDOW = ROOT / "tests/reference/reload/feel56-L6985-7100.log"
+WINDOW58 = ROOT / "tests/reference/reload/feel58-L4150-4266.log"
 LOCK = "18:47:04.275 Lock: +71 frames held (+0 in another camera, kind now 6), +0 missed (kind 0, helper error 0), largest kick 0.7 degrees"
 
 
@@ -74,6 +79,14 @@ class ReloadSlide(unittest.TestCase):
         judged = matrix.judge(rows + [LOCK], reload=True)
         self.assertTrue(judged["pass"])
 
+    def test_the_feel58_reload_fails_as_written(self):
+        # round 39 held the reload but not the frames the game scaled: the matrix's FAIL of 2026-11-25 23:05:34
+        judged = matrix.judge(WINDOW58.read_text().splitlines(), reload=True)
+        self.assertFalse(judged["pass"])
+        self.assertAlmostEqual(judged["slide_m"], 0.185, places=3)
+        self.assertGreater(judged["largest_jump_m"], 0.2)
+        self.assertIn("23:05:34.321", " ".join(judged["notes"]))
+
     def test_other_phases_are_judged_as_before(self):
         lines = window() + [LOCK]
         self.assertNotIn("slide_m", matrix.judge(lines))
@@ -96,6 +109,25 @@ class ReloadHeld(unittest.TestCase):
         self.assertLess(judged["slide_m"], 0.02)
         unchanged = [a for a, b in zip(window(), lines) if a == b]
         self.assertGreater(len(unchanged), 50)             # the frames before the reload, and its header and other lines, as written
+
+    def test_the_feel58_reload_passes_with_its_edges_held(self):
+        written = WINDOW58.read_text().splitlines()
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as work:
+            binary = Path(work) / "reload_hold_test"
+            subprocess.run([os.environ.get("CC", "cc"), "-std=c11", "-O1", "-ffp-contract=off", "-I", str(ROOT / "src"), "-I", str(ROOT / "tests"),
+                            str(ROOT / "tests/reload_hold_test.c"), "-lm", "-o", str(binary)], check=True)
+            for mode in ("read", "none"):
+                held = Path(work) / f"held-{mode}.log"
+                subprocess.run([str(binary), "--edges", str(WINDOW58), str(held), mode], check=True)
+                lines = held.read_text().splitlines()
+                with self.subTest(scale=mode):
+                    self.assertEqual(len(lines), len(written))
+                    judged = matrix.judge(lines, reload=True)
+                    self.assertTrue(judged["pass"], judged["notes"])
+                    self.assertLess(judged["slide_m"], matrix.SLIDE_M)    # what is left is the game's own motion after the reload (0.025 m)
+                    self.assertLess(judged["largest_jump_m"], 0.02)
+                    changed = [a for a, b in zip(written, lines) if a != b]
+                    self.assertEqual(len(changed), 5)                     # the five scaled frames, and nothing else
 
 
 if __name__ == "__main__":

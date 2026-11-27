@@ -1116,6 +1116,35 @@ int main(int argc, char **argv) {
   CHECK(tfp_fx_memory_copy(&fx, HEAP + 9, 1, &why) == TFP_NATIVE_AIM_COPY_REFUSED && !strcmp(why, "Memory write readback failed") && heap[9] == 1);
   heap_blind = false;
 
+  /* ---- 5d. round 40: the snapshot memo (on by default in the game) does not outlive either effect's game write: the
+   * aim option's copy and the movement byte's WriteProcessMemory drop every stored answer; a copy refused before the write
+   * keeps them; with the memo off a write leaves the shadow's stores as round 32 did ---- */
+  {
+#define PLANT() for (int m_ = 0; m_ < TFP_OPS_TAKES; m_++) wire.ops.perf.memo[m_].has = true, wire.ops.perf.memo[m_].epoch = wire.ops.frame_epoch
+#define STORED(all) (wire.ops.perf.memo[0].has == (all) && wire.ops.perf.memo[1].has == (all) && wire.ops.perf.memo[2].has == (all))
+    uint8_t byte = 1;
+    size_t written = 0;
+    tfp_ops_set_memo(&wire.ops, true);
+    CHECK(wire.ops.perf.memo_live);
+    heap[9] = 0;
+    PLANT();
+    CHECK(tfp_fx_memory_copy(&fx, HEAP + 9, 1, &why) == TFP_NATIVE_AIM_COPY_DONE && heap[9] == 1 && STORED(false));
+    PLANT();
+    CHECK(tfp_fx_memory_copy(&fx, 4096, 1, &why) == TFP_NATIVE_AIM_COPY_REFUSED && STORED(true)); /* refused before the write */
+    CHECK(fx.movement_host.windows_write_process_memory(&fx, HEAP + 9, &byte, 1, &written) && written == 1 && STORED(false));
+    PLANT();
+    win.write_result = 0; /* a failed write still dropped them: the game's memory may have changed in part */
+    CHECK(!fx.movement_host.windows_write_process_memory(&fx, HEAP + 9, &byte, 1, &written) && STORED(false));
+    win.write_result = 1;
+    tfp_ops_set_memo(&wire.ops, false);
+    PLANT();
+    CHECK(fx.movement_host.windows_write_process_memory(&fx, HEAP + 9, &byte, 1, &written) && STORED(true));
+    CHECK(tfp_fx_memory_copy(&fx, HEAP + 9, 0, &why) == TFP_NATIVE_AIM_COPY_DONE && heap[9] == 0 && STORED(true));
+    tfp_ops_memo_forget(&wire.ops);
+#undef PLANT
+#undef STORED
+  }
+
   /* ---- the end: everything clean, the runtime disables ---- */
   now_seconds += 1;
   tfp_wire_frame(&wire, NULL);

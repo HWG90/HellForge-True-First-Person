@@ -178,7 +178,7 @@ typedef struct TfpWire {
     int current;
     bool in_update;
   } laps;
-  /* Round 35: the snapshot memo's test switch (memo_on.txt; tfp_wire_set_memo) and, once a check turned the memo off in
+  /* Round 35: the snapshot memo's switch (tfp_wire_set_memo; on by default since round 40, memo_off.txt: tfp_wire_memo_start) and, once a check turned the memo off in
    * this session, what did (every backend made after it starts with the memo off). */
   bool memo_on, memo_off;
   struct { bool moved; int mode; size_t offset; const char *field; uint64_t epoch; } memo_off_cause;
@@ -197,6 +197,9 @@ void tfp_wire_laps_start(TfpWire *w, int64_t (*clock)(void));
 /* Round 35: the snapshot memo live (src/backend_ops.h tfp_ops_set_memo) on this backend and every one made after it, until
  * a check turns it off for the session. Off after tfp_wire_init. */
 void tfp_wire_set_memo(TfpWire *w, bool on);
+/* Round 40: the start's switch files (src/mod_view.c): the memo on unless memo_off.txt is beside the DLL. Answers whether
+ * it is on (tfp_wire_set_memo; a check that turned it off this session still holds). */
+bool tfp_wire_memo_start(TfpWire *w, bool memo_off_file);
 /* Round 35: the memo's state for the Perf snapshots line (TFP_PERF_MEMO_*). */
 int tfp_wire_memo_state(const TfpWire *w);
 

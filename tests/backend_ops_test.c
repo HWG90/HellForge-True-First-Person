@@ -1325,7 +1325,7 @@ int main(int argc, char **argv) {
       failures++;
     }
   }
-  unsigned live_worlds = 0, live_nil_worlds = 0;
+  unsigned live_worlds = 0, live_nil_worlds = 0, live_moved_worlds = 0;
   { /* round 35: the memo live (tfp_ops_set_memo): served hits answer as a fresh take would, a check catches a stale answer */
     static TfpOpsHost quiet;
     static TfpOps fresh_backend;
@@ -1425,6 +1425,40 @@ int main(int argc, char **argv) {
         }
         live_nil_worlds++;
       }
+      /* round 40: a check whose fresh take moved the backend's own state turns the memo off even though the answer is the
+       * same (backend_ops.c taken_body: `moved`). The game check cache is dropped between the stored take and the 17th live
+       * hit, so the checked take reads the module again and sets it: a state a served hit would have skipped. */
+      if (!failures) {
+        const char *bad = NULL;
+        memset(&state, 0, sizeof state);
+        first_image();
+        tfp_ops_init(&backend, &quiet, NULL, NULL);
+        tfp_ops_set_memo(&backend, true);
+        tfp_ops_begin_frame(&backend);
+        if (tfp_ops_snapshot(&backend, &stored, &why) != TFP_OPS_TRUE || !stored.safe) continue;
+        for (unsigned i = 0; i < TFP_OPS_MEMO_CHECK_EVERY && !bad; i++) /* the first hit checked, 15 served */
+          if (tfp_ops_snapshot(&backend, &again, &why) != TFP_OPS_TRUE || memcmp(&stored, &again, sizeof again)) bad = "the hits before the moved check";
+        if (!bad && (p->memo_checked[TFP_OPS_TAKE_FULL] != 1 || p->memo_served[TFP_OPS_TAKE_FULL] != TFP_OPS_MEMO_CHECK_EVERY - 1 || !p->memo_live))
+          bad = "one checked, 15 served, still live";
+        for (int s = 0; s < 3; s++) backend.frame_game_checks[s].has = false;
+        const uint64_t takes = p->takes[TFP_OPS_TAKE_FULL];
+        if (!bad && (tfp_ops_snapshot(&backend, &again, &why) != TFP_OPS_TRUE || memcmp(&stored, &again, sizeof again) ||
+                     p->memo_checked[TFP_OPS_TAKE_FULL] != 2 || p->takes[TFP_OPS_TAKE_FULL] != takes + 1 || !p->memo_moved ||
+                     p->memo_mismatches[TFP_OPS_TAKE_FULL]))
+          bad = "the 17th hit is checked: a fresh take, the same answer, the state moved, no mismatch";
+        if (!bad && (p->memo_live || !p->off.has || !p->off.moved || p->off.mode != TFP_OPS_TAKE_FULL || strcmp(p->off.field, "state") ||
+                     p->off.offset != 0))
+          bad = "a moved check turns the memo off, naming the state";
+        const uint64_t served = p->memo_served[TFP_OPS_TAKE_FULL];
+        if (!bad && (tfp_ops_snapshot(&backend, &again, &why) != TFP_OPS_TRUE || p->memo_served[TFP_OPS_TAKE_FULL] != served ||
+                     p->takes[TFP_OPS_TAKE_FULL] != takes + 2))
+          bad = "after a moved check: fresh takes again";
+        if (bad) {
+          fprintf(stderr, "live memo, run %s: %s\n", run->name, bad);
+          failures++;
+        }
+        live_moved_worlds++;
+      }
     }
     if (!live_worlds && !failures) {
       fprintf(stderr, "live memo: no run starts with a safe full snapshot\n");
@@ -1452,9 +1486,10 @@ int main(int argc, char **argv) {
          "player's snapshot can be had\n", held_releases);
   printf("Backend operations, shadow memo (round 32, logging only): on %u first images: hits only in a frame and the same epoch, the same answers "
          "as a backend without it, a change without an invalidate counted as a mismatch at its field\n", memo_worlds);
-  printf("Backend operations, live memo (round 35, memo_on.txt): on %u first images: served hits answer as a fresh take and a backend without "
+  printf("Backend operations, live memo (round 35; the game's default since round 40): on %u first images: served hits answer as a fresh take and a backend without "
          "it and read nothing; a change without an invalidate is answered stale until the next check, which turns the memo off at its field; "
-         "on %u, a served failure answers the fresh text\n", live_worlds, live_nil_worlds);
+         "on %u, a served failure answers the fresh text; on %u, a check whose take moved the backend's state turns it off (round 40)\n",
+         live_worlds, live_nil_worlds, live_moved_worlds);
   if (memo_vectors)
     printf("Backend operations, every vector with the memo live (TFP_OPS_MEMO=1): every answer retail's; %llu hits served, %llu checked, "
            "%llu guarded reads saved; %u backends turned it off\n", (unsigned long long)memo_served_total, (unsigned long long)memo_checked_total,
