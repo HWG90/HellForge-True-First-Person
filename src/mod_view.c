@@ -1430,6 +1430,7 @@ static void ads_seat_tick(void) {
   const bool near_on = tfp_near_ads_probe(&sight, &native, &applied);
   const TfpEditor *editor = tfp_wire_editor_of(&wire);
   tfp_aim_bind_tick(near_on, sight, tfp_locked_view_ads_sight_cm(&wire), tfp_editor_motion_editing_ads(editor)); /* src/aim_bind.h */
+  tfp_near_set_ads_scale(tfp_wire_clip_ads_scale(&wire)); /* round 53, src/weapon_clip.h: full aim shown wider than the game's lens */
   TfpPoseAdsProbe ads;
   const bool pose_on = tfp_pose_ads_probe(&ads) && ads.armed;
   TfpFovLockStats f; tfp_fov_lock_stats(&f);
