@@ -39,6 +39,21 @@ unsigned tfp_win_restore_slots(void);
 /* F11 and focus. */
 bool tfp_win_focused(void);
 bool tfp_win_key_down(int virtual_key);
+/* Round 50 (src/key_tap.h): the mod's edge keys (the toggle key, F10, F11, the placement editor's key).
+ * tfp_win_keys_begin once per game update before any of them is read (it also puts the keyboard hook on the game
+ * window's thread, the first time the window is in front). tfp_win_key_level: down now. tfp_win_key_tapped: up now, but
+ * pressed and let go since the previous update, answered once per press, never for a key that was held, only with the
+ * game in front at both updates. One GetAsyncKeyState per key and update however often either is asked; a key read with
+ * these must not also be read with tfp_win_key_down (that call would take the "pressed since" answer).
+ * tfp_win_keys_note: a line to log, while there is one. tfp_win_keys_end: the hook taken off, for a live unload (any
+ * thread); false when Windows refused or a call of the hook did not return in 2 seconds: the build must then stay. */
+void tfp_win_keys_begin(bool focused);
+bool tfp_win_key_level(int virtual_key);
+bool tfp_win_key_tapped(int virtual_key);
+unsigned tfp_win_key_taps(void);     /* taps answered, in all */
+unsigned tfp_win_key_messages(void); /* fresh key-down messages the hook saw, in all (any key) */
+bool tfp_win_keys_note(char *out, size_t size);
+bool tfp_win_keys_end(void);
 /* Round 36c: every key's level in one call (GetKeyboardState: keys[vk] & 0x80 down), for the key guard's typing
  * sample (src/key_guard.h); false: no snapshot. */
 bool tfp_win_keyboard(uint8_t keys[256]);
