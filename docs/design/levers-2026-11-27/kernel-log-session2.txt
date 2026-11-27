@@ -1,0 +1,29 @@
+spawned 968211c0033dce64 as entity 501 at -1.61 2.15 7.31 with 6 attachments
+equipped entity 501 (968211c0033dce64) into slot 1 of the Helldiver 485; the slot held 488
+the weapon controller takes slot 1 (was 1)
+removal of entity 488 (5fecab819f96a3e8) requested
+spawned 5fecab819f96a3e8 as entity 503 at -1.61 2.15 7.31 with 5 attachments
+equipped entity 503 (5fecab819f96a3e8) into slot 1 of the Helldiver 485; the slot held 501
+the weapon controller takes slot 1 (was 1)
+removal of entity 501 (968211c0033dce64) requested
+spawned 2152d5147b0ac418 as entity 505 at -1.61 2.15 7.31 with 1 attachments
+equipped entity 505 (2152d5147b0ac418) into slot 3 of the Helldiver 485; the slot held 0
+the weapon controller takes slot 3 (was 1)
+spawned 968211c0033dce64 as entity 514 at -1.61 2.15 7.31 with 6 attachments
+equipped entity 514 (968211c0033dce64) into slot 1 of the Helldiver 485; the slot held 503
+the weapon controller takes slot 1 (was 1)
+removal of entity 503 (5fecab819f96a3e8) requested
+spawned 5fecab819f96a3e8 as entity 516 at -1.61 2.15 7.31 with 5 attachments
+equipped entity 516 (5fecab819f96a3e8) into slot 1 of the Helldiver 485; the slot held 514
+the weapon controller takes slot 1 (was 1)
+removal of entity 514 (968211c0033dce64) requested
+spawned 2152d5147b0ac418 as entity 518 at -1.61 2.15 7.31 with 1 attachments
+equipped entity 518 (2152d5147b0ac418) into slot 3 of the Helldiver 485; the slot held 505
+the weapon controller takes slot 3 (was 1)
+removal of entity 505 (2152d5147b0ac418) requested
+wrote stratagem slot 5: type 32: 0x3194B3BA0 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 -> 20000000ffffffff0001000000000000000000000000000091154c020000000000000000000000000000000000000000
+wrote stratagem count 4 -> 5: 0x3194B40E0 04000000 -> 05000000
+wrote stratagem slot 6: type 27: 0x3194B3BD0 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 -> 1b000000ffffffff0001000000000000000000000000000091154c020000000000000000000000000000000000000000
+wrote stratagem count 5 -> 6: 0x3194B40E0 05000000 -> 06000000
+spawned 79e4b3d2da5e45e3 as entity 531 at -1.61 6.15 7.21
+wrote teleport -1.71 4.45 6.96 -> -1.61 4.55 7.08 (body): 0x32FC9E800 b42edbbf33538e4018daee40 -> 6fc8cdbfc8a9914001a4f240

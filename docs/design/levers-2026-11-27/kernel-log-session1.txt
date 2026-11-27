@@ -1,0 +1,57 @@
+hold from 3.63 0.15 12.08
+wrote body probe: 0x32BF0EA00 944768408082193e54e25041 -> e5110a418082193e54e25041
+spawned 11c27d3babb38956 as entity 520 at 8.63 2.15 12.48 with 1 attachments
+pick-up zone 1 of entity 520 opened
+equipped entity 520 (11c27d3babb38956) into slot 3 of the Helldiver 471; the slot held 0
+selected inventory slot 3
+selected inventory slot 3
+wrote teleport 8.63 0.15 12.08 -> 8.63 6.15 12.38 (body): 0x32BF0EA00 e5110a418082193e54e25041 -> e5110a4114ccc44021af5541
+spawned 968211c0033dce64 as entity 538 at 8.63 6.15 12.78 with 6 attachments
+equipped entity 538 (968211c0033dce64) into slot 1 of the Helldiver 471; the slot held 474
+the weapon controller takes slot 1 (was 3)
+removal of entity 474 (5fecab819f96a3e8) requested
+spawned e5796355a8fd67e0 as entity 540 at 8.63 6.15 12.78 with 4 attachments
+equipped entity 540 (e5796355a8fd67e0) into slot 1 of the Helldiver 471; the slot held 538
+the weapon controller takes slot 1 (was 1)
+removal of entity 538 (968211c0033dce64) requested
+spawned 2152d5147b0ac418 as entity 541 at 8.63 6.15 12.78 with 1 attachments
+equipped entity 541 (2152d5147b0ac418) into slot 3 of the Helldiver 471; the slot held 520
+the weapon controller takes slot 3 (was 1)
+removal of entity 520 (11c27d3babb38956) requested
+spawned 416d053372c4e433 as entity 542 at 8.63 6.15 12.78 with 1 attachments
+equipped entity 542 (416d053372c4e433) into slot 2 of the Helldiver 471; the slot held 476
+the weapon controller takes slot 2 (was 3)
+removal of entity 476 (8d3d52a3b2f19402) requested
+spawned 5fecab819f96a3e8 as entity 544 at 8.63 6.15 12.78 with 5 attachments
+equipped entity 544 (5fecab819f96a3e8) into slot 1 of the Helldiver 471; the slot held 540
+the weapon controller takes slot 1 (was 2)
+removal of entity 540 (e5796355a8fd67e0) requested
+spawned 968211c0033dce64 as entity 546 at 8.63 6.15 12.78 with 6 attachments
+equipped entity 546 (968211c0033dce64) into slot 1 of the Helldiver 471; the slot held 544
+the weapon controller takes slot 1 (was 1)
+removal of entity 544 (5fecab819f96a3e8) requested
+wrote stratagem slot 1: type 124 -> 27: 0x3172C3AE0 7c000000ffffffff -> 1b000000ffffffff
+wrote stratagem slot 2: type 145 -> 32: 0x3172C3B10 9100000001000000 -> 20000000ffffffff
+wrote stratagem slot 4: type 128 -> 3: 0x3172C3B70 80000000ffffffff -> 03000000ffffffff
+spawned 11c27d3babb38956 as entity 555 at 8.63 8.15 12.78 with 1 attachments
+pick-up zone 1 of entity 555 opened
+spawned 79e4b3d2da5e45e3 as entity 556 at 8.63 10.15 12.68
+undid stratagem slot 4: type 128 -> 3 at 0x3172C3B70
+undid stratagem slot 2: type 145 -> 32 at 0x3172C3B10
+undid stratagem slot 1: type 124 -> 27 at 0x3172C3AE0
+wrote stratagem slot 5: type 27: 0x3172C3BA0 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 -> 1b000000ffffffff000100000000000000000000000000006207f3020000000000000000000000000000000000000000
+wrote stratagem count 4 -> 5: 0x3172C40E0 04000000 -> 05000000
+wrote stratagem slot 6: type 32: 0x3172C3BD0 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 -> 20000000ffffffff000100000000000000000000000000006207f3020000000000000000000000000000000000000000
+wrote stratagem count 5 -> 6: 0x3172C40E0 05000000 -> 06000000
+wrote stratagem slot 7: type 3: 0x3172C3C00 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 -> 03000000ffffffff000100000000000000000000000000006207f3020000000000000000000000000000000000000000
+wrote stratagem count 6 -> 7: 0x3172C40E0 06000000 -> 07000000
+wrote stratagem slot 8: type 118: 0x3172C3C30 000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 -> 76000000ffffffff000100000000000000000000000000006207f3020000000000000000000000000000000000000000
+wrote stratagem count 7 -> 8: 0x3172C40E0 07000000 -> 08000000
+wrote teleport 8.63 6.15 12.38 -> 10.31 7.30 12.68 (body): 0x32BF0EA00 e5110a4114ccc44021af5541 -> c3f524419a99e940ec7b5a41
+wrote teleport 10.29 7.42 12.20 -> 10.31 7.95 12.75 (body): 0x32BF0EA00 249724418f5bed4043bd5241 -> c3f524416666fe4081995b41
+removal of entity 556 (79e4b3d2da5e45e3) requested
+wrote teleport 10.31 7.95 12.75 -> 8.63 0.15 12.20 (body): 0x32BF0EA00 c3f524416666fe4081995b41 -> 7b140a419a99193eb4cc5241
+spawned 79e4b3d2da5e45e3 as entity 574 at 8.49 4.15 12.50
+wrote teleport 8.55 2.44 11.97 -> 8.00 3.40 12.02 (body): 0x32BF0EA00 c9d408414d231c4073114f41 -> 000000419a99594041de4f41
+pick-up zone 0 of entity 574 opened
+wrote teleport 8.00 3.40 12.02 -> 8.63 7.60 12.60 (body): 0x32BF0EA00 000000419a99594041de4f41 -> 7b140a413333f3401a335941

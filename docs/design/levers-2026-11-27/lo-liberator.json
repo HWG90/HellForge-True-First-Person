@@ -1,0 +1,53 @@
+{
+ "slot": "primary",
+ "name": "AR-23 Liberator",
+ "resource": "968211c0033dce64",
+ "package": "dbd9381f9ea9788f",
+ "entity": 546,
+ "displaced": 544,
+ "attachments": [
+  "Vertical Grip (slot 1, f9df21c8e52cac95, in place of the default)"
+ ],
+ "before": {
+  "active": 1,
+  "backpack": 0,
+  "entity": 471,
+  "facing_x": -4.371138828673793e-08,
+  "facing_y": 0.999999999999999,
+  "held": 0,
+  "in_hand": 544,
+  "network": 341,
+  "primary": 544,
+  "raw": "e6110a4114ccc440a1154641",
+  "secondary": 542,
+  "support": 541,
+  "unit_x": 8.629369735717773,
+  "unit_y": 6.149911880493164,
+  "unit_z": 12.380279541015625,
+  "x": 8.629369735717773,
+  "y": 6.149911880493164,
+  "z": 12.380280494689941
+ },
+ "in_hand": true,
+ "removed": true,
+ "after": {
+  "active": 1,
+  "backpack": 0,
+  "entity": 471,
+  "facing_x": -4.371138828673793e-08,
+  "facing_y": 0.999999999999999,
+  "held": 0,
+  "in_hand": 546,
+  "network": 341,
+  "primary": 546,
+  "raw": "e5110a4114ccc440a1154641",
+  "secondary": 542,
+  "support": 541,
+  "unit_x": 8.629368782043457,
+  "unit_y": 6.149911880493164,
+  "unit_z": 12.380281448364258,
+  "x": 8.629368782043457,
+  "y": 6.149911880493164,
+  "z": 12.380280494689941
+ }
+}

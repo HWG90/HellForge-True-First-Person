@@ -29,6 +29,7 @@ from pathlib import Path
 
 HARNESS = Path(os.environ.get("HD2H_DIR", Path.home() / "hellforge-research/tools/BingusDevelopmentHarness"))
 WINDOW_CLASS = "helldivers2.exe"
+STEAM_CLASS = "steam_app_553850"   # round 51: what KWin calls the game's window when Proton runs it as the Steam app
 
 
 class DriveError(RuntimeError):
@@ -75,7 +76,8 @@ def _kwin(script):
 def focus(tries=5):
     """Bring the game window to the front; true once the engine itself reports focus."""
     script = ("for (const w of workspace.windowList()) { if (w.resourceClass == '%s') {"
-              " w.minimized = false; workspace.activeWindow = w; } }" % WINDOW_CLASS)
+              " w.minimized = false; workspace.activeWindow = w; } }" % WINDOW_CLASS).replace(
+        "w.resourceClass == '%s'" % WINDOW_CLASS, "(w.resourceClass == '%s' || w.resourceClass == '%s')" % (WINDOW_CLASS, STEAM_CLASS))
     for _ in range(tries):
         _kwin(script)
         time.sleep(0.5)

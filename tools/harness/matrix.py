@@ -593,6 +593,8 @@ def main(argv):
         return 2
     out = Path(argv[1]); out.mkdir(parents=True, exist_ok=True)
     names = argv[2:] or list(PHASES)
+    import phases_levers                                   # round 51: phases that set their scene with the levers
+    PHASES.update({n: phases_levers.PHASES[n] for n in names if n in phases_levers.PHASES})
     if not drive.focus():
         print("the game window could not be focused"); return 1
     log = log_path(); results = {}
@@ -605,6 +607,7 @@ def main(argv):
         print(style_header(before), flush=True)
         for name in names:
             script, settle = PHASES[name]
+            phases_levers.prepare(name)                    # nothing for a phase of this file's own
             start = log.stat().st_size
             aimed = play(device, name, log, out)
             time.sleep(min(settle, 1.0))

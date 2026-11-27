@@ -1,0 +1,294 @@
+{
+ "build": "25480438",
+ "image": "game-pre1020.dll",
+ "sites": {
+  "AVATARS": {
+   "at": 3,
+   "kind": "rip",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "488b15????????33dbf2440f10088b7008f2440f114c2440",
+   "rva": 2662198,
+   "size": 7
+  },
+  "DEFAULTS": {
+   "kind": "start",
+   "module": "game.dll",
+   "pattern": "40535741564883ec200f57c0488bca410f11004d8bf0488bda",
+   "rva": 7647664
+  },
+  "DROP": {
+   "kind": "start",
+   "module": "game.dll",
+   "pattern": "48895c241848896c24204889542410564883ec30",
+   "rva": 10151648
+  },
+  "ENGINE": {
+   "at": 3,
+   "kind": "rip",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "488b05????????488b5010488b8210030000ffd085c07436",
+   "rva": 6771383,
+   "size": 7
+  },
+  "ENTITY_DESCRIPTOR": {
+   "kind": "start",
+   "module": "game.dll",
+   "pattern": "4883ec083b0d????????0f849b0000004c8b15????????4533c0",
+   "rva": 16620864
+  },
+  "ENTITY_NONE": {
+   "at": 2,
+   "kind": "rip",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "3b3d????????488b05????????418b5d04418b75",
+   "rva": 6015922,
+   "size": 6
+  },
+  "ENTITY_OF_NETWORK": {
+   "kind": "start",
+   "module": "game.dll",
+   "pattern": "4883ec084c8b1d????????448bc24c8bc981faff7f00007510",
+   "rva": 16620448
+  },
+  "EQUIP": {
+   "kind": "start",
+   "module": "game.dll",
+   "pattern": "40535541554883ec4048897c2468418b",
+   "rva": 10149936
+  },
+  "EVENTS": {
+   "at": 3,
+   "kind": "rip",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "488b3d????????4c897c24208b9f????",
+   "rva": 4974611,
+   "size": 7
+  },
+  "EVENT_INDEX": {
+   "at": 3,
+   "kind": "u32",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "498bb3????????0f1f4000660f1f8400",
+   "rva": 4973756,
+   "size": 0
+  },
+  "EVENT_ROWS": {
+   "at": 3,
+   "kind": "u32",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "48038f????????49c1e304438b1c034b",
+   "rva": 4974879,
+   "size": 0
+  },
+  "GAME_MODE": {
+   "at": 3,
+   "kind": "rip",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "488b05????????8378080074268b4040",
+   "rva": 3670812,
+   "size": 7
+  },
+  "GAME_STATE": {
+   "at": 3,
+   "kind": "rip",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "488b0d????????ba2d0000004881c1????????e8",
+   "rva": 3838921,
+   "size": 7
+  },
+  "HEALTH": {
+   "at": 3,
+   "kind": "rip",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "488b0d????????4533c04889b42488000000448b8938100000",
+   "rva": 3714965,
+   "size": 7
+  },
+  "INVENTORY": {
+   "at": 3,
+   "kind": "rip",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "4c8b05????????33db8bcb458b483045",
+   "rva": 3841536,
+   "size": 7
+  },
+  "LOADOUTS": {
+   "at": 3,
+   "kind": "rip",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "4c8b15????????33c04c8b8c3ec80200",
+   "rva": 6313976,
+   "size": 7
+  },
+  "LOADOUT_COUNT": {
+   "at": 3,
+   "kind": "u32",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "458b82????????4585c07432498bca4c",
+   "rva": 6313993,
+   "size": 0
+  },
+  "MOTION": {
+   "at": 3,
+   "kind": "rip",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "488b0d????????41b0018b5008e8????????4c8b37",
+   "rva": 1309062,
+   "size": 7
+  },
+  "NET": {
+   "at": 3,
+   "kind": "rip",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "488b05????????448b4108488b98a8b3",
+   "rva": 4994907,
+   "size": 7
+  },
+  "PACKAGES": {
+   "at": 3,
+   "kind": "rip",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "488b0d????????488d94240801000041",
+   "rva": 7266686,
+   "size": 7
+  },
+  "PACKAGE_OF": {
+   "kind": "start",
+   "module": "game.dll",
+   "pattern": "4885c97471488b05????????448bc14c8b905825f10048b8659d2b0f48d6b9f2",
+   "rva": 5199488
+  },
+  "PLAYER": {
+   "at": 3,
+   "kind": "rip",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "488b05????????488d542448488b88e8",
+   "rva": 3820510,
+   "size": 7
+  },
+  "PLAYER_SELECT": {
+   "kind": "start",
+   "module": "game.dll",
+   "pattern": "4c8bdc5557488bec4883ec78488b05????????4833c4488945e0",
+   "rva": 11091600
+  },
+  "PROFILE": {
+   "at": 3,
+   "kind": "rip",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "4c8b05????????8b4250413980??????",
+   "rva": 4502093,
+   "size": 7
+  },
+  "REMOVE": {
+   "kind": "start",
+   "module": "game.dll",
+   "pattern": "48895c2408574883ec303b15????????",
+   "rva": 16630544
+  },
+  "SELECT": {
+   "kind": "start",
+   "module": "game.dll",
+   "pattern": "488bc444894018535541554881ec800000003b15????????",
+   "rva": 10136144
+  },
+  "SET_VELOCITY": {
+   "kind": "start",
+   "module": "game.dll",
+   "pattern": "48895c2418574883ec203b15????????488b1d????????48896c2430498be87507",
+   "rva": 4879696
+  },
+  "SPAWN": {
+   "kind": "start",
+   "module": "game.dll",
+   "pattern": "4c8bdc49895b1049897320574881eca0000000488b05????????4833c4488984249000000033c049",
+   "rva": 16619280
+  },
+  "STATE_VALUE": {
+   "at": 2,
+   "kind": "u32",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "83b8????????04751f4438a0????????",
+   "rva": 6015833,
+   "size": 0
+  },
+  "UNITS": {
+   "at": 3,
+   "kind": "rip",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "4c8b15????????7517b8ffffffff8bc84869c108",
+   "rva": 4867450,
+   "size": 7
+  },
+  "VEHICLES": {
+   "at": 3,
+   "kind": "rip",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "4c8b1d????????8bd5458b4b40458b5348440fafd0",
+   "rva": 4576004,
+   "size": 7
+  },
+  "WIELDABLES": {
+   "at": 3,
+   "kind": "rip",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "4c8b05????????458bd1458b5820418b58280fafd8",
+   "rva": 5010111,
+   "size": 7
+  },
+  "WIELDER": {
+   "at": 3,
+   "kind": "rip",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "4c8b15????????7517b8ffffffff8bc84869c1d0010000",
+   "rva": 4893642,
+   "size": 7
+  },
+  "WORLD": {
+   "at": 3,
+   "kind": "rip",
+   "minus": 0,
+   "module": "game.dll",
+   "pattern": "488b0d????????8b5008e8????????eb28488bcfe8??????",
+   "rva": 762101,
+   "size": 7
+  },
+  "WORLD_RECORDS": {
+   "at": 3,
+   "kind": "u32",
+   "minus": 8,
+   "module": "game.dll",
+   "pattern": "488d85????????488d04c8eb07488d05",
+   "rva": 6317519,
+   "size": 0
+  },
+  "ZONE_SET": {
+   "kind": "start",
+   "module": "game.dll",
+   "pattern": "415641574883ec283b15????????450fb6f1458bf84c8bd1",
+   "rva": 9930256
+  }
+ }
+}
