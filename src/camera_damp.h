@@ -144,13 +144,20 @@ static inline float tfp_eye_damp_release_slowly(TfpEyeDamp *d, double tick, uint
  *     the bit, the axes themselves are handed back;
  *   the root turns under a still view, or against it: the frame stands still, and what the head does in the world
  *     against the root's place is what is damped;
- *   only the view turns: the root did not, nor does the frame.
+ *   only the view turns: the root did not, nor does the frame;
+ *   the root's heading jumps by more than TFP_DAMP_FRAME_RESEAT in one frame (157 to 180 degrees out of an emote into
+ *     a dive backwards): that is no turn, the game has set the axes anew, and the frame goes with them as it always
+ *     did. The continuity reads such a frame in the root's axes (THE CUT, src/camera_continuity.h); with the frame
+ *     left standing it took the cut up round the wrong way, 0.09 m of step change became 0.26 (soak 29, 16:16:30.8).
  * It starts at the root's heading in the first frame, and again after a pause longer than `max_gap_ms`, a clock that
  * went back or an input that is not a number. Where there is no view to compare with (none given, or straight up or
- * down) the frame turns with the root, as it always did.
+ * down) the frame turns with the root, as it always did. The lag that is let go when damping stops
+ * (tfp_eye_damp_release) is carried in the same frame, so a root that flips under the view (a dive backwards) does
+ * not swing it round either.
  * off: how far the root's heading has turned on from the frame's (radians); root_yaw, view_yaw: the headings of the
  * frame before; view_known: that frame had one for the view. */
 #define TFP_DAMP_FRAME 1 /* tools/harness/replay_filter.c asks: an older header has none of this */
+#define TFP_DAMP_FRAME_RESEAT (TFP_PI/2) /* radians in one frame: more is the game setting the root's axes anew, not a turn */
 #define TFP_DAMP_FRAME_SAME 1e-5f /* radians (0.0006 degrees): two turns nearer than this are the same turn */
 #define TFP_DAMP_FRAME_LEVEL_MIN 1e-4f /* a forward axis or a view with less than this of level length has no heading */
 typedef struct TfpDampFrame { float off, root_yaw, view_yaw; double tick; bool known, view_known; } TfpDampFrame;
@@ -166,17 +173,21 @@ static inline bool tfp_damp_frame_step(TfpDampFrame *f, const float *root_basis,
   for (unsigned i = 0; i < 9; ++i) frame[i] = root_basis[i];
   bool finite = isfinite(tick);
   for (unsigned i = 0; i < 9; ++i) finite = finite && isfinite(root_basis[i]);
-  const float flat = finite ? sqrtf(root_basis[3]*root_basis[3]+root_basis[4]*root_basis[4]) : 0;
-  if (!(flat >= TFP_DAMP_FRAME_LEVEL_MIN)) { tfp_damp_frame_reset(f); return true; }
-  const float root_yaw = atan2f(root_basis[4], root_basis[3]);
+  if (!finite) { tfp_damp_frame_reset(f); return true; }
+  const bool again = !f->known || tick < f->tick || tick-f->tick > max_gap_ms;
+  /* a forward axis straight up or down has no heading: the one of the frame before stands (a first frame: the axes) */
+  const bool headed = sqrtf(root_basis[3]*root_basis[3]+root_basis[4]*root_basis[4]) >= TFP_DAMP_FRAME_LEVEL_MIN;
+  if (!headed && again) { tfp_damp_frame_reset(f); return true; }
+  const float root_yaw = headed ? atan2f(root_basis[4], root_basis[3]) : f->root_yaw;
   const bool viewed = view && isfinite(view[0]) && isfinite(view[1]) && sqrtf(view[0]*view[0]+view[1]*view[1]) >= TFP_DAMP_FRAME_LEVEL_MIN;
   const float view_yaw = viewed ? atan2f(view[1], view[0]) : 0;
-  if (!f->known || tick < f->tick || tick-f->tick > max_gap_ms) f->off = 0;
+  if (again) f->off = 0;
   else {
     const float root_turn = tfp_damp_frame_wrap(root_yaw-f->root_yaw);
     const float view_turn = viewed && f->view_known ? tfp_damp_frame_wrap(view_yaw-f->view_yaw) : root_turn;
     float with = 0; /* how far the frame turns: the smaller of the two turns where they are the same way */
-    if (root_turn > 0 && view_turn > 0) with = view_turn < root_turn ? view_turn : root_turn;
+    if (fabsf(root_turn) > TFP_DAMP_FRAME_RESEAT) with = root_turn; /* the axes set anew: the frame goes with them */
+    else if (root_turn > 0 && view_turn > 0) with = view_turn < root_turn ? view_turn : root_turn;
     else if (root_turn < 0 && view_turn < 0) with = view_turn > root_turn ? view_turn : root_turn;
     /* the view as far or further: off as it was, to the bit (two headings read back through atan2f differ in the last
      * digits where the turns were the same) */

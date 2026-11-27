@@ -462,6 +462,29 @@ int main(void) {
     float axes[9]; level_axes(heading(tilted)+21, axes);
     CHECK(!tfp_damp_frame_step(&f, axes, view, 5033, 250, frame) && level_frame(frame) && fabsf(turned(heading(tilted), heading(frame))) < 1e-3f);
   }
+  { /* A turn of the root of more than a quarter circle in one frame is no turn: the game has set the root's axes anew
+     * (out of an emote into a dive backwards the heading flips 157 to 180 degrees in a frame, soaks 28 and 29), which
+     * the continuity reads as a cut of the pose in the root's own axes (THE CUT). The frame goes with it, as before. */
+    TfpDampFrame f; tfp_damp_frame_reset(&f);
+    float axes[9], view[3], frame[9]; level_view(5, 0, view);
+    level_axes(-17.6f, axes); tfp_damp_frame_step(&f, axes, view, 5000, 250, frame);
+    level_axes(-174.5f, axes);
+    CHECK(tfp_damp_frame_step(&f, axes, view, 5033, 250, frame) && !memcmp(frame, axes, sizeof axes));
+    level_axes(-174.5f+89, axes); /* under it: a turn, and the view did not make it */
+    CHECK(!tfp_damp_frame_step(&f, axes, view, 5066, 250, frame) && fabsf(turned(-174.5f, heading(frame))) < 1e-3f);
+    level_axes(-174.5f+89-91, axes); /* over it, from a frame that already stands off the root: it keeps standing off as far */
+    CHECK(!tfp_damp_frame_step(&f, axes, view, 5099, 250, frame) && fabsf(turned(-174.5f-91, heading(frame))) < 1e-3f);
+  }
+  { /* A forward axis straight up (a body thrown, while a lag is let go): the frame of the frame before stands. */
+    TfpDampFrame f; tfp_damp_frame_reset(&f);
+    const float upright[9] = {1, 0, 0, 0, 0, 1, 0, -1, 0};
+    float axes[9], view[3], frame[9], kept[9]; level_view(30, 0, view);
+    CHECK(tfp_damp_frame_step(&f, upright, view, 5000, 250, frame) && !memcmp(frame, upright, sizeof upright) && !f.known); /* nothing before it: the axes */
+    level_axes(30, axes); tfp_damp_frame_step(&f, axes, view, 5016, 250, frame);
+    level_axes(50, axes); CHECK(!tfp_damp_frame_step(&f, axes, view, 5032, 250, kept) && fabsf(turned(30, heading(kept))) < 1e-3f);
+    CHECK(!tfp_damp_frame_step(&f, upright, view, 5048, 250, frame) && level_frame(frame) && fabsf(turned(30, heading(frame))) < 1e-3f);
+    level_axes(50, axes); CHECK(!tfp_damp_frame_step(&f, axes, view, 5064, 250, frame) && fabsf(turned(30, heading(frame))) < 1e-3f);
+  }
   /* The get-up of soak 60 (tests/reference/soak-60-standup.h). In the root's axes, as built before round 49, the eye's
    * step changes by 0.31 m in a frame; in the frame of tfp_damp_frame_step the first frame is 0.06 m at most and no
    * frame over 0.10 m. */
