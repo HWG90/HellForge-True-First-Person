@@ -24,6 +24,10 @@
 #include <string.h>
 
 #define TFP_ACTION_CLAMBER_MASK 0x22u /* a high clamber; named the pick-up mask until round 24 */
+/* How long the swap's held eye tolerates mask 0 around a swap (src/camera_helper.c, tfp_camera_set_action_tuning):
+ * 900 ms on build 25480438 (retail 300); the hold is then let go over 300 to 450 ms (src/camera_glide.h THE RELEASE).
+ * A throw keeps the outgoing weapon's native eye that long, 0.18 to 0.31 m behind the head: in the head camera it is
+ * kept in front of the head (src/camera_clear.h), and Show torso waits for the hold and its release to end. */
 #define TFP_ACTION_EYE_IDLE_MS 900u
 #define TFP_ACTION_EYE_RETURN true
 #define TFP_ACTION_AIM_GUARD_SECONDS 0.15 /* full aim younger than this is beginning, not ending */

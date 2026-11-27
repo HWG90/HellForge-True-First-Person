@@ -186,6 +186,15 @@ void tfp_camera_down_stats(TfpCameraDownStats *out);
 /* The body reference whose head the lock held the camera at, off foot, within the last 250 ms; 0 otherwise. What
  * head hiding asks in place of the on-foot answer (src/head_visibility.h held_off_foot). */
 uint32_t tfp_camera_lock_off_foot_body(void);
+/* Round 44: the body whose eye the swap's hold kept, glided or let go in a head-camera frame of the lock within the
+ * last 250 ms, or 0. Show torso waits for it (src/wire_engine.h tfp_wire_engine_set_eye_held): the eye the hold keeps
+ * is the native view's, in the body's neck and back. */
+#define TFP_CAMERA_EYE_HELD 1
+uint32_t tfp_camera_lock_eye_held_body(void);
+/* Round 44: keep the head camera's eye in front of the head in frames of the lock with head visibility active
+ * (src/camera_clear.h: the push and the floor). The binder turns it on (src/mod_view.c; off with clear_off.txt).
+ * Off (the default; tfp_camera_reset_for_tests sets it off): nothing of it runs, the veil's frames are round 32's. */
+void tfp_camera_set_clear(bool on);
 uint64_t tfp_camera_lock_frames(void); /* frames the lock has held so far: rising while the view is shown */
 /* Round 38 (src/camera_vehicle.h): under the lock, a frame of a body that is seated, off foot and not in physics (an
  * exosuit's or a vehicle's seat) stays first person. The eye is fixed in the body root's frame (the head's offset,
@@ -286,8 +295,11 @@ void tfp_camera_orphan_stats(TfpCameraOrphanStats *out);
  *    behind it, accepted in that case only. Less than the whole way is never taken there: from nearer the head the
  *    helmet would fill more of the frame, or the eye would be inside it.
  *  - After the veil closes, its last move is let out over TFP_CAMERA_VEIL_LET_OUT_MS (tfp_camera_veil_let_out) instead
- *    of taken back in one frame: the body is hidden by then, so the eye need not be clear, and the step back was the
- *    lurch's other half. Only head-camera frames of the lock with the body not down are let out into; any other frame ends it. */
+ *    of taken back in one frame: the step back was the lurch's other half. Only head-camera frames of the lock with
+ *    the body not down are let out into; any other frame ends it. (Round 26 had it that the body is hidden by then,
+ *    so the eye need not be clear: only the head, torso and shoulders are; the cape and the rest of the body are
+ *    drawn, and a held eye let out behind the head showed them at every throw (round 44). The let-out now ends at
+ *    the larger of the held eye and the head plus TFP_CAMERA_VEIL_CLEAR: src/camera_clear.h THE FLOOR.) */
 #define TFP_CAMERA_VEIL_HEAD_M .15f
 #define TFP_CAMERA_VEIL_MOST .40f
 #define TFP_CAMERA_VEIL_FOV_MOST 2.0943951f   /* 120 degrees: tfp_settings.h fov_degrees at most */
@@ -356,7 +368,10 @@ void tfp_camera_set_veil_second(bool on);
 /* Round 30: held_back, leaves of a same-frame evaluation out of full aim with no action owning the view, kept pending
  * (TFP_CAMERA_VEIL_SAME_FRAME_MS). */
 /* Round 32: clamped, kept leaves whose frame was clamped to the let-in cap (TFP_CAMERA_VEIL_CARRY_FAR_M); not in moved. */
-typedef struct TfpCameraVeilStats { uint64_t leaves, frames, moved, behind; float largest_m; bool second; uint64_t under, too_far, held_back, clamped; } TfpCameraVeilStats;
+/* Round 44 (src/camera_clear.h): floored, head-camera frames whose shown eye THE FLOOR moved forward (after the veil
+ * and its let-out); floor_largest_m, its largest move since the start. */
+typedef struct TfpCameraVeilStats { uint64_t leaves, frames, moved, behind; float largest_m; bool second; uint64_t under, too_far, held_back, clamped;
+  uint64_t floored; float floor_largest_m; } TfpCameraVeilStats;
 void tfp_camera_veil_stats(TfpCameraVeilStats *out);
 /* The tick's whole part in the veil (src/mod_view.c head_note calls it after head visibility's update, `tick` filled as
  * the "Head:" line has it, view included). NULL, no tick read: switched off. Otherwise tfp_camera_veil_tick with
@@ -409,6 +424,9 @@ enum { TFP_CAMERA_TRACE_LOOKED = 1,  /* jumps within the camera were looked for 
  * most leaves of the native view, and no row said so. */
 typedef struct TfpCameraTraceRow { float ms; uint32_t kind, source; float eye[3], wanted[3], step, correction, entry_ease; float root[3]; uint32_t what; float axes[9]; double tick; float damp[3], view[3]; float sock; uint32_t arms; float veil[3]; float turn[3];
   float veil_head[2]; /* round 26: in a frame the veil was open for, the head node from the eye before the veil: ahead along the level view, up (m); 0 0 otherwise */
+  /* Round 44: in every head-camera frame of the lock, the head node from the eye shown (after the veil and the floor):
+   * ahead along the level view, up (m), with head_known; and the push of src/camera_clear.h in that frame (m). */
+  float head_shown[2]; bool head_known; float clear;
 } TfpCameraTraceRow;
 void tfp_camera_trace_edge(void);
 /* The arm drive's figures of the last primary draw, for the newest frame presented. The draw comes after the frame's

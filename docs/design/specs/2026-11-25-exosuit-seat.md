@@ -87,6 +87,37 @@ the suit destroyed or changed (its rows are retired with no write), by head visi
 - The native-view exit's direction: only the position glides there; a direction step at the change, if the suit
   aimed far from where the diver looks once out, would be the game's own.
 
+## Round 43: gear hung on the body
+
+feel.58: "exosuit interior, helldiver belt equipment like sample holder is still visible". The seat hid the 30
+appearance slots, the backpack and the body's own meshes (every Seat line of session b9c60f4a: `103 rows hidden`), and
+never the units hung on the body's attach nodes (`attach_samplepouch` 0x000922d7, `attach_intelpad`, `attach_knife`,
+the pistol on `r_thigh`, `sling`, `support`/`support_mg`).
+
+In a seat `resolve()` now walks the body's child list (unit +0x1D8 first child, +0x1E0 next sibling, +8 the child's
+reference, +0x1D0 its parent; the walk of `src/models.c`: 8 levels, 32 to a list, 64 in all) with reads that never
+raise. A child is taken as gear (camera and shadow out, as the slots) when it is current in the registry at the object
+the list holds, of the renderer type, in the body's world, and its parent field names the unit it hangs under. Left:
+the first-person rig and everything under it, the exosuit, units of another type (skipped, never a check), another
+world or a disagreeing parent. Slot and backpack renderers are not taken twice, but what hangs on them is walked (an
+armour attachment). The set of (reference, parent) joins the "unchanged" test, so gear appearing, leaving or moving
+rebuilds the rows; CHECK 308 and 743 accept gear whose parent is where the walk found it and whose chain still reaches
+the body; gear is optional like the rig and the suit. Restore is the one every row has: a unit moved to the rig or
+gone is given back (or retired) on the next update, and everything on leaving the seat or a stop. On foot nothing is
+read: the retail vectors still match call for call. A seat is observed whole every frame (no steady path).
+
+Log, once per seat entry and on each change of the set (at most 6 a seat): `FPV head visibility: seat gear: N units
+under the body, G hidden as gear (R rows), ...; walk complete|stopped: ...`, then one line per unit seen: reference,
+depth, parent, attach node and its name hash, resource (+0x358), meshes, rows hidden and why. The Seat line says
+`(L of the limb slots, G of gear on the body)`.
+
+Only the game can show: whether the sample pouch and the intel pad are units of their own (then a line names node
+0x000922d7) or meshes of an armour renderer (already hidden by the slots: then the pouch would have been hidden in
+feel.58 too, and what the user saw is something else the lines will name); whether every piece of gear hangs under
+the body rather than the suit or the world; whether the game re-shows a holstered weapon's meshes while seated (an
+outside write is left alone by retail's foreign-mask rule until the next epoch); and when the slung weapon moves to
+the hands on exit.
+
 ## Other vehicles
 
 The seat rule is any seat: seated, off foot, not in physics. An FRV's seat (driver or passenger) therefore keeps

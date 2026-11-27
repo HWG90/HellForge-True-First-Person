@@ -113,8 +113,11 @@ static int store_part(void) {
   memset(&s, 0, sizeof s);
   CHECK(tfp_settings_defaults(&s));
   /* the seventeen options and their defaults (round 20: Aim field of view, its chosen degrees, the sight distance in aim;
-   * round 38: See through the exosuit cockpit, on) */
-  CHECK(TFP_LOCKED_COUNT == 17);
+   * round 38: See through the exosuit cockpit, on; round 45: Cockpit frame, on, and its opacity, 90) */
+  CHECK(TFP_LOCKED_COUNT == 19);
+  CHECK(tfp_settings_locked_flag(&s, TFP_LOCKED_cockpit_frame) && tfp_settings_locked_info(TFP_LOCKED_cockpit_frame)->is_bool &&
+        tfp_settings_locked_number(&s, TFP_LOCKED_cockpit_frame_opacity) == 90 && tfp_settings_locked_info(TFP_LOCKED_cockpit_frame_opacity)->min == 20 &&
+        tfp_settings_locked_info(TFP_LOCKED_cockpit_frame_opacity)->max == 100);
   CHECK(tfp_settings_locked_flag(&s, TFP_LOCKED_see_through_cockpit) && tfp_settings_locked("see_through_cockpit") == TFP_LOCKED_see_through_cockpit &&
         tfp_settings_locked_info(TFP_LOCKED_see_through_cockpit)->is_bool);
   CHECK(tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim) == 1 && tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim_degrees) == 50 &&
@@ -574,7 +577,7 @@ static int panel_part(void) {
   CHECK(drawn("tab:First person") && drawn("tab:Bob and sway") && drawn("tab:Locked view"));
   int count = 0, sliders = 0, checks_drawn = 0, keys = 0, described = 0, choices = 0;
   const TfpMenuControl *controls = tfp_wire_menu_controls(&count);
-  CHECK(count == 45);   /* round 38: See through the exosuit cockpit */
+  CHECK(count == 47);   /* round 38: See through the exosuit cockpit; round 45: Cockpit frame and its opacity */
   for (int i = 0; i < count; i++) {
     const TfpMenuControl *c = &controls[i];
     char line[420];
@@ -606,7 +609,8 @@ static int panel_part(void) {
     }
     if (c->description) { snprintf(line, sizeof line, "tip:%s", c->description); CHECK(drawn_part(line)); described++; }
   }
-  CHECK(sliders == 16 && checks_drawn == 17 && keys == 2 && choices == 3 && described == 32);
+  CHECK(sliders == 17 && checks_drawn == 18 && keys == 2 && choices == 3 && described == 34);
+  CHECK(drawn("check:Cockpit frame=on") && drawn("slider:Cockpit frame opacity (%)=90[20..100]")); /* round 45: enabled with the see-through cockpit on */
   CHECK(drawn("text:First person through every action, one field of view, and how much your body's movement moves the view."));
   CHECK(drawn("primary:Enable True First Person") && drawn("cap:U") && !drawn("cap:F11") && drawn("cap:PAGE UP")); /* the stored 122 (F11) reads as U */
   CHECK(drawn("slider:Weapon movement strength=120[0..200]") && drawn("slider:Near clip distance (cm)=15[5..40]") && drawn("slider:Weapon bob speed=100[25..200]"));
@@ -824,6 +828,30 @@ static int panel_part(void) {
   game_update(); draw_frame();
   CHECK(drawn("check:First Person Arms=on (disabled)") && drawn("text:The arm drive is refused on this build, so the hand grip cannot run.") && !drawn_part("Fird") && drawn("button:Edit arms and weapon placement (disabled)") && drawn("button:Change##editor_key (disabled)"));
   CHECK(drawn("button:Change##toggle_key") && drawn("check:True First Person: show torso=off"));
+  tfp_wire_menu_unbind(&wire);
+  tfp_wire_panel_free(&wire);
+  tfp_wire_settings_free(&wire);
+
+  /* ---- round 45: Cockpit frame needs the see-through cockpit; its opacity needs both ---- */
+  CHECK(start_wire());
+  new_host(11);
+  CHECK(tfp_wire_panel_bind(&wire, &api, &platform, 0, NULL));
+  game_update(); draw_frame();
+  CHECK(drawn("check:Cockpit frame=on") && drawn("slider:Cockpit frame opacity (%)=90[20..100]"));
+  ov.slide = ov.release = "Cockpit frame opacity (%)"; ov.slide_to = 60; draw_frame(); game_update();
+  CHECK(tfp_locked_view_cockpit_frame_opacity(&wire) == 60 && strstr(saved_text, "\"cockpit_frame_opacity\": 60"));
+  ov.slide = ov.release = NULL;
+  ov.flip = "Cockpit frame"; draw_frame(); game_update(); draw_frame();
+  CHECK(!tfp_locked_view_cockpit_frame(&wire) && strstr(saved_text, "\"cockpit_frame\": false"));
+  CHECK(drawn("check:Cockpit frame=off") && drawn("slider:Cockpit frame opacity (%)=60[20..100] (disabled)"));
+  ov.flip = "Cockpit frame"; draw_frame(); game_update(); draw_frame();
+  CHECK(tfp_locked_view_cockpit_frame(&wire) && drawn("slider:Cockpit frame opacity (%)=60[20..100]"));
+  ov.flip = "See through the exosuit cockpit"; draw_frame(); game_update(); draw_frame();
+  CHECK(!tfp_locked_view_see_through_cockpit(&wire) && drawn("check:Cockpit frame=on (disabled)") &&
+        drawn("slider:Cockpit frame opacity (%)=60[20..100] (disabled)"));
+  ov.flip = "Cockpit frame"; draw_frame(); game_update();          /* greyed: a click does nothing */
+  CHECK(tfp_locked_view_cockpit_frame(&wire) && ov.flip);
+  ov.flip = NULL;
   tfp_wire_menu_unbind(&wire);
   tfp_wire_panel_free(&wire);
   tfp_wire_settings_free(&wire);

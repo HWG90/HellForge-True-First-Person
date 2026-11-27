@@ -493,6 +493,9 @@ static void entry_note(void) {
  *                view, which no row said); round 26: also the veil's move being let out in the frames after it closes
  *   veil_head    round 26: in a frame the veil was open for, the head node from the eye before the veil: (ahead up), m
  *                along the level view and up (the veil moves the eye less where the head is below the view); else 0
+ *   head_shown   round 44: in every head-camera frame of the lock, the head node from the eye shown (eye_world + veil):
+ *                (ahead up), m; a negative ahead is the eye that far in front of the head. 0 in any other frame
+ *   clear        round 44: how far src/camera_clear.h pushed the eye the frame was built on along the level view (m)
  * A window is also opened when the body's action changes (src/trace_edges.h); such a window has no State line before
  * it, and "t=" starts again in it. So does one the eye opens itself (eye_edge), unless a window was open. */
 static void trace_note(void) {
@@ -546,9 +549,12 @@ static void trace_note(void) {
       snprintf(veil, sizeof veil, "(%.5f %.5f %.5f)", (double)r->veil[0], (double)r->veil[1], (double)r->veil[2]);
     char veil_head[48] = "0";
     if (r->veil_head[0] != 0 || r->veil_head[1] != 0) snprintf(veil_head, sizeof veil_head, "(%.4f %.4f)", (double)r->veil_head[0], (double)r->veil_head[1]);
+    char head_shown[48] = "0";
+    if (r->head_known) snprintf(head_shown, sizeof head_shown, "(%.4f %.4f)", (double)r->head_shown[0], (double)r->head_shown[1]);
     say("Trace: t=%.1f kind=%u eye_world=(%.5f %.5f %.5f) step=%.4f wanted=(%.5f %.5f %.5f) correction=%.4f lease=0x%llx pose_armed=%d entry_ease=%.2f source=%s"
         " root=(%.5f %.5f %.5f) axes=(%.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f) looked=%d taken=%s quiet=%d tick=%.3f"
-        " off_foot=%d damped=%d damp=(%.5f %.5f %.5f) view=(%.5f %.5f %.5f) sock=%.5f arms=%u eye_edge=%d veil=%s turn=(%.4f %.4f %.4f) veil_head=%s",
+        " off_foot=%d damped=%d damp=(%.5f %.5f %.5f) view=(%.5f %.5f %.5f) sock=%.5f arms=%u eye_edge=%d veil=%s turn=(%.4f %.4f %.4f) veil_head=%s"
+        " head_shown=%s clear=%.4f",
         (double)r->ms, r->kind, (double)r->eye[0], (double)r->eye[1], (double)r->eye[2], (double)r->step, (double)r->wanted[0], (double)r->wanted[1],
         (double)r->wanted[2], (double)r->correction, lease, (int)(pose.armed != 0), (double)r->entry_ease, sources[r->source < 4 ? r->source : 0],
         (double)r->root[0], (double)r->root[1], (double)r->root[2], (double)r->axes[0], (double)r->axes[1], (double)r->axes[2], (double)r->axes[3],
@@ -556,7 +562,8 @@ static void trace_note(void) {
         (int)((r->what & TFP_CAMERA_TRACE_LOOKED) != 0), taken[0] ? taken + 1 : "-", (int)((r->what & TFP_CAMERA_TRACE_QUIET) != 0), r->tick,
         (int)((r->what & TFP_CAMERA_TRACE_OFF_FOOT) != 0), (int)((r->what & TFP_CAMERA_TRACE_DAMPED) != 0), (double)r->damp[0], (double)r->damp[1],
         (double)r->damp[2], (double)r->view[0], (double)r->view[1], (double)r->view[2], (double)r->sock, (unsigned)r->arms,
-        (int)((r->what & TFP_CAMERA_TRACE_SELF) != 0), veil, (double)r->turn[0], (double)r->turn[1], (double)r->turn[2], veil_head);
+        (int)((r->what & TFP_CAMERA_TRACE_SELF) != 0), veil, (double)r->turn[0], (double)r->turn[1], (double)r->turn[2], veil_head,
+        head_shown, (double)r->clear);
   }
 }
 #endif
@@ -1014,7 +1021,7 @@ static void seat_note(void) {
   if (c.frames != told.frames && tfp_wire_engine_seat(&wire, &w)) {
     TfpSeatLine l = {c.frames - told.frames, c.refused - told.refused, c.glided - told.glided, c.settled, c.gliding, c.hands,
                      {c.offset[0], c.offset[1], c.offset[2]}, {c.left[0], c.left[1], c.left[2]}, {c.right[0], c.right[1], c.right[2]},
-                     w.see_through, w.suit, w.how, w.searches, w.hidden, w.limbs, w.cockpit, a.frames - arms_told.frames, a.idle - arms_told.idle};
+                     w.see_through, w.suit, w.how, w.searches, w.hidden, w.limbs, w.cockpit, a.frames - arms_told.frames, a.idle - arms_told.idle, w.gear};
     char line[700];
     tfp_seat_line(line, sizeof line, &l);
     say("%s", line);
@@ -1033,6 +1040,7 @@ static void start(void) {
 #endif
   tfp_wire_init(&wire, &memory, &platform, &helpers);
   wire.mouse_source = tfp_win_mouse_source;
+  tfp_camera_set_clear(true); /* round 44: the head camera's eye kept in front of the head (src/camera_clear.h); clear_off.txt below */
   {
     /* Test switch: a file "head_parts.txt" beside the DLL holding one digit 1-7 (bit 0 head, 1 torso, 2 shoulders). */
     char parts_path[MAX_PATH];
@@ -1113,6 +1121,11 @@ static void start(void) {
         if (veil_file) fclose(veil_file);
         tfp_camera_set_veil_second(veil_file != NULL);
         if (veil_file) say("Test: veil_second.txt: the helmet veil opens at the tick that sees a leave of the native view, so only the frame that draws the body is moved");
+        /* Round 44: the head camera's eye kept in front of the head (src/camera_clear.h), unless clear_off.txt. */
+        strcpy(slash + 1, "clear_off.txt");
+        FILE *clear_file = fopen(parts_path, "r");
+        if (clear_file) fclose(clear_file), tfp_camera_set_clear(false);
+        if (clear_file) say("Test: clear_off.txt: the head camera's eye is not kept in front of the head (a throw's held eye shows the cape, as before round 44)");
         /* Round 22: the Warp Pack's glow (src/warp_glow.h). Off by default: the "Warp:" line only says what plays. */
         strcpy(slash + 1, "warp_hide.txt");
         FILE *warp_file = fopen(parts_path, "r");
@@ -1158,6 +1171,7 @@ static void start(void) {
   tfp_wire_engine_set_held_body(tfp_camera_lock_off_foot_body); /* head hiding stays on while the lock holds a body that is off foot */
   tfp_wire_engine_set_lock_view(lock_view_now);                 /* and while the game presents the lease's own first-person request (a stim) */
   tfp_wire_engine_set_seat(tfp_camera_lock_seat_body, see_through_cockpit_now); /* round 38: the whole diver hidden in an exosuit, the suit seen through */
+  tfp_wire_engine_set_eye_held(tfp_camera_lock_eye_held_body); /* round 44: Show torso waits while a throw's held eye is kept or let go */
 #endif
   say(lock_wanted ? "Ready: camera lock: the view stays first person through every action and camera of your own character, death included; "
                     "the camera style is Stable unless Bodycam is switched on in the panel: in Bodycam body movement kicks the view (35 %% up to 8 degrees "
@@ -1520,6 +1534,50 @@ static void f11_hint_tick(int toggle_key, bool focused) {
 #endif
   tfp_f11_hint_tick(&f11_hint, &io, GetTickCount64(), toggle_key, name, stage == RUNNING, focused);
 }
+#ifdef TFP_FEEL
+/* Round 45: the cockpit frame (src/cockpit_frame.h). With See through the exosuit cockpit and Cockpit frame on, and
+ * first person shown from an exosuit's seat (the camera lock's seat body and its seated flag, not gliding in or out;
+ * the suit found and seen through, src/wire_engine.h TfpWireSeat), the Goose Overlay Host draws a static cockpit frame
+ * as a HUD panel under an id of this load's own. The seat has no event: its body is an atomic the camera helper
+ * publishes, read once a tick; the rest is read, and the host asked, only while seated or on leaving. */
+#include "cockpit_frame.h"
+static TfpCockpitFrame cockpit_frame;
+static TfpCockpitHud cockpit_hud;
+static char cockpit_panel_id[96];
+static void cockpit_say(void *u, const char *line) { (void)u; say("%s", line); }
+static const OvApi *cockpit_host(void) { /* the host as it is now (on the seat's edges only) */
+  HMODULE host = GetModuleHandleA(OV_HOST_DLL);
+  OvApiFn get = host ? (OvApiFn)(void *)GetProcAddress(host, "ov_api") : NULL;
+  return get ? get(2) : NULL;
+}
+static bool cockpit_show(void *u, float opacity, char *why, size_t why_size) {
+  (void)u;
+  if (!cockpit_panel_id[0]) tfp_cockpit_panel_id(cockpit_panel_id, sizeof cockpit_panel_id, (unsigned long)GetCurrentProcessId(), (unsigned long long)GetTickCount64());
+  return tfp_cockpit_hud_show(&cockpit_hud, cockpit_host(), cockpit_panel_id, opacity, why, why_size);
+}
+static void cockpit_hide(void *u) { (void)u; tfp_cockpit_hud_hide(&cockpit_hud, cockpit_host()); }
+static void cockpit_opacity(void *u, float opacity) { (void)u; tfp_cockpit_hud_opacity(&cockpit_hud, opacity); }
+static bool cockpit_drawn(void *u, char *description, size_t size) { (void)u; return tfp_cockpit_hud_drawn(&cockpit_hud, description, size); }
+static void cockpit_frame_tick(void) {
+  static const TfpCockpitFrameIo io = {NULL, cockpit_say, cockpit_show, cockpit_hide, cockpit_opacity, cockpit_drawn};
+  TfpCockpitFrameIn in = {false, false, false, false, 0};
+  const uint32_t body = stage == RUNNING ? tfp_camera_lock_seat_body() : 0;
+  if (body) {
+    TfpCameraSeatStats c; tfp_camera_seat_stats(&c);
+    in.seated = c.seated && !c.gliding;
+  }
+  if (!in.seated && !cockpit_frame.seat) return; /* on foot: nothing more */
+  if (in.seated) {
+    TfpWireSeat seat;
+    in.see_through = tfp_locked_view_see_through_cockpit(&wire);
+    in.option = tfp_locked_view_cockpit_frame(&wire);
+    in.suit = tfp_wire_engine_seat(&wire, &seat) && seat.suit && seat.body == body;
+    in.opacity = (float)(tfp_locked_view_cockpit_frame_opacity(&wire) / 100);
+  }
+  tfp_cockpit_frame_tick(&cockpit_frame, &io, GetTickCount64(), &in);
+}
+#endif
+/* end of round 45's cockpit frame */
 static void guard_resolve(void) {
   const uint64_t now = GetTickCount64();
   if (chat_layout.resolved || now < chat_next_try || !tfp_win_game()) return;
@@ -1537,6 +1595,7 @@ static void tick_body(void) {
 #ifdef TFP_FEEL
   int64_t mark = perf_qpc(); /* round 28: the sections of the Perf line */
   if (stage == RUNNING) { gate_note(); steady_note(); ads_seat_tick(); }
+  cockpit_frame_tick(); /* round 45: the cockpit frame over the see-through seat; hidden when not RUNNING */
 #endif
   if (stage == RUNNING) { quit_guard(); fov_lock_tick(); lock_note(); fov_note(); }   /* not earlier: the game module and the guarded reader are set up in WAIT_MODULES */
 #ifdef TFP_FEEL
@@ -1743,6 +1802,7 @@ __declspec(dllexport) int hellforge_mod_unload(const HfApi *api, HfMod *mod, uin
   eng_set_script_probe(NULL);
   tfp_mod_editor_retire();   /* its panel stays registered with the overlay host: closed, and drawing nothing */
   tfp_mod_panel_retire();    /* the settings panel likewise */
+  tfp_cockpit_hud_retire(&cockpit_hud, cockpit_host()); /* round 45: the cockpit frame's HUD panel likewise (closed already: no seat is held) */
   unsigned restored = tfp_win_restore_slots() + tfp_win_pose_restore_slots() + render_restored;
   hf->log(mod, "Live %s: the mod held nothing in the game; %u dispatch slot(s) put back; this build does nothing from here on.",
           reason == HF_UNLOAD_REPLACE ? "replace" : "removal", restored);

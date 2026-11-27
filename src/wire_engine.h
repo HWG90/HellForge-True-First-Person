@@ -95,6 +95,10 @@ TfpWireEngineState tfp_wire_engine_state(const TfpWire *w, TfpWireEngineModule m
  * body head hiding takes the on-foot answer as yes, so the helmet, torso and shoulders stay hidden around the eye.
  * NULL (the default): retail's answers. Process-wide. */
 void tfp_wire_engine_set_held_body(uint32_t (*body)(void));
+/* Round 44. `body` answers the reference of the body whose eye the camera helper holds or lets go at the native view's
+ * in a head-camera frame (tfp_camera_lock_eye_held_body), or 0. For that body Show torso waits (TfpHeadIo.eye_held).
+ * NULL (the default): never. Process-wide. */
+void tfp_wire_engine_set_eye_held(uint32_t (*body)(void));
 /* Beyond retail (the camera lock; 0.6.0-feel.26). `lock` answers whether the camera lock is on. While it is, and the
  * game presents the controller's lease's own first-person request (kind 6, the lease's record, not seated), head
  * hiding stays on whatever the action flags say: a stim (mask 0x40) keeps that request for about 0.85 s, and the
@@ -117,6 +121,7 @@ typedef struct TfpWireSeat {
   float distance;                    /* its seat node from the body's root, m (inf: not measured) */
   uint32_t searches, looked, suits;  /* searches made since the seat began; units read and suits among them in the last */
   double hidden, limbs, cockpit;     /* rows head visibility owns: all, the limb slots, the suit's meshes */
+  double gear;                       /* round 43: ... and units hung on the body */
 } TfpWireSeat;
 bool tfp_wire_engine_seat(const TfpWire *w, TfpWireSeat *out);
 /* Rows head visibility hides now (its phase is "active"); 0: it hides nothing; -1: the module is not bound. Reads only. */

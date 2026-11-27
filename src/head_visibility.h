@@ -64,9 +64,17 @@ typedef struct TfpHeadIo {
    * cockpit: while in a seat, the unit reference of the exosuit to see through (its body meshes lose the camera
    * pass; their shadow stays), or false for none (the option is off, or no suit is proven to be the one the diver
    * sits in). The unit must carry the exosuit's resource and be in the body's world, or it is left alone.
-   * Both are asked only for frames of camera kind 4 (the seat itself, and the glide out of it). */
+   * Both are asked only for frames of camera kind 4 (the seat itself, and the glide out of it).
+   * Round 43: in a seat the units hung on the body (its child list, unit +0x1D8 first child, +0x1E0 next sibling,
+   * at most 8 deep, 32 to a list, 64 in all) are hidden too, camera and shadow: the sample pouch, the holstered
+   * sidearm, the knife, slung weapons. Left: the first-person rig and what hangs on it, the exosuit, the units the
+   * slots or the backpack already name (their own children are walked), units of another type or world. Once per
+   * seat entry, and when the set changes in it, `log` gets one line per unit seen and why it was or was not taken. */
   bool (*seat)(void *user, const TfpVisSnapshot *s);
   bool (*cockpit)(void *user, const TfpVisSnapshot *s, double *unit);
+  /* Beyond retail, round 44. May be NULL: never. The camera holds this snapshot's body's eye at the native view's (a
+   * throw's or a swap's hold, or its release; src/camera_clear.h): Show torso does not draw the torso meanwhile. */
+  bool (*eye_held)(void *user, const TfpVisSnapshot *s);
 } TfpHeadIo;
 
 /* What depends on the game build: the code pins of helldivers2.exe that qualify the SDK setter and the
@@ -108,6 +116,9 @@ typedef struct TfpHeadResult {
    * and of the exosuit's meshes; the suit being seen through (0: none). */
   bool seat;
   double hidden_limbs, hidden_cockpit, cockpit_unit;
+  /* Beyond retail, round 43: rows owned of units hung on the body (gear: the sample pouch, the holstered sidearm, ...)
+   * in a seat; see the seat branch of resolve() in head_visibility.c. */
+  double hidden_gear;
 } TfpHeadResult;
 
 typedef struct TfpHead TfpHead;

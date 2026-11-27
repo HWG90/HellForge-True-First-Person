@@ -59,6 +59,8 @@ typedef struct TfpMenuControl {
   bool bodycam_only;        /* disabled while the camera style is Stable (src/camera_damp.h) */
   bool aim_chosen_only;     /* disabled unless Aim field of view is A chosen value (round 20) */
   bool inert;               /* stored, and nothing on this build acts on it: always disabled, with its note */
+  bool see_through_only;    /* round 45: disabled while See through the exosuit cockpit is off */
+  bool frame_only;          /* round 45: disabled unless the cockpit is seen through and Cockpit frame is on */
 } TfpMenuControl;
 const TfpMenuControl *tfp_wire_menu_controls(int *count);
 extern const char *const tfp_wire_menu_pages[TFP_MENU_PAGES];     /* "First person", "Bob and sway", "Locked view" */
