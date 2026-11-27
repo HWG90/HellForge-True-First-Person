@@ -17,6 +17,7 @@ Command line:
   drive.py run "wait 0.5; key r; hold w 0.7; click left 0.6; look 0 -40; key u"
   drive.py run "down right; wait 0.35; click middle; wait 2"    full aim (the middle button is the game's aim mode)
   drive.py run "down r; wait 0.8; wheel 1; wait 0.3; up r"      the scope's range: hold R, the wheel up one notch
+  drive.py run "key f10; wait 1; tap u 20"                      F10 held 250 ms (a key the mod polls); U down for 20 ms only
 """
 import json
 import os
@@ -101,6 +102,15 @@ BUTTONS = {"left": "L", "right": "R", "middle": "M"}
 # The mod's view toggle (a letter: _code gives its VK, U 0x55). U by default since round 36: HellForge 0.5's Armor LUT
 # editor opens on F11, the old default. "f11" stays in VK to reach HellForge's own key on purpose.
 TOGGLE = "u"
+# Round 50: how long `key NAME` holds. The mod level-polls its own keys once per game update, and in three sessions
+# (~/.cache/tfp-nest1, tfp-nest2, tfp-nest2b: 10 to 30 updates a second) about half the 80 ms presses of U, F10 and F11
+# fell between two polls. Those keys (the toggle key, the function keys, Page Up: the placement editor) are held for
+# 250 ms, at least two updates down to 8 a second; the game's own keys keep 80 ms, where a longer hold is another
+# action (a tap opens the stratagem list, a hold does not). `tap NAME MS` is for the short press itself.
+KEY_HOLD_S = 0.08
+POLLED_HOLD_S = 0.25
+POLLED = {TOGGLE, "pageup"} | {f"f{n}" for n in range(1, 13)}
+TAP_MOST_MS = 1000
 WHEEL_DELTA = 120     # one notch of the wheel (Windows' WHEEL_DELTA)
 WHEEL_GAP_S = 0.1     # between two notches: three frames at 30 a second, so the game reads each one
 WHEEL_MOST = 10       # notches in one step
@@ -118,9 +128,21 @@ def _code(name):
     raise DriveError(f"unknown key {name!r}")
 
 
+def key_hold(name):
+    """Seconds `key NAME` holds the key: POLLED_HOLD_S for a key the mod polls, KEY_HOLD_S for the rest."""
+    return POLLED_HOLD_S if name.lower() in POLLED else KEY_HOLD_S
+
+
 def events(script):
-    """Turn 'wait S; key NAME; hold NAME S; click BUTTON [S]; down NAME; up NAME; keep NAME; look DX DY; wheel N' into
-    timed lines.
+    """Turn 'wait S; key NAME; tap NAME MS; hold NAME S; click BUTTON [S]; down NAME; up NAME; keep NAME; look DX DY;
+    wheel N' into timed lines.
+
+    key NAME: one press, held key_hold(NAME) seconds (round 50: 0.25 for the keys the mod polls, 0.08 for the game's);
+    `key NAME S` holds S seconds, as `hold NAME S` does.
+
+    tap NAME MS: the key down for MS milliseconds (1 to TAP_MOST_MS) and up again: the short press of a quick player,
+    shorter than a game update when MS is small. For tests of what the mod does with one (round 50: it takes a tap that
+    began and ended between two updates as one press).
 
     wheel N: N notches of the mouse wheel, up (away from the player) for N > 0, down for N < 0; one helper line of
     +-120 (WHEEL_DELTA) per notch, WHEEL_GAP_S apart so each lands in its own game frame (round 30: the game's scope
@@ -138,7 +160,14 @@ def events(script):
             at += float(rest[0])
         elif word in ("key", "hold", "click"):
             add(f"d {_code(rest[0])}")
-            at += float(rest[1]) if len(rest) > 1 else 0.08
+            at += float(rest[1]) if len(rest) > 1 else key_hold(rest[0]) if word == "key" else KEY_HOLD_S
+            add(f"u {_code(rest[0])}")
+            at += 0.03
+        elif word == "tap":
+            if len(rest) != 2 or not rest[1].isdigit() or not 1 <= int(rest[1]) <= TAP_MOST_MS:
+                raise DriveError(f"tap takes a key and 1 to {TAP_MOST_MS} milliseconds: {step!r}")
+            add(f"d {_code(rest[0])}")
+            at += int(rest[1]) / 1000
             add(f"u {_code(rest[0])}")
             at += 0.03
         elif word == "down":
@@ -218,7 +247,7 @@ def held_after(script, held=()):
             downs.add(rest[0])
         elif word == "keep":
             kept.add(rest[0])
-        elif word in ("up", "key", "hold", "click"):
+        elif word in ("up", "key", "tap", "hold", "click"):
             held.discard(rest[0]); downs.discard(rest[0])
     return held | (downs & kept)
 
