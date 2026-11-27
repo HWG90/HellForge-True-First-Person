@@ -108,6 +108,12 @@ def act(device, name, script, settle, log, sleep=time.sleep):
     return None
 
 
+def judged(name, script, lines):
+    """matrix.judge of one action's stretch of the log. An action that presses the reload key is judged without the
+    stance class (round 49g: matrix.py left it out of its own reload phases only)."""
+    return matrix.judge(lines, stance=not matrix.reloading(name, script))
+
+
 def judge_log(lines):
     """A log judged in one piece for each camera style it ran in: one line of text for each stretch between two
     "Camera style:" lines in which a frame was held or traced. Frames on either side of such a line are not measured
@@ -163,7 +169,7 @@ def main(argv):
             lines = handle.read().splitlines()
         for text in matrix.style_changes(lines):
             print(text, flush=True)
-        j = matrix.judge(lines)
+        j = judged(name, script, lines)
         count += 1
         worst = max(worst, j["largest_jump_m"])
         veiled = max(veiled, j.get("largest_veil_m", 0.0))

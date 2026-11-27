@@ -167,7 +167,95 @@ class Judge(unittest.TestCase):
         self.assertLessEqual(stance.CAP_M, 0.10)
 
 
+class Narrow(unittest.TestCase):
+    """Round 49g: what the independent check of round49d found open in the class (results of 2026-11-27, findings 3
+    to 5): the root's change was not held under the limit, and four mutants of tools/harness/stance.py passed."""
+
+    def setUp(self):
+        self.lines = LOG.read_text().splitlines()
+        self.rows = trace.frames(self.lines)
+        self.i = next(i for i, r in enumerate(self.rows) if r["at"] == AT)
+
+    def ticked(self, line):
+        return float(line.split(" tick=")[1].split()[0]) if " Trace: " in line and " tick=" in line else None
+
+    def edited(self, change, first, last=None):
+        """The Trace lines of the frames first..last (indices into self.rows; last None: to the end) through `change`."""
+        lo = self.rows[first]["tick"]
+        hi = self.rows[last]["tick"] if last is not None else float("inf")
+        return [change(line) if self.ticked(line) is not None and lo <= self.ticked(line) <= hi else line for line in self.lines]
+
+    def test_a_root_change_at_or_over_the_limit_is_not_argued_off(self):
+        # the root, from the frame before the ramp on, and the eye a frame later, 0.065 m to the side: the root's own
+        # change of step is then 0.066 m, the eye shows 0.093 m, the ramp runs as it did and 0.054 m is left. A change
+        # of the root that size is the body's lunge (measure's own rule, which wants the wanted eye to make it to half)
+        # or nothing: this class is for the few centimetres of a body slowing down
+        def side(which):
+            return lambda line: re.sub(which + r"\(([-\d.]+) ", lambda m: f"{which}({float(m[1]) + 0.065:.5f} ", line)
+        lines = self.edited(side("root="), self.i - 1)
+        self.lines = lines
+        lines = self.edited(lambda line: side("wanted=")(side("eye_world=")(line)), self.i)
+        rows = trace.frames(lines)
+        f = next(f for f in matrix.measure(rows) if f["at"] == AT)
+        self.assertAlmostEqual(f["shown"], 0.093, places=2)
+        self.assertLess(f["shown"], stance.CAP_M)
+        before = sub(sub(rows[self.i - 1]["root"], rows[self.i - 2]["root"]), sub(rows[self.i - 2]["root"], rows[self.i - 3]["root"]))
+        self.assertAlmostEqual(math.hypot(*before), 0.067, places=3)
+        self.assertGreaterEqual(math.hypot(*before), matrix.POP_M)
+        self.assertAlmostEqual(math.dist(stance.against_root(rows, self.i), stance.against_root(rows, self.i - 1)), 0.0542, places=3)
+        self.assertIsNone(stance.ramp(rows, self.i, f["shown"], matrix.POP_M))
+        self.assertEqual(f["whose"], "own")
+        self.assertFalse(matrix.judge(lines)["pass"])
+
+    def test_a_steady_eye_at_another_speed_is_not_the_ramp(self):
+        # 0.008 m a frame slower from the ramp's first frame on: 1.36 m/s, steady. (What is left is then under the
+        # limit too, so only the speed says it is not the game's ramp.)
+        def slower(line, n=[0]):
+            n[0] += 1
+            return re.sub(r"\(([-\d.]+) ([-\d.]+) ([-\d.]+)\)", lambda m: f"({m[1]} {float(m[2]) + 0.008 * n[0]:.5f} {m[3]})", line, count=2)
+        rows = trace.frames(self.edited(slower, self.i))
+        step = stance.against_root(rows, self.i)
+        self.assertAlmostEqual(math.hypot(*step) * 1000.0 / (rows[self.i]["tick"] - rows[self.i - 1]["tick"]), 1.36, places=1)
+        self.assertLess(math.dist(step, stance.against_root(rows, self.i + 3)), stance.STEADY_M)
+        self.assertIsNone(stance.ramp(rows, self.i, 0.0664, matrix.POP_M))
+        self.assertIsNotNone(stance.ramp(self.rows, self.i, 0.0664, matrix.POP_M))
+
+    def test_a_frame_of_another_camera_or_one_the_veil_moved_is_not_the_ramps(self):
+        for old, new in ((" kind=6 ", " kind=4 "), (" veil=0 ", " veil=(0.00000 0.00000 0.00050) ")):
+            for k in (self.i + 1, self.i + 3, self.i - 1):
+                self.assertIn(old, self.lines[0] + " ".join(l for l in self.lines if " Trace: " in l), new)
+                lines = self.edited(lambda line: line.replace(old, new), k, k)
+                rows = trace.frames(lines)
+                self.assertEqual(len(rows), len(self.rows))
+                self.assertIsNone(stance.ramp(rows, self.i, 0.0664, matrix.POP_M), (new, k))
+
+    def test_frames_too_far_apart_are_not_read_as_one_run(self):
+        # the frames before the root's change 100 ms earlier: the root's change of the frame before would be read
+        # across a pause of the trace
+        def earlier(line):
+            return re.sub(r" tick=([\d.]+)", lambda m: f" tick={float(m[1]) - 100.0:.3f}", line)
+        rows = trace.frames(self.edited(earlier, 0, self.i - 3))
+        self.assertEqual([r["at"] for r in rows], [r["at"] for r in self.rows])
+        self.assertGreater(rows[self.i - 2]["tick"] - rows[self.i - 3]["tick"], stance.GAP_MS)
+        self.assertLessEqual(rows[self.i - 2]["tick"] - rows[self.i - 3]["tick"], 8000)
+        self.assertIsNone(stance.ramp(rows, self.i, 0.0664, matrix.POP_M))
+
+
 class Soak(unittest.TestCase):
+    def test_a_reload_action_is_judged_without_the_class(self):
+        # round 49g: matrix.py passed reload= for its own phases only, and the soak judged every action with the class
+        import soak
+        lines = LOG.read_text().splitlines()
+        for name, script in (("reload", matrix.PHASES["reload"][0]), ("pistol-reload", "key r"), ("ammo-check", "hold r 0.8"),
+                             ("overlap", "key r; wait 0.5; key 2"), ("overlap", "key f; wait 0.2; key f; wait 0.2; key r")):
+            self.assertTrue(matrix.reloading(name, script), script)
+            self.assertAlmostEqual(soak.judged(name, script, lines)["largest_jump_m"], 0.0664, places=3, msg=script)
+        for name, script in (("prone", matrix.PHASES["prone"][0]), ("aim", matrix.PHASES["aim"][0]), ("overlap", "key v; wait 0.6; click right 0.8"),
+                             ("stratagem-menu", matrix.PHASES["stratagem-menu"][0])):
+            self.assertFalse(matrix.reloading(name, script), script)
+            self.assertAlmostEqual(soak.judged(name, script, lines)["largest_jump_m"], 0.0542, places=3, msg=script)
+        self.assertEqual(matrix.judge(lines, stance=False)["stance_frames"], 0)
+
     def test_the_summary_counts_them_apart(self):
         import soak
         result = matrix.judge(LOG.read_text().splitlines())

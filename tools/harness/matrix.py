@@ -480,7 +480,13 @@ def behind_head(lines):
     return out
 
 
-def judge(lines, toggles=False, reload=False, throw=False):
+def reloading(name, script):
+    """Whether an action is judged without the stance class (tools/harness/stance.py): a phase of RELOADS, or any
+    script that presses the reload key (the ammo check and the soak's overlaps with a reload in them)."""
+    return name in RELOADS or bool(re.search(r"\b(?:key|hold|down) r\b", script))
+
+
+def judge(lines, toggles=False, reload=False, throw=False, stance=True):
     held = other = missed = 0
     masks = set()
     kick = jump = 0.0
@@ -507,7 +513,7 @@ def judge(lines, toggles=False, reload=False, throw=False):
     import trace as trace_reader
     rows = trace_reader.frames(lines)
     traced = bool(rows)
-    found = measure(rows, stance=not reload)   # round 49: a reload's eye is never the stance ramp's (tools/harness/stance.py)
+    found = measure(rows, stance=stance and not reload)   # round 49: a reload's eye is never the stance ramp's (tools/harness/stance.py)
     stances = [f["shown"] for f in found if f["whose"] == "stance"]
     veil_m = max([0.0] + [f["beyond"] for f in found if f["whose"] == "veil"])
     if traced:

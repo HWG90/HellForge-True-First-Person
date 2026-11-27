@@ -25,10 +25,15 @@ judged against POP_M as ever. No limit is raised. A frame is the stance ramp's w
   - the eye's step less the root's step of the frame before (the eye against the root, a frame late) goes at
     RAMP_M_S, within RAMP_BAND_M_S, in the frame and the three after, and stays within STEADY_M of itself: the
     ramp, begun in this frame and still running;
-  - the eye's change less the root's change of the frame before is under the limit given (POP_M).
+  - the eye's change less the root's change of the frame before is under the limit given (POP_M);
+  - that change of the root is itself under the limit (round 49g; the first version did not hold it there, and on the
+    soaks of feel.50 on it named 28 dive launches with a root change of up to 0.069 m). A change of the root of POP_M
+    or more is the body's lunge, which measure() takes off by its own rule or not at all.
 A step the filter made cannot fall in it (nothing was looked for, taken or carried), and a reload's cannot either: a
 reload phase is judged without this class (matrix.judge), because a reload's eye also reads "wanted = shown" and was
-the mod's (the reload hold, round 48)."""
+the mod's (the reload hold, round 48). The soak judges an action that presses the reload key without it too
+(matrix.reloading; soak.judged). The whole log judged in one piece at a soak's end cannot tell a reload's frames, and
+is judged with the class: a frame flagged in its own action's stretch stays flagged there."""
 import math
 
 RAMP_M_S = 1.6        # the game's stance ramp, eye against root (measured: 0.0534 m a frame at 33.4 ms)
@@ -75,4 +80,4 @@ def ramp(rows, i, shown, limit):
             return None
     root = _sub(_sub(rows[i - 1]["root"], rows[i - 2]["root"]), _sub(rows[i - 2]["root"], rows[i - 3]["root"]))
     left = math.dist(first, against_root(rows, i - 1))
-    return (left, math.hypot(*root)) if left < limit else None
+    return (left, math.hypot(*root)) if left < limit and math.hypot(*root) < limit else None
