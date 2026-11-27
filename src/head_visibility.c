@@ -1077,7 +1077,8 @@ static void resolve(TfpHead *h, void *arg) {
    * Never while the first-person rig is up (native request): its arms do not join the body's torso.
    * Nor while something is being drawn or put away: through a swap the camera is held at the rig's eye,
    * which sits in the body's neck and back. The torso appears once the rig-less state has been steady
-   * for TORSO_SETTLE seconds. */
+   * for TORSO_SETTLE seconds, and (round 44) once the camera no longer holds or lets go that eye: a throw holds it
+   * for TFP_ACTION_EYE_IDLE_MS (900) of this state and lets it go over 300 to 450 ms more (TfpHeadIo.eye_held). */
   const uint8_t *bytes = s->controller_bytes;
   bool steady = s->camera_kind == 4 && s->has_controller_bytes && s->controller_len >= 6
     && bytes[0] == 0 && bytes[1] == 0 && bytes[2] == 0 && bytes[3] == 0 && bytes[5] == 0;
@@ -1085,7 +1086,8 @@ static void resolve(TfpHead *h, void *arg) {
   if (!steady) h->has_torso_steady_since = false;
   else if (!h->has_torso_steady_since || now < h->torso_steady_since) { h->torso_steady_since = now; h->has_torso_steady_since = true; }
   bool settled = h->has_torso_steady_since && now - h->torso_steady_since >= TORSO_SETTLE;
-  bool show_torso = !full_body && settled && h->io->show_torso && h->io->show_torso(h->io->user);
+  bool show_torso = !full_body && settled && h->io->show_torso && h->io->show_torso(h->io->user)
+    && !(h->io->eye_held && h->io->eye_held(h->io->user, s));
   /* Beyond retail, round 38: in an exosuit's seat the whole diver is out of sight whatever the options say, and the
    * suit may be seen through (TfpHeadIo.seat, .cockpit). */
   const bool seat = in_seat(h, s);

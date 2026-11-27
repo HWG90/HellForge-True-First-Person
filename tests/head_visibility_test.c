@@ -209,6 +209,9 @@ static bool watch_ok(const char *call, bool ok, size_t i) {
 static bool seat_on; static double cockpit_unit;
 static bool seat_answer(void *user, const TfpVisSnapshot *s) { (void)user; (void)s; return seat_on; }
 static bool cockpit_answer(void *user, const TfpVisSnapshot *s, double *unit) { (void)user; (void)s; *unit = cockpit_unit; return cockpit_unit > 0; }
+/* Round 44: the camera holds the body's eye at the native view's (TfpHeadIo.eye_held): never in the replay. */
+static bool eye_held_on;
+static bool eye_held_answer(void *user, const TfpVisSnapshot *s) { (void)user; (void)s; return eye_held_on; }
 static size_t replay(bool here) {
   size_t count = sizeof head_visibility_vectors / sizeof head_visibility_vectors[0], failures = 0, done = 0;
   const char *dump = getenv("VIS_DUMP");
@@ -226,7 +229,7 @@ static size_t replay(bool here) {
       hio = (TfpHeadIo){NULL, vf_read, vf_ptr, vf_alignment_executable, vf_player_snapshot, vf_pin_player_snapshot, vf_backpack,
                         vf_action_state, vf_on_foot, vf_foreign_camera, vf_userdata_address, vf_clock, vf_log, vf_controller_result,
                         vf_controller_is_enabled, vf_fallback_ready, vf_pinned_ready, vf_full_body, vf_hide_torso, vf_show_torso,
-                        vf_seated_head, seat_answer, cockpit_answer};   /* round 38: never a seat here; nothing changes */
+                        vf_seated_head, seat_answer, cockpit_answer, eye_held_answer};   /* round 38: never a seat here; nothing changes (round 44: nor an eye held) */
       vf_start_run(head_visibility_runs[run].header, &options);
       if (options.nolog) hio.log = NULL;
       tfp_head_free(head);
@@ -392,7 +395,7 @@ static bool prepare(const char *name, size_t last) {
       hio = (TfpHeadIo){NULL, vf_read, vf_ptr, vf_alignment_executable, vf_player_snapshot, vf_pin_player_snapshot, vf_backpack,
                         vf_action_state, vf_on_foot, vf_foreign_camera, vf_userdata_address, vf_clock, vf_log, vf_controller_result,
                         vf_controller_is_enabled, vf_fallback_ready, vf_pinned_ready, vf_full_body, vf_hide_torso, vf_show_torso,
-                        vf_seated_head, seat_answer, cockpit_answer};
+                        vf_seated_head, seat_answer, cockpit_answer, eye_held_answer};
       vf_start_run(head_visibility_runs[run].header, &options);
       if (options.nolog) hio.log = NULL;
       tfp_head_free(head);
@@ -463,7 +466,20 @@ static bool seat_cases(void) {
 
   /* 3. Show torso on: drawn in the ordinary view once steady, hidden in the seat, drawn again after it. */
   SCHECK(seat_step("Vshow_torso=1 Vtick=103800 !update", false));
+  /* Round 44: steady past TORSO_SETTLE, but the camera holds a throw's eye (or lets it go): the torso waits; it is
+   * drawn in the first update after the hold, with no new settling. */
+  eye_held_on = true;
   SCHECK(seat_step("Vtick=104600 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.hidden_torso == 1 && r.hidden_head == 1);
+  eye_held_on = false;
+  SCHECK(seat_step("Vtick=104605 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.hidden_torso == 0 && r.hidden_head == 1);
+  /* held again with the torso drawn (a throw's leave while Show torso had it drawn): hidden again until it ends */
+  eye_held_on = true;
+  SCHECK(seat_step("Vtick=104608 !update", false));
+  tfp_head_result(head, &r); SCHECK(r.hidden_torso == 1);
+  eye_held_on = false;
+  SCHECK(seat_step("Vtick=104610 !update", false));
   tfp_head_result(head, &r); SCHECK(r.hidden_torso == 0 && r.hidden_head == 1);
   seat_on = true;
   SCHECK(seat_step("Vtick=104620 !update", false));
