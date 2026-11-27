@@ -47,8 +47,20 @@ Round 39: the reload phases (RELOADS) are judged on the traced eye only (a phase
 fail on a slide: the eye's offset from the body root along the level view changing by more than SLIDE_M within
 SLIDE_MS while the root stays within ROOT_STILL_M (reload_slide). The feel.44 matrix's "reload" passed while every
 reload slid the eye 0.21 to 0.26 m back and forward again over 75 ms: five frames of 0.045 m, none of them a jump.
+
+Round 49: two more judges, both on the Trace rows.
+The turn (turn_snaps): the angle between the directions two consecutive frames were shown with (turn=). A frame whose
+camera kind differs from the frame before and that turns more than TURN_DEG fails the phase, unless the phase's own
+script moved the mouse (a "look"): the feel.59 matrix passed "dive-swap" while the view turned 29.0 and then 39.5
+degrees in one frame each at the two changes of camera, and the Bodycam soak 72.7 (nothing read turn=).
+The veil's bound (veil_faults): until round 49 any frame the veil moved was "the veil's" and not counted, whatever it
+did. Now the frame the veil opens in may move the eye VEIL_OPEN_M at most (printed), and from one frame to the next
+the veil's move (the let-out after it too) may change by VEIL_STEP_M at most, or by its own let-out's steepest frame
+where that is more; a veil that falls to nothing in one frame, or that the native view cuts, fails (soak 60: 0.248 m
+then 0; soak 62 #13 melee: 0.196, 0.081, native). The veil's frames are still left out of the step judge.
 """
 import json
+import math
 import re
 import sys
 import time
@@ -130,6 +142,14 @@ CUT = re.compile(r"Cut: largest camera jump ([\d.]+) m")
 MASK = re.compile(r" (?:Hold|Return|Drop|Wait): .*?\bmask=([0-9a-fA-F]+)")
 STYLE = re.compile(r"^(\d+:\d+:\d+\.\d+) Camera style: (\w+)")
 POP_M = 0.06   # the presented eye's step may change by this much between two frames (30 a second in the harness)
+# Round 49
+TURN_DEG = 10.0      # a frame of another camera kind than the one before may turn the view this much, without the mouse
+VEIL_STEP_M = 0.05   # the veil's move may change by this much from one frame to the next, after the frame it opens in ...
+VEIL_OUT_MS = 300.0  # ... or by the steepest frame of its own let-out where that is more: 1.5 times the veil's largest move
+                     # over this time (src/camera_helper.h TFP_CAMERA_VEIL_LET_OUT_MS, rest to rest). The LAS-5 Scythe's
+                     # 0.32 m is let out at 0.053 m a frame at 30 frames a second; that is the let-out, not a flick
+VEIL_OPEN_M = 0.40   # the most the veil may move the eye in the frame it opens in: the most it is built to move at all
+                     # (src/camera_helper.h TFP_CAMERA_VEIL_MOST)
 
 
 def log_path():
@@ -327,6 +347,56 @@ def measure(rows):
     return found
 
 
+def _degrees(u, v):
+    """The angle between two directions, degrees. From the cross product too: the rows carry four places, and the arc
+    cosine of a dot product of two such vectors reads 0.8 degrees between a direction and itself."""
+    cross = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]
+    return math.degrees(math.atan2(_length(cross), sum(x * y for x, y in zip(u, v))))
+
+
+def turn_snaps(rows):
+    """Round 49: every frame of `rows` (trace.frames) whose kind differs from the frame before it (GAP_MS apart at
+    most), where both say which way they were shown (turn=): [{at, tick, kind, before, degrees}], whatever the angle.
+    The judge fails those over TURN_DEG."""
+    out = []
+    for a, b in zip(rows, rows[1:]):
+        if a["kind"] == b["kind"] or not (0 < b["tick"] - a["tick"] <= GAP_MS) or not a.get("turn") or not b.get("turn"):
+            continue
+        out.append({"at": b["at"], "tick": b["tick"], "kind": b["kind"], "before": a["kind"], "degrees": _degrees(a["turn"], b["turn"])})
+    return out
+
+
+def veil_faults(rows):
+    """Round 49, the veil's bound: (the largest move of an opening frame, its row or None, [fault]). A fault is
+    {at, tick, what, m}: what "opening" (the first veiled frame moved the eye more than VEIL_OPEN_M), "step" (the
+    veil's move changed by more than the bound from the frame before, after the opening frame: the let-out too, and
+    a veil that fell to nothing in one frame) or "cut" (the same where the frame is a native one: the native view cut
+    a move that was not let out). The bound: VEIL_STEP_M, or the steepest frame of the let-out of the largest move
+    the veil has had since it opened (1.5 times it over VEIL_OUT_MS, for the time between the two frames) where that
+    is more. Frames more than GAP_MS apart are not neighbours: the first veiled frame after a pause is an opening."""
+    largest, where, faults = 0.0, None, []
+    zero = [0.0, 0.0, 0.0]
+    before, peak = None, 0.0
+    for row in rows:
+        near = before is not None and 0 < row["tick"] - before["tick"] <= GAP_MS
+        was = (before.get("veil") or zero) if near else zero
+        now = row.get("veil") or zero
+        if _length(now) > 0 and _length(was) == 0:
+            peak = _length(now)
+            if peak > largest:
+                largest, where = peak, row
+            if peak > VEIL_OPEN_M:
+                faults.append({"at": row["at"], "tick": row["tick"], "what": "opening", "m": peak})
+        elif _length(was) > 0:
+            change = _length(_sub(now, was))
+            bound = max(VEIL_STEP_M, 1.5 * peak * (row["tick"] - before["tick"]) / VEIL_OUT_MS)
+            if change > bound + 1e-6:   # (the rows carry five places)
+                faults.append({"at": row["at"], "tick": row["tick"], "what": "cut" if row["kind"] == 6 else "step", "m": change})
+            peak = max(peak, _length(now))
+        before = row
+    return largest, where, faults
+
+
 def describe(result):
     """What a soak or matrix line says of the jump: the figure judged, the body's own beside it, the old figure."""
     if not result.get("from_trace"):
@@ -343,6 +413,10 @@ def describe(result):
         text += f" float {result['largest_float_m']:.3f} m ({result['float_at']})"
     if "slide_m" in result:
         text += f" slide {result['slide_m']:.3f} m"
+    if result.get("turn_deg"):
+        text += f" turn {result['turn_deg']:.1f} deg at a change of camera ({result['turn_at']})"
+    if result.get("veil_open_m"):
+        text += f" veil opened {result['veil_open_m']:.3f} m"
     return text
 
 
@@ -466,7 +540,9 @@ def behind_head(lines):
     return out
 
 
-def judge(lines, toggles=False, reload=False, throw=False):
+def judge(lines, toggles=False, reload=False, throw=False, mouse=False):
+    """`mouse`: the phase's own script moved the mouse (a "look"): its turns at a change of camera are printed and not
+    failed (round 49)."""
     held = other = missed = 0
     masks = set()
     kick = jump = 0.0
@@ -502,6 +578,27 @@ def judge(lines, toggles=False, reload=False, throw=False):
     floated, float_row = trace_reader.largest_float(rows) if traced else (0.0, None)   # round 24
     ok = held > 0 and missed == 0 and (jump < (POP_M if traced else LIMIT_M) or toggles) and not refused and (floated <= trace_reader.FLOAT_M or toggles)   # the toggle itself is a cut by design
     extra, first = {}, []
+    # Round 49: the turn at a change of camera, and the veil's bound.
+    snaps = [t for t in turn_snaps(rows) if t["degrees"] > TURN_DEG]
+    worst = max(turn_snaps(rows), key=lambda t: t["degrees"], default=None)
+    extra.update({"turn_deg": worst["degrees"] if worst else 0.0, "turn_at": worst["at"] if worst else None, "turn_snaps": snaps})
+    for t in snaps:
+        text = f"the view turned {t['degrees']:.1f} degrees in one frame at the change of camera kind {t['before']} to {t['kind']} ({t['at']})"
+        if mouse or toggles:
+            first.append(text + ": the phase moved the mouse or switched the view, not counted")
+        else:
+            ok = False
+            first.append(text + f": over {TURN_DEG:.0f} without the mouse")
+    opened, opened_row, faults = veil_faults(rows)
+    extra.update({"veil_open_m": opened, "veil_open_at": opened_row["at"] if opened_row else None, "veil_faults": faults})
+    for f in faults:
+        what = {"opening": f"the veil opened with a move of {f['m']:.3f} m (over {VEIL_OPEN_M:.2f})",
+                "step": f"the veil's move changed by {f['m']:.3f} m in one frame (a flick, or a move not let out: over {VEIL_STEP_M:.2f} and over its let-out's steepest)",
+                "cut": f"the native view cut a veil move of {f['m']:.3f} m that was not let out"}[f["what"]]
+        first.append(f"{what} ({f['at']})")
+        if not toggles:
+            ok = False
+    extra["said"] = list(first)   # the lines of these two judges, for soak.py
     if reload:   # round 39: on the traced eye only, and its slide along the view across the reload's edges
         slide, slide_row = reload_slide(rows)
         extra = {"slide_m": slide, "slide_at": slide_row["at"] if slide_row else None}
@@ -615,7 +712,7 @@ def main(argv):
             time.sleep(max(0.0, settle - 1.0) + 1.2)   # the Lock line is written once a second
             with open(log, errors="replace") as handle:
                 handle.seek(start); lines = handle.read().splitlines()
-            results[name] = judge_aim(name, aimed, lines, judge(lines, name.startswith('toggle'), reload=name in RELOADS, throw=name in THROWS))
+            results[name] = judge_aim(name, aimed, lines, judge(lines, name.startswith('toggle'), reload=name in RELOADS, throw=name in THROWS, mouse="look" in script))
             r = results[name]
             for text in style_changes(lines):
                 print(text)
