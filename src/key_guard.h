@@ -191,6 +191,11 @@ static inline TfpKeyVerdict tfp_key_guard_press(TfpKeyGuard *g, uint64_t now_ms,
  *              cannot be read); false leaves the sample out. It replaced a GetAsyncKeyState per text key (56 a tick):
  *              under Wine each of those can be a wineserver request, which a mod's reads had saturated before
  *   chat, overlay, panel, say   asked only on a press
+ *   key_tapped (round 50, may be NULL)   the toggle key is up now but was pressed and let go since the previous tick
+ *              (src/key_tap.h: once per press, never for a key that was held, only with the game in front at both
+ *              ticks). The edge is told down, then up, in this one tick, so a tap is a press exactly when a level press
+ *              would have been (a key just bound stays refused until it was seen up) and the next press has its edge;
+ *              the press then goes through the same chat, overlay, panel and typing answers as any other
  * Returns true for a press to act on. */
 typedef struct TfpKeyGuardIo {
   void *user;
@@ -201,10 +206,13 @@ typedef struct TfpKeyGuardIo {
   bool (*overlay)(void *user);
   bool (*panel)(void *user);
   void (*say)(void *user, const char *line);
+  bool (*key_tapped)(void *user, int vk);
 } TfpKeyGuardIo;
 static inline bool tfp_key_guard_toggle(TfpKeyGuard *g, const TfpKeyGuardIo *io, uint64_t now_ms, int toggle_key, bool focused, bool sample) {
   const bool down = toggle_key && focused && io->key_down(io->user, toggle_key);
-  const bool pressed = io->edge(io->user, toggle_key, down);
+  const bool tapped = toggle_key && focused && !down && io->key_tapped && io->key_tapped(io->user, toggle_key);
+  const bool pressed = io->edge(io->user, toggle_key, down || tapped);
+  if (tapped) io->edge(io->user, toggle_key, false);
   if (toggle_key && focused && sample) {
     uint8_t keys[256];
     if (io->keyboard(io->user, keys)) tfp_key_guard_sample(g, now_ms, toggle_key, keys);

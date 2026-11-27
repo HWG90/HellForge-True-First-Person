@@ -1466,7 +1466,9 @@ static TfpChatLayout chat_layout;
 static uint64_t chat_next_try;
 static char chat_why[160];
 static bool guard_read(void *u, uint64_t at, void *out, size_t size) { (void)u; return tfp_win_read(at, out, size); }
-static bool guard_key(void *u, int vk) { (void)u; return tfp_win_key_down(vk); }
+/* round 50: the toggle key and F11 through the tap reader (src/key_tap.h): the level, and a tap between two ticks */
+static bool guard_key(void *u, int vk) { (void)u; return tfp_win_key_level(vk); }
+static bool guard_tapped(void *u, int vk) { (void)u; return tfp_win_key_tapped(vk); }
 static bool guard_keyboard(void *u, uint8_t keys[256]) { (void)u; return tfp_win_keyboard(keys); }
 static int guard_chat(void *u) { (void)u; return tfp_chat_open(guard_read, NULL, &chat_layout); }
 static bool guard_overlay(void *u) { /* a host window open or look capture held: the host has the keyboard */
@@ -1500,7 +1502,7 @@ static bool guard_edge(void *u, int key, bool down) {
   return pressed;
 #endif
 }
-static const TfpKeyGuardIo guard_io = {NULL, guard_key, guard_edge, guard_keyboard, guard_chat, guard_overlay, guard_panel, guard_say};
+static const TfpKeyGuardIo guard_io = {NULL, guard_key, guard_edge, guard_keyboard, guard_chat, guard_overlay, guard_panel, guard_say, guard_tapped};
 /* Round 41: F11 (the old toggle key, HellForge's Armor LUT editor now) pressed in the game gets one notice naming the
  * toggle key (src/f11_hint.h): the host's HUD, the chat/overlay/panel answers of the guard above, F11 only read. */
 #include "f11_hint.h"
@@ -1513,7 +1515,7 @@ static bool f11_show(void *u, const char *notice, char *why, size_t why_size) {
   return tfp_f11_hint_hud_show(&f11_hud, get ? get(3) : NULL, "goose.true-first-person/f11-notice", notice, why, why_size);
 }
 static void f11_hint_tick(int toggle_key, bool focused) {
-  static const TfpF11HintIo io = {NULL, guard_key, guard_chat, guard_overlay, guard_panel, guard_say_line, f11_show};
+  static const TfpF11HintIo io = {NULL, guard_key, guard_chat, guard_overlay, guard_panel, guard_say_line, f11_show, guard_tapped};
   char name[16] = "";
 #ifdef TFP_FEEL
   if (toggle_key) tfp_wire_menu_key_name(toggle_key, name);
@@ -1572,6 +1574,10 @@ static void tick_body(void) {
   const int toggle_key = TFP_TOGGLE_KEY;
 #endif
   const bool focused = tfp_win_focused();
+  /* round 50: the keys below are level-polled once a tick, and a tap that began and ended between two ticks (20 to 30
+   * ticks a second in a heavy mission, fewer in a hitch) is a press too: src/key_tap.h, tfp_win_keys_begin */
+  tfp_win_keys_begin(focused);
+  for (char keys_line[320]; tfp_win_keys_note(keys_line, sizeof keys_line);) say("%s", keys_line);
   if (toggle_key && focused) guard_resolve();
   /* round 36b/36c: the press, refused while text is typed (src/key_guard.h tfp_key_guard_toggle) */
   const bool pressed = tfp_key_guard_toggle(&key_guard, &guard_io, GetTickCount64(), toggle_key, focused, !chat_layout.resolved);
@@ -1605,8 +1611,11 @@ static void tick_body(void) {
    * the menu knows whether to offer the editor. */
   int editor_key = tfp_wire_menu_editor_key(&wire, TFP_EDITOR_KEY);
   tfp_mod_editor_tick(hf, owner, editor_key);
-  bool editor_down = editor_key && tfp_win_focused() && tfp_win_key_down(editor_key);
-  if (tfp_wire_menu_key_edge(&editor_edge, editor_key, editor_down)) {
+  const bool editor_down = editor_key && focused && tfp_win_key_level(editor_key);
+  const bool editor_tapped = editor_key && focused && !editor_down && tfp_win_key_tapped(editor_key); /* round 50: down and up in one tick */
+  const bool editor_pressed = tfp_wire_menu_key_edge(&editor_edge, editor_key, editor_down || editor_tapped);
+  if (editor_tapped) tfp_wire_menu_key_edge(&editor_edge, editor_key, false);
+  if (editor_pressed) {
     const char *refused = tfp_wire_editor_toggle(&wire);
     if (refused) say("Placement editor: %s", refused);
   }
@@ -1736,6 +1745,9 @@ __declspec(dllexport) int hellforge_mod_unload(const HfApi *api, HfMod *mod, uin
       Sleep(1);
     }
   }
+  /* round 50: the keyboard hook (src/key_tap.h) must be off the game window's thread, and no call of it under way,
+   * before this build may be taken out of memory. Last: nothing after it refuses. */
+  if (!why && !tfp_win_keys_end()) why = "the keyboard hook on the game window's thread could not be taken off";
   if (why) {
     InterlockedExchange(&release_state, 0);
     InterlockedExchange(&closing, 0);

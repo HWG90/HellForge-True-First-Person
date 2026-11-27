@@ -316,8 +316,20 @@ void tfp_wire_panel_tick(TfpWire *w, const TfpPanelPlatform *platform, uint64_t 
   }
   if (p->choice == TFP_CHOICE_MCM) {
     /* F10: MCM's window on this mod's page, or closed; one press, one change */
-    if (platform->key_down && platform->mcm_show && tfp_wire_menu_key_edge(&p->f10, TFP_PANEL_KEY, platform->key_down(platform->user, TFP_PANEL_KEY)))
-      platform->mcm_show(platform->user);
+    if (platform->key_down && platform->mcm_show) {
+      /* round 50: a tap between two updates is down and up within this one (src/key_tap.h): one press, the edge left up */
+      const bool down = platform->key_down(platform->user, TFP_PANEL_KEY);
+      const bool tapped = !down && platform->key_tapped && platform->key_tapped(platform->user, TFP_PANEL_KEY);
+      const bool pressed = tfp_wire_menu_key_edge(&p->f10, TFP_PANEL_KEY, down || tapped);
+      if (tapped) tfp_wire_menu_key_edge(&p->f10, TFP_PANEL_KEY, false);
+      if (pressed) {
+        bool opened = false;
+        const char *refused = platform->mcm_show(platform->user, &opened);
+        char line[280];
+        if (refused) snprintf(line, sizeof line, "Menu: F10: refused: %s", refused), tfp_wire_say(w, line);
+        else tfp_wire_say(w, opened ? "Menu: F10: opening DBF-MCM on this page" : "Menu: F10: closing DBF-MCM");
+      }
+    }
     if (now_ms < p->mcm_next) return;
     p->mcm_next = now_ms + TFP_MENU_TRY_MS;
     if (platform->mcm_try(platform->user, w, unavailable, edit) != TFP_MCM_REFUSED) return;   /* registered, or made again */

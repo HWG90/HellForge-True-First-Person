@@ -12,9 +12,10 @@
 /* One try: TFP_MCM_READY registered (also when it already was), TFP_MCM_WAITING MCM not loaded or not ready yet,
  * TFP_MCM_REFUSED MCM did not take it (one Refused line). */
 TfpMcmState tfp_mod_menu_try(const HfApi *hf, HfMod *mod, TfpWire *w, unsigned unavailable, TfpMenuEditFn edit);
-/* F10 while MCM holds the menu: MCM's window on this mod's first page, or closed when it is open (not while MCM is
- * taking a key or text). */
-void tfp_mod_menu_show(void);
+/* F10 while MCM holds the menu: MCM's window on this mod's first page (*opened true), or closed when it is open
+ * (*opened false): NULL. Not done (MCM is taking a key or text, nothing is registered, MCM refused): why, for the
+ * "Menu: F10: refused: ..." line (round 50). */
+const char *tfp_mod_menu_show(bool *opened);
 /* Takes the registration out of MCM (a live replace). true: nothing is registered any more. */
 bool tfp_mod_menu_release(const HfApi *hf, HfMod *mod, TfpWire *w);
 bool tfp_mod_menu_registered(void);
