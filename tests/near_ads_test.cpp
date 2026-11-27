@@ -126,7 +126,44 @@ int main() {
   set_closer(NAN);
   for (int i = 0; i < 80; ++i) last = frame(.173f);
   CHECK(near(last, .173, 1e-6));
+  // Round 53 (src/weapon_clip.h): full aim shown wider than the game's lens. The game's near clip (its sight's distance)
+  // is scaled so the near plane shows on screen what it shows at the game's lens; a change toward the eye at once.
+  CHECK(tfp_near_ads_scale() == 1);                                         // the start-up value: the game's
+  const float s50 = std::tan(15*3.14159265f/180)/std::tan(25*3.14159265f/180);   // the game's 30 degrees shown at 50
+  tfp_near_set_ads_scale(s50);
+  CHECK(near(tfp_near_ads_scale(), s50, 0));
+  last = frame(.173f);
+  CHECK(near(last, .173*s50, 1e-6));                                        // 0.099 m, in the first call
+  for (int i = 0; i < 20; ++i) last = frame(.173f);
+  CHECK(near(last, .173*s50, 1e-6) && tfp_near_ads_probe(&sight, &native, &applied) && near(sight, .173, 1e-6) && near(native, .173, 1e-6) &&
+        near(applied, .173*s50, 1e-6));                                     // the sight the pose helper is handed is the game's still
+  tfp_near_set_ads_scale(std::tan(15*3.14159265f/180));                     // shown at the lock's 90: the game's own 0.05, no nearer
+  last = frame(.173f);
+  CHECK(near(last, .05, 1e-6));
+  for (int i = 0; i < 80; ++i) last = frame(.35f);                          // a scope's far zoom level (0.35 m): eased out to 0.094 m
+  CHECK(near(last, .0938, 1e-3));
+  tfp_near_set_ads_scale(s50);                                              // with the gun drawn in: the game's value less the move, then scaled
+  set_closer(.073f);
+  last = frame(.173f);
+  CHECK(near(last, (.173 - .073)*s50, 1e-6));
+  set_closer(0);
+  for (int i = 0; i < 80; ++i) last = frame(.05f);                          // a pistol's iron sights: the game's 0.05 is left
+  CHECK(near(last, .05, 1e-6));
+  for (int i = 0; i < 80; ++i) last = frame(.173f);
+  CHECK(near(last, .173*s50, 1e-3));
+  tfp_near_set_ads_scale(1);                                                // the game's lens again: eased out to the game's value
+  before = last = frame(.173f);
+  CHECK(last > .173f*s50 && last < .173f);
+  for (int i = 0; i < 80; ++i) { last = frame(.173f); CHECK(last >= before - 1e-6f); before = last; }
+  CHECK(near(last, .173, 1e-6));
+  const float bad[] = {0, -1, 2, NAN, INFINITY};                            // not a scale: the game's
+  for (float b : bad) { tfp_near_set_ads_scale(b); CHECK(tfp_near_ads_scale() == 1); last = frame(.173f); CHECK(near(last, .173, 1e-6)); }
+  // at the hip the scale is nothing: the hip clearance
+  tfp_near_set_ads_scale(s50);
   scene.controls[4] = 0;
+  for (int i = 0; i < 80; ++i) last = frame(.173f);
+  CHECK(near(last, .10, 1e-3));
+  tfp_near_set_ads_scale(1);
   tfp_near_set_ads_source(nullptr);
   tfp_near_end(gen);
   CHECK(!tfp_near_ads_probe(&sight, &native, &applied) && sight == 0);      // no lease: nothing known

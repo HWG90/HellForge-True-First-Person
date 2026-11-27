@@ -115,4 +115,10 @@ typedef bool (*TfpNearAdsSource)(float *closer);
 void tfp_near_set_ads_source(TfpNearAdsSource source);
 TfpNearAdsSource tfp_near_ads_source(void); /* what was set (NULL: none). Reads only. */
 bool tfp_near_ads_probe(float *sight, float *native, float *applied);
+/* Not in retail (round 53, src/weapon_clip.h): full aim shown wider than the game's lens. `scale` (tfp_clip_ads_scale:
+ * tan(game lens/2)/tan(shown/2)) is what the near clip of full aim is scaled by, after the gun's move above and never
+ * under the game's own 0.05; a change toward the eye is taken at once. 1 (the start-up value) or anything not in
+ * (0, 1): the game's value. Set every tick; read in the game's own calls. The hip and normal aim never read it. */
+void tfp_near_set_ads_scale(float scale);
+float tfp_near_ads_scale(void);
 #endif
