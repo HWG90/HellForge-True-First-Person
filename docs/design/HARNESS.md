@@ -308,7 +308,7 @@ memory and call the game's own functions, as the user's other mods do.
 | Lever | Status | Evidence |
 |---|---|---|
 | `where` | works | entity 471 (the mod's own `Ids: avatar=0x1d7`), resource `4d1c334d294dfa97`, position equal to `Unit.world_position(body, 1)`, the carried entities and the hand |
-| `teleport X Y [Z]`, `ahead M` | works | `{"from": [8.63, 0.15, 12.08], "to": [8.63, 6.15, 12.38], "after": [8.63, 6.15, 12.38], "moved": true}`; a dozen more moves in both sessions |
+| `teleport X Y [Z]`, `ahead M` | works | `{"from": [8.63, 0.15, 12.08], "to": [8.63, 6.15, 12.38], "after": [8.63, 6.15, 12.38], "moved": true}`; more moves in both sessions |
 | `loadout primary\|secondary\|support NAME [--grip] [--with=ATTACHMENT]` | works, the pieces untextured | AR-23 Liberator with a Vertical Grip (`lo-liberator.json`: entity 546 in the hand, the displaced one removed; the mod's `Weapon: key=64ce3d03c0118296 name="AR-23 Liberator"`), BR-14 Adjudicator with the grip (seen under the handguard, `adjudicator-grip-under-exosuit.jpg`), R-4 Hyena, LAS-58 Talon, MG-206 (`lo-hmg.json`) |
 | `stratagems [NAME ...]` | works in memory; the thrown ball seen, the delivery not | four types added as slots 5 to 8 (`stratagems.json`); `undo 3` put three earlier writes back |
 | `spawn item NAME` | works; picking it up not shown | MG-43 as entity 555, `{"settled": 2, "zone1": {"category": 3, "handle": 150}}` (the ground pick-up open) |
@@ -344,7 +344,7 @@ What each one does:
   and grip in `foregrip-liberator.jpg`, the Adjudicator's grip, the holstered Talon). The weapon's package is resident,
   the pieces' materials are not: the mission loads only the loadout's own. The records' ids (+8, +0x10, +0x20) are not
   packages HellForge will load. Shapes and nodes are right, so the grip can be tested; a capture is not a beauty shot.
-- **A spawned exosuit shows no enter prompt** and E does nothing, at its front, back and side, standing (session 1:
+- **A spawned exosuit shows no enter prompt** and E does nothing, from its front and its back, standing (session 1:
   `exosuit-no-prompt.jpg`; its interaction zone 0 reads open, category 19, settled 1; opening it again changes
   nothing). No call that seats the diver was found (Tank Seat Kit's seat transaction moves between seats only).
 - **A called-in exosuit did not arrive** within the phase: the EXO-45 slot was added and its code played, no new
@@ -362,7 +362,7 @@ What each one does:
 ### Lever phases (`tools/harness/phases_levers.py OUT [NAME ...]`; `matrix.py OUT NAME` plays them too)
 
 Each sets its scene with the levers, plays input, keeps the log lines it is about and takes `matrix.judge`'s verdict.
-One run on main (0488cda, feel build, session 3efa0b55, Stable camera):
+One run on main (0488cda, feel build, session 3efa0b55):
 
 | Phase | Levers | Camera | Lines |
 |---|---|---|---|
