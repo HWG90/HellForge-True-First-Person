@@ -3261,6 +3261,105 @@ static void test_game_ik_guards(void) {
          "the grip off, the drive off, another gun with its own IK_left; a dead gun is not written; a faulted put-back is kept and done next frame, "
          "on its own gun and node; a unit on the IK_left, a parent that is not an earlier node of the gun: not moved\n");
 }
+/* Round 42b: the fingers and the thumb with the game's IK holding the hand. The curl is for the handle, so it comes with
+ * the gun's IK_left's share of its way there (none while that node is refused); on a vertical grip (its node's Y down the
+ * gun) the thumb is straight when asked, wrapped otherwise and on every other grip. */
+static void grip_node_vertical(bool vertical) {
+  TfpGraftMatrix node;
+  CHECK(read_fake(&f, worlds_of(FOREGRIP) + 64, &node, 64));
+  const float *root = rig_world[TFP_GRAFT_RIG_SOCKET].values; /* the gun's root */
+  for (unsigned j = 0; j < 3; j++) {
+    node.values[j] = vertical ? root[4 + j] : body_now[body_left_hand()].values[j];
+    node.values[4 + j] = vertical ? -root[8 + j] : body_now[body_left_hand()].values[4 + j];
+    node.values[8 + j] = vertical ? -root[j] : body_now[body_left_hand()].values[8 + j];
+  }
+  CHECK(tfp_graft_rigid(&node));
+  put(worlds_of(FOREGRIP) + 64, &node, 64);
+}
+static void test_game_ik_fingers(void) {
+  static const float zero[3] = {0, 0, 0};
+  float ahead[3];
+  forward_of_socket(.12f, -.04f, ahead);
+  TfpGraftLocal plain[TFP_GRAFT_RIG_NODES], now[TFP_GRAFT_RIG_NODES], straight[TFP_GRAFT_RIG_NODES], wrapped[TFP_GRAFT_RIG_NODES];
+  TfpArmDriveGrip g;
+  fresh();
+  grip_resources();
+  grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], zero, NULL);
+  gik_gun();
+  tfp_arm_drive_set(true, true, 1);
+  uint64_t t = 1000;
+  drawn_locals(t, plain); /* the grip off: the body's fingers */
+  fit_grip(ahead);
+  grip_node_vertical(true);
+  tfp_arm_drive_set_grip(true, false);
+  tfp_arm_drive_set_game_ik(true);
+  tfp_arm_drive_set_grip_thumb(true);
+  /* the curl follows the node's share, a frame behind (the reach's own weight runs ahead of a 0.42 s slide) */
+  const double open_curl = rig_curl(&plain[21]), closed = tfp_gf_curl_degrees[TFP_GF_MIDDLE];
+  double last = open_curl, share_before = 0;
+  int behind = 0;
+  for (int i = 0; i < 40; i++) {
+    drawn_locals(t += 16, now);
+    tfp_arm_drive_grip_take(&g);
+    const double curl = rig_curl(&now[21]);
+    CHECK(curl >= last - 1e-4);
+    CHECK(curl <= open_curl + (closed - open_curl) * share_before + .05); /* never further closed than the node is on its way */
+    behind += curl + .5 < open_curl + (closed - open_curl) * (double)g.weight; /* less than the reach's own weight would close it */
+    last = curl, share_before = g.ik_share;
+  }
+  CHECK(behind >= 10 && g.ik_share == 1);
+  drawn_locals(t += 16, straight);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(fabs(rig_curl(&straight[21]) - closed) < .01 && g.vertical && g.thumb_straight == 1);
+  CHECK(strstr(tfp_arm_drive_grip_ik_line(&g), "a vertical grip, the thumb straight along it: 1 frames"));
+  /* the straight thumb: joints 2 and 3 the body's own, joint 1 turned; wrapped (the option): joint 1 the body's, 2 and 3
+   * turned further closed; the four fingers the same either way */
+  CHECK(!memcmp(&straight[27], &plain[27], 64) && !memcmp(&straight[28], &plain[28], 64) && memcmp(straight[26].basis, plain[26].basis, 36) &&
+        !memcmp(straight[26].position, plain[26].position, 12));
+  tfp_arm_drive_set_grip_thumb(false);
+  drawn_locals(t += 16, wrapped);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(!memcmp(&wrapped[26], &plain[26], 64) && fabs(rig_curl(&wrapped[27]) - rig_curl(&plain[27]) - TFP_GF_THUMB_TURN_DEGREES) < .01 &&
+        fabs(rig_curl(&wrapped[28]) - rig_curl(&plain[28]) - TFP_GF_THUMB_TURN_DEGREES) < .01);
+  for (unsigned n = 14; n <= 25; n++) CHECK(!memcmp(&wrapped[n], &straight[n], 64));
+  CHECK(g.vertical && !g.thumb_straight && strstr(tfp_arm_drive_grip_ik_line(&g), "a vertical grip, the thumb wrapped"));
+  /* a grip that is not vertical (its node turned as the body's hand is): wrapped, whatever the option says */
+  tfp_arm_drive_set_grip_thumb(true);
+  grip_node_vertical(false);
+  for (int i = 0; i < 40; i++) drawn_locals(t += 16, now);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(!g.vertical && !memcmp(&now[26], &plain[26], 64) && fabs(rig_curl(&now[27]) - rig_curl(&plain[27]) - TFP_GF_THUMB_TURN_DEGREES) < .01);
+  CHECK(!strstr(tfp_arm_drive_grip_ik_line(&g), "vertical"));
+  CHECK(tfp_arm_drive_release());
+  /* the node refused (a unit hangs on it): the game's IK keeps the hand on the gun's own node, and the fingers stay the body's */
+  fresh();
+  grip_resources();
+  grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], zero, NULL);
+  gik_gun();
+  tfp_arm_drive_set(true, true, 1);
+  drawn_locals(t = 1000, plain);
+  fit_grip(ahead);
+  n32(links_of(OPTIC), (2u << 16) | 2);
+  tfp_arm_drive_set_grip(true, false);
+  tfp_arm_drive_set_game_ik(true);
+  for (int i = 0; i < 40; i++) drawn_locals(t += 16, now);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(g.state == TFP_ARM_GRIP_HELD && g.attachment && g.ik_why == TFP_GIK_CARRIES);
+  for (unsigned n = 14; n <= 28; n++) CHECK(!memcmp(&now[n], &plain[n], 64));
+  /* a gun with no IK_left of its own: nothing for the game's IK to hold the hand on, the curl by the reach as before */
+  fresh();
+  grip_resources();
+  grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], NULL, NULL);
+  fit_grip(zero);
+  tfp_arm_drive_set(true, true, 1);
+  tfp_arm_drive_set_grip(true, false);
+  tfp_arm_drive_set_game_ik(true);
+  for (int i = 0; i < 40; i++) drawn_locals(t += 16, now);
+  tfp_arm_drive_grip_take(&g);
+  CHECK(g.ik_why == TFP_GIK_NO_OWN && fabs(rig_curl(&now[21]) - closed) < .01);
+  printf("arm drive: game IK: the fingers close with the gun's IK_left's way to the grip, not before; on a vertical grip the thumb is straight "
+         "(joints 2 and 3 the body's) or wrapped as asked, wrapped on any other; the body's fingers while the node is refused\n");
+}
 /* The checker's follow test (round 42b's independent check): the third-person body's left-hand IK has the same target, so
  * the body's hand goes where the gun's IK_left goes, and the gate reads the body's hand. `follows`: the body's hand is on the
  * node as the engine evaluated it last (else it stays where the game keeps the node); `sway_mps`: with a 2 Hz sway of that
@@ -3437,6 +3536,7 @@ int main(int argc, char **argv) {
   test_game_ik_target_change();
   test_game_ik_refusals();
   test_game_ik_guards();
+  test_game_ik_fingers();
   test_game_ik_follow();
   if (argc == 3) test_rest_recorded(argv[2]);
   printf("arm drive: %u checks passed\n", checks);

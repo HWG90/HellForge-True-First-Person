@@ -154,6 +154,7 @@ typedef struct GripUnit {
 static const float GRIP_PIN_M = .03f, GRIP_TAKE_M = .15f, GRIP_LEAVE_M = .18f, GRIP_RETURN_M = .05f;
 static const float GRIP_STEADY_MPS = .35f, GRIP_FAST_MPS = .9f;
 static const double GRIP_REST_S = .5;
+static const float GRIP_VERTICAL_DEGREES = 30;
 enum { GRIP_SPEED_MS = 80, GRIP_TRACK_MS = 250, GRIP_SETTLE_MS = 150, GRIP_SETTLE_LONG_MS = 800, GRIP_TRACK = 32 };
 
 static struct {
@@ -238,6 +239,8 @@ static struct {
     struct { uint64_t at; float p[3], c[3]; } track[GRIP_TRACK]; /* c: where this mod had moved the gun's IK_left then (gik_commanded) */
     uint64_t steady_since; /* the body's hand by the grip and steady since (0: it is not) */
     bool has_rest;
+    unsigned thumb;                /* TFP_GF_THUMB_* of the hand as closed last */
+    bool thumb_straight, vertical; /* round 42b: the option (tfp_arm_drive_set_grip_thumb); the grip held is a vertical one */
     float rest[3];      /* where it rests on this gun while held, in the same frame */
     TfpArmDriveGrip seen;
   } grip;
@@ -904,7 +907,7 @@ static uint32_t grip_target(const Units *u, const TfpGraftMatrix *body, const Tf
   const float *hand = body[d.map.body[TFP_OG_HAND]].values + 12;
   int best = -1, kept = -1;
   float best_m = FLT_MAX, kept_m = FLT_MAX;
-  struct { unsigned unit; uint32_t node; float at[3]; } seen_nodes[TREE_UNITS * GRIP_PER_UNIT];
+  struct { unsigned unit; uint32_t node; float at[3], y[3]; } seen_nodes[TREE_UNITS * GRIP_PER_UNIT];
   unsigned count = 0;
   TfpGraftMatrix ref_w = {.values = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}}; /* the first grip node found: the frame the gate tracks the body's hand in */
   uintptr_t ref_object = 0;
@@ -924,7 +927,7 @@ static uint32_t grip_target(const Units *u, const TfpGraftMatrix *body, const Tf
       TfpGraftMatrix w;
       if (!grip_node_world(tree.units[i].object, worlds, g->node[k], &w) || !tfp_graft_rigid(&w)) continue;
       seen_nodes[count].unit = i, seen_nodes[count].node = g->node[k];
-      memcpy(seen_nodes[count].at, w.values + 12, sizeof seen_nodes[count].at);
+      memcpy(seen_nodes[count].at, w.values + 12, sizeof seen_nodes[count].at), memcpy(seen_nodes[count].y, w.values + 4, sizeof seen_nodes[count].y);
       if (!count) ref_w = w, ref_object = tree.units[i].object;
       float m = grip_gap(w.values + 12, hand);
       const bool in_use = d.grip.latched && tree.units[i].object == d.grip.object && tree.units[i].ref == d.grip.ref && g->node[k] == d.grip.node;
@@ -1007,6 +1010,15 @@ static uint32_t grip_target(const Units *u, const TfpGraftMatrix *body, const Tf
     d.grip.has_rel = false;
   }
   d.grip.attachment = seen_nodes[target].unit != 0;
+  { /* round 42b: a vertical grip is one whose node's Y (down the handle, src/grip_fingers.h) runs down the gun, against the
+     * gun root's Z, within GRIP_VERTICAL_DEGREES (the BR-14's standard vertical grip: 5 degrees) */
+    uintptr_t gun_worlds;
+    TfpGraftMatrix root;
+    const float *y = seen_nodes[target].y;
+    d.grip.vertical = d.grip.attachment && ptr(tree.units[0].object + L_UNIT_WORLDS, &gun_worlds) && rd(gun_worlds, &root, sizeof root) &&
+                      tfp_graft_rigid(&root) &&
+                      -(y[0] * root.values[8] + y[1] * root.values[9] + y[2] * root.values[10]) >= cosf(GRIP_VERTICAL_DEGREES * (float)TFP_OG_PI / 180);
+  }
   d.grip.own_object = 0;
   { /* for the log: the gun's own grip node nearest the one held */
     float own_m = FLT_MAX;
@@ -1085,9 +1097,17 @@ static void grip_frame(const Units *u, const TfpGraftMatrix *body, TfpGraftLocal
   /* round 36b: the hand closed on an attachment's grip, with the reach's weight; never on the gun's own node (the body's
    * fingers suit its handguard). Otherwise what is curled eases out over EASE_S. */
   const bool on_attachment = d.grip.attachment && d.grip.target_object && state >= TFP_ARM_GRIP_NO_NODE;
-  if (on_attachment) d.grip.finger_weight = weight_of_reach;
-  else d.grip.finger_weight = fmax(0, d.grip.finger_weight - seconds / TFP_OG_EASE_S);
-  tfp_grip_fingers_close(&d.grip.fingers, mixed, d.grip.finger_weight, TFP_GF_THUMB_WRAPPED);
+  if (on_attachment) {
+    d.grip.finger_weight = weight_of_reach;
+    /* round 42b: where the game's own IK holds the drawn hand (the gun has an IK_left of its own), the hand is on the
+     * handle only as far as that node is (its share last frame; none while it is refused): the curl is for the handle,
+     * and the body's fingers suit the handguard the hand is on until then */
+    if (d.gik.on && d.gik.bound && d.gik.bound_object == u->weapon)
+      d.grip.finger_weight = fmin(d.grip.finger_weight, d.gik.owned && d.gik.object == u->weapon ? tfp_gik_share(d.gik.progress) : 0);
+    d.grip.thumb = d.grip.thumb_straight && d.grip.vertical ? TFP_GF_THUMB_STRAIGHT : TFP_GF_THUMB_WRAPPED; /* kept while it eases out */
+  } else d.grip.finger_weight = fmax(0, d.grip.finger_weight - seconds / TFP_OG_EASE_S);
+  tfp_grip_fingers_close(&d.grip.fingers, mixed, d.grip.finger_weight, d.grip.thumb);
+  seen->vertical = d.grip.vertical && d.grip.attachment, seen->thumb_straight += d.grip.finger_weight > 0 && d.grip.thumb == TFP_GF_THUMB_STRAIGHT;
   seen->state = state, seen->weight = weight, seen->to_m = wanted ? to : 0;
   seen->reach = wanted ? r.reach_share : 0, seen->shoulder_m = r.shoulder_m;
   if (state == TFP_ARM_GRIP_HELD) {
@@ -1399,6 +1419,7 @@ void tfp_arm_drive_set(bool on, bool restore_after_draw, float weight) {
 void tfp_arm_drive_set_bend(bool on) { d.bend = on; }
 void tfp_arm_drive_set_grip(bool on, bool one_handed) { d.grip.on = on, d.grip.one_handed = one_handed; }
 void tfp_arm_drive_set_game_ik(bool on) { d.gik.on = on; }
+void tfp_arm_drive_set_grip_thumb(bool straight) { d.grip.thumb_straight = straight; }
 void tfp_arm_drive_grip_take(TfpArmDriveGrip *out) {
   *out = d.grip.seen;
   const TfpArmDriveGrip keep = d.grip.seen;
@@ -1501,6 +1522,9 @@ const char *tfp_arm_drive_grip_ik_line(const TfpArmDriveGrip *g) {
   else
     snprintf(line, sizeof line, "the mod's reach alone; the game's IK target stays on the gun's own IK_left: %s; %u writes, %u put back",
              tfp_gik_why_name(g->ik_why), (unsigned)g->ik_writes, (unsigned)g->ik_restores);
+  const size_t used = strlen(line);
+  if (g->thumb_straight) snprintf(line + used, sizeof line - used, "; a vertical grip, the thumb straight along it: %u frames", (unsigned)g->thumb_straight);
+  else if (g->vertical) snprintf(line + used, sizeof line - used, "; a vertical grip, the thumb wrapped");
   return line;
 }
 static char grip_units_last[700];

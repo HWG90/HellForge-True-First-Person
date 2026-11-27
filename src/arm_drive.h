@@ -245,6 +245,11 @@ void tfp_arm_drive_set_grip(bool on, bool one_handed);
  * (the one the drive proved on the rig's socket). The drive's own reach of nodes 10, 12, 13 runs as before: it aims at the
  * same pose, so the two agree. Off at the start and until this is called with true. */
 void tfp_arm_drive_set_game_ik(bool on);
+/* Round 42b (src/grip_fingers.h): how the thumb closes on a VERTICAL grip (an attachment's grip node whose Y runs down the
+ * gun). straight: laid up along the handle, joints 2 and 3 the body's own; else wrapped round it as on every other grip.
+ * Off (wrapped) at the start. With the game's IK target on, the fingers close by that target's share of its way, since
+ * the drawn hand is on the handle only as far as the target is. */
+void tfp_arm_drive_set_grip_thumb(bool straight);
 /* What the grip did in the driven frames since the last call, for the "Grip:" line (the call empties it). */
 enum {
   TFP_ARM_GRIP_OFF = 0,   /* switched off */
@@ -333,6 +338,8 @@ typedef struct TfpArmDriveGrip {
   float ik_m;                     /* the grip's node from where the game keeps the gun's IK_left, last frame it was read */
   uint32_t ik_frames, ik_full;    /* frames the node was moved; of those, all the way onto the grip */
   uint32_t ik_writes, ik_restores;/* writes of the node; times the game's own record went back */
+  bool vertical;                  /* the grip held is a vertical one (its node's Y runs down the gun), last frame */
+  uint32_t thumb_straight;        /* frames the hand was closed with the straight thumb (tfp_arm_drive_set_grip_thumb) */
 } TfpArmDriveGrip;
 void tfp_arm_drive_grip_take(TfpArmDriveGrip *out);
 /* "the gun's units: 2, 2 with a grip node: [0] the gun e5796355a8fd67e0, 39 nodes, grip node 13; [1] on [0] node 17
