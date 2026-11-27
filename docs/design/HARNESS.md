@@ -276,3 +276,113 @@ at it and at LLtM as test levers. What was tried on build 25480438, through `too
   `%LOCALAPPDATA%/LinksLinkToMemory`. That folder, and with it the `hd2_*` script kit with the spawner, does not
   exist in the HellForge prefix; the kit's addresses are retail's.
 
+
+## Levers (round 51, 2026-11-27)
+
+The user: "you have the capability to edit memory to change stratagems equipped, change loadout equipped, spawn in
+items, spawn in stratagems, spawn in mechs, teleport to map positions. Please utilize these tools." `tools/harness/
+levers.py` does that from inside the game. The note above ("no call that spawns a pick-up or moves the player") looked
+only at the HD2 runtime: the game's Lua has LuaJIT's ffi, so a Lua command through the Bingus harness can read and write
+memory and call the game's own functions, as the user's other mods do.
+
+### How it is built
+
+- `levers.lua`, the kernel, goes into the game once a session (`_G.TFP_LEVERS`; a changed kernel or table goes in
+  anew). It reads through `ReadProcessMemory` only, writes only private read-write data pages and keeps the bytes it
+  replaced (`levers.py undo [N]`, `levers.py log`), and calls a game function only while the code at its address still
+  matches the site's pattern. Offsets HellForge 0.5 moves are read from the game's own instructions each time: the entity
+  records' offset read 0x8261C78 in the running game where the saved image says 0xF32F18.
+- `levers_sites.json` (made by `levers_sites_gen.py` from `native-work/evidence/game-pre1020.dll`): 36 sites. The retail
+  LLtM kit's patterns (`hd2_addresses.lua`) match this older build once each and land on the addresses HellForge's SDK
+  headers name (spawn request game+0xFD9710, PlayerManager +0x3326468, ...); the Gadget Kit spawner's functions were
+  found by their fingerprints (equip +0x9AE030, select +0x9AAA50, the default customization +0x74B1B0, the player's
+  weapon controller's select +0xA93E90). `tests/test_harness_levers.py` proves every pattern against the image.
+- Packages load through HellForge's Lua bridge (`hellforge_lua_load_package`, an export of `hellforge_modloader.dll`);
+  stratagem rows are read through `hellforge_lua_get`. Names (items, entities, stratagem types) come from the SDK's
+  `hellforge_content.h`.
+- Nothing the account owns changes and nothing is sent to the backend: every lever acts on the running mission's
+  entities, alone and as the host (refused otherwise).
+
+### The levers, with what the game showed (sessions e139cf25 and 3efa0b55; files in `levers-2026-11-27/`)
+
+| Lever | Status | Evidence |
+|---|---|---|
+| `where` | works | entity 471 (the mod's own `Ids: avatar=0x1d7`), resource `4d1c334d294dfa97`, position equal to `Unit.world_position(body, 1)`, the carried entities and the hand |
+| `teleport X Y [Z]`, `ahead M` | works | `{"from": [8.63, 0.15, 12.08], "to": [8.63, 6.15, 12.38], "after": [8.63, 6.15, 12.38], "moved": true}`; more moves in both sessions |
+| `loadout primary\|secondary\|support NAME [--grip] [--with=ATTACHMENT]` | works, the pieces untextured | AR-23 Liberator with a Vertical Grip (`lo-liberator.json`: entity 546 in the hand, the displaced one removed; the mod's `Weapon: key=64ce3d03c0118296 name="AR-23 Liberator"`), BR-14 Adjudicator with the grip (seen under the handguard, `adjudicator-grip-under-exosuit.jpg`), R-4 Hyena, LAS-58 Talon, MG-206 (`lo-hmg.json`) |
+| `stratagems [NAME ...]` | works in memory; the thrown ball seen, the delivery not | four types added as slots 5 to 8 (`stratagems.json`); `undo 3` put three earlier writes back |
+| `spawn item NAME` | works; picking it up not shown | MG-43 as entity 555, `{"settled": 2, "zone1": {"category": 3, "handle": 150}}` (the ground pick-up open) |
+| `spawn exosuit` | works; cannot be entered | EXO-45 as entity 574, vehicle index 0, health 1800, facing the diver (`exosuit-spawned.jpg`) |
+| `attachments WEAPON`, `vehicles`, `names WORDS` | work | 234 customization items by name; the exosuit with its position and facing |
+| `armor`, `loadout grenade`, `spawn beacon`, `enter` | not built | each refuses with its reason (`levers.NOT_BUILT`) |
+
+What each one does:
+
+- **where**: the Helldiver's entity from player slot 0's network id through the game's EntityOfNetwork (+0xFD9BA0);
+  position from MotionManager's positions; facing from the UnitComponent record (rotation +720, position +736).
+- **teleport**: the position in MotionManager (and the unit's pose) is rewritten every frame from the physics body, so
+  writing it does nothing (tried: the record's four positions and its source, held for 45 frames). What moves the
+  diver is the centre of its physics body: an 0x80-byte record (centre +0, rotation +0x10, speed limits 200 and 100
+  at +0x4C and +0x5C) about 0.98 m above the feet (0.5 m prone). No pointer chain to it was found, so `levers.py`
+  finds candidates from outside (`/proc/<pid>/mem`, read only, 2 to 45 s; the address is then remembered) and the
+  kernel proves one against the diver's position and that shape before it writes 12 bytes. Two candidates: refused.
+  The body keeps the height it is given until it moves: Z left out keeps the height.
+- **loadout**: load the weapon's package, spawn the entity at the diver with the game's default customization (the
+  default builder's ten records, the named items put in their slots), the game's equip into slot 1, 2 or 3, the
+  weapon controller's selection, then the displaced entity's removal. The inventory's own select alone is undone
+  within 2 s: the controller in the avatar's simulation block (AvatarManager + 0x53E170 - 0x4A8 + 0x1238 index: +0 the
+  entity, +0x14 the slot wanted) puts its slot back.
+- **stratagems**: each name becomes a new slot after the last (a copy of slot 1 with the type and unlimited uses, then
+  the count), its packages loaded first (the row's +0xA8 package and its +0xF8 item's). The list also holds the
+  mission's own Reinforce, SOS, Resupply and upload: the first build replaced slots 1 and 2 with them in it, which is
+  why nothing equipped is ever changed now.
+- **spawn item**: the spawn request, then the game's own call that opens the ground pick-up (zone 1).
+
+### What did not work, and why
+
+- **Customization pieces draw magenta.** Every lever-equipped weapon shows untextured pieces (the Liberator's magazine
+  and grip in `foregrip-liberator.jpg`, the Adjudicator's grip, the holstered Talon). The weapon's package is resident,
+  the pieces' materials are not: the mission loads only the loadout's own. The records' ids (+8, +0x10, +0x20) are not
+  packages HellForge will load. Shapes and nodes are right, so the grip can be tested; a capture is not a beauty shot.
+- **A spawned exosuit shows no enter prompt** and E does nothing, from its front and its back, standing (session 1:
+  `exosuit-no-prompt.jpg`; its interaction zone 0 reads open, category 19, settled 1; opening it again changes
+  nothing). No call that seats the diver was found (Tank Seat Kit's seat transaction moves between seats only).
+- **A called-in exosuit did not arrive** within the phase: the EXO-45 slot was added and its code played, no new
+  vehicle appeared in 30 s nor in the two minutes after. Whether the code was heard is not known.
+- **E did not take the spawned pick-up** in the one try (0.5 to 1.1 m from it, after a teleport).
+- **The game's removal does not take an exosuit away**: the first one stood there to the end of the session.
+- **Packages HellForge does not know** are refused: the P-2 Peacemaker's and the P-19 Redeemer's (`loadout secondary
+  peacemaker`: "neither a package HellForge's catalogue names nor one of the mods' own"). A package the game already
+  holds for the mission counts as loaded.
+- **armor, grenade, beacon, enter** are not built: no call was proven (`levers.NOT_BUILT` says what is missing).
+- A mistake of mine to keep out of the kernel: three position copies found by a memory scan were Lua strings my own
+  reads had made, and one write went into a freed one. The kernel writes only to addresses it derived from a manager,
+  or (the body) proved against one in the same frame.
+
+### Lever phases (`tools/harness/phases_levers.py OUT [NAME ...]`; `matrix.py OUT NAME` plays them too)
+
+Each sets its scene with the levers, plays input, keeps the log lines it is about and takes `matrix.judge`'s verdict.
+One run on main (0488cda, feel build, session 3efa0b55):
+
+| Phase | Levers | Camera | Lines |
+|---|---|---|---|
+| prone-melee | none | pass, 268 frames, jump 0.054 m | `Motion: action=prone` |
+| foregrip-liberator | AR-23 Liberator in the hand with Vertical Grip (in place of the default) | pass, 342 frames, jump 0.020 m | `Weapon: ... name="AR-23 Liberator"`; Grip: 0 |
+| foregrip-adjudicator | BR-14 Adjudicator in the hand with Vertical Grip (a slot with no default) | pass, 361 frames, jump 0.015 m | `Weapon: ... name="BR-14 Adjudicator"`; `Reload: eye held through the reload (would have slid 0.106 m)`; Grip: 0 |
+| support-weapon | MG-206 in the hand | pass, 392 frames, jump 0.016 m | Weapon: 0, Grip: 0 |
+| stratagem-throw | MG-206 added as slot 5 | pass, 269 frames, jump 0.024 m, veil 0.252 m not counted, float 0.090 m | `State: left the native view` and back |
+| exosuit-seat | EXO-45 slot added, code played, none came; one spawned | FAIL: never seated | Seat: 0 |
+
+Findings for the camera work:
+
+- No `Grip:` line in any phase: the session's log says `Refused: grip hand: held back on build 25480438` (it wants
+  `arms_on.txt`). The foregrip phases need that file beside the DLL to say anything about the left hand.
+- No `Weapon:` line when the MG-206 came into the hands, though the Liberator and the Adjudicator each got one.
+- A tap (`key u`) does not switch the view on: `hold u 0.2` does. The runner holds it; matrix.py still taps.
+- The body was prone from prone-melee's last `key z` on (`Motion: action=prone` at 21:32:30 in the Adjudicator's
+  phase): the taps that should stand it up were not heard, so the three weapon phases were played prone.
+- The user's MCM file sets the toggle to F11, which the session's Transmog editor takes: `session 2` ran with
+  `toggle_key=85` in `MCM/true_first_person.ini` for its length (put back after).
+- KWin now names the game's window `steam_app_553850`: `drive.focus()` looks for both names.
+- The exosuit seat, the glide into it and the see-through cockpit are still unproven in the harness: they need an
+  exosuit the diver can enter.
