@@ -301,6 +301,12 @@ static float pistol_frame(Pistol *p, float dt, float share, uint64_t lease) {
     TfpReloadProbe probe; tfp_reload_probe(&probe, &in, why, put, (uint64_t)(p->t+.5));
     probe.eye[0] = .01f; probe.eye[1] = PISTOL_E0+(p->in_eye ? p->x_read : 0); probe.eye[2] = .02f; probe.eye_known = true;
     probe.anchor[0] = 0; probe.anchor[1] = p->in_eye ? 0 : p->x_read; probe.anchor[2] = 0; probe.anchor_known = true;
+    { /* the eye's parents, nodes 1 to 4: axes the identity, node 4 at (0, 0, 1.5), still */
+      uint8_t records[4*TFP_RELOAD_LOCAL_SIZE]; memset(records, 0, sizeof records);
+      for (int n = 0; n < 4; ++n) { const float one = 1; for (int a = 0; a < 3; ++a) memcpy(records+n*TFP_RELOAD_LOCAL_SIZE+16*a, &one, 4); }
+      const float high = 1.5f; memcpy(records+3*TFP_RELOAD_LOCAL_SIZE+TFP_RELOAD_LOCAL_POSITION+8, &high, 4);
+      tfp_reload_probe_parents(&probe, records, 4);
+    }
     TfpReloadEdges out;
     if (tfp_reload_watch_frame(&p->w, &p->h, &probe, lease, &out)) { ++p->reports; p->report = out; }
   }
@@ -807,7 +813,7 @@ int main(int argc, char **argv) {
     while (tfp_reload_edges_line(&p.report, lines, line, sizeof line)) {
       printf("    %s\n", line);
       CHECK(strlen(line) < 600);
-      if (lines == 0) CHECK(!strcmp(line, "Reload rest: tick 999; node 50 at (0.0100 -0.3717 0.0200), request+0x60 (0.0000 0.0000 0.0000); argument -0.1250 m, C 0.0000 m, "
+      if (lines == 0) CHECK(!strcmp(line, "Reload rest: tick 999; node 50 at (0.0100 -0.3717 0.0200), its parents 1 to 4 (0.0000 0.0000 1.5000), axes 12.0000, request+0x60 (0.0000 0.0000 0.0000); argument -0.1250 m, C 0.0000 m, "
                                            "the rig's own vector held -0.1250 m; hip share 1.00; sidearm 1"));
       starts += !strncmp(line, "Reload start: ", 14); ends += !strncmp(line, "Reload end: ", 12);
       ++lines;
@@ -817,12 +823,21 @@ int main(int argc, char **argv) {
                         "+67 ms r 0.888 arg -0.0116 own +0.0000 put -0.1110 n50 (+0.0000 +0.0215 +0.0000) a60 (+0.0000 +0.0000 +0.0000); ";
     CHECK(tfp_reload_edges_line(&p.report, 1, line, sizeof line) && !strncmp(line, first, strlen(first)));
     CHECK(!tfp_reload_edges_line(&p.report, lines, line, sizeof line) && !tfp_reload_edges_line(NULL, 0, line, sizeof line));
+    CHECK(!strstr(line, " up "));                                          /* the parents still: not said in a frame */
+    { /* one of them moved, or turned, or not read: said */
+      TfpReloadEdges m = p.report; m.start[1].up[2] += .01f;
+      CHECK(tfp_reload_edges_line(&m, 1, line, sizeof line) && strstr(line, "a60 (+0.0000 +0.0000 +0.0000) up (+0.0000 +0.0000 +0.0100) axes +0.0000;"));
+      m = p.report; m.start[0].turn -= .25f;
+      CHECK(tfp_reload_edges_line(&m, 1, line, sizeof line) && strstr(line, " up (+0.0000 +0.0000 +0.0000) axes -0.2500; "));
+      m = p.report; m.start[0].up_known = false;
+      CHECK(tfp_reload_edges_line(&m, 1, line, sizeof line) && strstr(line, " up ?; "));
+    }
     /* the longest a line can be: every frame kept, scaled, eased by the hip share, not held, far ticks */
     TfpReloadEdges worst = p.report; worst.starts = worst.ends = TFP_RELOAD_EDGE_FRAMES;
     for (uint32_t i = 0; i < TFP_RELOAD_EDGE_FRAMES; ++i) {
       TfpReloadProbe *f = &worst.start[i]; memset(f, 0, sizeof *f);
       f->tick = worst.rest.tick+99999; f->r = .123f; f->argument = f->own = f->put = -1.2345f; f->share = .5f; f->scale = .3103f; f->scale_known = true; f->kind = TFP_RELOAD_SCALED;
-      f->why = TFP_RELOAD_SCALED; f->eye_known = f->anchor_known = true; for (int a = 0; a < 3; ++a) { f->eye[a] = -3.9999f; f->anchor[a] = -1234.5678f; }
+      f->why = TFP_RELOAD_SCALED; f->eye_known = f->anchor_known = true; for (int a = 0; a < 3; ++a) { f->eye[a] = -3.9999f; f->anchor[a] = -1234.5678f; f->up[a] = -9.8765f; } f->turn = -12.3456f; f->up_known = true;
       worst.end[i] = *f;
     }
     for (uint32_t i = 0; tfp_reload_edges_line(&worst, i, line, sizeof line); ++i) CHECK(strlen(line) < 639);

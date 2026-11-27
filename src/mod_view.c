@@ -787,6 +787,7 @@ static void arms_tick(void) {
     tfp_arm_drive_set(wanted, tfp_arm_drive_put_back(arms_keep, arms_restore), weight);
     /* Round 23: the left hand on the weapon's grip (src/offhand_grip.h): the option, the test switch, a handgun at the hip */
     tfp_arm_drive_set_grip(!grip_off && tfp_wire_settings_first_person_arms(&wire), tfp_wire_settings_sidearm(&wire));
+    tfp_pose_set_sidearm(tfp_wire_settings_sidearm(&wire)); /* round 49e: for the "Reload rest:" line only */
   }
   { /* The resting weapon pose (src/arm_drive.h): the clock, whether this tick is a rest and in which stance, and the body's layer states.
      * The action alone is not a rest: a walk, hip fire, an ammo check and a melee are "idle" to it (src/action_select.c), and in the game
@@ -1417,6 +1418,9 @@ static void steady_note(void) { /* once a second: the rig's depth held steady (s
   /* round 39: once a reload, in the second it ended (src/reload_hold.h) */
   for (uint32_t i = 0; i < held.reload.count && i < TFP_RELOAD_LOGGED; ++i) { tfp_reload_line(&held.reload.ends[i], line, sizeof line); say("%s", line); }
   if (held.reload.count > TFP_RELOAD_LOGGED) say("Reload: %u more reloads ended in the same second", held.reload.count - TFP_RELOAD_LOGGED);
+  /* round 49e: the edges of each, looked at (the frame before it, its start and its end: src/reload_hold.h) */
+  for (uint32_t i = 0; i < held.reload.edge_count && i < TFP_RELOAD_EDGES_LOGGED; ++i)
+    for (uint32_t k = 0; tfp_reload_edges_line(&held.reload.edges[i], k, line, sizeof line); ++k) say("%s", line);
   if (!tfp_steady_worth(&held)) return;
   tfp_steady_line(&held, line, sizeof line);
   say("%s", line);

@@ -79,8 +79,9 @@
  * in kind. Neither node 50 nor request+0x60 was ever logged, so which moved, by how much and in which frame is not yet
  * read off a run. TfpReloadWatch keeps, for each reload, the frame before it and the frames of both edges (to 150 ms
  * after each begins): the tick, r, request+0x4c, what the held depth and the hold put on node 5, the hip share, main
- * row +0x11ac where read, node 50's local position and request+0x60..0x68 as the node 5 call found them; said once a
- * reload on the "Reload rest:", "Reload start:" and "Reload end:" lines, beside the frame's "Trace:" rows. */
+ * row +0x11ac where read, node 50's local position and request+0x60..0x68 as the node 5 call found them, and the eye's
+ * parents (rig nodes 1 to 4: the eye hangs on the root through them, and none of them is in v); said once a reload on
+ * the "Reload rest:", "Reload start:" and "Reload end:" lines, beside the frame's "Trace:" rows. */
 #ifndef TFP_RELOAD_HOLD_H
 #define TFP_RELOAD_HOLD_H
 #include <math.h>
@@ -99,7 +100,7 @@
 #define TFP_RELOAD_APART     .3f                 /* m: the scaled-space vector this far from the hold's (times 1-r): s is not the game's */
 #define TFP_RELOAD_EDGE_FRAMES 16u               /* round 49e: frames kept of each edge of a reload */
 #define TFP_RELOAD_EDGE_MS     150u              /* an edge is kept this long after its first frame (the blend's 75 ms, the mover's 100) */
-#define TFP_RELOAD_EDGE_LINE   4u                /* frames a line */
+#define TFP_RELOAD_EDGE_LINE   3u                /* frames a line */
 #define TFP_RELOAD_EDGES_LOGGED 2u               /* reloads a second whose edges are kept */
 
 /* The evaluator from game+0x1287a44, two hex digits a byte; "xxxxxxxx": a displacement that is read, not compared:
@@ -298,9 +299,11 @@ typedef struct TfpReloadProbe {
                                    * gave for it (tfp_reload_frame's delta: in a scaled frame the whole, `own` included) */
   float share, scale;             /* the hip share; main row +0x11ac where it was read */
   float eye[3], anchor[3];        /* node 50's local position; request+0x60..0x68 */
+  float up[3], turn;              /* the eye's parents (rig nodes 1 to 4, between the root and node 50): their local positions
+                                   * summed, and the 36 numbers of their axes summed (a change of either: one of them moves) */
   float constant;                 /* C's forward part, as the frame's input had it */
   uint8_t kind, why;              /* tfp_reload_share's answer; tfp_reload_frame's */
-  bool scale_known, eye_known, anchor_known, constant_known;
+  bool scale_known, eye_known, anchor_known, constant_known, up_known;
 } TfpReloadProbe;
 /* One reload: the last frame before it, its start (from the first frame with C in it) and its end (from the last frame
  * with all of C in it, through the blend back and the frames after). */
@@ -328,6 +331,19 @@ static inline void tfp_reload_probe(TfpReloadProbe *p, const TfpReloadInput *in,
   p->kind = (uint8_t)tfp_reload_share(in->blend, in->ability, in->bit, in->unscaled, in->mix_before, in->mix_after, &p->r);
   p->why = (uint8_t)why;
   if (p->kind == TFP_RELOAD_SCALED && in->scale_known) { p->scale = in->scale; p->scale_known = true; }
+}
+/* The eye's parents from the rig's local records: `records` the `count` records of TFP_RELOAD_LOCAL_SIZE bytes from
+ * node 1 on (nine numbers of axes, then the position, as the engine's setters write them: src/arm_graft.h). */
+#define TFP_RELOAD_LOCAL_SIZE 64u
+#define TFP_RELOAD_LOCAL_POSITION 36u
+static inline void tfp_reload_probe_parents(TfpReloadProbe *p, const uint8_t *records, uint32_t count) {
+  p->up[0] = p->up[1] = p->up[2] = p->turn = 0;
+  for (uint32_t n = 0; n < count; ++n) {
+    float local[12]; memcpy(local, records+(size_t)n*TFP_RELOAD_LOCAL_SIZE, sizeof local);
+    for (int i = 0; i < 9; ++i) p->turn += local[i];
+    for (int i = 0; i < 3; ++i) p->up[i] += local[9+i];
+  }
+  p->up_known = true;
 }
 static inline void tfp_reload_watch_add(TfpReloadProbe *frames, uint32_t *count, const TfpReloadProbe *p) {
   if (*count < TFP_RELOAD_EDGE_FRAMES) frames[(*count)++] = *p;
@@ -390,11 +406,12 @@ static inline bool tfp_reload_edges_line(const TfpReloadEdges *e, uint32_t index
     if (e->held_known) snprintf(held, sizeof held, "held %.4f m", (double)e->held);
     if (e->constant_known) snprintf(constant, sizeof constant, "%.4f m", (double)e->constant);
     if (!e->rest_known) { snprintf(text, size, "Reload rest: not seen (the reload began with the lease); C %s, the rig's own vector %s; sidearm %d", constant, held, e->sidearm ? 1 : 0); return true; }
-    char eye[64] = "not read", anchor[64] = "not read";
+    char eye[64] = "not read", anchor[64] = "not read", up[96] = "not read";
+    if (zero->up_known) snprintf(up, sizeof up, "(%.4f %.4f %.4f), axes %.4f", (double)zero->up[0], (double)zero->up[1], (double)zero->up[2], (double)zero->turn);
     if (zero->eye_known) snprintf(eye, sizeof eye, "(%.4f %.4f %.4f)", (double)zero->eye[0], (double)zero->eye[1], (double)zero->eye[2]);
     if (zero->anchor_known) snprintf(anchor, sizeof anchor, "(%.4f %.4f %.4f)", (double)zero->anchor[0], (double)zero->anchor[1], (double)zero->anchor[2]);
-    snprintf(text, size, "Reload rest: tick %llu; node 50 at %s, request+0x60 %s; argument %.4f m, C %s, the rig's own vector %s; hip share %.2f; sidearm %d",
-             (unsigned long long)zero->tick, eye, anchor, (double)zero->argument, constant, held, (double)zero->share, e->sidearm ? 1 : 0);
+    snprintf(text, size, "Reload rest: tick %llu; node 50 at %s, its parents 1 to 4 %s, request+0x60 %s; argument %.4f m, C %s, the rig's own vector %s; hip share %.2f; sidearm %d",
+             (unsigned long long)zero->tick, eye, up, anchor, (double)zero->argument, constant, held, (double)zero->share, e->sidearm ? 1 : 0);
     return true;
   }
   const uint32_t start_lines = (e->starts+TFP_RELOAD_EDGE_LINE-1)/TFP_RELOAD_EDGE_LINE, end_lines = (e->ends+TFP_RELOAD_EDGE_LINE-1)/TFP_RELOAD_EDGE_LINE;
@@ -405,15 +422,19 @@ static inline bool tfp_reload_edges_line(const TfpReloadEdges *e, uint32_t index
   size_t used = (size_t)snprintf(text, size, "%s", start ? "Reload start: " : "Reload end: ");
   for (uint32_t i = from; i < count && i < from+TFP_RELOAD_EDGE_LINE && used < size; ++i) {
     const TfpReloadProbe *f = &frames[i];
-    char eye[48] = "?", anchor[56] = "?", hip[16] = "", scale[16] = "";
+    char eye[48] = "?", anchor[56] = "?", hip[16] = "", scale[16] = "", up[72] = "";
+    /* the parents: said only where one of them moved from the rest frame (or was not read) */
+    if (!f->up_known || !zero->up_known) snprintf(up, sizeof up, " up ?");
+    else if (fabsf(f->up[0]-zero->up[0]) >= 5e-5f || fabsf(f->up[1]-zero->up[1]) >= 5e-5f || fabsf(f->up[2]-zero->up[2]) >= 5e-5f || fabsf(f->turn-zero->turn) >= 5e-5f)
+      snprintf(up, sizeof up, " up (%+.4f %+.4f %+.4f) axes %+.4f", (double)(f->up[0]-zero->up[0]), (double)(f->up[1]-zero->up[1]), (double)(f->up[2]-zero->up[2]), (double)(f->turn-zero->turn));
     if (f->eye_known && zero->eye_known)
       snprintf(eye, sizeof eye, "(%+.4f %+.4f %+.4f)", (double)(f->eye[0]-zero->eye[0]), (double)(f->eye[1]-zero->eye[1]), (double)(f->eye[2]-zero->eye[2]));
     if (f->anchor_known && zero->anchor_known)
       snprintf(anchor, sizeof anchor, "(%+.4f %+.4f %+.4f)", (double)(f->anchor[0]-zero->anchor[0]), (double)(f->anchor[1]-zero->anchor[1]), (double)(f->anchor[2]-zero->anchor[2]));
     if (f->share != 1) snprintf(hip, sizeof hip, " hip %.2f", (double)f->share);
     if (f->kind == TFP_RELOAD_SCALED) { if (f->scale_known) snprintf(scale, sizeof scale, " x%.3f", (double)f->scale); else snprintf(scale, sizeof scale, " x?"); }
-    const int n = snprintf(text+used, size-used, "%s%+lld ms r %.3f arg %.4f own %+.4f put %+.4f n50 %s a60 %s%s%s%s", i > from ? "; " : "",
-                           (long long)(f->tick-zero->tick), (double)f->r, (double)f->argument, (double)f->own, (double)f->put, eye, anchor, hip, scale,
+    const int n = snprintf(text+used, size-used, "%s%+lld ms r %.3f arg %.4f own %+.4f put %+.4f n50 %s a60 %s%s%s%s%s", i > from ? "; " : "",
+                           (long long)(f->tick-zero->tick), (double)f->r, (double)f->argument, (double)f->own, (double)f->put, eye, anchor, up, hip, scale,
                            f->why != TFP_RELOAD_ADDED && f->why != TFP_RELOAD_NONE ? " not held" : "");
     if (n < 0) break;
     used += (size_t)n;
