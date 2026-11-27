@@ -147,14 +147,17 @@ static inline float tfp_ads_pull_frame(TfpAdsPull *p, TfpAdsFall *f, float sight
  * left 0.12 mm cut at 60 fps (tests/wire_pose_test.c ads_frames). Going out it follows the gun itself (a near clip short of the sight cuts
  * nothing; only one beyond it does). The pull's glide ends in a snap of up to TFP_ADS_SNAP: that too is led by.
  * `last` is the closer published the frame before, within TFP_ADS_STALE_MS. */
+/* Round 42 (`snap`, "Aim-in time" 0): the frame the gun comes in all at once is no step of the smoothstep, and no next
+ * step follows it to lead: that frame gives `closer` itself (and is the step the next frame's lead is measured from). */
 typedef struct TfpAdsLead { float last; double at; bool has; } TfpAdsLead;
-static inline float tfp_ads_lead(TfpAdsLead *l, float closer, double tick) {
+static inline float tfp_ads_lead_snap(TfpAdsLead *l, float closer, double tick, bool snap) {
   if (!isfinite(closer) || closer < 0) closer = 0;
   const bool fresh = l->has && isfinite(tick) && tick >= l->at && tick - l->at <= TFP_ADS_STALE_MS;
-  const float grow = fresh ? closer - l->last : 0;
+  const float grow = fresh && !snap ? closer - l->last : 0;
   l->last = closer; l->at = isfinite(tick) ? tick : 0; l->has = true;
   return grow > 0 ? closer + 3*grow + TFP_ADS_SNAP : closer; /* and the glide's last step, its snap */
 }
+static inline float tfp_ads_lead(TfpAdsLead *l, float closer, double tick) { return tfp_ads_lead_snap(l, closer, tick, false); }
 /* The near clip in full aim: the game's `native`, moved in with the gun, never under the game's 0.05. */
 static inline float tfp_ads_near(float native, float closer) {
   if (!isfinite(native) || !(closer > 0) || !isfinite(closer)) return native;

@@ -226,6 +226,43 @@ int main(void) {
       CHECK(on >= 1 && on <= 3 && worst <= game_worst && clear && fabsf(goal-rest) < DEG(.001f));
     }
   }
+  /* Round 42, "Aim-in time" 0 (tfp_fov_lock_step_in instant): the frame aim begins shows the aim's value at once, a chosen
+   * aim field of view and the locked view alike; in aim, and out of it, the glide is as before; false is step_aim to the bit. */
+  {
+    TfpFovLock a, b; tfp_fov_lock_reset(&a); tfp_fov_lock_reset(&b);
+    double u = 50000;
+    for (int i = 0; i < 50; ++i, u += 16) { tfp_fov_lock_step_in(&a, want, DEG(50), false, game, u, true); tfp_fov_lock_step_aim(&b, want, DEG(50), false, game, u); }
+    CHECK(fabsf(a.shown-want) < DEG(.05f) && a.shown == b.shown);         /* at the hip, the same */
+    CHECK(tfp_fov_lock_step_in(&a, want, DEG(50), true, DEG(30), u, true) == DEG(50));   /* in: the chosen 50 at once */
+    const float glided = tfp_fov_lock_step_aim(&b, want, DEG(50), true, DEG(30), u);
+    CHECK(glided > DEG(70) && glided < want);                               /* the 180 ms default: the glide */
+    u += 16;
+    CHECK(tfp_fov_lock_step_in(&a, want, DEG(50), true, DEG(30), u, true) == DEG(50));   /* and stays there */
+    /* out: the glide back to the lock, not a snap */
+    const float out = tfp_fov_lock_step_in(&a, want, DEG(50), false, game, u += 16, true);
+    CHECK(out > DEG(50) && out < DEG(60));
+    /* with no lock and a chosen value: from the game's value to the chosen one at once */
+    TfpFovLock c; tfp_fov_lock_reset(&c);
+    CHECK(tfp_fov_lock_step_in(&c, 0, DEG(50), false, game, u += 16, true) == game && !tfp_fov_lock_active(&c));
+    CHECK(tfp_fov_lock_step_in(&c, 0, DEG(50), true, game, u += 16, true) == DEG(50) && tfp_fov_lock_active(&c));
+    /* the locked view in aim with the lock on (target the lock): nothing to snap to, the same as the glide */
+    TfpFovLock d, e; tfp_fov_lock_reset(&d); tfp_fov_lock_reset(&e);
+    for (int i = 0; i < 30; ++i, u += 16) { tfp_fov_lock_step_in(&d, want, TFP_FOV_AIM_LOCKED, false, game, u, true); tfp_fov_lock_step_aim(&e, want, TFP_FOV_AIM_LOCKED, false, game, u); }
+    CHECK(tfp_fov_lock_step_in(&d, want, TFP_FOV_AIM_LOCKED, true, DEG(30), u, true) == want);
+    CHECK(fabsf(tfp_fov_lock_step_aim(&e, want, TFP_FOV_AIM_LOCKED, true, DEG(30), u)-want) < DEG(.05f));
+    /* the game's zoom in aim: its value at once */
+    TfpFovLock g; tfp_fov_lock_reset(&g);
+    for (int i = 0; i < 30; ++i, u += 16) tfp_fov_lock_step_in(&g, want, TFP_FOV_AIM_ZOOM, false, game, u, true);
+    CHECK(tfp_fov_lock_step_in(&g, want, TFP_FOV_AIM_ZOOM, true, DEG(35), u, true) == DEG(35));
+    /* instant false: step_aim, frame for frame, through in and out */
+    TfpFovLock h, k; tfp_fov_lock_reset(&h); tfp_fov_lock_reset(&k);
+    bool all = true;
+    for (int i = 0; i < 120; ++i, u += 16) {
+      const bool aiming = (i / 20) % 2 == 1;
+      all = all && tfp_fov_lock_step_in(&h, want, DEG(50), aiming, game, u, false) == tfp_fov_lock_step_aim(&k, want, DEG(50), aiming, game, u);
+    }
+    CHECK(all);
+  }
   printf("fov lock: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

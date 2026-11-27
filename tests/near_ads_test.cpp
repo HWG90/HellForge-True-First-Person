@@ -126,6 +126,26 @@ int main() {
   set_closer(NAN);
   for (int i = 0; i < 80; ++i) last = frame(.173f);
   CHECK(near(last, .173, 1e-6));
+  // round 42, "Aim-in time": at 180 (the start-up value) full aim's value is eased to from the hip's (45 ms); at 0 the
+  // first call of full aim hands it over at once, and the hip's way back out eases as before
+  CHECK(tfp_near_ads_enter_ms() == 180);
+  scene.controls[4] = 0;
+  for (int i = 0; i < 60; ++i) last = frame(.173f);
+  CHECK(near(last, .10, 1e-6));
+  scene.controls[4] = 1;
+  last = frame(.173f);
+  CHECK(last > .10f && last < .17f);
+  scene.controls[4] = 0;
+  for (int i = 0; i < 60; ++i) last = frame(.173f);
+  tfp_near_set_ads_enter_ms(0);
+  scene.controls[4] = 1;
+  last = frame(.173f);
+  CHECK(near(last, .173, 1e-6));
+  for (int i = 0; i < 5; ++i) { last = frame(.173f); CHECK(near(last, .173, 1e-6)); }
+  scene.controls[4] = 0;
+  last = frame(.173f);
+  CHECK(last < .17f && last > .10f);                                         // out: eased, as before
+  tfp_near_set_ads_enter_ms(180);
   scene.controls[4] = 0;
   tfp_near_set_ads_source(nullptr);
   tfp_near_end(gen);

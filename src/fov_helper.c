@@ -243,6 +243,9 @@ static bool shared_lens(Policy *p, float target, bool ads, float *result) {
   p->shared_used = p->shared_progress; p->lens_ready = true; p->lens_ads = ads;
   p->lens_blending = p->shared_ads_transition && p->shared_progress < 1; p->lens_last = *result; return true;
 }
+static volatile uint32_t ads_enter_ms = 180; /* round 42: "Aim-in time" (tfp_fov_set_ads_enter_ms) */
+void tfp_fov_set_ads_enter_ms(uint32_t ms) { ads_enter_ms = ms; }
+uint32_t tfp_fov_ads_enter_ms(void) { return ads_enter_ms; }
 /* cpp:158-180 */
 static float handoff_lens(Policy *p, float target, bool ads) {
   if (!p->c.reserved || p->fird) return target;
@@ -252,7 +255,8 @@ static float handoff_lens(Policy *p, float target, bool ads) {
   double now = 0;
   if (ads != p->lens_ads) {
     if (!seconds(&now)) { reset_lens(p); return target; }
-    p->lens_ads = ads; p->lens_from = p->lens_last; p->lens_start = now; p->lens_blending = true;
+    p->lens_ads = ads; p->lens_from = p->lens_last; p->lens_start = now;
+    p->lens_blending = !(ads && ads_enter_ms == 0); /* not in retail (round 42): "Aim-in time" 0, into aim at once */
   }
   float result = target;
   if (p->lens_blending) {
@@ -720,7 +724,7 @@ static float lock_field(void *camera, float native, float applied, bool aiming, 
   float goal = steady ? aim_goal : applied; bool aim = aiming;
   if (!decides) { aim = kept && lock_frame_aim; if (kept) goal = lock_frame_applied; }
   if (!(wanted > 0) && lock_recent(lock_tail_at, tick)) goal = lock_tail_native; /* gliding out: to what stays on screen */
-  float shown = tfp_fov_lock_step_aim(&lock_state, wanted, aim_field, aim, goal, tick);
+  float shown = tfp_fov_lock_step_in(&lock_state, wanted, aim_field, aim, goal, tick, ads_enter_ms == 0); /* round 42: instant into aim */
   const bool active = tfp_fov_lock_active(&lock_state);
   if (!active) shown = applied; /* let go (or never taken): the caller's own value, untouched */
   lock_shown = active ? shown : 0;
