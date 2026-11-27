@@ -94,7 +94,7 @@ def shot(path):
 
 
 VK = {"shift": 0x10, "ctrl": 0x11, "lctrl": 0xA2, "alt": 0x12, "space": 0x20, "tab": 0x09, "esc": 0x1B, "f9": 0x78, "f10": 0x79,
-      "f11": 0x7A, "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27, "e": 0x45,
+      "f11": 0x7A, "pagedown": 0x22, "pageup": 0x21, "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27, "e": 0x45,
       # "left" and "right" alone are the mouse buttons (BUTTONS wins), so the arrow keys have their own names
       "arrowup": 0x26, "arrowdown": 0x28, "arrowleft": 0x25, "arrowright": 0x27}
 BUTTONS = {"left": "L", "right": "R", "middle": "M"}
