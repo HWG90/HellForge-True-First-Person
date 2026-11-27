@@ -122,7 +122,8 @@ static inline int tfp_clip_line(const TfpClipSample *s, char *out, size_t size) 
   const float under = -(s->z+TFP_CLIP_RISE_M), beside = fabsf(s->x)-TFP_CLIP_HALF_M;
   if (first > 0) snprintf(top, sizeof top, "%.3f m under and %.3f m beside the view axis", under > 0 ? under : 0, beside > 0 ? beside : 0);
   else snprintf(top, sizeof top, "on the view axis");
-  if (s->has_near && s->near > first+.0005f) {
+  if (!s->has_near) snprintf(cut, sizeof cut, "not known");
+  else if (s->near > first+.0005f) {
     if (first > 0) snprintf(cut, sizeof cut, "the gun from %.3f to %.3f m", first, s->near);
     else snprintf(cut, sizeof cut, "the gun to %.3f m", s->near);
   }

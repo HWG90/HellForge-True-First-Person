@@ -41,6 +41,14 @@ bool tfp_wire_settings_options_of(TfpWire *w, TfpRtValue value, TfpMotionOptions
 TfpRtValue tfp_wire_settings_markers(TfpWire *w, const char *const *keys, size_t count);
 /* Actions.resolve(mod.config, key, action) typed. false: an action outside the list. */
 bool tfp_wire_settings_resolve(TfpWire *w, const char *key, TfpAct action, TfpActionPlacement *out, bool *is_explicit);
+/* Round 53 (src/weapon_clip.h): the near clip and the gun. The near-clip reader of this binder holds each distance in
+ * front of the gun (the depth the placed gun is first on screen at, at the field of view shown or the lock's when that
+ * is wider), and tfp_wire_settings_frame says the `Clip:` line once the figures have stood for half a second.
+ * tfp_wire_clip_place: the placement that is held by (of the hip's actions, or normal aim's, the one whose gun comes
+ * onto the screen nearest the eye) and that depth. tfp_wire_clip_ads_scale: what the near helper is handed every tick
+ * (tfp_near_set_ads_scale) from the last diagnostics row's two fields of view; 1 without a row. */
+float tfp_wire_clip_place(TfpWire *w, const char *key, bool aim, float fov, float *x, float *z);
+float tfp_wire_clip_ads_scale(TfpWire *w);
 /* Where that placement comes from, for the log: "imported(own)", "imported(__all)", "idle>imported(own)",
  * "imported(older own)", "imported(older __all)", "family(rifle)", "imported(global)", "shipped default",
  * "ads default". */

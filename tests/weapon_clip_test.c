@@ -92,7 +92,7 @@ int main(void) {
   CHECK(strstr(line, "(game 0.050 m, setting off)") && strstr(line, "the gun's top is on the view axis, first on screen 0.000 m from the eye; cut on screen: the gun to 0.050 m"));
   hip.has_near = false;
   tfp_clip_line(&hip, line, sizeof line);
-  CHECK(strstr(line, "near in force not read"));
+  CHECK(strstr(line, "near in force not read (setting off)") && strstr(line, "cut on screen: not known"));
   TfpClipSample ads = {.view = TFP_CLIP_ADS, .key = "e8a3969f81abec5f", .name = "BR-14 Adjudicator", .fov = DEG(90), .game_fov = DEG(30),
                        .has_near = true, .game_near = .098f, .near = .05f};
   tfp_clip_line(&ads, line, sizeof line);
