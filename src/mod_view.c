@@ -797,6 +797,7 @@ static void arms_tick(void) {
     /* Round 23: the left hand on the weapon's grip (src/offhand_grip.h): the option, the test switch, a handgun at the hip */
     tfp_arm_drive_set_grip(!grip_off && tfp_wire_settings_first_person_arms(&wire), tfp_wire_settings_sidearm(&wire));
     tfp_arm_drive_set_game_ik(!game_ik_off); /* round 42b: the game's IK target on a fitted grip (only while the grip runs) */
+    tfp_arm_drive_set_grip_thumb(!tfp_locked_view_foregrip_thumb_wrapped(&wire)); /* round 42b: "Foregrip thumb", Straight unless Wrapped */
   }
   { /* The resting weapon pose (src/arm_drive.h): the clock, whether this tick is a rest and in which stance, and the body's layer states.
      * The action alone is not a rest: a walk, hip fire, an ammo check and a melee are "idle" to it (src/action_select.c), and in the game

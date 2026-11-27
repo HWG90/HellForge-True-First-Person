@@ -166,6 +166,8 @@ bool tfp_locked_view_see_through_cockpit(TfpWire *w);
  * its opacity in percent (20 .. 100, default 90). */
 bool tfp_locked_view_cockpit_frame(TfpWire *w);
 double tfp_locked_view_cockpit_frame_opacity(TfpWire *w);
+/* Round 42b: "Foregrip thumb" (src/grip_fingers.h): true is Wrapped; false, also when nothing is stored, is Straight. */
+bool tfp_locked_view_foregrip_thumb_wrapped(TfpWire *w);
 /* Round 23: the "First Person Arms" option (stored key fird_person_arms; true when nothing is stored), and whether the
  * weapon in hand (the placement's weapon key) is a handgun by the catalogue. */
 bool tfp_wire_settings_first_person_arms(TfpWire *w);
