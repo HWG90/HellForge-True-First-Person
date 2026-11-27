@@ -70,7 +70,7 @@ int main(void) {
       if (p.progress == 1 && done_at < 0) done_at = now - entered;
     }
     CHECK(done_at > .085 && done_at < .105);
-    /* a long frame spends a third of the packet at most (as retail's clock does of its 0.18) */
+    /* a long frame spends retail's fixed step at most (0.06 s, a third of its 0.18), not a third of a shorter packet */
     tfp_transition_init(&t);
     tfp_transition_set_enter(&t, .09);
     now = 10;
@@ -78,7 +78,77 @@ int main(void) {
     now += .016;
     CHECK(step(&t, true, now, &p) && p.progress == 0);
     now += .2; /* within the clock's 0.25 s gap */
-    CHECK(step(&t, true, now, &p) && fabs(p.progress - 1.0 / 3) < 1e-12);
+    CHECK(step(&t, true, now, &p) && fabs(p.progress - 2.0 / 3) < 1e-12);
+  }
+  /* ---- short times at real frame rates: done within one frame of the set time (review: not held to three frames) ---- */
+  {
+    const double rates[] = {1.0 / 30, 1.0 / 60};
+    const double sets[] = {.01, .05, .09};
+    for (unsigned r = 0; r < 2; r++)
+      for (unsigned k = 0; k < 3; k++) {
+        TfpTransition t;
+        TfpTransitionPacket p;
+        tfp_transition_init(&t);
+        tfp_transition_set_enter(&t, sets[k]);
+        double now = 10;
+        for (int i = 0; i < 5; i++, now += rates[r]) step(&t, false, now, &p);
+        CHECK(step(&t, true, now, &p) && p.reason == TFP_REASON_ADS_ENTER && p.progress == 0);
+        const double entered = now;
+        double done_at = -1;
+        for (int i = 0; i < 20 && done_at < 0; i++) {
+          now += rates[r];
+          CHECK(step(&t, true, now, &p) && isfinite(p.progress));
+          if (p.progress == 1) done_at = now - entered;
+        }
+        CHECK(done_at >= sets[k] - 1e-9 && done_at < sets[k] + rates[r] + 1e-9);
+      }
+  }
+  /* ---- 0: the motion module's AIM to ADS action in the entry tick joins the instant packet (review blocker) ---- */
+  {
+    TfpTransition t;
+    TfpTransitionPacket p;
+    tfp_transition_init(&t);
+    tfp_transition_set_enter(&t, 0);
+    double now = 10;
+    for (int i = 0; i < 5; i++, now += .016) { step(&t, false, now, &p); tfp_transition_action(&t, 1, now, &p); }
+    CHECK(step(&t, true, now, &p) && p.reason == TFP_REASON_ADS_ENTER && p.progress == 1);
+    const uint64_t epoch = p.epoch;
+    CHECK(tfp_transition_action(&t, 2, now, &p) && p.epoch == epoch && p.progress == 1 && p.merged == TFP_REASON_ACTION &&
+          p.reason == TFP_REASON_ADS_ENTER);
+    now += .016;
+    CHECK(step(&t, true, now, &p) && p.epoch == epoch && p.progress == 1);
+    /* a second action change in aim begins its own 0.18 packet, as before */
+    CHECK(tfp_transition_action(&t, 3, now, &p) && p.epoch == epoch + 1 && p.reason == TFP_REASON_ACTION && p.duration == .18 &&
+          p.progress == 0);
+    /* an action change in a later tick of an instant aim-in, with none in its first: its own 0.18 packet, as before */
+    {
+      TfpTransition u;
+      TfpTransitionPacket q;
+      tfp_transition_init(&u);
+      tfp_transition_set_enter(&u, 0);
+      double at = 10;
+      for (int i = 0; i < 5; i++, at += .016) { step(&u, false, at, &q); tfp_transition_action(&u, 1, at, &q); }
+      CHECK(step(&u, true, at, &q) && q.progress == 1);
+      const uint64_t began = q.epoch;
+      at += .016;
+      CHECK(step(&u, true, at, &q) && q.epoch == began);
+      CHECK(tfp_transition_action(&u, 2, at, &q) && q.epoch == began + 1 && q.reason == TFP_REASON_ACTION && q.duration == .18 &&
+            q.progress == 0);
+    }
+    /* and a later zoom level in aim begins its own 0.18 packet */
+    TfpTransitionInput s = hip();
+    s.controller_active = true; s.zoom_identity = 1;
+    now += .3; /* the action packet done */
+    for (int i = 0; i < 3; i++, now += .016) tfp_transition_update(&t, &s, now, true, false, &p);
+    s.zoom_identity = 2;
+    CHECK(tfp_transition_update(&t, &s, now, true, false, &p) && p.reason == TFP_REASON_ZOOM && p.duration == .18 && p.progress == 0);
+    /* at 180 the same action joins the entering packet as retail's: one packet */
+    tfp_transition_init(&t);
+    now = 10;
+    for (int i = 0; i < 5; i++, now += .016) { step(&t, false, now, &p); tfp_transition_action(&t, 1, now, &p); }
+    CHECK(step(&t, true, now, &p) && p.reason == TFP_REASON_ADS_ENTER && p.progress == 0);
+    const uint64_t at180 = p.epoch;
+    CHECK(tfp_transition_action(&t, 2, now, &p) && p.epoch == at180 && p.merged == TFP_REASON_ACTION && p.duration == .18);
   }
   /* ---- 0: progress 1 in the first frame of aim; never not a number ---- */
   {

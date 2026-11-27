@@ -29,8 +29,15 @@ static bool mergeable(TfpTransitionReason reason) { /* :31 */
   return reason == TFP_REASON_ZOOM || reason == TFP_REASON_SHOULDER || reason == TFP_REASON_ACTION;
 }
 static bool joins(const TfpTransition *t, TfpTransitionReason reason, bool ads) { /* :37 */
+  /* Round 42 (not in retail): an ADS_ENTER of no duration began at 1, so its first ACTION (the motion module's AIM to ADS,
+   * in the same tick) would begin a 0.18 packet of its own and ease the gun's placement after all. That first ACTION, in
+   * the tick the packet began (no update since), joins the instant packet; a later one (a reload in aim, a zoom level)
+   * begins its own, as before. At 180 nothing here changes: the packet is still below merge_until and joins as retail's. */
+  const bool instant_action = reason == TFP_REASON_ACTION && t->packet.reason == TFP_REASON_ADS_ENTER &&
+                              !(t->packet.duration > 0) && t->packet.merged == TFP_REASON_NONE &&
+                              t->previous.time == t->packet.started;
   return t->has_packet && mergeable(reason) && t->packet.continuous && t->packet.ads == ads &&
-         t->packet.progress < t->merge_until;
+         (t->packet.progress < t->merge_until || instant_action);
 }
 static void advance(TfpTransition *t, double now) { /* :41 */
   /* Round 42: the packet's own duration (an ADS_ENTER's may be shorter than t->duration); with t->duration's own packets
@@ -38,7 +45,9 @@ static void advance(TfpTransition *t, double now) { /* :41 */
    * began at 1 and is not divided by. */
   const double duration = t->packet.duration;
   if (!(duration > 0)) { t->packet.progress = 1; return; }
-  double elapsed = fmax(0, fmin(now - t->previous.time, duration / 3)); /* t->max_step for t->duration's packets */
+  /* Round 42 (review): one slow frame spends at most retail's fixed step (t->max_step, 60 ms) or a third of a longer
+   * packet; a shorter ADS_ENTER is not held to three frames, so it ends in the frame its time has passed. */
+  double elapsed = fmax(0, fmin(now - t->previous.time, fmax(duration / 3, t->max_step))); /* t->max_step for t->duration's packets */
   t->packet.progress = fmax(t->packet.progress, fmin(1, t->packet.progress + elapsed / duration));
 }
 static void begin(TfpTransition *t, TfpTransitionReason reason, bool ads, uint64_t identity, uint64_t player,

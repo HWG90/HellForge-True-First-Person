@@ -1415,7 +1415,9 @@ static void ads_seat_tick(void) {
   float sight = 0, native = 0, applied = 0;
   const bool near_on = tfp_near_ads_probe(&sight, &native, &applied);
   const TfpEditor *editor = tfp_wire_editor_of(&wire);
-  const double aim_in_ms = tfp_locked_view_ads_transition_ms(&wire); /* round 42: "Aim-in time" */
+  /* Round 42: "Aim-in time", worked out once (whole ms; not a number or outside 0 .. 300: 180) so the shared clock and
+   * the helpers take the same value (review: 0.4 was instant in the helpers and three frames on the clock). */
+  const double aim_in_ms = (double)tfp_aim_bind_aim_in(tfp_locked_view_ads_transition_ms(&wire));
   tfp_wire_set_aim_in(&wire, aim_in_ms); /* the shared clock's ADS_ENTER (src/transition.h), before this tick's runtime update */
   tfp_aim_bind_tick(near_on, sight, tfp_locked_view_ads_sight_cm(&wire), tfp_editor_motion_editing_ads(editor), aim_in_ms); /* src/aim_bind.h */
   TfpPoseAdsProbe ads;

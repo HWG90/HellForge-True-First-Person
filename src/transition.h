@@ -44,7 +44,8 @@ void tfp_transition_init(TfpTransition *t); /* duration 0.18, max gap 0.25, step
  * seconds. ADS_LEAVE and every other reason keep `duration` (0.18). 0 (or less): an ADS_ENTER packet begins at progress 1,
  * so everything that follows the clock is in aim in the frame the game enters it. Not a number, or above 1 s: ignored.
  * The start-up value is 0.18, retail's: a clock never set behaves as before, frame for frame. A packet keeps the duration
- * it began with (packet.duration); each advance spends at most a third of it. */
+ * it began with (packet.duration); each advance spends at most the larger of max_step (60 ms) and a third of it, so a short
+ * one ends in the frame its time has passed. The first ACTION after an ADS_ENTER of 0 joins it (no new packet). */
 void tfp_transition_set_enter(TfpTransition *t, double seconds);
 /* input NULL: snapshot unavailable. true and *out filled when a packet exists. */
 bool tfp_transition_update(TfpTransition *t, const TfpTransitionInput *input, double now, bool enabled,

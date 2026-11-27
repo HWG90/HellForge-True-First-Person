@@ -550,6 +550,38 @@ int main(void) {
     on.controller.enabled = false, on.controller.lease = NULL, on.controller.phase = TFP_PHASE_IDLE;
     CHECK(tfp_wire_call(&on, TFP_RT_E_on_disable, NULL, r) == TFP_RT_OK);
   }
+  { /* round 42 (review): "Aim-in time" through the wire (tfp_wire_set_aim_in) to the shared clock's ADS_ENTER, by the
+     * runtime's own transition_update host call (src/wire_rt.c rt_transition_update) */
+    static TfpWire aimw;
+    tfp_wire_init(&aimw, &memory, &platform, &helpers);
+    CHECK(aimw.aim_in_ms == 180);
+    tfp_wire_set_aim_in(&aimw, 301);
+    tfp_wire_set_aim_in(&aimw, NAN);
+    tfp_wire_set_aim_in(&aimw, -1);
+    CHECK(aimw.aim_in_ms == 180); /* out of 0 .. 300, or not a number: the last value kept */
+    TfpRtHost *h = &aimw.host;
+    TfpOpsSnapshot hip = sample(true), in = sample(true);
+    hip.controller_active = false;
+    TfpRtTable ht, at;
+    const TfpRtValue yes = {.kind = TFP_RT_TRUE}, no = {.kind = TFP_RT_FALSE};
+    const double sets[] = {0, 90, 180};
+    for (unsigned k = 0; k < 3; k++) {
+      tfp_wire_set_aim_in(&aimw, sets[k]);
+      CHECK(aimw.aim_in_ms == sets[k]);
+      CHECK(h->transition_new(h, .18, .25)); /* what the runtime's start makes (src/tfp_runtime.c) */
+      double now = 10;
+      for (int i = 0; i < 4; i++, now += .016) {
+        tfp_wire_snapshot_table(&aimw, &hip, &ht);
+        CHECK(h->transition_update(h, &ht, now, yes, no));
+      }
+      tfp_wire_snapshot_table(&aimw, &in, &at);
+      CHECK(h->transition_update(h, &at, now, yes, no));
+      TfpRtTable o;
+      CHECK(h->transition_result(h, &o) && o.present && aimw.has_packet);
+      CHECK(aimw.packet.reason == TFP_REASON_ADS_ENTER && aimw.packet.ads && aimw.packet.duration == sets[k] / 1000);
+      CHECK(o.f[TFP_RT_TRANS_PROGRESS].kind == TFP_RT_NUMBER && o.f[TFP_RT_TRANS_PROGRESS].number == (sets[k] == 0 ? 1 : 0));
+    }
+  }
   CHECK(tfp_wire_call(&wire, TFP_RT_E_on_disable, NULL, r) == TFP_RT_OK && r[0].kind == TFP_RT_TRUE);
   CHECK(!wire.rt.has[TFP_RT_O_CONTROLLER]);
   CHECK(helper_calls == 0); /* no helper was reached: nothing was armed, nothing to disarm */
