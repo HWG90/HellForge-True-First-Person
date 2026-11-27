@@ -262,6 +262,26 @@ int main(void) {
       all = all && tfp_fov_lock_step_in(&h, want, DEG(50), aiming, game, u, false) == tfp_fov_lock_step_aim(&k, want, DEG(50), aiming, game, u);
     }
     CHECK(all);
+    /* review: 180 and above are round 41's glide (tfp_fov_lock_glide with no snap) frame for frame, through in and out */
+    for (int m = 0; m < 2; ++m) {
+      TfpFovLock x, ref; tfp_fov_lock_reset(&x); tfp_fov_lock_reset(&ref);
+      bool same = true;
+      for (int i = 0; i < 120; ++i, u += 16) {
+        const bool aiming = (i / 20) % 2 == 1;
+        same = same && tfp_fov_lock_step_enter(&x, want, DEG(50), aiming, game, u, m ? 300.0f : 180.0f) ==
+                       tfp_fov_lock_glide(&ref, want, DEG(50), aiming, game, u, false);
+      }
+      CHECK(same);
+    }
+    /* review: 90 ms glides into aim with half the time constant (40 ms), and out again with the full one (80 ms) */
+    TfpFovLock n; tfp_fov_lock_reset(&n);
+    for (int i = 0; i < 50; ++i, u += 16) tfp_fov_lock_step_enter(&n, want, DEG(50), false, game, u, 90.0f);
+    const float hip_shown = n.shown;
+    const float first = tfp_fov_lock_step_enter(&n, want, DEG(50), true, DEG(30), u, 90.0f);
+    CHECK(fabsf(first - (hip_shown + (DEG(50)-hip_shown)*(1-expf(-16.0f/40.0f)))) < 1e-6f && n.glide == 40.0f);
+    const float in_shown = n.shown;
+    const float back = tfp_fov_lock_step_enter(&n, want, DEG(50), false, game, u += 16, 90.0f);
+    CHECK(fabsf(back - (in_shown + (want-in_shown)*(1-expf(-16.0f/TFP_FOV_LOCK_GLIDE_MS)))) < 1e-6f && n.glide == 0);
   }
   printf("fov lock: %d checks, %d failed\n", checks, failed);
   return failed != 0;

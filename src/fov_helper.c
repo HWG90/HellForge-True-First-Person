@@ -261,7 +261,9 @@ static float handoff_lens(Policy *p, float target, bool ads) {
   float result = target;
   if (p->lens_blending) {
     if (!now && !seconds(&now)) { reset_lens(p); return target; }
-    const double elapsed = now-p->lens_start, duration = (double)p->c.reserved/1000;
+    /* Round 42 (not in retail): into aim, an aim-in time below 180 and shorter than the handoff's own (reserved) is the blend's. */
+    const uint32_t enter = ads_enter_ms, span = ads && enter < 180 && enter < p->c.reserved ? enter : p->c.reserved;
+    const double elapsed = now-p->lens_start, duration = (double)span/1000;
     if (elapsed < 0 || elapsed >= duration) { p->lens_blending = false; }
     else {
       const float t = (float)(elapsed/duration), w = t*t*(3-2*t);
@@ -724,7 +726,7 @@ static float lock_field(void *camera, float native, float applied, bool aiming, 
   float goal = steady ? aim_goal : applied; bool aim = aiming;
   if (!decides) { aim = kept && lock_frame_aim; if (kept) goal = lock_frame_applied; }
   if (!(wanted > 0) && lock_recent(lock_tail_at, tick)) goal = lock_tail_native; /* gliding out: to what stays on screen */
-  float shown = tfp_fov_lock_step_in(&lock_state, wanted, aim_field, aim, goal, tick, ads_enter_ms == 0); /* round 42: instant into aim */
+  float shown = tfp_fov_lock_step_enter(&lock_state, wanted, aim_field, aim, goal, tick, (float)ads_enter_ms); /* round 42: the aim-in time into aim */
   const bool active = tfp_fov_lock_active(&lock_state);
   if (!active) shown = applied; /* let go (or never taken): the caller's own value, untouched */
   lock_shown = active ? shown : 0;

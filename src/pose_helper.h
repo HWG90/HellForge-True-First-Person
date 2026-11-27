@@ -279,7 +279,8 @@ bool tfp_pose_ads_near(float *closer);
 void tfp_pose_set_ads_editing(bool on);
 /* Round 42, "Aim-in time" (locked_view.json ads_transition_ms; not in retail): the shared clock's ADS_ENTER time in ms. The
  * shared phase (tfp_pose_set_transition) already carries it; this is for the frames it does not: 0 takes the hip weight
- * to 0 at once in full aim where no packet matches (blend_ms is the config's, and never 0), and the frame the gun comes
+ * to 0 at once in full aim where no packet matches (blend_ms is the config's, and never 0); below blend_ms (150) that blend
+ * into full aim takes the aim-in time; and at 0 the frame the gun comes
  * in all at once gives the near clip no lead (src/ads_seat.h tfp_ads_lead_snap). Any other value: as before (180, the
  * start-up value). Any thread; read in each frame. */
 void tfp_pose_set_ads_enter_ms(uint32_t ms);

@@ -196,13 +196,13 @@ static void ease_reset(void) {
   atomic_store_explicit(&shown_meters, float_bits(0), memory_order_relaxed);
 }
 /* cpp:112-123 */
-static float ease(float target) {
+static float ease(float target, float tau) {
   const uint64_t now = now_us(), before = atomic_load_explicit(&shown_at, memory_order_relaxed);
   const float from = bits_float(atomic_load_explicit(&shown_meters, memory_order_relaxed));
   float out = target;
   if (now && before && now >= before && now - before <= EASE_GAP_US && isfinite(from) && from > 0) {
     const uint64_t elapsed = now - before < EASE_STEP_US ? now - before : EASE_STEP_US;
-    out = from + (target - from) * (1.0f - expf(-(float)elapsed / EASE_TAU_US));
+    out = from + (target - from) * (1.0f - expf(-(float)elapsed / tau));
     if (!isfinite(out) || fabsf(out - target) < EASE_SNAP_METERS) out = target;
   }
   atomic_store_explicit(&shown_meters, float_bits(out), memory_order_relaxed);
@@ -313,11 +313,13 @@ void tfp_near_setter_from(uint64_t ret, void *camera, float native) {
             target = wanted; if (aim) atomic_fetch_add_explicit(&aim_applied, 1, memory_order_relaxed);
           }
         }
-        float eased = ease(target);
+        /* Round 42 (not in retail): in full aim, an aim-in time below 180 scales the ease (0 is the snap below). */
+        const uint32_t enter = atomic_load_explicit(&ads_enter_ms, memory_order_relaxed);
+        float eased = ease(target, view == VIEW_ADS && enter > 0 && enter < 180 ? EASE_TAU_US*((float)enter/180.0f) : EASE_TAU_US);
         /* Not in retail (round 42): "Aim-in time" 0, the first call of full aim: full aim's value at once. */
         const bool entered = view == VIEW_ADS && atomic_load_explicit(&ads_was, memory_order_relaxed) == 0;
         atomic_store_explicit(&ads_was, view == VIEW_ADS ? 1u : 0u, memory_order_relaxed);
-        if (entered && atomic_load_explicit(&ads_enter_ms, memory_order_relaxed) == 0 && eased != target) {
+        if (entered && enter == 0 && eased != target) {
           eased = target; atomic_store_explicit(&shown_meters, float_bits(eased), memory_order_relaxed);
         }
         /* Not in retail (round 20): with the gun drawn closer in full aim, a near clip coming in is taken at once; the

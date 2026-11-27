@@ -135,8 +135,17 @@ int main() {
   scene.controls[4] = 1;
   last = frame(.173f);
   CHECK(last > .10f && last < .17f);
+  const float first180 = last;
   scene.controls[4] = 0;
   for (int i = 0; i < 60; ++i) last = frame(.173f);
+  // review: at 90 the full-aim ease's time constant is halved (22.5 ms): the first call is further in, and not yet there
+  tfp_near_set_ads_enter_ms(90);
+  scene.controls[4] = 1;
+  last = frame(.173f);
+  CHECK(last > first180 && last < .173f);
+  scene.controls[4] = 0;
+  for (int i = 0; i < 60; ++i) last = frame(.173f);
+  CHECK(near(last, .10, 1e-6));
   tfp_near_set_ads_enter_ms(0);
   scene.controls[4] = 1;
   last = frame(.173f);

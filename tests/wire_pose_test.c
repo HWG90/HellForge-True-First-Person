@@ -704,7 +704,7 @@ static int ads_frames_at(const TfpOpsPoseHelper *H, const TfpOpsHelperConfig *c,
       if (cut > worst) worst = cut;
       /* round 42: at 0 the gun is in aim (the ADS share 1) in the first frame of full aim; at 180 it is not */
       TfpPoseAdsProbe probe;
-      if (i == 0) CHECK(tfp_pose_ads_probe(&probe) && (aim_in_ms == 0 ? probe.share == 1 : probe.share < .5f));
+      if (i == 0) CHECK(tfp_pose_ads_probe(&probe) && (aim_in_ms == 0 ? probe.share == 1 : aim_in_ms >= 180 ? probe.share < .5f : probe.share < 1));
     }
     /* settled: the sight 10 cm from the eye (at most 0.25 m pulled) and the near clip at its rear */
     const float pulled = sight - .10f > .25f ? .25f : sight - .10f;
@@ -729,6 +729,7 @@ static int ads_frames_at(const TfpOpsPoseHelper *H, const TfpOpsHelperConfig *c,
 }
 static int ads_frames(const TfpOpsPoseHelper *H, const TfpOpsHelperConfig *c) {
   if (ads_frames_at(H, c, 180)) return 1;
+  if (ads_frames_at(H, c, 90)) return 1; /* review: an aim-in time between, the helpers' eases scaled */
   return ads_frames_at(H, c, 0); /* round 42: "Aim-in time" 0 */
 }
 

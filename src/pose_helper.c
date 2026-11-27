@@ -1506,7 +1506,10 @@ static void position_locked(uint32_t unit, uint32_t node, const float *pose, uin
     policy.weight += (target - policy.weight)*tfp_phase_step(&policy.shared, policy.full_ads);
     policy.target = target; policy.start_weight = policy.weight; policy.blend_start = now;
   } else {
-    const float u = (float)(now - policy.blend_start)/(float)policy.c.blend_ms;
+    /* Round 42 (not in retail): a blend into full aim takes no longer than the aim-in time (below 180 only: 180 or more is blend_ms as before). */
+    const uint32_t enter = atomic_load_explicit(&ads_enter_ms, memory_order_relaxed);
+    const uint32_t span = policy.target == 0 && enter < 180 && enter < policy.c.blend_ms ? enter : policy.c.blend_ms;
+    const float u = span ? (float)(now - policy.blend_start)/(float)span : 1;
     const float t = u < 0 ? 0 : (u > 1 ? 1 : u), eased = t*t*(3 - 2*t);
     policy.weight = policy.start_weight + (policy.target - policy.start_weight)*eased;
     if (target != policy.target) { policy.start_weight = policy.weight; policy.target = target; policy.blend_start = now; }

@@ -18,9 +18,9 @@
 #define TFP_FOV_AIM_ZOOM (-1.0f)
 #define TFP_FOV_AIM_LOCKED 0.0f
 
-typedef struct TfpFovLock { float shown; double at; bool aimed; } TfpFovLock; /* shown: 0 while nothing is changed; aimed: the last step's `aiming` (round 42) */
+typedef struct TfpFovLock { float shown; double at; bool aimed; float glide; } TfpFovLock; /* shown: 0 while nothing is changed; aimed: the last step's `aiming` (round 42); glide: the time constant since aim began, ms (0: TFP_FOV_LOCK_GLIDE_MS; round 42) */
 
-static inline void tfp_fov_lock_reset(TfpFovLock *l) { l->shown = 0; l->at = 0; l->aimed = false; }
+static inline void tfp_fov_lock_reset(TfpFovLock *l) { l->shown = 0; l->at = 0; l->aimed = false; l->glide = 0; }
 static inline bool tfp_fov_lock_active(const TfpFovLock *l) { return l->shown > 0; }
 /* One frame. `wanted`: the locked field of view in radians, 0 with the lock off. `aim`: TFP_FOV_AIM_* or a chosen
  * value. `applied`: what the game (or the mod's own zoom policy) would show this frame. `tick`: milliseconds.
@@ -34,19 +34,26 @@ static inline float tfp_fov_lock_glide(TfpFovLock *l, float wanted, float aim, b
   const float target = chosen ? aim : wanted > 0 && !(aiming && !(aim == TFP_FOV_AIM_LOCKED)) ? wanted : applied;
   float shown = fresh ? l->shown : applied; /* start from what was on screen */
   if (entered) shown = target; /* round 42: "Aim-in time" 0, the frame aim begins: the aim's value at once */
-  else if (fresh && tick > l->at) shown += (target-shown)*(1-expf(-(float)(tick-l->at)/TFP_FOV_LOCK_GLIDE_MS));
+  else if (fresh && tick > l->at) shown += (target-shown)*(1-expf(-(float)(tick-l->at)/(l->glide > 0 ? l->glide : TFP_FOV_LOCK_GLIDE_MS)));
   if (!on && fabsf(shown-applied) < TFP_FOV_LOCK_DONE) { tfp_fov_lock_reset(l); return applied; }
   l->shown = shown; l->at = tick;
   return shown;
 }
-/* Round 42 (not in retail): `instant` ("Aim-in time" 0) takes the aim's value in the frame `aiming` begins, with no glide;
- * the glide goes on as before for anything else (a zoom level in aim, aim-out, the lock switched). false: the call of
- * round 41 and before, to the bit. */
-static inline float tfp_fov_lock_step_in(TfpFovLock *l, float wanted, float aim, bool aiming, float applied, double tick, bool instant) {
-  const bool entered = instant && aiming && !l->aimed;
-  const float shown = tfp_fov_lock_glide(l, wanted, aim, aiming, applied, tick, entered);
+/* Round 42 (not in retail): `enter_ms`, the "Aim-in time". 0 takes the aim's value in the frame `aiming` begins, with no
+ * glide. Between 0 and 180 the glide's time constant from that frame until aim ends is TFP_FOV_LOCK_GLIDE_MS scaled by
+ * enter_ms/180 (a zoom level in aim glides that fast too); aim-out and the lock switched glide as before. 180 or more:
+ * the call of round 41 and before, to the bit. */
+static inline float tfp_fov_lock_step_enter(TfpFovLock *l, float wanted, float aim, bool aiming, float applied, double tick, float enter_ms) {
+  const bool edge = aiming && !l->aimed;
+  if (edge) l->glide = enter_ms > 0 && enter_ms < 180 ? TFP_FOV_LOCK_GLIDE_MS*(enter_ms/180.0f) : 0;
+  else if (!aiming) l->glide = 0;
+  const float shown = tfp_fov_lock_glide(l, wanted, aim, aiming, applied, tick, edge && !(enter_ms > 0));
   l->aimed = aiming;
   return shown;
+}
+/* `instant`: "Aim-in time" 0; false: 180, the call of round 41 and before, to the bit. */
+static inline float tfp_fov_lock_step_in(TfpFovLock *l, float wanted, float aim, bool aiming, float applied, double tick, bool instant) {
+  return tfp_fov_lock_step_enter(l, wanted, aim, aiming, applied, tick, instant ? 0.0f : 180.0f);
 }
 static inline float tfp_fov_lock_step_aim(TfpFovLock *l, float wanted, float aim, bool aiming, float applied, double tick) {
   return tfp_fov_lock_step_in(l, wanted, aim, aiming, applied, tick, false);

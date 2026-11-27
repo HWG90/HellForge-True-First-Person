@@ -126,8 +126,9 @@ void tfp_fov_set_lock_aim(float radians, float aim, double now_ms);
 /* Round 42, "Aim-in time" (locked_view.json ads_transition_ms; not in retail): the shared clock's ADS_ENTER time in ms. The
  * shared phase already carries it into the lens handoff; with 0, the frames it does not reach are in aim at once too:
  * the handoff's own blend into full aim (config reserved, 180) is not begun, and the lock (src/fov_lock.h
- * tfp_fov_lock_step_in) takes the aim's field of view in the frame aim begins. Any other value: as before (180, the
- * start-up value). Any thread; read in each frame. */
+ * tfp_fov_lock_step_enter) takes the aim's field of view in the frame aim begins. Below 180: the handoff's blend into aim
+ * takes that long, and the lock's glide in aim is scaled by ms/180. 180 or more: as before (180, the start-up value).
+ * Any thread; read in each frame. */
 void tfp_fov_set_ads_enter_ms(uint32_t ms);
 uint32_t tfp_fov_ads_enter_ms(void); /* what was set (180 at start-up). Reads only. */
 typedef struct TfpFovLockStats { uint64_t applied; float game_radians, shown_radians; } TfpFovLockStats;
