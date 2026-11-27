@@ -74,8 +74,8 @@ static inline bool tfp_ew_add(TfpEwWeapon *list, int *count, int capacity, const
   if (*count >= capacity) return false;
   TfpEwWeapon *w = &list[(*count)++];
   memset(w, 0, sizeof *w);
-  snprintf(w->key, sizeof w->key, "%s", key);
-  snprintf(w->name, sizeof w->name, "%s", name && *name ? name : key);
+  snprintf(w->key, sizeof w->key, "%.*s", TFP_EW_KEY - 1, key);
+  snprintf(w->name, sizeof w->name, "%.*s", TFP_EW_NAME - 1, name && *name ? name : key);
   w->group = (unsigned)group < TFP_EW_GROUPS ? group : TFP_EW_OTHER;
   w->saved = saved;
   return true;

@@ -15,6 +15,7 @@
 #define TFP_WIRE_EDITOR_H
 #include "wire.h"
 #include "placement_editor.h"
+#include "editor_weapons.h"
 
 typedef struct TfpEditorSample {
   bool click;              /* the left button is down */
@@ -37,6 +38,10 @@ typedef struct TfpEditorPlatform {
   void (*draw)(void *user, const TfpEdCommand *commands, int count);
   /* stingray.Window.mouse_focus() and show_cursor(); false: the functions could not be asked. */
   bool (*window)(void *user, bool *mouse_focus, bool *show_cursor);
+  /* Round 53 (src/editor_weapons.h): the weapons with a saved placement, sorted, the one in your hands first; handed
+   * over at the editor's first drawn frame and again after "Reset all"; NULL, 0 when the editor stops drawing.
+   * NULL: the platform shows no list. */
+  void (*weapons)(void *user, const TfpEwWeapon *list, int count);
 } TfpEditorPlatform;
 
 /* After the settings binder, before the runtime's on_enable. false: out of memory. */
@@ -48,6 +53,11 @@ const char *tfp_wire_editor_toggle(TfpWire *w);
 bool tfp_wire_editor_active(const TfpWire *w);       /* open, opening or closing */
 bool tfp_wire_editor_holds_draft(const TfpWire *w);  /* an edit that is neither saved nor put back */
 const char *tfp_wire_editor_status(const TfpWire *w);
+/* Round 53: the list the editor's panel shows (src/editor_weapons.h): every key of the settings' action_placements that
+ * holds an action, and of the older weapon_placements, named and put in its category by the catalogue (a key it does
+ * not know: the key itself, Other; "__all": "All weapons (shared)", Other), plus the weapon in your hands (held; NULL:
+ * none) when it has none saved. Sorted (tfp_ew_sort). Returns how many; 0 when the settings are not bound. */
+int tfp_wire_editor_weapon_list(TfpWire *w, const char *held, TfpEwWeapon *out, int capacity);
 /* The bound editor, for the motion runtime (src/editor_motion.h): it draws the editor's yaw, pitch and roll.
  * NULL: none is bound yet. */
 const TfpEditor *tfp_wire_editor_of(const TfpWire *w);
