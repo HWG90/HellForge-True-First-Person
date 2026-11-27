@@ -190,7 +190,7 @@ def style_summary(start, lines):
 def whose_counts(pops):
     """How many of the listed frames are whose: own, filter, body, veil (round 19); along: those of the eye's own that
     lie along the view."""
-    counts = {"own": 0, "filter": 0, "body": 0, "veil": 0, "along": 0}
+    counts = {"own": 0, "filter": 0, "body": 0, "veil": 0, "stance": 0, "along": 0}
     for p in pops:
         counts[p["whose"]] += 1
         counts["along"] += _along_named(p)
@@ -213,7 +213,7 @@ def _veil(row):
     return _length(row["veil"]) if row.get("veil") else 0.0
 
 
-def measure(rows):
+def measure(rows, stance=True):
     """One dict for every three consecutive frames of `rows` (trace.frames), named for the third:
       shown    how much the presented eye's step changed, as a vector: |(c-b) - (b-a)|. The presented eye is the eye
                shown: the row's eye plus veil= where the line has it (round 19: the helmet veil moved the eye handed
@@ -261,8 +261,14 @@ def measure(rows):
     lunge's size and way (within POP_M), and no other that frame or the next. And the body itself: in a native frame
     the rig eye is given the root's change a frame after the root, by the game; where the shown eye makes it with the
     rig eye that is the body's, whatever was carried. What the body did stays in view as "body" in every line.
+    Round 49, whose "stance" (with `stance`; tools/harness/stance.py): a frame that is the eye's own, in which the
+    filter did nothing, and which is the first of the game's stance ramp (prone to standing or back: the eye against
+    the root at 1.6 m/s from its first frame) with the root's own change of step of the frame before, under POP_M,
+    on top. That change is taken off as the body's is (body, after 1), what is left (beyond, bare) is under POP_M,
+    and the frame is printed and not counted. matrix.judge leaves the class out of a reload phase.
     Each dict also has at (the frame's own time), written (the stamp of its line) and tick (the helper's clock: what
     tells two frames apart; frames from before an edge are all written with it, under one stamp)."""
+    import stance as stance_ramp
     changes = {}
     for i in range(2, len(rows)):
         a, b, c = rows[i - 2:i + 1]
@@ -320,6 +326,10 @@ def measure(rows):
                 whose = "own"
             else:
                 whose = "filter"
+        if whose == "own" and stance:   # round 49: the game's stance ramp with the root's small change of step on top
+            ramp = stance_ramp.ramp(rows, i, shown, POP_M)
+            if ramp:
+                whose, beyond, body, after, bare = "stance", ramp[0], ramp[1], 1, min(bare, ramp[0])
         found.append({"at": c["at"], "written": c["written"], "tick": c["tick"], "kind": c["kind"], "looked": c["looked"], "taken": c["taken"], "carried": c["carried"], "shown": shown,
                       "lengths": change["lengths"], "wanted": wanted, "root": _length(change["root"]) if change["root"] else None,
                       "body": body, "after": after, "beyond": beyond, "whose": whose, "along": along, "across": across,
@@ -338,6 +348,8 @@ def describe(result):
         text += f" (body {result['body_m']:.3f})"
     if result.get("largest_veil_m"):
         text += f" (veil {result['largest_veil_m']:.3f} not counted)"
+    if result.get("stance_frames"):
+        text += f" (stance ramp {result['stance_frames']}, largest {result['largest_stance_m']:.3f} shown, not counted)"
     text += f" [by lengths {result['by_lengths_m']:.3f}]"
     if result.get("largest_float_m"):
         text += f" float {result['largest_float_m']:.3f} m ({result['float_at']})"
@@ -354,7 +366,8 @@ def pop_lines(result, indent="       "):
     for p in result.get("pops", []):
         body = "the body's own" + {0: "", 1: " a frame after the root, with the wanted eye"}.get(p.get("after"), "") + ", not counted"
         who = {"body": body, "own": "the eye's own, along the view" if _along_named(p) else "the eye's own (nothing carried)", "filter": "the filter's",
-               "veil": "the veil's (the eye moved in front of the head at a leave of the native view)"}[p["whose"]]
+               "veil": "the veil's (the eye moved in front of the head at a leave of the native view)",
+               "stance": "the game's stance ramp begun on the root's own change of step, not counted"}[p["whose"]]
         split = "" if p.get("along") is None else f" (along the view {p['along']:.3f}, across {p['across']:.3f})"
         if p.get("veil"):
             split += f", veil {p['veil']:.3f}"
@@ -493,7 +506,8 @@ def judge(lines, toggles=False, reload=False, throw=False):
     import trace as trace_reader
     rows = trace_reader.frames(lines)
     traced = bool(rows)
-    found = measure(rows)
+    found = measure(rows, stance=not reload)   # round 49: a reload's eye is never the stance ramp's (tools/harness/stance.py)
+    stances = [f["shown"] for f in found if f["whose"] == "stance"]
     veil_m = max([0.0] + [f["beyond"] for f in found if f["whose"] == "veil"])
     if traced:
         # Round 19: the eye's own largest, without the veil's move; the veil's frames have their own largest and do
@@ -522,7 +536,8 @@ def judge(lines, toggles=False, reload=False, throw=False):
         elif head["frames"] and not head["measured"]:
             first.append("the head was not measured in the head camera (no head_shown or veil_head on the rows)")
     return {**extra, "pass": ok, "frames": held, "other_camera_frames": other, "missed": missed, "kinds": sorted(kinds),
-            "largest_jump_m": jump, "largest_veil_m": veil_m, "from_trace": traced, "judged": len(found),
+            "largest_jump_m": jump, "largest_veil_m": veil_m, "stance_frames": len(stances), "largest_stance_m": max([0.0] + stances),
+            "from_trace": traced, "judged": len(found),
             "by_lengths_m": max([0.0] + [f["lengths"] for f in found]), "body_m": max([0.0] + [f["body"] for f in found]),
             "pops": [f for f in found if f["whose"]], "largest_kick_deg": kick, "notes": first + sorted(set(notes))[:6],
             "largest_float_m": floated, "float_at": float_row["at"] if float_row else None, "masks": sorted(masks)}

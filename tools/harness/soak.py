@@ -64,17 +64,18 @@ def listed(pops):
 
 def unlisted(whole, seen):
     """The frames over the limit in the whole log that no action's own stretch listed (`seen`: their ticks)."""
-    return [p for p in whole if p["whose"] not in ("body", "veil") and p["tick"] not in seen]
+    return [p for p in whole if p["whose"] not in ("body", "veil", "stance") and p["tick"] not in seen]
 
 
 def counted(pops):
     """The summary's words for the frames at or over the limit: how many, whose, the largest."""
     counts = matrix.whose_counts(pops)
-    flagged = [p for p in pops if p["whose"] not in ("body", "veil")]
+    flagged = [p for p in pops if p["whose"] not in ("body", "veil", "stance")]
     veiled = [p["beyond"] for p in pops if p["whose"] == "veil"]
     veil = f"{len(veiled)} the veil's" + (f", largest {max(veiled):.3f} m" if veiled else "") + ", not counted"
     return (f"{len(flagged)} frames flagged ({counts['own']} the eye's own, {counts['along']} of them along the view; {counts['filter']} the filter's), "
-            f"largest {max([0.0] + [p.get('bare', p['beyond']) for p in flagged]):.3f} m; {veil}; {counts['body']} the body's own, not counted")
+            f"largest {max([0.0] + [p.get('bare', p['beyond']) for p in flagged]):.3f} m; {veil}; {counts['body']} the body's own, not counted"
+            + (f"; {counts['stance']} the game's stance ramp, not counted" if counts["stance"] else ""))   # round 49 (tools/harness/stance.py)
 
 
 def aim_summary(aims, lines):
