@@ -1013,3 +1013,78 @@ window as written (slide 0.233 m) and pass on its replay.
 3. A reload begun or ended in full aim, and an aim begun in a reload: the game's own pull off the sight, eased in.
 4. The 2 cm rise of the eye at the Liberator's reload (C's upward part) is left as the game has it.
 5. A reload right after firing: the vector held is the last frame's before the reload, recoil and all.
+
+## Round 40: the reload's edges the game scales
+
+Written 2026-11-25 (branch `round40-reload-edges`), from the feel.58 harness run (HellForge 0.5, Stable style): the
+matrix's "reload" phase failed round 39's summed-slide judge, "the eye slid 0.185 m along the view with the root still
+(to 23:05:34.321)", with jumps of 0.145 to 0.206 m at 23:05:31.78-31.92 (the reload's start) and 23:05:34.05-34.15 (its
+end). The mod's own line said why: "Reload: eye held through the reload (would have slid 0.202 m), but not in 5 of its
+70 frames: the game scaled the rig by main row +0x11ac" (and 6 of 71 at 23:08:48, 6 of 40 at 23:05:56). The window is
+kept as `tests/reference/reload/feel58-L4150-4266.log`.
+
+**What it is.** The evaluator (`~/.cache/tfp-round9/eval.txt`, game+0x1287aa4..0x1287b9b) steps the weight at +0x88 by
+dt / 0.075 s (the divisor at 0x23c6718 is 0.075) and, in every frame it does so (the weight under 1 at the frame's
+start) with the avatar's bit set ([rsp+0x44]) and the byte after it clear ([rsp+0x45], 0x1287b81), multiplies the
+blended vector v' (xmm7, xmm15, xmm8) by the float at [rsi+r13+0x53ea5c], the avatar's main row +0x11ac, before C is
+added the second time. So request+0x4c = s v' + C in exactly the edge frames. The "Gate:" lines of those seconds read
++0x11ac at 0.0034 to 0.2895 and 0.0000 to 0.3103: the eye went most of the way onto the root for two or three frames
+and back. Round 39 refused those frames (TFP_RELOAD_SCALED), so the slide it took away from the reload's middle was
+left at its edges.
+
+**What is done.** `src/reload_hold.h`, `tfp_reload_scaled`: a frame the game scales is held too, in the hip share, two
+ways:
+
+- in the scaled space, where s is read (main row +0x11ac, one guarded read in such a frame only, from the pose helper)
+  and is at least 0.02: v' = (request+0x4c - C) / s is the frame's own unscaled vector, and the eye goes where it would
+  stand unscaled with the hold, (1-r) v + r held + C. A weapon swapped in the reload still eases in over the blend
+  back. The vector so worked out must be within (1-r) 0.3 m of what the hold expects of it (only that share of it is
+  the frame's own), else the read s is not trusted;
+- by the eye's offset otherwise (s not read, under 0.02, or not trusted; the game's s is often 0, and then
+  request+0x4c is C and says nothing of v): the eye is kept at held + C, the rig's own vector of the last frame
+  without C. At the start that is the frame before; at the end it is the vector from before the reload, so a weapon
+  swapped in the reload steps by the difference at the first frame after the blend (and not more).
+
+The held depth's own term goes into such a frame as it would unscaled (tfp_steady_carry's, by the share): the held
+depth itself still passes it. What goes out is the same pair as every other frame (node 5 forward, the root back);
+no state of the game is written that the steady path did not write already. [rsp+0x45] set now counts as not scaled,
+in the held depth too (`tfp_steady_gain`), as the evaluator has it. Full aim is the game's (share 0): its scaling
+and reload as before. A frame the game does not scale is the same as round 39's to the bit. The "Reload:" line adds
+"; N frames the game scaled by main row +0x11ac held, M of them by the eye's offset" where there were any, and its
+"would have slid" counts the scaled frames too.
+
+**Tests.** `tests/run-reload-hold.sh`: the share in scaled frames (r still given; [rsp+0x45] skips the scaling; the
+held depth's gain agrees on 20000 random frames); made-up reloads with both edges scaled at s 0, 0.0034, 0.02, 0.1,
+0.2895, 0.5, 1 and 1.25, read and not read, at 8, 16.7, 33.3 and 50 ms frames, the Liberator and a longer vector with a
+C that is not 0: held to 2e-6 m at the hip, the game's own in full aim, every edge frame counted (by the offset where s
+is not read or under 0.02); a weapon swapped in the reload (eased with s read; one step of the difference with s 0 or
+not read); a read s that is not the game's (0.02 where the game's is 0.2895: refused, held by the offset; 0.5: used,
+the eye 0.135 to 0.233 m, off by what the two disagree); the held depth's own term through scaled edges; what cannot
+be held (a lease begun in a reload with s not read, a value that is no number) and the line; 5000 frames with no
+reload, any bit, byte and scale: nothing added. And the replay of the feel.58 window (`--edges`): the round 39 hold's
+settled frames taken as written, C 0 (the settled reload's argument is 0.0000 m), V 0.2024 m from the Reload: line, the
+root's place along the view taken between the neighbours of each edge (it moved 0.006 m: the harness looks down), s the
+second's largest +0x11ac and r solved from each scaled frame's eye; the five scaled frames held at the rest within the
+game's own motion after the reload (largest step 0.0129 m, the game's own), with s read and not read.
+`tests/test_harness_reload.py`: the window as written fails the matrix judge (slide 0.185 m, jump 0.206 m), and with its
+edges held passes (slide 0.025 m, the game's own motion after the reload; jump 0.009 m; only the five scaled rows
+changed). `tests/run-wire-pose.sh`: the real helper with the avatar's bit set through the reload, s 0.2895 (read), s 0
+(offset) and [rsp+0x45] set, at 9, 16 and 33 ms frames: held to 2e-6 m at the hip, the line as above, the game's own in
+full aim; the calm frames the same bits as without the bit; the weight is now fed to the helper as the game has it,
+before its step while the lens is read and after it at the writes.
+
+The replay cannot tell s and r apart: the log has one number per frame (the eye) for two unknowns, and the 75 ms ramp
+of 33 ms frames with the Gate: line's s does not reproduce the logged eye (its third frame would be at r = 1, the eye on
+the root, where the log has it 0.03 m off). So the reconstruction takes s and solves r; the result does not depend on
+the split, since in both ways of holding a frame the rig's own vector is what it was before the reload.
+
+### What only the game can show
+
+1. That the "Reload:" lines of a hip reload say every frame was held, with "N frames the game scaled by main row
+   +0x11ac held", and the matrix's reload phase passes (no slide at 23:05:31-like edges).
+2. How often s is under 0.02 at the edges (then "M of them by the eye's offset"), and that the read s is the game's:
+   the line counts the frames held by the offset, so a run of offsets where s was read says it was not trusted.
+3. A weapon swapped during a reload whose edges are scaled with s 0: the one step at its end.
+4. The other two reasons a scaled frame could be the game's and not this model's: a write of main row +0x11ac between
+   the evaluator's read (game+0x1287b88) and the helper's, on another thread; and [rsp+0x45] meaning something else
+   in another state (the avatar dead, in a vehicle).

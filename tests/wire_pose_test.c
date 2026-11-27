@@ -103,6 +103,9 @@ void pose_world_depth_pin(int intact) {
   if (!have) { kept = *at; have = true; }
   *at = intact ? kept : static_cast<uint8_t>(kept ^ 0xff);
 }
+/* Round 40: the avatar's packed bit and the byte after it (the evaluator's locals at stack +0x44 and +0x45) alone, the
+ * lens as it stands. */
+void pose_world_avatar_bit(int bit, int unscaled) { scene.frame[0] = bit ? 1 : 0; scene.frame[1] = unscaled ? 1 : 0; sync(); }
 /* The avatar's main row (avatar owner + 0x53d8b0 + index * 0x1238): byte +5, byte +0x3d, the float at +0x11ac. */
 void pose_world_main_row(unsigned index, int five, int three_d, float scalar) {
   const uint64_t row = W.a[A_OWNER] + 0x53d8b0 + static_cast<uint64_t>(index) * 0x1238;
@@ -557,6 +560,7 @@ void pose_world_aim(int on);
 void pose_world_second_request(int pushed);
 void pose_world_request_field(unsigned at, uint32_t value);
 void pose_world_reload_code(int state, const float *c);
+void pose_world_avatar_bit(int bit, int unscaled);
 static PoseWorld world;
 static int lock_depth[2], lock_faults;
 static unsigned forwarded_calls, getter_calls, cas_calls, input_only_calls;
@@ -629,6 +633,16 @@ static void depth_frame(uint64_t step_ms) {
 /* The same, and then the evaluator's write of the rig's root (from its pinned call site, its own stack pose). */
 static void root_frame(uint64_t step_ms) {
   depth_frame(step_ms);
+  tfp_pose_position_from(world.carrier_return, world.viewmodel, 0, (const float *)(uintptr_t)(world.stack + 0x240), world.stack);
+}
+/* Round 40: the same, with request+0x88 as the evaluator has it: the weight `before` while the lens and the request's
+ * state are read (game+0x12873b3, before the weight is stepped at game+0x1287aeb), `after` at the writes. */
+static void stepped_root_frame(uint64_t step_ms, float before, float after) {
+  uint32_t u; now_ms += step_ms;
+  memcpy(&u, &before, 4); pose_world_request_field(0x88, u);
+  tfp_pose_position_getter_from(world.getter_return, world.viewmodel, 50, world.stack, world.request);
+  memcpy(&u, &after, 4); pose_world_request_field(0x88, u);
+  tfp_pose_position_from(world.rig_return, world.viewmodel, 5, (const float *)(uintptr_t)(world.request + 0x48), world.stack);
   tfp_pose_position_from(world.carrier_return, world.viewmodel, 0, (const float *)(uintptr_t)(world.stack + 0x240), world.stack);
 }
 static bool applied_is(double x, double y, double z) {
@@ -1384,7 +1398,10 @@ static int real(void) {
    * ms as +0x8f changes). The eye goes with the rig's forward value, the root's half (the eye at request+0x4c less the
    * root's forward shift). At the hip it stays where it was through the whole reload; in full aim the game's own reload
    * is left as it is; with the evaluator not the pinned one, or one of its instructions naming another place for C, as
-   * main had it. Frames with no reload: the same bits with and without the evaluator pinned. ---- */
+   * main had it. Frames with no reload: the same bits with and without the evaluator pinned.
+   * Round 40: and with the avatar's bit set through the reload, so that the game scales the rig's vector by main row
+   * +0x11ac in every frame of both edges (s v' + C): s 0.2895 (the feel.58 harness's, read and divided by), s 0 (the
+   * eye held by its offset), and [rsp+0x45] set (no scaling). The same, edges and all; the calm frames the same bits. ---- */
   {
     static const uint64_t steps[3] = {16, 9, 33};
     static const float C3[3] = {.003f, -.0107f, .02f};
@@ -1393,7 +1410,10 @@ static int real(void) {
     static float calm[2][3][CAP];
     int calm_n[2][3] = {{0}};
     static const int STATES[3] = {1, 2, 0}; /* as the game has it; one instruction naming another place; not the pinned evaluator */
-    for (int sx = 0; sx < 3; sx++) for (int f = 0; f < 3; f++) for (int aim = 0; aim < 2; aim++) {
+    /* round 40: the avatar's bit in the reload: 0 none; 1 set, s 0.2895; 2 set, s 0; 3 set with [rsp+0x45] (no scaling) */
+    static const float SCALE_OF[4] = {0, .2895f, 0, .2895f};
+    for (int sx = 0; sx < 3; sx++) for (int sm = 0; sm < 4; sm++) for (int f = 0; f < 3; f++) for (int aim = 0; aim < 2; aim++) {
+      if (STATES[sx] != 1 && sm != 0 && sm != 1) continue; /* not the pinned evaluator: one scaled run is enough */
       TfpSteadySecond held; char line[640]; TfpGateSecond g;
       const uint64_t step = steps[f]; const int code = STATES[sx] == 1;
       pose_world_reload_code(STATES[sx], C3);
@@ -1404,21 +1424,24 @@ static int real(void) {
       game_frame(handle, &stats, 300);
       pose_world_optic();
       pose_world_aim(aim);
-      float w = 1; uint8_t ability = 0;
+      float w = 1; uint8_t ability = 0; int scaled_frames = 0;
+      pose_world_main_row(0, 1, 1, SCALE_OF[sm]);
       double eye_rest = 0, eye_least = 1e9, eye_most = -1e9, step_most = 0, eye_last = 0; int n = 0, kept = 0;
       /* one frame of the game: the bytes, the rig's forward value, the evaluator's two writes; what the eye is */
 #define RELOAD_FRAME(calm_) do { \
         const float before_ = w; if (w < 1) { w += (float)step / 75.0f; if (w > 1) w = 1; } \
         const float r_ = before_ < 1 ? (ability ? w : 1 - w) : (ability ? 1.0f : 0.0f); \
+        const bool scaled_ = !(calm_) && (sm == 1 || sm == 2) && before_ < 1; scaled_frames += scaled_; \
+        pose_world_avatar_bit(!(calm_) && sm != 0, !(calm_) && sm == 3); \
         pose_world_request_field(0x8C, 0x00000100u | (ability ? 0x01000000u : 0)); \
-        { uint32_t u_; memcpy(&u_, &w, 4); pose_world_request_field(0x88, u_); } \
-        { const float y_ = (1 - r_) * v + r_ * C + C; uint32_t u_; memcpy(&u_, &y_, 4); pose_world_request_field(0x4C, u_); } \
-        root_frame(step); \
-        const double eye_ = (double)((1 - r_) * v + r_ * C + C) - (double)root_forwarded[1]; \
+        const float y_ = ((1 - r_) * v + r_ * C) * (scaled_ ? SCALE_OF[sm] : 1.0f) + C; \
+        { uint32_t u_; memcpy(&u_, &y_, 4); pose_world_request_field(0x4C, u_); } \
+        stepped_root_frame(step, before_, w); \
+        const double eye_ = (double)y_ - (double)root_forwarded[1]; \
         if (n) { step_most = fmax(step_most, fabs(eye_ - eye_last)); } \
         eye_least = fmin(eye_least, eye_); eye_most = fmax(eye_most, eye_); eye_last = eye_; ++n; \
         if ((calm_) && kept + 4 <= CAP) { float *o_ = &calm[aim][f][kept]; \
-          if (code) { o_[0] = forwarded[0]; o_[1] = forwarded[1]; o_[2] = forwarded[2]; o_[3] = root_forwarded[1]; } \
+          if (code && sm == 0) { o_[0] = forwarded[0]; o_[1] = forwarded[1]; o_[2] = forwarded[2]; o_[3] = root_forwarded[1]; } \
           else CHECK(o_[0] == forwarded[0] && o_[1] == forwarded[1] && o_[2] == forwarded[2] && o_[3] == root_forwarded[1]); \
           kept += 4; } \
       } while (0)
@@ -1433,10 +1456,12 @@ static int real(void) {
       tfp_reload_line(&held.reload.ends[0], line, sizeof line);
       if (code && !aim) {
         if (eye_most - eye_least > 2e-6 || step_most > 2e-6)
-          printf("wire pose: a reload at the hip, %llu ms frames: the eye went %.6f to %.6f m (rest %.6f), its largest step %.6f m\n",
-                 (unsigned long long)step, eye_least, eye_most, eye_rest, step_most);
+          printf("wire pose: a reload at the hip, %llu ms frames, avatar bit case %d: the eye went %.6f to %.6f m (rest %.6f), its largest step %.6f m\n",
+                 (unsigned long long)step, sm, eye_least, eye_most, eye_rest, step_most);
         CHECK(eye_most - eye_least <= 2e-6 && step_most <= 2e-6);         /* held: where it was, the whole reload */
-        char want[120]; snprintf(want, sizeof want, "Reload: eye held through the reload (would have slid %.3f m)", eye_rest - 2 * (double)C); /* to 2C: the eye at rest (with the held depth's own) to the game's reload place */
+        char want[240]; snprintf(want, sizeof want, "Reload: eye held through the reload (would have slid %.3f m)", eye_rest - 2 * (double)C); /* to 2C: the eye at rest (with the held depth's own) to the game's reload place */
+        if (scaled_frames) snprintf(want + strlen(want), sizeof want - strlen(want), "; %d frames the game scaled by main row +0x11ac held, %d of them by the eye's offset",
+                                    scaled_frames, sm == 2 ? scaled_frames : 0); /* round 40 */
         if (strcmp(line, want)) printf("wire pose: %s (wanted: %s)\n", line, want);
         CHECK(!strcmp(line, want));
         CHECK(held.roots == held.shifted && held.stops == 0);              /* node 5 and its root together, every frame */
@@ -1445,11 +1470,13 @@ static int real(void) {
         CHECK(strstr(line, "Reload: eye held through the reload (would have slid ") != NULL); /* worked out, nothing put back (the hip share is 0) */
       } else {
         CHECK(near(eye_least, 2 * C, 2e-6) && near(eye_most, eye_rest, 2e-6) && eye_rest - eye_least > .1); /* not the pinned evaluator: main's slide, to 2C */
+        if (sm) CHECK(scaled_frames > 0);
         CHECK(strstr(line, "Reload: eye not held through the reload (") && strstr(line, "the game's reload vector could not be read"));
       }
       for (int i = 0; i < (int)(300 / step); i++) RELOAD_FRAME(true);        /* calm again: the same bits as without it */
 #undef RELOAD_FRAME
-      if (code) calm_n[aim][f] = kept; else CHECK(kept == calm_n[aim][f] && kept > 4 * 40);
+      if (code && sm == 0) calm_n[aim][f] = kept; else CHECK(kept == calm_n[aim][f] && kept > 4 * 40);
+      pose_world_avatar_bit(0, 0);
       pose_world_request_field(0x8C, 0); pose_world_request_field(0x88, 0x3f800000);
       { const float two = 2; uint32_t u; memcpy(&u, &two, 4); pose_world_request_field(0x4C, u); }
       pose_world_aim(0);

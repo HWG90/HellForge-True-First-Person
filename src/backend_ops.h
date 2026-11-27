@@ -246,8 +246,8 @@ typedef struct TfpOpsPerf {
   uint64_t memo_moved;                   /* hits whose own take left the backend's state (below `why`) changed */
   TfpOpsMismatch first;                  /* the first mismatch of all, kept */
   TfpOpsMemo memo[TFP_OPS_TAKES];
-  /* Round 35 (docs/design/specs/2026-11-25-performance.md, section 6): the memo live, behind the test switch memo_on.txt
-   * (tfp_ops_set_memo; off after tfp_ops_init). On, a hit answers the stored snapshot instead of taking one ("served"),
+  /* Round 35 (docs/design/specs/2026-11-25-performance.md, section 6): the memo live, the game's default since round 40
+   * (memo_off.txt switches it off; tfp_ops_set_memo, off after tfp_ops_init: the wire sets it on every new backend). On, a hit answers the stored snapshot instead of taking one ("served"),
    * except every TFP_OPS_MEMO_CHECK_EVERY-th live hit (the first, the 17th, ...), which still takes a fresh one and compares
    * as the shadow does ("checked"). A checked hit that differs (a mismatch) or whose take moved the backend's state turns
    * the memo off for this backend: memo_live false, `off` kept, and from then on every call is fresh again (the shadow). */
