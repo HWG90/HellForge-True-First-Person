@@ -15,7 +15,7 @@
  *
  * What is done about it: while the drive holds the hand on an attachment's grip node, the gun's own IK_left node (a leaf
  * locator, no mesh) is given the attachment node's pose in the gun's frame, so the game's IK and hand pose put the hand on
- * the fitted grip. It eases there and back over TFP_GIK_EASE_S, and the game's own record goes back exactly when the hand
+ * the fitted grip. It eases there and back in tfp_gik_seconds of the distance, and the game's own record goes back exactly when the hand
  * lets go, the gun or its attachment changes, or the drive stops. */
 #ifndef TFP_GAME_IK_H
 #define TFP_GAME_IK_H
@@ -24,9 +24,15 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define TFP_GIK_EASE_S .25 /* the node's slide there and back. The gate (src/arm_drive.c) lets go of a body's hand moving faster
-                            * than 0.9 m/s against the gun, and the body's own IK follows the same node: a 0.124 m slide (the
-                            * AR-23's standard vertical grip) peaks at 1.5 x 0.124 / 0.25 = 0.74 m/s, under it. */
+/* The node's slide there and back takes as long as its length asks. The gate (src/arm_drive.c) lets go of a body's hand
+ * moving faster than 0.9 m/s against the gun, and the body's own IK follows the same node; a smoothstep over T peaks at
+ * 1.5 x distance / T. Fitted grips sit 0.08 to 0.18 m from the gun's own IK_left, so T is the time that keeps the peak at
+ * TFP_GIK_PEAK_MPS (half the gate's), never under TFP_GIK_EASE_S nor over TFP_GIK_EASE_MOST_S: 0.27 s at 0.08 m, 0.41 s
+ * for the AR-23's 0.124 m, 0.60 s at 0.18 m. (Until the round's independent check it was 0.25 s for all: 1.08 m/s at
+ * 0.18 m, which the gate took for a reload's pull, five times a second.) */
+#define TFP_GIK_EASE_S .25
+#define TFP_GIK_EASE_MOST_S .8
+#define TFP_GIK_PEAK_MPS .45
 #define TFP_GIK_CHAIN UINT32_C(0x0c92a44d)    /* the left-hand IK chain's constraint target (both state machines) */
 #define TFP_GIK_CHAIN_R UINT32_C(0x2ab9644b)  /* the right hand's (IK_right 15C8ADE4), not touched */
 
@@ -40,20 +46,27 @@ enum {
   TFP_GIK_NOT_LEAF,   /* its IK_left is not a leaf with a parent in the gun (refused: moving it would move other nodes) */
   TFP_GIK_UNREAD,     /* the gun's or the attachment's matrices could not be read, or are not rigid */
   TFP_GIK_FAULT,      /* the engine's setter or update faulted */
+  TFP_GIK_CARRIES,    /* a unit hangs on the gun's IK_left (refused: it would be dragged along, and a grip on it would run away) */
   TFP_GIK_WHYS
 };
 static inline const char *tfp_gik_why_name(uint32_t why) {
   static const char *const names[TFP_GIK_WHYS] = {
       "moved", "switched off", "the hand is not held on a grip", "the hand holds the gun's own node, where the game's IK already is",
       "the gun has no IK_left of its own", "the gun's IK_left is not a leaf node", "the gun's or the grip's matrices were not readable",
-      "an engine call faulted"};
+      "an engine call faulted", "a unit hangs on the gun's IK_left"};
   return why < TFP_GIK_WHYS ? names[why] : "?";
 }
 
-/* The ease's progress (0: the game's own node, 1: on the grip) towards `want`, linear in time. */
-static inline double tfp_gik_ease(double progress, bool want, double seconds) {
-  if (!(seconds > 0)) return progress;
-  const double step = seconds / TFP_GIK_EASE_S;
+/* How long a slide of `metres` takes. */
+static inline double tfp_gik_seconds(double metres) {
+  const double s = 1.5 * metres / TFP_GIK_PEAK_MPS;
+  return !(s > TFP_GIK_EASE_S) ? TFP_GIK_EASE_S : s > TFP_GIK_EASE_MOST_S ? TFP_GIK_EASE_MOST_S : s;
+}
+/* The ease's progress (0: the game's own node, 1: on the grip) towards `want`, linear in time: `seconds` gone of a slide
+ * that takes `slide_s` (tfp_gik_seconds). */
+static inline double tfp_gik_ease(double progress, bool want, double seconds, double slide_s) {
+  if (!(seconds > 0) || !(slide_s > 0)) return progress;
+  const double step = seconds / slide_s;
   progress += want ? step : -step;
   return progress < 0 ? 0 : progress > 1 ? 1 : progress;
 }

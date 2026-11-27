@@ -239,7 +239,7 @@ void tfp_arm_drive_set_grip(bool on, bool one_handed);
 /* Round 42b (src/game_ik.h, docs/design/specs/2026-11-25-game-ik.md): the game solves the drawn left arm onto the gun's own
  * IK_left node by its own IK (the first-person rig's state machine, chain 0C92A44D), whatever the drive writes into nodes
  * 10, 12, 13. on: while the hand is held on an attachment's grip node, the gun's own IK_left node (a leaf locator) is given
- * that node's pose in the gun's frame, easing there and back over TFP_GIK_EASE_S, so the game's IK puts the hand on the
+ * that node's pose in the gun's frame, easing there and back in the time the distance asks (tfp_gik_seconds), so the game's IK puts the hand on the
  * fitted grip; the game's own record goes back exactly when the gun changes or goes, the drive stops or is not driven, or
  * this is switched off, and eased when the hand lets go or the attachment goes. Only the local player's first-person gun
  * (the one the drive proved on the rig's socket). The drive's own reach of nodes 10, 12, 13 runs as before: it aims at the
