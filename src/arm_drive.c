@@ -1087,7 +1087,7 @@ static void grip_frame(const Units *u, const TfpGraftMatrix *body, TfpGraftLocal
   const bool on_attachment = d.grip.attachment && d.grip.target_object && state >= TFP_ARM_GRIP_NO_NODE;
   if (on_attachment) d.grip.finger_weight = weight_of_reach;
   else d.grip.finger_weight = fmax(0, d.grip.finger_weight - seconds / TFP_OG_EASE_S);
-  tfp_grip_fingers_close(&d.grip.fingers, mixed, d.grip.finger_weight);
+  tfp_grip_fingers_close(&d.grip.fingers, mixed, d.grip.finger_weight, TFP_GF_THUMB_WRAPPED);
   seen->state = state, seen->weight = weight, seen->to_m = wanted ? to : 0;
   seen->reach = wanted ? r.reach_share : 0, seen->shoulder_m = r.shoulder_m;
   if (state == TFP_ARM_GRIP_HELD) {
