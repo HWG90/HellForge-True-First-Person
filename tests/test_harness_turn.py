@@ -21,6 +21,7 @@ PRONE_BACK = "soak62-C-L1960-2012.log"     # the primary back, prone after a div
 FOOT_SWAP = "soak60-A-L3280-3420.log"      # a swap on foot: 0.05 and 0.02 degrees at its two changes
 FLICK = "soak60-A-L6760-6800.log"          # the primary back, prone: the veil 0.248 m, then nothing
 MELEE = "soak62-C-L2760-2815.log"          # #13 melee, prone: the veil 0.196, 0.081 m, then the native view
+UNDER = "soak62-C-L2155-2200.log"          # a dive + swap: the veil 0.120 m, then 0.055 with the head below the view
 STIM = "soak60-A-L6985-7015.log"           # #20 stim, prone: the end of an orphan run, the camera's matrix 90 degrees off
 
 
@@ -138,6 +139,78 @@ class VeilBound(unittest.TestCase):
         j = matrix.judge(cut(FOOT_SWAP))
         self.assertEqual(j["veil_faults"], [])
         self.assertAlmostEqual(j["veil_open_m"], 0.191, places=3)
+
+
+def let_out(ms):
+    """src/camera_helper.h tfp_camera_veil_let_out: what is left of the veil's move `ms` after its frame."""
+    x = min(1.0, max(0.0, ms / 300.0))
+    return 1 - x * x * (3 - 2 * x)
+
+
+def veil_kept(lines):
+    """The rows of `lines` (trace.frames) with the veil's move as round 49 keeps it (src/camera_helper.c): a veiled
+    frame (veil_head= on its line) whose own move is less than what is left of the move kept from an earlier frame,
+    less what the eye has gained on the head since, shows what is left; the let-out after the veil is of the move
+    kept. The eye before the veil, the head and the veil's own moves are the logged ones."""
+    ahead = {}
+    for line in lines:
+        tick, head = matrix._TICK.search(line), matrix._VEIL_HEAD.search(line)
+        if " Trace: " in line and tick and head:
+            ahead[float(tick[1])] = -float(head[1])   # the eye in front of the head, before the veil
+    out, kept, before = [], None, None   # kept: (the move, its tick, the eye ahead of the head then)
+    for row in trace.frames(lines):
+        row = dict(row)
+        near = before is not None and 0 < row["tick"] - before["tick"] <= matrix.GAP_MS
+        if row["kind"] != 4 or not near:
+            kept = None
+        own = row["veil"] or [0.0, 0.0, 0.0]
+        if row["kind"] == 4 and row["tick"] in ahead:   # a veiled frame
+            left = 0.0
+            if kept:
+                left = matrix._length(kept[0]) * let_out(row["tick"] - kept[1]) - max(0.0, ahead[row["tick"]] - kept[2])
+            if kept and left > matrix._length(own) + 1e-4:
+                row["veil"] = [c * left / matrix._length(kept[0]) for c in kept[0]]
+            else:
+                kept = (own, row["tick"], ahead[row["tick"]]) if matrix._length(own) > 0 else None
+        elif row["kind"] == 4 and kept:
+            w = let_out(row["tick"] - kept[1])
+            row["veil"] = [c * w for c in kept[0]] if w > 0 else None
+            kept = kept if w > 0 else None
+        out.append(row)
+        before = row
+    return out
+
+
+class VeilKept(unittest.TestCase):
+    """Round 49, the veil's dropped move, on the logged rows."""
+
+    def shown(self, rows):
+        """The changes of the shown eye's step at or over the limit, in the frames the veil had a part in."""
+        return [round(f["shown"], 3) for f in matrix.measure(rows) if f["veil"] > 0 and f["shown"] >= matrix.POP_M]
+
+    def test_the_rule_gives_the_log_back_where_no_move_was_dropped(self):
+        lines = cut(FOOT_SWAP)
+        for a, b in zip(trace.frames(lines), veil_kept(lines)):
+            self.assertLess(matrix._length(matrix._sub(a["veil"] or [0, 0, 0], b["veil"] or [0, 0, 0])), 0.002)   # the let-out as the build made it
+
+    def test_the_flick_of_soak_60_is_let_out(self):
+        lines = cut(FLICK)
+        logged, kept = trace.frames(lines), veil_kept(lines)
+        self.assertEqual([(f["what"], round(f["m"], 3)) for f in matrix.veil_faults(logged)[2]], [("step", 0.248)])
+        self.assertEqual(matrix.veil_faults(kept)[2], [])
+        self.assertEqual(self.shown(logged), [0.248, 0.496, 0.248])   # forward 0.248 m and back again in the next frame, the root still
+        self.assertEqual(self.shown(kept), [0.248, 0.256])            # the opening frame alone (its going and its stopping): no way back ...
+        moves = [round(matrix._length(r["veil"]), 3) for r in kept if r["veil"]]
+        self.assertEqual(moves[:3], [0.248, 0.240, 0.217])            # ... the move let out over 300 ms
+        self.assertTrue(all(a >= b for a, b in zip(moves, moves[1:])))
+
+    def test_the_smaller_second_move_of_soak_62_is_let_out(self):
+        lines = cut(UNDER)
+        logged, kept = trace.frames(lines), veil_kept(lines)
+        self.assertEqual([(f["what"], round(f["m"], 3)) for f in matrix.veil_faults(logged)[2]], [("step", 0.065)])
+        self.assertEqual(matrix.veil_faults(kept)[2], [])
+        moves = [round(matrix._length(r["veil"]), 3) for r in kept if r["veil"]]
+        self.assertEqual(moves[:2], [0.120, 0.116])
 
 
 class Orphan(unittest.TestCase):

@@ -273,6 +273,7 @@ static _Atomic uint64_t veil_under, veil_far;
 static _Atomic uint64_t veil_held_back;
 /* Round 26: the last veiled frame's move and time, let out after the veil closes (game thread, under the policy lock). */
 static float veil_out_move[3]; static double veil_out_tick; static bool veil_out_on;
+static float veil_out_ahead; /* round 49: how far in front of the head node the eye was before that move, along the level view (negative: behind) */
 /* Round 30 (camera_helper.h TFP_CAMERA_VEIL_LET_IN_M): a leave kept pending by veil_same_frame_leave whose view stays
  * away is veiled from its second head-camera frame; the move is let in, veil_in_frames counting the veiled frames
  * (game thread, under the policy lock). */
@@ -1999,8 +2000,25 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
                   if (length > most) { for (unsigned i = 0; i < 3; ++i) adjusted[i] = before[i]+d[i]*(most/length); veil_clear = false; }
                 }
                 /* Round 26: what the move was, for the let-out after the veil closes. */
-                for (unsigned i = 0; i < 3; ++i) veil_out_move[i] = adjusted[i]-before[i];
-                veil_out_tick = tick; veil_out_on = veil_out_move[0] != 0 || veil_out_move[1] != 0 || veil_out_move[2] != 0;
+                /* Round 49: a veiled frame that moves less than what is left of an earlier frame's move (nothing: the
+                 * head too far to move to, soak 60, 19:38:37.383, 0.248 m then 0; or less: the head below a view that
+                 * has pitched, soak 62, 19:45:10.494, 0.120 m then 0.055) wrote its own move over the one kept, and the
+                 * difference was dropped in one frame. The earlier move and its time are kept and it is let out in
+                 * this frame as in a frame after the veil. What the eye itself has gained on the head since that
+                 * frame is taken off first (a held eye being let go under the veil needs less of the move, and the
+                 * veil's own then stands); a frame whose own move is the larger is the move kept from then on. */
+                const float veil_move[3] = {adjusted[0]-before[0], adjusted[1]-before[1], adjusted[2]-before[2]};
+                const float veil_ahead = (before[0]-head[0])*horizontal[0]+(before[1]-head[1])*horizontal[1];
+                const float veil_w = veil_out_on && !policy.lock_down && tick >= veil_out_tick ? tfp_camera_veil_let_out(tick-veil_out_tick) : 0;
+                const float veil_own = sqrtf(veil_move[0]*veil_move[0]+veil_move[1]*veil_move[1]+veil_move[2]*veil_move[2]);
+                const float veil_kept = sqrtf(veil_out_move[0]*veil_out_move[0]+veil_out_move[1]*veil_out_move[1]+veil_out_move[2]*veil_out_move[2]);
+                const float veil_left = veil_kept*veil_w-fmaxf(0, veil_ahead-veil_out_ahead);
+                if (veil_w > 0 && veil_kept > 0 && isfinite(veil_left) && veil_left > veil_own+1e-4f)
+                  for (unsigned i = 0; i < 3; ++i) adjusted[i] = before[i]+veil_out_move[i]*(veil_left/veil_kept);
+                else {
+                  memcpy(veil_out_move, veil_move, 12); veil_out_ahead = veil_ahead;
+                  veil_out_tick = tick; veil_out_on = veil_own > 0;
+                }
                 veil_logged = true;
               } else if (veil_out_on && !veil_frame && policy.lock_now && kind == 4 && !policy.lock_down && tick >= veil_out_tick) {
                 /* Round 26: the veil closed: its last move is let out (camera_helper.h tfp_camera_veil_let_out). */
