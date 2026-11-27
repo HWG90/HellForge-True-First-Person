@@ -147,6 +147,8 @@ const char *tfp_wire_settings_weapon_name(TfpWire *w);
 double tfp_locked_view_fov_aim(TfpWire *w);
 double tfp_locked_view_fov_aim_degrees(TfpWire *w);
 double tfp_locked_view_ads_sight_cm(TfpWire *w);
+/* Round 42: "Aim-in time", ms (0 .. 300; 180 the default, 0 in one frame): the shared clock's time into aim (src/transition.h). */
+double tfp_locked_view_ads_transition_ms(TfpWire *w);
 bool tfp_locked_view_bodycam(TfpWire *w); /* the camera style: false Stable, true Bodycam (src/camera_damp.h) */
 double tfp_locked_view_kick_strength(TfpWire *w);
 double tfp_locked_view_kick_max_degrees(TfpWire *w);

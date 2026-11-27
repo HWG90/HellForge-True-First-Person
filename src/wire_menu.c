@@ -89,6 +89,10 @@ static const Control CONTROLS[] = {
       TIP("How close full aim brings the sight to your eye. The weapon is moved toward you until its sight is this far away; a sight that "
           "is already closer is left where it is. 0 keeps the game's own distance (the default). Fine-tune one weapon with the placement "
           "editor's ADS action (aim, then Page Up).")),
+  /* round 42: how long the view takes into aim once the game is in it (the shared clock's ADS_ENTER; src/transition.h) */
+  ROW("ads_transition_ms", TFP_MK_SLIDER, "Aim-in time (ms)", 2, L(ads_transition_ms), RANGE(0, 300, 10),
+      TIP("How long the gun takes to settle on the sight once the game enters aim. 0 is instant. Default 180. The game's own short "
+          "wait before aiming is not changed.")),
   /* the camera style (src/camera_damp.h): Boolean `bodycam` in the file, a choice of two here */
   ROW("camera_style", TFP_MK_CHOICE, "Camera style", 2, L(bodycam), .choices = STYLES, .choice_count = 2,
       TIP("Stable: a steady, traditional first-person camera. Bodycam: the view moves with your head, like a body camera: it takes kicks from your "

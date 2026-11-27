@@ -112,9 +112,10 @@ static int store_part(void) {
   TfpSettings s;
   memset(&s, 0, sizeof s);
   CHECK(tfp_settings_defaults(&s));
-  /* the seventeen options and their defaults (round 20: Aim field of view, its chosen degrees, the sight distance in aim;
-   * round 38: See through the exosuit cockpit, on) */
-  CHECK(TFP_LOCKED_COUNT == 17);
+  /* the eighteen options and their defaults (round 20: Aim field of view, its chosen degrees, the sight distance in aim;
+   * round 38: See through the exosuit cockpit, on; round 42: Aim-in time, 180 ms) */
+  CHECK(TFP_LOCKED_COUNT == 18);
+  CHECK(tfp_settings_locked_number(&s, TFP_LOCKED_ads_transition_ms) == 180 && !tfp_settings_locked_info(TFP_LOCKED_ads_transition_ms)->is_bool);
   CHECK(tfp_settings_locked_flag(&s, TFP_LOCKED_see_through_cockpit) && tfp_settings_locked("see_through_cockpit") == TFP_LOCKED_see_through_cockpit &&
         tfp_settings_locked_info(TFP_LOCKED_see_through_cockpit)->is_bool);
   CHECK(tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim) == 1 && tfp_settings_locked_number(&s, TFP_LOCKED_fov_aim_degrees) == 50 &&
@@ -164,7 +165,7 @@ static int store_part(void) {
   CHECK(n && n < sizeof text && tfp_settings_write_locked(&s, NULL, 0) == n && strstr(text, "{\n \"format\": 1,\n \"locked_view\": {") == text &&
         strstr(text, "\"camera_lock\": false") && strstr(text, "\"fov_degrees\": 120") &&
         strstr(text, "\"kick_max_degrees\": 0") && strstr(text, "\"put_away\": true") && strstr(text, "\"thrown_kick_strength\": 70") &&
-        strstr(text, " \"locked_view\": {\n  \"ads_sight_cm\": 0,\n  \"animated_arms\": true,\n  \"bodycam\": false,\n  \"camera_damping\": 60,\n  \"camera_lock\": false,") &&
+        strstr(text, " \"locked_view\": {\n  \"ads_sight_cm\": 0,\n  \"ads_transition_ms\": 180,\n  \"animated_arms\": true,\n  \"bodycam\": false,\n  \"camera_damping\": 60,\n  \"camera_lock\": false,") &&
         strstr(text, "\"animated_arms\": true") && strstr(text, "\"smooth_eye\": true") && !strstr(text, "holster_animation"));
   TfpSettings back;
   memset(&back, 0, sizeof back);
@@ -574,7 +575,7 @@ static int panel_part(void) {
   CHECK(drawn("tab:First person") && drawn("tab:Bob and sway") && drawn("tab:Locked view"));
   int count = 0, sliders = 0, checks_drawn = 0, keys = 0, described = 0, choices = 0;
   const TfpMenuControl *controls = tfp_wire_menu_controls(&count);
-  CHECK(count == 45);   /* round 38: See through the exosuit cockpit */
+  CHECK(count == 46);   /* round 38: See through the exosuit cockpit; round 42: Aim-in time */
   for (int i = 0; i < count; i++) {
     const TfpMenuControl *c = &controls[i];
     char line[420];
@@ -606,7 +607,7 @@ static int panel_part(void) {
     }
     if (c->description) { snprintf(line, sizeof line, "tip:%s", c->description); CHECK(drawn_part(line)); described++; }
   }
-  CHECK(sliders == 16 && checks_drawn == 17 && keys == 2 && choices == 3 && described == 32);
+  CHECK(sliders == 17 && checks_drawn == 17 && keys == 2 && choices == 3 && described == 33);
   CHECK(drawn("text:First person through every action, one field of view, and how much your body's movement moves the view."));
   CHECK(drawn("primary:Enable True First Person") && drawn("cap:U") && !drawn("cap:F11") && drawn("cap:PAGE UP")); /* the stored 122 (F11) reads as U */
   CHECK(drawn("slider:Weapon movement strength=120[0..200]") && drawn("slider:Near clip distance (cm)=15[5..40]") && drawn("slider:Weapon bob speed=100[25..200]"));
@@ -615,6 +616,10 @@ static int panel_part(void) {
   CHECK(drawn("check:Camera lock=on") && drawn("check:Field of view lock=on") && drawn("slider:Field of view (degrees)=80[50..120]") &&
         drawn("combo:Aim field of view=The game's zoom") && drawn("slider:Aim field of view (degrees)=50[20..90] (disabled)") &&
         drawn("text:Used when Aim field of view is A chosen value.") && drawn("slider:Sight distance in aim (cm)=0[0..30]") &&
+        drawn("slider:Aim-in time (ms)=180[0..300]") && drawn("slider:Sight distance in aim (cm)=0[0..30]") < drawn("slider:Aim-in time (ms)=180[0..300]") &&
+        drawn("slider:Aim-in time (ms)=180[0..300]") < drawn("combo:Camera style=Stable") &&
+        drawn("tip:How long the gun takes to settle on the sight once the game enters aim. 0 is instant. Default 180. The game's own short "
+              "wait before aiming is not changed.") &&
         !drawn_part("Zoom when aiming") && drawn("slider:View kick strength (%)=35[0..100] (disabled)") && drawn("slider:View kick limit (degrees)=8[0..20] (disabled)") &&
         drawn("slider:View kick when thrown (%)=70[0..100]") && drawn("slider:Camera damping (%)=60[0..100] (disabled)") && drawn("check:Animated arms=on") && drawn("check:Weapon put-away=on") && drawn("check:Smooth eye=on"));
   /* The camera style. Bodycam is off (the Stable camera): its row is directly above the kick sliders, with what the
