@@ -87,7 +87,10 @@ struct Game {
   void native(uint32_t mask = 0, bool aim = false) {
     s.request[0] = 6; s.linked = true; s.mask = mask; s.aim = aim ? 1 : 0; s.camera_rotation_given = true;
     rig_at_head();
-    s.argument[0] = .02f; s.argument[1] = .01f; s.argument[2] = .03f; s.argument[3] = 0; rotation_from_look();
+    s.argument[0] = .02f; s.argument[1] = .01f; s.argument[2] = .03f; s.argument[3] = 0;
+    // Round 49: in the native view the rotation argument is local to the rig eye, whose axes are the look's here: none.
+    // (Until then this wrote the world's yaw, as hip() does; nothing read a native frame's rotation against the rig.)
+    s.argument_rotation[0] = s.argument_rotation[1] = s.argument_rotation[2] = 0; s.argument_rotation[3] = 1;
   }
   // The request is the ordinary one again but the camera is still a child of the rig, which the game did not move.
   void gap() { const bool given = s.camera_rotation_given; hip(); s.linked = true; s.camera_rotation_given = given; }

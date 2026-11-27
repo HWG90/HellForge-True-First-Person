@@ -493,6 +493,13 @@ static void entry_note(void) {
  *   head_shown   round 44: in every head-camera frame of the lock, the head node from the eye shown (eye_world + veil):
  *                (ahead up), m; a negative ahead is the eye that far in front of the head. 0 in any other frame
  *   clear        round 44: how far src/camera_clear.h pushed the eye the frame was built on along the level view (m)
+ *   turn_carry   round 49, only where it is not 0: how far the direction shown (turn) is off the game's own in this
+ *                frame, degrees: the difference carried across a change of camera and eased out (src/camera_turn.h)
+ *   turn_edge    round 49, only on the frame a change of camera began a carry: the degrees it began with, then the
+ *                probe: game_turn, the game's own direction in the world; game_cam, where the game put its ordinary
+ *                (kind 4) camera, in this frame at a leave of the native view, in the last ordinary frame at an entry
+ *                ("-": not known); heading, the body root's forward axis as a compass angle, degrees (atan2(x, y)).
+ *                Why the game's two cameras point apart is not known; this is what a cause can be read from
  * A window is also opened when the body's action changes (src/trace_edges.h); such a window has no State line before
  * it, and "t=" starts again in it. So does one the eye opens itself (eye_edge), unless a window was open. */
 static void trace_note(void) {
@@ -548,10 +555,20 @@ static void trace_note(void) {
     if (r->veil_head[0] != 0 || r->veil_head[1] != 0) snprintf(veil_head, sizeof veil_head, "(%.4f %.4f)", (double)r->veil_head[0], (double)r->veil_head[1]);
     char head_shown[48] = "0";
     if (r->head_known) snprintf(head_shown, sizeof head_shown, "(%.4f %.4f)", (double)r->head_shown[0], (double)r->head_shown[1]);
+    char turned[192] = "";
+    if (r->turn_carry != 0 || r->turn_edge != 0) {
+      int used = snprintf(turned, sizeof turned, " turn_carry=%.2f", (double)r->turn_carry);
+      if (r->turn_edge != 0 && used > 0 && (size_t)used < sizeof turned) {
+        char camera[64] = "-";
+        if (r->game_cam_known) snprintf(camera, sizeof camera, "(%.3f %.3f %.3f)", (double)r->game_cam[0], (double)r->game_cam[1], (double)r->game_cam[2]);
+        snprintf(turned + used, sizeof turned - (size_t)used, " turn_edge=%.2f game_turn=(%.4f %.4f %.4f) game_cam=%s heading=%.1f", (double)r->turn_edge,
+                 (double)r->game_turn[0], (double)r->game_turn[1], (double)r->game_turn[2], camera, atan2((double)r->axes[3], (double)r->axes[4])*180/3.14159265358979323846);
+      }
+    }
     say("Trace: t=%.1f kind=%u eye_world=(%.5f %.5f %.5f) step=%.4f wanted=(%.5f %.5f %.5f) correction=%.4f lease=0x%llx pose_armed=%d entry_ease=%.2f source=%s"
         " root=(%.5f %.5f %.5f) axes=(%.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f) looked=%d taken=%s quiet=%d tick=%.3f"
         " off_foot=%d damped=%d damp=(%.5f %.5f %.5f) view=(%.5f %.5f %.5f) sock=%.5f arms=%u eye_edge=%d veil=%s turn=(%.4f %.4f %.4f) veil_head=%s"
-        " head_shown=%s clear=%.4f",
+        " head_shown=%s clear=%.4f%s",
         (double)r->ms, r->kind, (double)r->eye[0], (double)r->eye[1], (double)r->eye[2], (double)r->step, (double)r->wanted[0], (double)r->wanted[1],
         (double)r->wanted[2], (double)r->correction, lease, (int)(pose.armed != 0), (double)r->entry_ease, sources[r->source < 4 ? r->source : 0],
         (double)r->root[0], (double)r->root[1], (double)r->root[2], (double)r->axes[0], (double)r->axes[1], (double)r->axes[2], (double)r->axes[3],
@@ -560,7 +577,7 @@ static void trace_note(void) {
         (int)((r->what & TFP_CAMERA_TRACE_OFF_FOOT) != 0), (int)((r->what & TFP_CAMERA_TRACE_DAMPED) != 0), (double)r->damp[0], (double)r->damp[1],
         (double)r->damp[2], (double)r->view[0], (double)r->view[1], (double)r->view[2], (double)r->sock, (unsigned)r->arms,
         (int)((r->what & TFP_CAMERA_TRACE_SELF) != 0), veil, (double)r->turn[0], (double)r->turn[1], (double)r->turn[2], veil_head,
-        head_shown, (double)r->clear);
+        head_shown, (double)r->clear, turned);
   }
 }
 #endif

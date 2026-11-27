@@ -427,6 +427,11 @@ typedef struct TfpCameraTraceRow { float ms; uint32_t kind, source; float eye[3]
   /* Round 44: in every head-camera frame of the lock, the head node from the eye shown (after the veil and the floor):
    * ahead along the level view, up (m), with head_known; and the push of src/camera_clear.h in that frame (m). */
   float head_shown[2]; bool head_known; float clear;
+  /* Round 49 (src/camera_turn.h THE CARRY). turn_carry: how far the direction shown is off the game's own in this frame
+   * (degrees; 0: nothing carried). turn_edge: the degrees a change of camera in this frame began a carry with (0: none),
+   * and with it the probe: game_turn, the game's own direction in the world (what `turn` would have been), and
+   * game_cam, where the game last put its ordinary camera (game_cam_known). */
+  float turn_carry, turn_edge, game_turn[3], game_cam[3]; bool game_cam_known;
 } TfpCameraTraceRow;
 void tfp_camera_trace_edge(void);
 /* The arm drive's figures of the last primary draw, for the newest frame presented. The draw comes after the frame's

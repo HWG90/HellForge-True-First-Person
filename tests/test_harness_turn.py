@@ -2,7 +2,10 @@
 bound (veil_faults), on made-up rows and on rows cut from the soaks of 2026-11-27 (feel.59 + rounds 40, 43:
 tests/reference/turn; soak 60 is Stable, soak 62 Bodycam)."""
 import math
+import os
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -133,6 +136,71 @@ class VeilBound(unittest.TestCase):
         j = matrix.judge(cut(FOOT_SWAP))
         self.assertEqual(j["veil_faults"], [])
         self.assertAlmostEqual(j["veil_open_m"], 0.191, places=3)
+
+
+class Carried(unittest.TestCase):
+    """THE CARRY (src/camera_turn.h) run again over the logged frames by tests/camera_turn_replay.c: the rows' turn= is
+    the game's own direction on the build they were logged on, which carried nothing."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR"))
+        cls.tool = str(Path(cls.dir.name) / "camera_turn_replay")
+        subprocess.run([os.environ.get("CC", "cc"), "-std=c11", "-O1", "-ffp-contract=off", "-Wall", "-Wextra", "-Werror", "-I", str(ROOT / "src"),
+                        str(ROOT / "tests/camera_turn_replay.c"), "-lm", "-o", cls.tool], check=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.dir.cleanup()
+
+    def replay(self, name):
+        """(the frames as logged, the same frames as they are shown with the carry; each has "carried" and "began")."""
+        logged = trace.frames(cut(name))
+        text = "".join("%.3f %d %s\n" % (r["tick"], r["kind"], " ".join(repr(x) for x in (r["turn"] or [0, 0, 0]))) for r in logged)
+        out = subprocess.run([self.tool], input=text, capture_output=True, text=True, check=True).stdout.splitlines()
+        self.assertEqual(len(out), len(logged))
+        shown = []
+        for row, line in zip(logged, out):
+            x, y, z, carried, began = (float(v) for v in line.split())
+            shown.append(dict(row, turn=[x, y, z] if row["turn"] else None, carried=carried, began=began))
+        return logged, shown
+
+    def largest_turn(self, rows):
+        return max(matrix._degrees(a["turn"], b["turn"]) for a, b in zip(rows, rows[1:])
+                   if a["turn"] and b["turn"] and 0 < b["tick"] - a["tick"] <= matrix.GAP_MS)
+
+    def test_the_dive_swap_of_soak_60(self):
+        logged, shown = self.replay(DIVE_SWAP)
+        self.assertEqual([round(t["degrees"], 1) for t in matrix.turn_snaps(logged) if t["degrees"] > matrix.TURN_DEG], [29.0, 39.5])
+        self.assertEqual([t for t in matrix.turn_snaps(shown) if t["degrees"] > matrix.TURN_DEG], [])
+        self.assertLess(max(t["degrees"] for t in matrix.turn_snaps(shown)), 0.7)   # the frames of the two changes: the game's own 0.6 of a frame
+        # (the carry is the whole rotation between the two views, rebuilt level from the forward axes: 39.7 for 39.5)
+        self.assertEqual([round(r["began"]) for r in shown if r["began"]], [29, 40])
+        # no frame turns faster than 200 degrees a second (6.9 degrees at 34.5 ms, with the game's own 0.7)
+        self.assertGreater(self.largest_turn(logged), 39.0)
+        self.assertLess(self.largest_turn(shown), 200 * 0.0345 + 0.8)
+        # and it ends at the game's direction: 29 degrees in 218 ms, 39.5 in 296
+        first = next(i for i, r in enumerate(shown) if r["began"])
+        self.assertTrue(all(r["carried"] == 0 and r["turn"] == l["turn"] for r, l in zip(shown, logged)
+                            if 230 < r["tick"] - shown[first]["tick"] < 360))
+        self.assertEqual(shown[-1]["turn"], logged[-1]["turn"])
+
+    def test_the_prone_primary_back_of_soak_62(self):
+        logged, shown = self.replay(PRONE_BACK)
+        self.assertEqual([round(t["degrees"], 1) for t in matrix.turn_snaps(logged) if t["degrees"] > matrix.TURN_DEG], [72.7])
+        self.assertEqual([t for t in matrix.turn_snaps(shown) if t["degrees"] > matrix.TURN_DEG], [])
+        self.assertEqual([round(r["began"]) for r in shown if r["began"]], [74])   # 72.7 between the forward axes
+        self.assertLess(self.largest_turn(shown), 200 * 0.0345 + 1.7)   # the game's own turn there is up to 1.5 degrees a frame
+        first = next(i for i, r in enumerate(shown) if r["began"])
+        carried = [r["carried"] for r in shown[first:]]
+        self.assertTrue(all(a >= b for a, b in zip(carried, carried[1:])))   # monotone
+        self.assertTrue(all(r["carried"] == 0 for r in shown if r["tick"] - shown[first]["tick"] > 560))
+
+    def test_a_swap_on_foot_is_unchanged(self):
+        logged, shown = self.replay(FOOT_SWAP)
+        self.assertEqual(len(matrix.turn_snaps(logged)), 2)
+        self.assertTrue(all(r["carried"] == 0 and r["began"] == 0 for r in shown))
+        self.assertEqual([r["turn"] for r in shown], [r["turn"] for r in logged])
 
 
 if __name__ == "__main__":
