@@ -2894,6 +2894,62 @@ static void test_game_ik_foregrip(void) {
   CHECK(!tfp_arm_drive_held());
   gun_alive();
 }
+/* The held grip node changes while the gun's IK_left is on the first one (another node of the attachment becomes the
+ * target): the node slides to the new one over the same ease, never a jump. */
+static void test_game_ik_target_change(void) {
+  static const float zero[3] = {0, 0, 0};
+  float ahead[3], further[3];
+  forward_of_socket(.12f, -.04f, ahead);
+  forward_of_socket(.06f, 0, further);
+  TfpGraftMatrix hand, socket;
+  fresh();
+  grip_resources();
+  grip_world(&rig_world[TFP_GRAFT_RIG_SOCKET], zero, NULL);
+  gik_gun();
+  tfp_arm_drive_set(true, true, 1);
+  tfp_arm_drive_set_grip(true, false);
+  tfp_arm_drive_set_game_ik(true);
+  uint64_t t = 1000;
+  for (int i = 0; i < 20; i++) grip_draw(t += 16, &hand, &socket);
+  fit_grip(ahead);
+  for (int i = 0; i < 40; i++) grip_draw(t += 16, &hand, &socket);
+  const TfpGraftMatrix first = gik_target();
+  CHECK(gik_node_from(first.values + 12) < 1e-5f);
+  /* the attachment is made again (another node count): its grip node is now node 2, 0.06 m further along the gun */
+  TfpGraftMatrix moved, grip_root;
+  CHECK(read_fake(&f, worlds_of(FOREGRIP) + 64, &moved, 64) && read_fake(&f, worlds_of(FOREGRIP), &grip_root, 64));
+  for (unsigned i = 0; i < 3; i++) moved.values[12 + i] += further[i];
+  {
+    const uint64_t resource = UINT64_C(0xf9df21c8e52cac95);
+    make_unit(FOREGRIP, 3, object_of(GUN), (1u << 16) | 2);
+    put(object_of(FOREGRIP) + 0x358, &resource, 8);
+    p64(object_of(FOREGRIP) + 0x1e0, object_of(OPTIC));
+    put(worlds_of(FOREGRIP), &grip_root, 64), n32(names_of(FOREGRIP) + 2 * 4, GRIP_NAME_T), put(worlds_of(FOREGRIP) + 2 * 64, &moved, 64);
+  }
+  TfpGraftMatrix root;
+  CHECK(read_fake(&f, worlds_of(GUN), &root, 64));
+  const TfpGraftMatrix second = tfp_graft_relative(&moved, &root);
+  const float gap = sqrtf(further[0] * further[0] + further[1] * further[1] + further[2] * further[2]);
+  float most_step = 0;
+  TfpGraftLocal last = gik_node();
+  int on = -1;
+  for (int i = 0; i < 40; i++) {
+    grip_draw(t += 16, &hand, &socket);
+    const TfpGraftLocal now = gik_node();
+    const float step = gik_from(&now, last.position);
+    if (step > most_step) most_step = step;
+    last = now;
+    if (on < 0 && gik_from(&now, second.values + 12) < 1e-5f) on = i;
+  }
+  TfpArmDriveGrip g;
+  tfp_arm_drive_grip_take(&g);
+  printf("arm drive: game IK: the held grip node changed %.3f m away: the gun's IK_left slid there in %d frames, largest step %.4f m\n",
+         (double)gap, on + 1, (double)most_step);
+  CHECK(g.attachment && g.ik_share == 1 && on >= 14 && on <= 17);
+  CHECK(most_step <= 1.5f * .016f / (float)TFP_GIK_EASE_S * gap * 1.01f + 1e-5f);
+  gik_writes_only_node();
+  CHECK(tfp_arm_drive_release() && !tfp_arm_drive_held());
+}
 /* A gun whose IK_left has a node hanging on it is never moved; one with none, or a handgun, neither. */
 static void test_game_ik_refusals(void) {
   static const float zero[3] = {0, 0, 0};
@@ -2966,6 +3022,12 @@ static void test_game_ik_maths(void) {
   CHECK(tfp_gik_pose(&game, &target, .5, &out) && fabsf(out.position[1] - .18f) < 1e-6f && out.preserved[3] == 5);
   const TfpGraftMatrix m = tfp_graft_local_matrix(&out);
   CHECK(tfp_graft_rigid(&m) && fabsf(grip_degrees(&m, &ID) - 40.107f) < .01f);
+  { /* a change of grip node: from the old aim (share 0) to the new (share 1), halfway between */
+    TfpGraftMatrix aim;
+    CHECK(tfp_gik_cross(&game, &target, 1, &aim) && !memcmp(&aim, &target, 64));
+    CHECK(tfp_gik_cross(&game, &target, 0, &aim) && fabsf(aim.values[13] - .13f) < 1e-6f && grip_degrees(&aim, &ID) < .01f);
+    CHECK(tfp_gik_cross(&game, &target, .5, &aim) && fabsf(aim.values[13] - .18f) < 1e-6f && tfp_graft_rigid(&aim));
+  }
   /* the node where the game keeps it */
   TfpGraftMatrix parent = ID;
   parent.values[12] = 1;
@@ -3019,6 +3081,7 @@ int main(int argc, char **argv) {
   test_grip_gate_pinned();
   test_game_ik_maths();
   test_game_ik_foregrip();
+  test_game_ik_target_change();
   test_game_ik_refusals();
   if (argc == 3) test_rest_recorded(argv[2]);
   printf("arm drive: %u checks passed\n", checks);

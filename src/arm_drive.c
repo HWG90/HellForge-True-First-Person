@@ -255,6 +255,8 @@ static struct {
     uintptr_t target_object;
     uint32_t target_node;
     double progress;         /* tfp_gik_ease */
+    TfpGraftMatrix shown, from; /* the target as aimed at last frame; where a change of grip node slides from */
+    double cross;            /* that slide's progress (1: on the new target) */
     uint64_t at;             /* the clock at the last frame (0: none) */
   } gik;
 } d;
@@ -1201,8 +1203,12 @@ static void gik_frame(const Units *u, const Api *a) {
         rd(grip_worlds + 64 * (uintptr_t)d.grip.target_node, &grip, sizeof grip) && tfp_graft_rigid(&grip)) {
       const TfpGraftMatrix target = tfp_graft_relative(&grip, &parent);
       if (tfp_graft_rigid(&target)) {
-        if (!d.gik.has_target || d.gik.target_object != d.grip.target_object || d.gik.target_node != d.grip.target_node)
+        if (!d.gik.has_target || d.gik.target_object != d.grip.target_object || d.gik.target_node != d.grip.target_node) {
+          /* another grip node while the node is on its way or there: it slides from where it was aimed, never jumps */
+          if (d.gik.has_target && d.gik.progress > 0) d.gik.from = d.gik.shown, d.gik.cross = 0;
+          else d.gik.cross = 1;
           d.gik.target_object = d.grip.target_object, d.gik.target_node = d.grip.target_node;
+        }
         d.gik.target = target, d.gik.has_target = true;
       } else why = TFP_GIK_UNREAD;
     } else why = TFP_GIK_UNREAD;
@@ -1224,8 +1230,15 @@ static void gik_frame(const Units *u, const Api *a) {
     seen->ik_why = why, seen->ik_share = 0;
     return;
   }
+  TfpGraftMatrix aim = d.gik.target;
+  d.gik.cross = tfp_gik_ease(d.gik.cross, true, seconds);
+  if (d.gik.cross < 1) {
+    TfpGraftLocal from;
+    if (!tfp_gik_pose(&game, &d.gik.from, 1, &from) || !tfp_gik_cross(&from, &d.gik.target, tfp_gik_share(d.gik.cross), &aim)) aim = d.gik.target;
+  }
+  d.gik.shown = aim;
   TfpGraftLocal out;
-  if (!tfp_gik_pose(&game, &d.gik.target, share, &out)) {
+  if (!tfp_gik_pose(&game, &aim, share, &out)) {
     if (!gik_restore()) why = TFP_GIK_FAULT;
     seen->ik_why = why == TFP_GIK_NONE ? TFP_GIK_UNREAD : why, seen->ik_share = 0;
     return;

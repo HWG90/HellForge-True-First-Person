@@ -70,6 +70,16 @@ static inline bool tfp_gik_pose(const TfpGraftLocal *game, const TfpGraftMatrix 
   if (!(share > 0)) { *out = *game; return true; }
   return tfp_graft_mix(game, target, (float)share, out);
 }
+/* The target while the held grip node changes (another node, or the attachment made again): from where the node was aimed
+ * (`from`, a record with the game's other words) towards the new target `to` at `share`, so the node slides rather than
+ * jumps. false: a rotation is not rigid. */
+static inline bool tfp_gik_cross(const TfpGraftLocal *from, const TfpGraftMatrix *to, double share, TfpGraftMatrix *out) {
+  if (share >= 1) { *out = *to; return true; }
+  TfpGraftLocal mixed;
+  if (!tfp_graft_mix(from, to, (float)share, &mixed)) return false;
+  *out = tfp_graft_local_matrix(&mixed);
+  return true;
+}
 /* The node where the game keeps it, in the world: its parent's world matrix times the game's own record. */
 static inline TfpGraftMatrix tfp_gik_unmoved(const TfpGraftLocal *game, const TfpGraftMatrix *parent_world) {
   const TfpGraftMatrix local = tfp_graft_local_matrix(game);
