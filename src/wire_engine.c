@@ -1525,7 +1525,7 @@ bool tfp_wire_engine_seat(const TfpWire *w, TfpWireSeat *out) {
   out->seat = r.seat; out->see_through = see_through && see_through(); out->body = st->cockpit.body; out->suit = st->cockpit.suit;
   out->how = st->cockpit.how; out->distance = st->cockpit.distance; out->searches = st->cockpit.searches;
   out->looked = st->cockpit.looked; out->suits = st->cockpit.suits;
-  out->hidden = r.hidden; out->limbs = r.hidden_limbs; out->cockpit = r.hidden_cockpit;
+  out->hidden = r.hidden; out->limbs = r.hidden_limbs; out->cockpit = r.hidden_cockpit; out->gear = r.hidden_gear;
   return true;
 }
 static bool rt_head_stop(TfpRtHost *h, V *o1, V *o2) { return head_on(SH(h)) ? head_call(h, tfp_head_stop, o1, o2) : SH(h)->off.head_stop(h, o1, o2); }

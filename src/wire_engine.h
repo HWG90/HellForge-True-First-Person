@@ -117,6 +117,7 @@ typedef struct TfpWireSeat {
   float distance;                    /* its seat node from the body's root, m (inf: not measured) */
   uint32_t searches, looked, suits;  /* searches made since the seat began; units read and suits among them in the last */
   double hidden, limbs, cockpit;     /* rows head visibility owns: all, the limb slots, the suit's meshes */
+  double gear;                       /* round 43: ... and units hung on the body */
 } TfpWireSeat;
 bool tfp_wire_engine_seat(const TfpWire *w, TfpWireSeat *out);
 /* Rows head visibility hides now (its phase is "active"); 0: it hides nothing; -1: the module is not bound. Reads only. */
