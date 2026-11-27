@@ -12,6 +12,7 @@
 #include "reference/soak-slowing-steps.h"
 #include "reference/soak-21-alternation.h"
 #include "reference/soak-30-cut.h"
+#include "reference/soak-aim-entry.h"
 static int checks, failed;
 #define CHECK(c) do { ++checks; if (!(c)) { ++failed; printf("FAILED line %d: %s\n", __LINE__, #c); } } while (0)
 static const TfpContinuityTuning T = TFP_CONTINUITY_DEFAULT;
@@ -715,6 +716,61 @@ static CutEnd cut_end(float far, float dt_ms) {
   }
   e.cuts = (unsigned)CUTS(&c);
   return e;
+}
+/* Round 49, THE AIM ENTRY, made up: the head camera's eye standing, then the native view of full aim `far` m behind it
+ * (source NATIVE, quiet) and standing. `entry`: the presented eye's step in the frame of the change; `step`, `change`:
+ * its largest step from there on and the most a step changes; `half`: what is carried 80 ms after the change (the full
+ * aim's shortening would have it gone by then); `gone`: the time from the change to the first frame nothing is carried
+ * (ms; -1: never within a second). */
+typedef struct AimEntry { float entry, step, change, half, gone; unsigned edges, jumps; } AimEntry;
+static AimEntry aim_entry(float far, float dt, bool quiet) {
+  Run r; start(&r); AimEntry a = {0, 0, 0, 0, -1, 0, 0};
+  for (int i = 0; i < 12; ++i) frame(&r, 0, .2f, 1.7f, HEAD, false, false, dt);
+  r.travelled = r.change = 0;
+  for (int n = 0; n*dt < 1000; ++n) {
+    frame(&r, 0, .2f-far, 1.7f, NATIVE, true, quiet, dt);
+    if (!n) a.entry = r.step;
+    if (n*dt <= 80 && (n+1)*dt > 80) a.half = r.correction;
+    if (a.gone < 0 && r.correction == 0) a.gone = n*dt;
+  }
+  a.step = r.travelled; a.change = r.change; a.edges = (unsigned)r.c.edges; a.jumps = (unsigned)r.c.jumps;
+  return a;
+}
+/* Logged rows around an entry into full aim (tests/reference/soak-aim-entry.h) through the filter. The entry is the
+ * first row of the native view in full aim after a row of the head camera. `exact`: how far the presented eye is from
+ * the logged one at most in the rows before it; `entry`: the presented eye's step in the world in the entry's row;
+ * `logged_entry`: the same of the log; `step`: its largest step from the entry to the end of that full aim; `over`:
+ * the most such a step is beyond the wanted eye's own in its row; `change`: the most a step changes there, as a vector,
+ * beyond what the wanted eye's own changes by; `carried`: what the entry's row carries; `gone`: the time from the
+ * entry to the first row nothing is carried (ms); `jumps`: rows of that full aim taken up as jumps. */
+typedef struct AimLogged { float exact, entry, logged_entry, step, over, change, carried, gone; unsigned jumps, edges; } AimLogged;
+static AimLogged aim_logged(const AimFrame *rows, int count) {
+  TfpContinuity c; memset(&c, 0, sizeof c);
+  AimLogged a = {0, 0, 0, 0, 0, 0, 0, -1, 0, 0}; int entry = -1; float shown[3] = {0}, before[3] = {0}; bool ended = false;
+  for (int i = 0; i < count && !ended; ++i) {
+    const AimFrame *f = &rows[i]; float relative[3] = {0}, out[3], world[3], apart = 0;
+    for (int x = 0; x < 3; ++x) for (int k = 0; k < 3; ++k) relative[x] += (f->wanted[k]-f->root[k])*f->axes[x*3+k];
+    const uint64_t jumps = c.jumps, edges = c.edges;
+    const float carried = tfp_continuity_step_in(&c, relative, f->wanted, f->axes, (uint32_t)f->source, f->looked != 0, f->quiet != 0, 1000.0+(double)f->ms, 250, &T, out);
+    for (int k = 0; k < 3; ++k) { world[k] = f->root[k]; for (int x = 0; x < 3; ++x) world[k] += out[x]*f->axes[x*3+k]; apart += (world[k]-f->logged[k])*(world[k]-f->logged[k]); }
+    if (entry < 0 && i && f->source == NATIVE && f->quiet && f[-1].source == HEAD) entry = i;
+    if (entry < 0) { if (sqrtf(apart) > a.exact) a.exact = sqrtf(apart); }
+    else if (!f->quiet || f->source != NATIVE) ended = true;
+    else {
+      float step = 0, own = 0, change = 0, own_change = 0, logged = 0;
+      for (int k = 0; k < 3; ++k) { const float d = world[k]-shown[k], w = f->wanted[k]-f[-1].wanted[k], l = f->logged[k]-f[-1].logged[k];
+        const float e = d-(shown[k]-before[k]), v = w-(f[-1].wanted[k]-f[-2].wanted[k]);
+        step += d*d; own += w*w; logged += l*l; change += e*e; own_change += v*v; }
+      step = sqrtf(step); own = sqrtf(own); change = sqrtf(change); own_change = sqrtf(own_change);
+      if (i == entry) { a.entry = step; a.logged_entry = sqrtf(logged); a.carried = carried; a.edges = (unsigned)(c.edges-edges); }
+      else { if (step-own > a.over) a.over = step-own; if (change-own_change > a.change) a.change = change-own_change; }
+      if (step > a.step) a.step = step;
+      if (a.gone < 0 && carried == 0) a.gone = f->ms-rows[entry].ms;
+      a.jumps += (unsigned)(c.jumps-jumps);
+    }
+    memcpy(before, shown, sizeof shown); memcpy(shown, world, sizeof world);
+  }
+  return a;
 }
 int main(void) {
   Run r;
@@ -2063,6 +2119,89 @@ int main(void) {
     if (kind == 1) { CHECK(c.settles == 1 && still_at_limit); CHECK(ended >= 0 && ended*dt <= TFP_CONTINUITY_SETTLE_MS+dt+1e-3 && ended*dt >= TFP_CONTINUITY_SETTLE_MS-dt); }
     if (kind == 2) CHECK(c.settles == 1 && ended == 1);
     if (kind == 3) CHECK(c.settles == 0 && held_frames == 0);
+  }
+  /* Round 49, THE AIM ENTRY (src/camera_continuity.h): the native view of full aim come to straight from the head
+   * camera. Seen in every such entry of the soaks (16 of them, 0.15 to 0.41 m in one frame, nothing taken up). */
+  {
+    static const float fars[] = {.15f, .171f, .25f, .33f, .414f}, rates[] = {33.3f, 16.7f, 8.3f};
+    for (unsigned d = 0; d < 5; ++d) for (unsigned f = 0; f < 3; ++f) {
+      const AimEntry a = aim_entry(fars[d], rates[f], true);
+      printf("  THE AIM ENTRY, %.3f m at %.1f ms a frame: %.4f m in the frame of the change, then %.4f m a frame at most, step change %.4f m, %.3f m carried after 80 ms, let go after %.0f ms\n",
+             (double)fars[d], (double)rates[f], (double)a.entry, (double)a.step, (double)a.change, (double)a.half, (double)a.gone);
+      /* taken up as a change of camera: the presented eye does not move in that frame */
+      CHECK(a.edges == 1 && a.jumps == 0 && a.entry < 1e-4f);
+      /* no step over 0.06 m at 33 ms a frame (1.8 m/s at any frame time), and no step changes by 0.03 m */
+      CHECK(a.step <= .06f*rates[f]/33.3f+1e-4f);
+      CHECK(a.change < .03f);
+      /* its own curve: not ended within the 80 ms of full aim, its length by the distance, 150 to 350 ms */
+      CHECK(a.half > fars[d]/2);
+      CHECK(a.gone >= 150 && a.gone <= 350+rates[f]);
+    }
+    CHECK(aim_entry(.414f, 33.3f, true).gone > aim_entry(.171f, 33.3f, true).gone+60); /* by the distance */
+    /* the same change of camera outside full aim is what it was: taken up, on the ordinary curve */
+    const AimEntry plain = aim_entry(.171f, 33.3f, false);
+    CHECK(plain.edges == 1 && plain.entry < 1e-4f && plain.gone > 150 && plain.gone < 250);
+    /* ... and when full aim comes two frames after it, what is carried ends within 80 ms as before (the curve is
+     * no entry's) */
+    start(&r);
+    for (int i = 0; i < 12; ++i) frame(&r, 0, .2f, 1.7f, HEAD, false, false, 33.3f);
+    frame(&r, 0, 0, 1.7f, NATIVE, true, false, 33.3f); frame(&r, 0, 0, 1.7f, NATIVE, true, false, 33.3f);
+    CHECK(r.correction > .15f);
+    for (int i = 0; i < 4; ++i) frame(&r, 0, 0, 1.7f, NATIVE, true, true, 33.3f);
+    CHECK(r.correction == 0);
+    /* The other way, the native view of full aim left for the head camera in a quiet frame: not taken up, as before. */
+    start(&r);
+    for (int i = 0; i < 12; ++i) frame(&r, 0, 0, 1.7f, NATIVE, true, true, 33.3f);
+    frame(&r, 0, .2f, 1.7f, HEAD, false, true, 33.3f);
+    CHECK(r.correction == 0 && r.shown[1] == .2f && r.c.edges == 0 && !r.c.active);
+    /* Nor is the way back from a head-camera frame that was itself in full aim (the gap inside full aim: the native
+     * view left for a frame or two and come back to, the aim never let go): shown as it is both ways, as before. */
+    start(&r);
+    for (int i = 0; i < 12; ++i) frame(&r, 0, 0, 1.7f, NATIVE, true, true, 33.3f);
+    for (int i = 0; i < 2; ++i) { frame(&r, 0, .2f, 1.7f, HEAD, false, true, 33.3f); CHECK(r.correction == 0 && r.shown[1] == .2f); }
+    frame(&r, 0, 0, 1.7f, NATIVE, true, true, 33.3f);
+    CHECK(r.correction == 0 && r.shown[1] == 0 && r.c.edges == 0 && !r.c.active);
+    /* A jump inside full aim is not taken up: the sights stay on the eye. With nothing carried ... */
+    start(&r);
+    for (int i = 0; i < 12; ++i) frame(&r, 0, 0, 1.7f, NATIVE, true, true, 33.3f);
+    frame(&r, 0, .3f, 1.7f, NATIVE, true, true, 33.3f);
+    CHECK(r.correction == 0 && r.shown[1] == .3f && r.c.jumps == 0 && r.c.edges == 0);
+    /* ... and while an entry is let out: the jump is shown whole in its frame, and the curve goes on as it was (what
+     * is carried is what it is without the jump, frame for frame) */
+    {
+      Run still, jumped; start(&still); start(&jumped);
+      for (int i = 0; i < 12; ++i) { frame(&still, 0, .2f, 1.7f, HEAD, false, false, 33.3f); frame(&jumped, 0, .2f, 1.7f, HEAD, false, false, 33.3f); }
+      for (int i = 0; i < 12; ++i) {
+        frame(&still, 0, 0, 1.7f, NATIVE, true, true, 33.3f); frame(&jumped, i < 3 ? 0 : .3f, 0, 1.7f, NATIVE, true, true, 33.3f);
+        if (i == 2) CHECK(jumped.correction > .1f); /* still carried when the jump comes */
+        CHECK(fabsf(still.correction-jumped.correction) < 1e-6f && fabsf(jumped.shown[1]-still.shown[1]) < 1e-6f);
+        CHECK(fabsf(jumped.shown[0]-(i < 3 ? 0 : .3f)) < 1e-6f);
+      }
+      CHECK(jumped.c.jumps == 0 && jumped.c.edges == 1 && jumped.correction == 0);
+    }
+    /* The aim let go while the entry is let out: the curve goes on to its end, nothing steps. */
+    start(&r);
+    for (int i = 0; i < 12; ++i) frame(&r, 0, .2f, 1.7f, HEAD, false, false, 33.3f);
+    for (int i = 0; i < 2; ++i) frame(&r, 0, 0, 1.7f, NATIVE, true, true, 33.3f);
+    r.travelled = r.change = 0;
+    for (int i = 0; i < 12; ++i) frame(&r, 0, 0, 1.7f, NATIVE, true, false, 33.3f);
+    CHECK(r.correction == 0 && r.travelled < .06f && r.change < .03f && r.c.jumps == 0);
+    /* The logged entries (tests/reference/soak-aim-entry.h). */
+    static const struct { const char *name; const AimFrame *rows; int count; float logged; } entries[] = {
+      {"soak 62-C 19:43:55.003", soak62_aim_entry, (int)(sizeof soak62_aim_entry/sizeof *soak62_aim_entry), .171f},
+      {"soak 51-B 23:23:18.846", soak51_aim_entry, (int)(sizeof soak51_aim_entry/sizeof *soak51_aim_entry), .414f},
+      {"soak 52-C 23:35:01.309", soak52_aim_entry, (int)(sizeof soak52_aim_entry/sizeof *soak52_aim_entry), .389f}};
+    for (unsigned e = 0; e < 3; ++e) {
+      const AimLogged a = aim_logged(entries[e].rows, entries[e].count);
+      printf("  THE AIM ENTRY, %s: the log %.3f m in one frame; now %.4f m in that frame (%.3f m carried), then %.4f m a frame at most, %.4f m beyond the rig eye's own, step change %.4f m beyond its own, let go after %.0f ms\n",
+             entries[e].name, (double)a.logged_entry, (double)a.entry, (double)a.carried, (double)a.step, (double)a.over, (double)a.change, (double)a.gone);
+      CHECK(a.exact < .005f);                               /* the rows before the entry are the log's */
+      CHECK(fabsf(a.logged_entry-entries[e].logged) < .002f);
+      CHECK(a.edges == 1 && a.jumps == 0);
+      CHECK(a.entry < .02f && fabsf(a.carried-entries[e].logged) < .02f);
+      CHECK(a.step < .06f && a.over < .05f && a.change < .025f);
+      CHECK(a.gone >= 150 && a.gone <= 380);
+    }
   }
   printf("camera continuity: %d checks, %d failed\n", checks, failed);
   return failed != 0;
