@@ -330,6 +330,7 @@ def measure(rows, stance=True):
             ramp = stance_ramp.ramp(rows, i, shown, POP_M)
             if ramp:
                 whose, beyond, body, after, bare = "stance", ramp[0], ramp[1], 1, min(bare, ramp[0])
+                along = across = None   # they were split from the whole change, not from what is left
         found.append({"at": c["at"], "written": c["written"], "tick": c["tick"], "kind": c["kind"], "looked": c["looked"], "taken": c["taken"], "carried": c["carried"], "shown": shown,
                       "lengths": change["lengths"], "wanted": wanted, "root": _length(change["root"]) if change["root"] else None,
                       "body": body, "after": after, "beyond": beyond, "whose": whose, "along": along, "across": across,
