@@ -48,14 +48,25 @@ static const char *const tfp_cockpit_hud_names[TFP_COCKPIT_HUD_COUNT] = {"strata
  * STRATAGEMS 40..210 x 30..68 (the opened list grows down: room to 0.52 h); compass and banner 715..1285 x 28..115;
  * objective 1530..1995 x 40..150 (more objectives grow down: room to 0.32 h); weapon panel 45..480 x 965..1105;
  * the reticle and the suit's gauges 840..1160 x 475..670; TAB 1895..1950 x 1060..1092. */
-static inline void tfp_cockpit_hud_reserved(float w, float h, TfpCockpitBox out[TFP_COCKPIT_HUD_COUNT]) {
-  const float cx = w * 0.5f, cy = h * 0.5f;
-  out[TFP_COCKPIT_HUD_STRATAGEMS] = (TfpCockpitBox){0, 0, 0.40f * h, 0.52f * h};
+/* inset: how far in from each side the HUD's sides hang (0: the screen's edges; see tfp_cockpit_hud_inset). */
+static inline void tfp_cockpit_hud_reserved_at(float w, float h, float inset, TfpCockpitBox out[TFP_COCKPIT_HUD_COUNT]) {
+  const float cx = w * 0.5f, cy = h * 0.5f, l = inset, r = w - inset;
+  out[TFP_COCKPIT_HUD_STRATAGEMS] = (TfpCockpitBox){l, 0, l + 0.40f * h, 0.52f * h};
   out[TFP_COCKPIT_HUD_COMPASS] = (TfpCockpitBox){cx - 0.30f * h, 0, cx + 0.30f * h, 0.13f * h};
-  out[TFP_COCKPIT_HUD_OBJECTIVES] = (TfpCockpitBox){w - 0.48f * h, 0, w, 0.32f * h};
-  out[TFP_COCKPIT_HUD_WEAPON] = (TfpCockpitBox){0, h - 0.20f * h, 0.48f * h, h};
+  out[TFP_COCKPIT_HUD_OBJECTIVES] = (TfpCockpitBox){r - 0.48f * h, 0, r, 0.32f * h};
+  out[TFP_COCKPIT_HUD_WEAPON] = (TfpCockpitBox){l, h - 0.20f * h, l + 0.48f * h, h};
   out[TFP_COCKPIT_HUD_RETICLE] = (TfpCockpitBox){cx - 0.20f * h, cy - 0.15f * h, cx + 0.20f * h, cy + 0.15f * h};
-  out[TFP_COCKPIT_HUD_PROMPT] = (TfpCockpitBox){w - 0.12f * h, h - 0.09f * h, w, h};
+  out[TFP_COCKPIT_HUD_PROMPT] = (TfpCockpitBox){r - 0.12f * h, h - 0.09f * h, r, h};
+}
+static inline void tfp_cockpit_hud_reserved(float w, float h, TfpCockpitBox out[TFP_COCKPIT_HUD_COUNT]) {
+  tfp_cockpit_hud_reserved_at(w, h, 0, out);
+}
+/* A screen wider than 16:9 (21:9, 32:9): the game may keep its HUD in a centred 16:9 area instead of the screen's edges
+ * (not measured: the user's screens are 16:9). The frame keeps clear of both: what hangs between HUD places (the rails,
+ * the dash) is laid out inside this inset, the pillars at the screen's edges at heights no HUD place uses. */
+static inline float tfp_cockpit_hud_inset(float w, float h) {
+  const float wide = h * 16.0f / 9.0f;
+  return w > wide ? (w - wide) * 0.5f : 0;
 }
 static inline bool tfp_cockpit_box_overlap(TfpCockpitBox a, TfpCockpitBox b) {
   return a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
@@ -113,6 +124,7 @@ static inline void tfp_cockpit_layout(float w, float h, TfpCockpitLayout *l) {
   memset(l, 0, sizeof *l);
   l->w = w, l->h = h, l->unit = h / 1080.0f;
   const float cx = w * 0.5f, pillar = 0.072f * h, dash_top = h - 0.11f * h, rail = 0.05f * h, in = 0.018f * h;
+  const float inset = tfp_cockpit_hud_inset(w, h); /* 0 on 16:9 and narrower */
   l->bolt_r = 0.0055f * h;
   /* the left pillar: below the stratagem list, above the weapon panel; a brace into the dash's corner */
   const float left_top = 0.55f * h, left_bottom = 0.78f * h;
@@ -126,7 +138,7 @@ static inline void tfp_cockpit_layout(float w, float h, TfpCockpitLayout *l) {
   tfp_cockpit_bolt(l, w - pillar * 0.5f, right_top + in), tfp_cockpit_bolt(l, w - pillar * 0.5f, dash_top - in);
   tfp_cockpit_bolt(l, w - pillar * 0.5f, (right_top + dash_top) * 0.5f);
   /* the dash: right of the weapon panel, left of the key prompt, with a raised hood in the middle */
-  const float dash_x0 = 0.50f * h, dash_x1 = w - 0.14f * h;
+  const float dash_x0 = inset + 0.50f * h, dash_x1 = w - inset - 0.14f * h;
   tfp_cockpit_rect(l, dash_x0, dash_top, dash_x1, h, TFP_COCKPIT_FACE_UP);
   l->dash = (TfpCockpitBox){dash_x0, dash_top, dash_x1, h};
   tfp_cockpit_bolt(l, dash_x0 + in, dash_top + in), tfp_cockpit_bolt(l, dash_x1 - in, dash_top + in);
@@ -145,7 +157,7 @@ static inline void tfp_cockpit_layout(float w, float h, TfpCockpitLayout *l) {
   for (float x = dash_x0 + 0.25f * h; x < dash_x1 - 0.05f * h && l->seams < 8; x += 0.25f * h)
     if (x < cx - 0.40f * h || x > cx + 0.40f * h) l->seam_x[l->seams++] = x;
   /* the roof rails: in the gaps between the stratagem list, the compass and the objectives */
-  const float rail_l0 = 0.42f * h, rail_l1 = cx - 0.32f * h, rail_r0 = cx + 0.32f * h, rail_r1 = w - 0.50f * h;
+  const float rail_l0 = inset + 0.42f * h, rail_l1 = cx - 0.32f * h, rail_r0 = cx + 0.32f * h, rail_r1 = w - inset - 0.50f * h;
   if (rail_l1 - rail_l0 >= 0.05f * h) {
     tfp_cockpit_rect(l, rail_l0, 0, rail_l1, rail, TFP_COCKPIT_FACE_DOWN);
     tfp_cockpit_bolt(l, rail_l0 + in, rail * 0.5f), tfp_cockpit_bolt(l, rail_l1 - in, rail * 0.5f);
@@ -382,7 +394,10 @@ static inline bool tfp_cockpit_hud_show(TfpCockpitHud *hud, const OvApi *ov, con
   ov->set_open(hud->panel, 1);
   return true;
 }
-static inline void tfp_cockpit_hud_hide(TfpCockpitHud *hud) { if (hud->panel) hud->ov->set_open(hud->panel, 0); }
+/* ov: the host as it is now. A panel of a host since reloaded (or gone) is not touched: its API may be unloaded. */
+static inline void tfp_cockpit_hud_hide(TfpCockpitHud *hud, const OvApi *ov) {
+  if (hud->panel && ov && ov == hud->ov) ov->set_open(hud->panel, 0);
+}
 static inline void tfp_cockpit_hud_opacity(TfpCockpitHud *hud, float opacity) {
   __atomic_store_n(&hud->opacity_pct, tfp_cockpit_pct(opacity), __ATOMIC_RELAXED);
 }
@@ -393,8 +408,8 @@ static inline bool tfp_cockpit_hud_drawn(TfpCockpitHud *hud, char *description, 
   return true;
 }
 /* Live replace: closed for good; a frame already inside the draw finishes, the next one closes it again. */
-static inline void tfp_cockpit_hud_retire(TfpCockpitHud *hud) {
+static inline void tfp_cockpit_hud_retire(TfpCockpitHud *hud, const OvApi *ov) {
   __atomic_store_n(&hud->retired, 1, __ATOMIC_RELEASE);
-  if (hud->panel) hud->ov->set_open(hud->panel, 0);
+  tfp_cockpit_hud_hide(hud, ov);
 }
 #endif

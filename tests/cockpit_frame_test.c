@@ -82,16 +82,19 @@ static void hud_kept_clear(void) {
     const float w = sizes[s][0], h = sizes[s][1];
     new_host();
     draw_at(w, h, 1);
-    TfpCockpitBox r[TFP_COCKPIT_HUD_COUNT];
-    tfp_cockpit_hud_reserved(w, h, r);
+    /* the HUD as anchored to the screen's edges, and (wider than 16:9) as kept in a centred 16:9 area: either way clear */
+    TfpCockpitBox r[2][TFP_COCKPIT_HUD_COUNT];
+    tfp_cockpit_hud_reserved(w, h, r[0]);
+    tfp_cockpit_hud_reserved_at(w, h, tfp_cockpit_hud_inset(w, h), r[1]);
     int over = 0, outside = 0;
     for (int i = 0; i < ncalls; i++) {
-      for (int k = 0; k < TFP_COCKPIT_HUD_COUNT; k++)
-        if (tfp_cockpit_box_overlap(calls[i].box, r[k])) {
-          over++;
-          printf("  %gx%g: %s %.0f,%.0f..%.0f,%.0f covers the %s\n", w, h, calls[i].what, calls[i].box.x0, calls[i].box.y0,
-                 calls[i].box.x1, calls[i].box.y1, tfp_cockpit_hud_names[k]);
-        }
+      for (int a = 0; a < 2; a++)
+        for (int k = 0; k < TFP_COCKPIT_HUD_COUNT; k++)
+          if (tfp_cockpit_box_overlap(calls[i].box, r[a][k])) {
+            over++;
+            printf("  %gx%g: %s %.0f,%.0f..%.0f,%.0f covers the %s (%s)\n", w, h, calls[i].what, calls[i].box.x0, calls[i].box.y0,
+                   calls[i].box.x1, calls[i].box.y1, tfp_cockpit_hud_names[k], a ? "centred 16:9" : "screen edges");
+          }
       if (calls[i].box.x0 < -1 || calls[i].box.y0 < -1 || calls[i].box.x1 > w + 1 || calls[i].box.y1 > h + 1) outside++;
     }
     CHECK(over == 0);
@@ -107,6 +110,20 @@ static void hud_kept_clear(void) {
     CHECK((l.window.x1 - l.window.x0) * (l.window.y1 - l.window.y0) > 0.75f * w * h);
     CHECK(ncalls < 120); /* cheap: one panel, about 95 calls */
   }
+}
+static void hud_inset_of_wide_screens(void) {
+  CHECK(tfp_cockpit_hud_inset(1920, 1080) == 0 && tfp_cockpit_hud_inset(3840, 2160) == 0 && tfp_cockpit_hud_inset(1280, 1024) == 0);
+  CHECK(fabsf(tfp_cockpit_hud_inset(3440, 1440) - 440) < 0.5f && fabsf(tfp_cockpit_hud_inset(2560, 1080) - 320) < 0.5f);
+  TfpCockpitBox a[TFP_COCKPIT_HUD_COUNT], b[TFP_COCKPIT_HUD_COUNT];
+  tfp_cockpit_hud_reserved(3440, 1440, a);
+  tfp_cockpit_hud_reserved_at(3440, 1440, 440, b);
+  CHECK(b[TFP_COCKPIT_HUD_STRATAGEMS].x0 == 440 && b[TFP_COCKPIT_HUD_OBJECTIVES].x1 == 3000 && b[TFP_COCKPIT_HUD_WEAPON].x0 == 440 &&
+        b[TFP_COCKPIT_HUD_PROMPT].x1 == 3000 && b[TFP_COCKPIT_HUD_RETICLE].x0 == a[TFP_COCKPIT_HUD_RETICLE].x0 &&
+        b[TFP_COCKPIT_HUD_COMPASS].x0 == a[TFP_COCKPIT_HUD_COMPASS].x0);
+  /* 21:9 keeps both rails and the dash, inside the centred area's HUD */
+  TfpCockpitLayout l;
+  tfp_cockpit_layout(3440, 1440, &l);
+  CHECK(l.plates >= 9 && l.dash.x0 >= 440 + 0.48f * 1440 && l.dash.x1 <= 3000 - 0.12f * 1440);
 }
 static void colours_are_the_theme_faded(void) {
   new_host();
@@ -290,7 +307,12 @@ static void hud_show_draw_hide(void) {
   CHECK(ncalls > 20 && ncalls < 120 && !bad_colour);
   CHECK(tfp_cockpit_hud_drawn(&hud, d, sizeof d) && strstr(d, "2560 x 1440, margins left 104 px"));
   printf("  drawn: %s\n", d);
-  tfp_cockpit_hud_hide(&hud);
+  OvApi other = api;                                   /* a reloaded host: the old one's panel is not touched */
+  const int closes = host.closes;
+  tfp_cockpit_hud_hide(&hud, &other);
+  tfp_cockpit_hud_hide(&hud, NULL);
+  CHECK(host.closes == closes && host.open == 1);
+  tfp_cockpit_hud_hide(&hud, &api);
   CHECK(host.open == 0);
   CHECK(tfp_cockpit_hud_show(&hud, &api, "goose.true-first-person/cockpit-frame@1-2", 0.9f, why, sizeof why));
   CHECK(host.registered == 2 && host.open == 1);       /* registered once, opened again */
@@ -299,7 +321,7 @@ static void hud_show_draw_hide(void) {
   CHECK(tfp_cockpit_hud_drawn(&hud, d, sizeof d));
   tfp_cockpit_hud_opacity(&hud, 0.4f);
   CHECK(hud.opacity_pct == 40);
-  tfp_cockpit_hud_retire(&hud);                         /* live replace: closed, a late frame closes it again and draws nothing */
+  tfp_cockpit_hud_retire(&hud, &api);                   /* live replace: closed, a late frame closes it again and draws nothing */
   CHECK(host.open == 0);
   host.open = 1; ncalls = 0;
   host.def.draw(&frame, host.def.user);
@@ -310,6 +332,7 @@ static void hud_show_draw_hide(void) {
 int main(void) {
   measured_boxes_inside_the_reserve();
   hud_kept_clear();
+  hud_inset_of_wide_screens();
   colours_are_the_theme_faded();
   no_colour_literals();
   shown_while_seated_and_hidden_on_leave();

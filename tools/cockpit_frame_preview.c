@@ -32,6 +32,11 @@ int main(int argc, char **argv) {
   TfpCockpitBox zone[TFP_COCKPIT_HUD_COUNT];
   tfp_cockpit_hud_reserved(w, h, zone);
   for (int i = 0; i < TFP_COCKPIT_HUD_COUNT; i++) printf("zone %.2f %.2f %.2f %.2f %s\n", zone[i].x0, zone[i].y0, zone[i].x1, zone[i].y1, tfp_cockpit_hud_names[i]);
+  const float inset = tfp_cockpit_hud_inset(w, h); /* wider than 16:9: the HUD kept in a centred 16:9 area as well */
+  if (inset > 0) {
+    tfp_cockpit_hud_reserved_at(w, h, inset, zone);
+    for (int i = 0; i < TFP_COCKPIT_HUD_COUNT; i++) printf("zone %.2f %.2f %.2f %.2f %s (16:9)\n", zone[i].x0, zone[i].y0, zone[i].x1, zone[i].y1, tfp_cockpit_hud_names[i]);
+  }
   char d[300];
   tfp_cockpit_describe(&l, d, sizeof d);
   printf("describe %s\n", d);

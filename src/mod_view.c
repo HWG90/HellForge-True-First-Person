@@ -1519,14 +1519,17 @@ static TfpCockpitFrame cockpit_frame;
 static TfpCockpitHud cockpit_hud;
 static char cockpit_panel_id[96];
 static void cockpit_say(void *u, const char *line) { (void)u; say("%s", line); }
-static bool cockpit_show(void *u, float opacity, char *why, size_t why_size) {
-  (void)u;
+static const OvApi *cockpit_host(void) { /* the host as it is now (on the seat's edges only) */
   HMODULE host = GetModuleHandleA(OV_HOST_DLL);
   OvApiFn get = host ? (OvApiFn)(void *)GetProcAddress(host, "ov_api") : NULL;
-  if (!cockpit_panel_id[0]) tfp_cockpit_panel_id(cockpit_panel_id, sizeof cockpit_panel_id, (unsigned long)GetCurrentProcessId(), (unsigned long long)GetTickCount64());
-  return tfp_cockpit_hud_show(&cockpit_hud, get ? get(2) : NULL, cockpit_panel_id, opacity, why, why_size);
+  return get ? get(2) : NULL;
 }
-static void cockpit_hide(void *u) { (void)u; tfp_cockpit_hud_hide(&cockpit_hud); }
+static bool cockpit_show(void *u, float opacity, char *why, size_t why_size) {
+  (void)u;
+  if (!cockpit_panel_id[0]) tfp_cockpit_panel_id(cockpit_panel_id, sizeof cockpit_panel_id, (unsigned long)GetCurrentProcessId(), (unsigned long long)GetTickCount64());
+  return tfp_cockpit_hud_show(&cockpit_hud, cockpit_host(), cockpit_panel_id, opacity, why, why_size);
+}
+static void cockpit_hide(void *u) { (void)u; tfp_cockpit_hud_hide(&cockpit_hud, cockpit_host()); }
 static void cockpit_opacity(void *u, float opacity) { (void)u; tfp_cockpit_hud_opacity(&cockpit_hud, opacity); }
 static bool cockpit_drawn(void *u, char *description, size_t size) { (void)u; return tfp_cockpit_hud_drawn(&cockpit_hud, description, size); }
 static void cockpit_frame_tick(void) {
@@ -1773,7 +1776,7 @@ __declspec(dllexport) int hellforge_mod_unload(const HfApi *api, HfMod *mod, uin
   eng_set_script_probe(NULL);
   tfp_mod_editor_retire();   /* its panel stays registered with the overlay host: closed, and drawing nothing */
   tfp_mod_panel_retire();    /* the settings panel likewise */
-  tfp_cockpit_hud_retire(&cockpit_hud); /* round 45: the cockpit frame's HUD panel likewise (closed already: no seat is held) */
+  tfp_cockpit_hud_retire(&cockpit_hud, cockpit_host()); /* round 45: the cockpit frame's HUD panel likewise (closed already: no seat is held) */
   unsigned restored = tfp_win_restore_slots() + tfp_win_pose_restore_slots() + render_restored;
   hf->log(mod, "Live %s: the mod held nothing in the game; %u dispatch slot(s) put back; this build does nothing from here on.",
           reason == HF_UNLOAD_REPLACE ? "replace" : "removal", restored);
