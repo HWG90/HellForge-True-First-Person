@@ -200,6 +200,26 @@
  *  - More than max_m is not carried (the rest is shown at once); a step of more than teleport_m, a pause longer
  *    than the helper's frame gap, or a value that is not finite starts again with no correction.
  *  - quiet (full aim): nothing new is taken up and what is carried ends within 80 ms; the sights stay on the eye.
+ *    THE AIM ENTRY (round 49) is the one exception. A swap with the aim held (key 2 in full aim) leaves the native
+ *    view for the head camera and comes back to it with full aim already on: the first native frame is quiet, the
+ *    change of camera was not taken up, and the eye went from the head camera's place to the rig's in that one frame.
+ *    Seen at every such entry of the soaks (16 scanned in soaks 36 to 38, 50 to 52 and 62: 0.151 to 0.414 m in one
+ *    frame, most of it back along the view; tests/reference/soak-aim-entry.h). So a change of camera from the head
+ *    camera (TFP_CONTINUITY_SOURCE_HEAD) to the native view (TFP_CONTINUITY_SOURCE_NATIVE) in a quiet frame, the head
+ *    camera's last frame not quiet (as at all of those entries: the aim comes on with the native view), is taken
+ *    up as any change of camera is, and let out on a curve of its own that the 80 ms do not shorten: the ordinary
+ *    cubic from where the eye was, its length by the distance (the largest acceleration ease_accel, as for any
+ *    correction), and no shorter than keeps the presented eye under TFP_CONTINUITY_AIM_ENTRY_SPEED on it (0.06 m in a
+ *    frame of 33 ms: from 0.36 m on that is the longer of the two), within min_ms and max_ms: 194 ms for 0.15 m,
+ *    207 ms for 0.171 m, 345 ms for 0.414 m. While it runs the sights are off the rig eye by what is still carried
+ *    (the aim-in animation is running then). Nothing else of full aim is changed: a jump inside it is not taken up,
+ *    with or without that curve running (the curve goes on as it was and the jump is shown whole); the native view of
+ *    full aim left for the head camera in a quiet frame is not taken up, nor is the way back from a head-camera frame
+ *    that was itself quiet (a frame or two of the head camera inside full aim: both ways are shown as they are, and
+ *    the eye is back on the sights in the frame the native view is); and a correction that is no entry's (taken
+ *    up before full aim came) still ends within the 80 ms. A curve begun after it (a frame taken up once the aim is
+ *    let go) is no entry's. (The round-48 prototype, a fixed 150 ms, replayed on the logged entries: steps of 0.119 and 0.133 m a frame
+ *    for 0.414 m.)
  *  - THE CUT (round 19, tfp_continuity_step_cut). Out of an emote the game cuts the body's pose in one frame when the
  *    diver moves (sprint, dive, dive-back), and the head camera rides the head: the root jumps or turns (a dive-back's
  *    yaw flips 160 degrees) and the head is 0.34 to 0.61 m further on against it in that frame, from rest. Nothing is
@@ -248,6 +268,9 @@ typedef struct TfpContinuityTuning { float pop_m, pop_accel, ease_accel, min_ms,
 #define TFP_CONTINUITY_NEAR .9f       /* of the measure: once in a run a frame from here on counts as a jump, if it goes the way of the jump before it */
 #define TFP_CONTINUITY_STOP .2f       /* of the measure: a step under this (and a quarter of the step predicted) is the eye stopping, whichever way it points */
 #define TFP_CONTINUITY_QUIET_MS 80.0f
+#define TFP_CONTINUITY_SOURCE_HEAD 1u   /* THE AIM ENTRY: the caller's number for the head camera (SMOOTH_HEAD, src/camera_helper.c) */
+#define TFP_CONTINUITY_SOURCE_NATIVE 2u /* ... and for the native view (SMOOTH_NATIVE; the repeated native argument is given as it) */
+#define TFP_CONTINUITY_AIM_ENTRY_SPEED 1.8f /* ... the presented eye's fastest on that curve (m/s): 0.06 m in a frame of 33 ms */
 #define TFP_CONTINUITY_SPEED_FRAMES 4u /* the frames looked at for the speed believed when a run's time is over */
 #define TFP_CONTINUITY_CUT_M .25f      /* THE CUT: the head's move against the root in one frame, at least */
 #define TFP_CONTINUITY_CUT_ACCEL 150.0f /* ... or this (m/s^2) times the frame's time squared, whichever is more */
@@ -287,6 +310,8 @@ typedef struct TfpContinuity {
   float head[3], head_speed;             /* last frame: the head in the root's frame, and its speed the frame before a cut (m/s; unknown: huge) */
   bool head_placed; float head_world[3]; /* last frame: the same head in the world, where the world was given */
   bool rest_end;                         /* the curve is a cut's: it ends with no acceleration either (tfp_continuity_curve) */
+  bool aim_entry;                        /* THE AIM ENTRY: the curve is an entry's into full aim; the 80 ms of full aim do not shorten it */
+  bool quiet;                            /* ... last frame was in full aim */
   uint64_t cuts;                         /* frames taken up as a cut */
   float largest;                         /* the largest correction carried since the reader last cleared it */
   bool settle_ok;                        /* round 24, set by the caller before each frame: THE SETTLE may begin or go on in it */
@@ -633,7 +658,9 @@ static inline float tfp_continuity_step_cut(TfpContinuity *c, const float *wante
   const bool near = c->run && within && !c->neared && size > TFP_CONTINUITY_NEAR*limit && alike > .7f*size*tfp_continuity_length(last);
   const bool jump = !quiet && !edge && detect && (over || near) && !slowing && !onset && !resumed && !returned;
   const bool believe = jump && !within; /* jumps for longer than the run: a new speed, not a re-seated rig */
-  const bool take = !quiet && size > 1e-4f && (edge || jump);
+  /* THE AIM ENTRY (round 49): the native view of full aim come to straight from the head camera. */
+  const bool aim_entry = quiet && !c->quiet && edge && !cut && source == TFP_CONTINUITY_SOURCE_NATIVE && c->source == TFP_CONTINUITY_SOURCE_HEAD;
+  const bool take = size > 1e-4f && ((!quiet && (edge || jump)) || aim_entry);
   /* THE LET-DOWN AT A SLOWING: the frame before was taken up and this one is followed as slowing down. What the
    * presented eye still had of the kept speed, less this frame's own, as far as it points at the wanted eye. */
   if (!take && !quiet && !c->calm && over && slowing && !stopped) {
@@ -673,11 +700,15 @@ static inline float tfp_continuity_step_cut(TfpContinuity *c, const float *wante
     /* A cut's curve, the quartic (tfp_continuity_curve), starts at 12 d / T^2 + 6 v / T: as long again by the square
      * root of 2 for the same largest acceleration, and up to max_ms as long again by as much. */
     if (cut) duration = fminf(fmaxf(1000*(6*rate+sqrtf(36*rate*rate+48*a*length))/(2*a), t->min_ms), t->max_ms*1.41421356f);
+    /* THE AIM ENTRY: no shorter than keeps the presented eye under its speed (a cubic from rest is fastest half way,
+     * at 1.5 d / T). */
+    if (aim_entry) duration = fminf(fmaxf(duration, 1500*length/TFP_CONTINUITY_AIM_ENTRY_SPEED), t->max_ms);
     /* THE LET-DOWN AT A SLOWING, in a frame taken up: measured anew, against the wanted eye where the jump put it. */
     tfp_continuity_glide(c, next, from_speed, true, duration, quiet, dt, t, glide);
     for (unsigned i = 0; i < 3; ++i) next[i] += glide[i];
     tfp_continuity_begin(c, next, from_speed, tick, duration);
     c->rest_end = cut; /* kept when the curve is begun again from where it is (the glide, full aim) */
+    c->aim_entry = aim_entry;
     for (unsigned i = 0; i < 3; ++i) value[i] = next[i];
     if (cut) { ++c->cuts; c->run = 0; } else if (edge) { ++c->edges; c->run = 0; } else if (believe) c->run = 0; else { ++c->jumps; if (!c->run++) c->run_started = tick; }
     c->neared = c->run && (c->neared || !over); c->paused = c->trial = c->calm = false;
@@ -705,7 +736,7 @@ static inline float tfp_continuity_step_cut(TfpContinuity *c, const float *wante
     /* THE WAY BACK: the eye went and came back, which is no speed. Kept whole (as it was until 0.6.0-feel.46), a
      * flip of 0.2 m a frame was 6 m/s, and the first frame looked at afterwards sent the presented eye on at it. */
     if (back) for (unsigned i = 0; i < 3; ++i) c->speed[i] = 0;
-    if (quiet && c->active && c->started+c->duration-tick > TFP_CONTINUITY_QUIET_MS) tfp_continuity_begin(c, value, speed, tick, TFP_CONTINUITY_QUIET_MS);
+    if (quiet && c->active && !c->aim_entry && c->started+c->duration-tick > TFP_CONTINUITY_QUIET_MS) tfp_continuity_begin(c, value, speed, tick, TFP_CONTINUITY_QUIET_MS);
     if (placed) { /* the speed with the turning left out, kept and averaged as the other is */
       const float kept = returned ? 0 : loose_size > limit || denied || !c->loose ? 1 : 1-expf(-dt/.05f);
       for (unsigned i = 0; i < 3; ++i) c->loose_speed[i] += (free_step[i]/dt-c->loose_speed[i])*kept;
@@ -769,7 +800,7 @@ static inline float tfp_continuity_step_cut(TfpContinuity *c, const float *wante
         duration = fminf(fmaxf(1000*(4*r+sqrtf(16*r*r+24*a*tfp_continuity_length(held)))/(2*a), t->min_ms), t->max_ms);
         c->settling = false;
       }
-      tfp_continuity_begin(c, held, over ? from_speed : zero, tick, duration); c->rest_end = false;
+      tfp_continuity_begin(c, held, over ? from_speed : zero, tick, duration); c->rest_end = c->aim_entry = false;
       for (unsigned i = 0; i < 3; ++i) { value[i] = held[i]; c->coast[i] = 0; }
       c->lent = false;
     }
@@ -781,7 +812,7 @@ static inline float tfp_continuity_step_cut(TfpContinuity *c, const float *wante
   if (carried > c->largest) c->largest = carried;
   for (unsigned i = 0; i < 3; ++i) { out[i] = wanted[i]+value[i]; c->ago[i] = c->wanted[i]; c->wanted[i] = wanted[i]; c->shown[i] = out[i]; }
   c->ago_known = !edge; /* across a change of camera the eye before is another camera's */
-  c->tick = tick; c->source = source;
+  c->tick = tick; c->source = source; c->quiet = quiet;
   tfp_continuity_head(c, head, wanted, world, basis, head_kept, cut);
   return carried;
 }

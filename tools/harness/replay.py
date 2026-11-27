@@ -62,6 +62,8 @@ What this leaves out:
  - The fitted axes are a guess: where nothing is carried and nothing taken up no turn can be seen and the axes stay
    as they were, so a root that turns evenly there and is caught turning later looks as if it began to turn then.
  - The damping (src/camera_damp.h) is not run again: the wanted eye of a head-camera frame is logged after it.
+   (Round 24: it is where the traversal rule changed it. Round 49: --damp-frame runs it again in the test switch's
+   frame and --root-frame in the root's axes in the same rows; replay_filter.c says how far that can be trusted.)
  - The helper's own decision to look (smooth_detect) is taken from the log; the present filter might have kept a run
    of jumps open for a different time.
 """
@@ -395,15 +397,17 @@ def head_given(row):
 def row_text(row, axes):
     """One row for replay_filter.c: tick source detect quiet fresh, wanted, root, logged eye, axes, (round 19) whether
     the head is given and the head node in the world (head_node; zeros where it is not given), and (round 24) mask,
-    kind, damped, off_foot, damp, stable, rearm_only (context(); -1 where not known)."""
+    kind, damped, off_foot, damp, stable, rearm_only (context(); -1 where not known), and (round 49) the logged view
+    (zeros where the line does not say)."""
     node = head_node(row, row[axes]) if head_given(row) else None
     given = node is not None
     damped = row.get("damped")
-    return "%.3f %d %d %d %d %s %s %s %s %d %s %d %d %d %d %s %d %d %d\n" % (
+    return "%.3f %d %d %d %d %s %s %s %s %d %s %d %d %d %d %s %d %d %d %s\n" % (
         row["tick"], SOURCES.get(row["source"], 0), row["looked"], row.get("quiet", 0), row.get("fresh", False), " ".join(map(str, row["wanted"])),
         " ".join(map(str, row["root"])), " ".join(map(str, row["eye"])), " ".join(map(str, row[axes])), given, " ".join(map(str, node or [0.0, 0.0, 0.0])),
         row.get("mask", -1), row["kind"], -1 if damped is None or row.get("damp") is None else damped, row.get("off_foot") or 0,
-        " ".join(map(str, row.get("damp") or [0.0, 0.0, 0.0])), row.get("stable", -1), row.get("rearm_only", 0), row.get("settle_arm", -1))
+        " ".join(map(str, row.get("damp") or [0.0, 0.0, 0.0])), row.get("stable", -1), row.get("rearm_only", 0), row.get("settle_arm", -1),
+        " ".join(map(str, row.get("view") or [0.0, 0.0, 0.0])))
 
 
 def emit_head(name, rows):
@@ -426,9 +430,9 @@ def emit_head(name, rows):
     return "\n".join(out) + "\n"
 
 
-def run(binary, mode, rows, axes, settle=False):
+def run(binary, mode, rows, axes, settle=False, flags=()):
     text = "".join(row_text(row, axes) for row in rows)
-    out = subprocess.run([str(binary), mode] + (["settle"] if settle else []), input=text, capture_output=True, text=True, check=True).stdout.splitlines()
+    out = subprocess.run([str(binary), mode] + (["settle"] if settle else []) + list(flags), input=text, capture_output=True, text=True, check=True).stdout.splitlines()
     assert len(out) == len(rows)
     return [[float(x) for x in line.split()] for line in out]
 
@@ -480,7 +484,7 @@ def header(revision, work, name):
     if Path(revision).is_dir():  # a folder with the two headers in place of a revision
         return Path(revision).resolve()
     folder.mkdir()
-    for file in ("camera_continuity.h", "camera_math.h", "camera_damp.h", "camera_traversal.h"):
+    for file in ("camera_continuity.h", "camera_math.h", "camera_damp.h", "camera_traversal.h", "camera_clear.h"):
         shown = subprocess.run(["git", "-C", str(ROOT), "show", f"{revision}:src/{file}"], capture_output=True, text=True,
                                check=file in ("camera_continuity.h", "camera_math.h"))
         if shown.returncode == 0:  # the damping and the round-24 rules only where the revision has both (replay_filter.c RULES)
@@ -488,11 +492,14 @@ def header(revision, work, name):
     return folder
 
 
-def replay(rows, logged=None, present=None, settle=False):
+def replay(rows, logged=None, present=None, settle=False, flags=()):
     """Runs both filters over `rows` (read(), all of them with axes or none) and returns (the frames, whether the axes
     were given). `present`: a git revision, or a folder with camera_continuity.h and camera_math.h, in place of this
     tree's filter. `settle`: THE SETTLE on in this tree's filter (the helper's settle_on.txt; off by default, as in the
-    helper). Each row gets old_eye, old_carried, old_taken (the logged build's filter), new_eye, new_carried,
+    helper). `flags` (round 49): further arguments for this tree's filter, "dampframe" (the eye damping run again
+    in the frame of tfp_damp_frame_step, the helper's damp_frame_on.txt), "rootframe" (run again in the same rows in
+    the root's own axes: what "dampframe" is compared with) and "floor" (round 44's FLOOR on the eye presented);
+    replay_filter.c says what each does. Each row gets old_eye, old_carried, old_taken (the logged build's filter), new_eye, new_carried,
     new_taken (this tree's), fit (the axes used), misfit (m, the logged filter from the log) and follows."""
     given = bool(rows) and all(row["axes"] for row in rows)
     logged = logged or ("9a3470b" if given else "b7ce1ab")
@@ -510,7 +517,7 @@ def replay(rows, logged=None, present=None, settle=False):
             row["old_eye"], row["old_carried"], row["old_taken"], row["fit"], row["misfit"] = out[0:3], out[3], taken(out[4]), out[5:14], out[14]
             row["old_wanted"] = out[15:18]
             row["follows"] = row["known"] and row["misfit"] < EXACT_M if given else row["misfit"] < NEAR_M
-        for row, out in zip(rows, run(new, "run", rows, "fit", settle)):
+        for row, out in zip(rows, run(new, "run", rows, "fit", settle, flags)):
             row["new_eye"], row["new_carried"], row["new_taken"] = out[0:3], out[3], taken(out[4])
             row["new_wanted"] = out[15:18]
     return (merge(rows) if given else rows), given
@@ -522,6 +529,9 @@ def main(argv):
     parser.add_argument("--logged", default=None, help="git revision of the build that wrote the log")
     parser.add_argument("--present", default=None, help="git revision (or a folder with the two headers) to run in place of this tree's filter")
     parser.add_argument("--settle", action="store_true", help="THE SETTLE on in this tree's filter (settle_on.txt; off by default)")
+    parser.add_argument("--damp-frame", action="store_true", help="this tree's eye damping run again in the frame of tfp_damp_frame_step (damp_frame_on.txt; off by default)")
+    parser.add_argument("--root-frame", action="store_true", help="the same rows run again in the root's own axes: what --damp-frame is compared with")
+    parser.add_argument("--floor", action="store_true", help="round 44's FLOOR on the eye this tree's filter presents (src/camera_clear.h)")
     parser.add_argument("--from", dest="start", default=None)
     parser.add_argument("--to", dest="end", default=None)
     parser.add_argument("--emit", default=None, help="write the rows of --from/--to as a C array of this name")
@@ -529,7 +539,8 @@ def main(argv):
     parser.add_argument("--worst", type=int, default=0, help="list this many rows where the logged filter, replayed, is farthest from the log")
     args = parser.parse_args(argv[1:])
     calls = read(Path(args.log).read_text(errors="replace").splitlines())
-    rows, given = replay(calls, args.logged, args.present, args.settle)
+    rows, given = replay(calls, args.logged, args.present, args.settle,
+                         (["dampframe"] if args.damp_frame else []) + (["rootframe"] if args.root_frame else []) + (["floor"] if args.floor else []))
     if not given:
         calls = rows
 

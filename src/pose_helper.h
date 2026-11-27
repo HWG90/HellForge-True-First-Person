@@ -240,6 +240,9 @@ uint32_t tfp_pose_set_entity_fields(const TfpEntityFields *fields);
  * stop once (tfp_steady_stop_line); the count begins again. Returns 1, or 0 before the host is set. */
 uint32_t tfp_pose_set_depth_steady(uint32_t mode);
 uint32_t tfp_pose_steady_take(TfpSteadySecond *out);
+/* Round 49e: the weapon is a handgun (held in one hand at the hip), for the "Reload rest:" line of a reload's edges
+ * (src/reload_hold.h); nothing is done by it. false: the start-up value. The binder sets it each tick. Any thread. */
+void tfp_pose_set_sidearm(bool on);
 typedef struct TfpPoseHoldProbe {
   uint32_t hold, armed, error;   /* the mode; whether a lease is armed; tfp_pose_error() */
   uint64_t node5_calls;          /* position-setter calls for node 5 of the watched rig, counted from the first tfp_pose_set_hold on */

@@ -813,6 +813,7 @@ static void arms_tick(void) {
     tfp_arm_drive_set(wanted, tfp_arm_drive_put_back(arms_keep, arms_restore), weight);
     /* Round 23: the left hand on the weapon's grip (src/offhand_grip.h): the option, the test switch, a handgun at the hip */
     tfp_arm_drive_set_grip(!grip_off && tfp_wire_settings_first_person_arms(&wire), tfp_wire_settings_sidearm(&wire));
+    tfp_pose_set_sidearm(tfp_wire_settings_sidearm(&wire)); /* round 49e: for the "Reload rest:" line only */
   }
   { /* The resting weapon pose (src/arm_drive.h): the clock, whether this tick is a rest and in which stance, and the body's layer states.
      * The action alone is not a rest: a walk, hip fire, an ammo check and a melee are "idle" to it (src/action_select.c), and in the game
@@ -1158,6 +1159,15 @@ static void start(void) {
         tfp_camera_set_settle(settle_file != NULL);
         if (settle_file) say("Test: settle_on.txt: the native view coming back on mask 0 after it was left for a new request or firearm holds the "
                              "eye against the root until the rig is steady (3 frames, 350 ms at most), then eases once (THE SETTLE)");
+        /* Round 49: the frame the head camera's eye is damped in (src/camera_damp.h tfp_damp_frame_step), off by default:
+         * it takes the 0.31 m out of a get-up from lying on the back, and replayed over the soaks (tools/harness/replay.py
+         * --damp-frame against --root-frame) it made other frames worse by more than 5 mm; on only to compare in the game. */
+        strcpy(slash + 1, "damp_frame_on.txt");
+        FILE *damp_frame_file = fopen(parts_path, "r");
+        if (damp_frame_file) fclose(damp_frame_file);
+        tfp_camera_set_damp_frame(damp_frame_file != NULL);
+        if (damp_frame_file) say("Test: damp_frame_on.txt: the head camera's eye is damped in a level frame that turns with the body only as far as "
+                                 "the view turns the same way (a body that turns under a still view does not swing the eye)");
         /* The overrides of the three live features (src/wire_options.h): for testing only. */
         static const struct { const char *name; TfpFeature feature; bool on; } forced[] = {
           {"arms_live.txt", TFP_FEATURE_ARMS, true}, {"arms_off.txt", TFP_FEATURE_ARMS, false},
@@ -1443,6 +1453,9 @@ static void steady_note(void) { /* once a second: the rig's depth held steady (s
   /* round 39: once a reload, in the second it ended (src/reload_hold.h) */
   for (uint32_t i = 0; i < held.reload.count && i < TFP_RELOAD_LOGGED; ++i) { tfp_reload_line(&held.reload.ends[i], line, sizeof line); say("%s", line); }
   if (held.reload.count > TFP_RELOAD_LOGGED) say("Reload: %u more reloads ended in the same second", held.reload.count - TFP_RELOAD_LOGGED);
+  /* round 49e: the edges of each, looked at (the frame before it, its start and its end: src/reload_hold.h) */
+  for (uint32_t i = 0; i < held.reload.edge_count && i < TFP_RELOAD_EDGES_LOGGED; ++i)
+    for (uint32_t k = 0; tfp_reload_edges_line(&held.reload.edges[i], k, line, sizeof line); ++k) say("%s", line);
   if (!tfp_steady_worth(&held)) return;
   tfp_steady_line(&held, line, sizeof line);
   say("%s", line);
@@ -1548,6 +1561,50 @@ static void f11_hint_tick(int toggle_key, bool focused) {
 #endif
   tfp_f11_hint_tick(&f11_hint, &io, GetTickCount64(), toggle_key, name, stage == RUNNING, focused);
 }
+#ifdef TFP_FEEL
+/* Round 45: the cockpit frame (src/cockpit_frame.h). With See through the exosuit cockpit and Cockpit frame on, and
+ * first person shown from an exosuit's seat (the camera lock's seat body and its seated flag, not gliding in or out;
+ * the suit found and seen through, src/wire_engine.h TfpWireSeat), the Goose Overlay Host draws a static cockpit frame
+ * as a HUD panel under an id of this load's own. The seat has no event: its body is an atomic the camera helper
+ * publishes, read once a tick; the rest is read, and the host asked, only while seated or on leaving. */
+#include "cockpit_frame.h"
+static TfpCockpitFrame cockpit_frame;
+static TfpCockpitHud cockpit_hud;
+static char cockpit_panel_id[96];
+static void cockpit_say(void *u, const char *line) { (void)u; say("%s", line); }
+static const OvApi *cockpit_host(void) { /* the host as it is now (on the seat's edges only) */
+  HMODULE host = GetModuleHandleA(OV_HOST_DLL);
+  OvApiFn get = host ? (OvApiFn)(void *)GetProcAddress(host, "ov_api") : NULL;
+  return get ? get(2) : NULL;
+}
+static bool cockpit_show(void *u, float opacity, char *why, size_t why_size) {
+  (void)u;
+  if (!cockpit_panel_id[0]) tfp_cockpit_panel_id(cockpit_panel_id, sizeof cockpit_panel_id, (unsigned long)GetCurrentProcessId(), (unsigned long long)GetTickCount64());
+  return tfp_cockpit_hud_show(&cockpit_hud, cockpit_host(), cockpit_panel_id, opacity, why, why_size);
+}
+static void cockpit_hide(void *u) { (void)u; tfp_cockpit_hud_hide(&cockpit_hud, cockpit_host()); }
+static void cockpit_opacity(void *u, float opacity) { (void)u; tfp_cockpit_hud_opacity(&cockpit_hud, opacity); }
+static bool cockpit_drawn(void *u, char *description, size_t size) { (void)u; return tfp_cockpit_hud_drawn(&cockpit_hud, description, size); }
+static void cockpit_frame_tick(void) {
+  static const TfpCockpitFrameIo io = {NULL, cockpit_say, cockpit_show, cockpit_hide, cockpit_opacity, cockpit_drawn};
+  TfpCockpitFrameIn in = {false, false, false, false, 0};
+  const uint32_t body = stage == RUNNING ? tfp_camera_lock_seat_body() : 0;
+  if (body) {
+    TfpCameraSeatStats c; tfp_camera_seat_stats(&c);
+    in.seated = c.seated && !c.gliding;
+  }
+  if (!in.seated && !cockpit_frame.seat) return; /* on foot: nothing more */
+  if (in.seated) {
+    TfpWireSeat seat;
+    in.see_through = tfp_locked_view_see_through_cockpit(&wire);
+    in.option = tfp_locked_view_cockpit_frame(&wire);
+    in.suit = tfp_wire_engine_seat(&wire, &seat) && seat.suit && seat.body == body;
+    in.opacity = (float)(tfp_locked_view_cockpit_frame_opacity(&wire) / 100);
+  }
+  tfp_cockpit_frame_tick(&cockpit_frame, &io, GetTickCount64(), &in);
+}
+#endif
+/* end of round 45's cockpit frame */
 static void guard_resolve(void) {
   const uint64_t now = GetTickCount64();
   if (chat_layout.resolved || now < chat_next_try || !tfp_win_game()) return;
@@ -1565,6 +1622,7 @@ static void tick_body(void) {
 #ifdef TFP_FEEL
   int64_t mark = perf_qpc(); /* round 28: the sections of the Perf line */
   if (stage == RUNNING) { gate_note(); steady_note(); ads_seat_tick(); }
+  cockpit_frame_tick(); /* round 45: the cockpit frame over the see-through seat; hidden when not RUNNING */
 #endif
   if (stage == RUNNING) { quit_guard(); fov_lock_tick(); lock_note(); fov_note(); }   /* not earlier: the game module and the guarded reader are set up in WAIT_MODULES */
 #ifdef TFP_FEEL
@@ -1771,6 +1829,7 @@ __declspec(dllexport) int hellforge_mod_unload(const HfApi *api, HfMod *mod, uin
   eng_set_script_probe(NULL);
   tfp_mod_editor_retire();   /* its panel stays registered with the overlay host: closed, and drawing nothing */
   tfp_mod_panel_retire();    /* the settings panel likewise */
+  tfp_cockpit_hud_retire(&cockpit_hud, cockpit_host()); /* round 45: the cockpit frame's HUD panel likewise (closed already: no seat is held) */
   unsigned restored = tfp_win_restore_slots() + tfp_win_pose_restore_slots() + render_restored;
   hf->log(mod, "Live %s: the mod held nothing in the game; %u dispatch slot(s) put back; this build does nothing from here on.",
           reason == HF_UNLOAD_REPLACE ? "replace" : "removal", restored);

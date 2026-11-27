@@ -198,6 +198,8 @@ static volatile float lock_gain, lock_max, lock_settle = 300, lock_thrown_gain, 
 static volatile float lock_damp_ms; /* the camera damping option as a time constant (src/camera_damp.h); 0: none */
 static _Atomic uint32_t lock_bodycam = 1; /* the camera style (src/camera_damp.h TfpCameraStyle): 1 Bodycam, the sliders as they are; 0 Stable */
 static TfpEyeDamp lock_eye_damp;    /* the head camera's eye under that option (lock_damp_eye). Policy lock. */
+static TfpDampFrame lock_damp_frame; /* round 49: the frame that eye is damped in (src/camera_damp.h tfp_damp_frame_step). Policy lock. */
+static _Atomic uint32_t damp_frame_on; /* tfp_camera_set_damp_frame (a test switch, off by default: the root's own axes, as before) */
 static TfpKick lock_kick; static TfpQ lock_view = {0, 0, 0, 1}, lock_last_kick = {0, 0, 0, 1}; static bool lock_view_known; static double lock_tick;
 /* Beyond retail: the body down under the lock (camera_helper.h TfpCameraDownStats). lock_carry: what is left of the
  * held direction after the body is up again, in the game's view frame, eased out (LOCK_CARRY_MS). Policy lock. */
@@ -1214,8 +1216,8 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
  * and 0.10 m of lag at most, Stable with its own 350 ms and 0.25 m, src/camera_damp.h): in a head-camera frame the
  * eye is at the head, so every movement of the head moves the view.
  * Here the head's place against the body root (`head`: as the retail smoothing left it, the
- * point the eye is built on) goes through a low-pass (src/camera_damp.h), in the root's frame, so the body's own
- * travel is not held back, and the eye is moved by that lag. As with the retail smoothing, the eye's place in front
+ * point the eye is built on) goes through a low-pass (src/camera_damp.h), in the root's frame (round 49 below: or, by a
+ * test switch, in a level one), so the body's own travel is not held back, and the eye is moved by that lag. As with the retail smoothing, the eye's place in front
  * of and above the head is not filtered: it comes from this frame's view, so turning the view (or the body under
  * it) does not swing the eye. Only in the ordinary camera's frames (kind 4) of a body on foot that the lock holds:
  * a body that is down or off foot is followed, full aim keeps the sights on the eye, and the native view is the
@@ -1225,7 +1227,7 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
  * the option leaves no damping for is let go at that rate. `eye` is the wanted eye in the world and takes the damped one, before
  * the continuity sees it. True: the state is kept for the next frame; the caller forgets it in every frame that
  * returns false or does not come here, so it starts from the true eye after those. */
-static bool lock_damp_eye(Policy *p, uint32_t kind, const float *root, const float *root_basis, const float *head, double tick, float *eye) {
+static bool lock_damp_eye(Policy *p, uint32_t kind, const float *root, const float *root_basis, const float *view, const float *head, double tick, float *eye) {
   const TfpCameraStyle style = tfp_camera_style(atomic_load_explicit(&lock_bodycam, memory_order_relaxed) != 0, lock_damp_ms);
   const float damp_ms = style.eye_damp_ms;
   /* on_foot: a frame the damping is for. Without it the lag is let go on 40 ms; with it and no time constant
@@ -1243,8 +1245,17 @@ static bool lock_damp_eye(Policy *p, uint32_t kind, const float *root, const flo
   const bool damp = on_foot && damp_ms > 0;
   trace_damp.off_foot = p->lock_off_foot;
   float relative[3] = {0}, damped[3] = {0}, behind[3] = {0}, lag = 0;
+  /* Round 49, a test switch (tfp_camera_set_damp_frame, damp_frame_on.txt), off by default: not in the root's own axes
+   * but in a level frame that turns with the root only as far as the `view` turns the same way (src/camera_damp.h
+   * tfp_damp_frame_step): a root that turns under a still view (a get-up from lying on the back, 16.5 degrees a
+   * frame) swung the lag round with it, 0.31 m in a frame. It starts with the damping. Off, `frame` is the root's
+   * axes and every frame is main's, bit for bit. */
+  float frame[9]; bool own = true;
+  if (!lock_eye_damp.known) tfp_damp_frame_reset(&lock_damp_frame);
+  if (atomic_load_explicit(&damp_frame_on, memory_order_relaxed)) own = tfp_damp_frame_step(&lock_damp_frame, root_basis, view, tick, p->c.max_gap_ms, frame);
+  else memcpy(frame, root_basis, sizeof frame);
   for (unsigned axis = 0; axis < 3; ++axis) for (unsigned component = 0; component < 3; ++component)
-    relative[axis] += (head[component]-root[component])*root_basis[axis*3+component];
+    relative[axis] += (head[component]-root[component])*frame[axis*3+component];
   if (damp) {
     if (!tfp_finite3(relative)) return false;
     lag = tfp_eye_damp_follow(&lock_eye_damp, relative, tick, p->c.max_gap_ms, damp_ms, style.eye_lag_m, damped);
@@ -1254,10 +1265,12 @@ static bool lock_damp_eye(Policy *p, uint32_t kind, const float *root, const flo
                               : tfp_eye_damp_release(&lock_eye_damp, tick, p->c.max_gap_ms, behind)) > 0)) return false;
   if (lag > 0 && tfp_finite3(behind)) {
     for (unsigned component = 0; component < 3; ++component) { float added = 0;
-      for (unsigned axis = 0; axis < 3; ++axis) added += behind[axis]*root_basis[axis*3+component];
+      for (unsigned axis = 0; axis < 3; ++axis) added += behind[axis]*frame[axis*3+component];
       eye[component] += added; trace_damp.added[component] = added; }
-    /* where the eye is shown: what the way into the native view starts from */
-    for (unsigned axis = 0; axis < 3; ++axis) p->last_relative[axis] += behind[axis];
+    /* where the eye is shown: what the way into the native view starts from (in the root's axes) */
+    for (unsigned axis = 0; axis < 3; ++axis) { float in_root = behind[axis];
+      if (!own) { in_root = 0; for (unsigned component = 0; component < 3; ++component) in_root += trace_damp.added[component]*root_basis[axis*3+component]; }
+      p->last_relative[axis] += in_root; }
   }
   return true;
 }
@@ -1994,7 +2007,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
             if (!commit_current(&policy, kind, &commit_error)) { reset(&policy, false); if (commit_error == READ_FAILED) atomic_store_explicit(&armed, 0, memory_order_release); error(commit_error); }
             else { memcpy(policy.last_relative, relative, 12); policy.last_relative_tick = tick; policy.relative_valid = true;
               if (policy.lock_now) { float shown[3] = {0}; const float smoothed[3] = {head[0]+lag[0], head[1]+lag[1], head[2]+lag[2]};
-                eye_damped = lock_damp_eye(&policy, kind, root, root_basis, smoothed, tick, adjusted);
+                eye_damped = lock_damp_eye(&policy, kind, root, root_basis, forward, smoothed, tick, adjusted);
                 if (finite3(forward)) memcpy(trace_damp.view, forward, 12);
                 if (smooth_present(&policy, kind, SMOOTH_HEAD, root, root_basis, adjusted, smoothed, tick, shown)) memcpy(adjusted, shown, 12); }
               memcpy(policy.last_head_world, adjusted, 12);
@@ -2370,6 +2383,7 @@ void tfp_camera_set_continuity(bool on, bool trace_frames) { atomic_store(&smoot
 void tfp_camera_continuity_event(void) { atomic_store(&smooth_event, 1u); }
 void tfp_camera_settle_arm(void) { atomic_store(&settle_arm, 1u); }
 void tfp_camera_set_settle(bool on) { atomic_store(&settle_on, on ? 1u : 0u); }
+void tfp_camera_set_damp_frame(bool on) { atomic_store(&damp_frame_on, on ? 1u : 0u); }
 void tfp_camera_set_orphan(bool on) { atomic_store(&orphan_on, on ? 1u : 0u); }
 void tfp_camera_set_dive(bool on) { atomic_store(&dive_on, on ? 1u : 0u); }
 void tfp_camera_set_veil(bool on) {
@@ -2537,7 +2551,7 @@ void tfp_camera_reset_for_tests(void) {
   atomic_store(&lock_down_error, 0); atomic_store(&lock_down_why, 0); atomic_store(&lock_body_ragdoll, 0); atomic_store(&lock_body_off_foot, 0);
   atomic_store(&lock_off_foot_body, 0); atomic_store(&lock_off_foot_at, 0); atomic_store(&lock_body_distance, 0); atomic_store(&lock_down_distance, 0);
   lock_carry = tfp_q_identity(); lock_was_held = false; lock_down_until = 0; lock_view_known = false; lock_first_known = false; lock_tick = 0; tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity(); tfp_turn_reset(&lock_turn); lock_game_cam_tick = -1; atomic_store(&dive_on, 0);
-  lock_damp_ms = 0; atomic_store(&lock_bodycam, 1); tfp_eye_damp_reset(&lock_eye_damp);
+  lock_damp_ms = 0; atomic_store(&lock_bodycam, 1); tfp_eye_damp_reset(&lock_eye_damp); tfp_damp_frame_reset(&lock_damp_frame); atomic_store(&damp_frame_on, 0);
   seat_forget(); seat_from_tick = 0; seat_from_q = tfp_q_identity(); seat_hand_hashes = 0; seat_hand_count = 0;
   atomic_store(&seat_frames, 0); atomic_store(&seat_refused, 0); atomic_store(&seat_glided, 0); atomic_store(&seat_entries, 0);
   atomic_store(&seat_exits, 0); atomic_store(&seat_cuts, 0); atomic_store(&seat_body_at, 0); atomic_store(&seat_body, 0);

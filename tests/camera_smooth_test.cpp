@@ -171,9 +171,11 @@ struct Twice {
   }
   bool same(int from, int to) const { return frames[0] == frames[1] && to <= frames[0] && !std::memcmp(at[0][from], at[1][from], sizeof(float) * 4 * (to - from)); }
 };
-template <class Script> static void twice(Twice &t, bool smooth, float damping_ms, Script script) {
+// `frame`: round 49's test switch (tfp_camera_set_damp_frame: the eye damped in the frame of tfp_damp_frame_step).
+template <class Script> static void twice(Twice &t, bool smooth, float damping_ms, Script script, bool frame = false) {
   for (int damped = 0; damped < 2; ++damped) {
     fresh(true, smooth, false, damped ? damping_ms : 0.0f);
+    tfp_camera_set_damp_frame(frame);
     clock_ms = 900000;
     Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
     t.frames[damped] = 0;
@@ -721,6 +723,55 @@ int main() {
     for (int i = 0; i < t.frames[0]; ++i) worst = std::fmax(worst, t.apart(i));
     CHECK(t.frames[0] == 120 && t.frames[1] == 120 && worst < 1e-4f);
     std::printf("damping, the body turning 92 degrees under a still view: the eye at most %.5f m from the undamped one\n", worst);
+  }
+  // ---- 15b. Round 49, a test switch (tfp_camera_set_damp_frame, damp_frame_on.txt; off by default, and off everything
+  // above and below is as it was). The frame the eye is damped in turns with the root only as far as the view does
+  // (src/camera_damp.h tfp_damp_frame_step). The root alone turns 16.5 degrees a frame at 30 frames a second (the
+  // get-up of soak 60) under a still view, and the head, 0.54 m from it, stands still in the world. Without damping
+  // the eye moves only by the head camera's own smoothing, which works in the root's axes. Damped in the root's
+  // axes the eye is swung further, by the lag those axes make of a head that did not move; damped in the frame it goes
+  // no further than the undamped one. And a head that the turning root carries round with it does move in the world:
+  // in the frame that is damped like any other move of the head (in the root's axes it is none: scenario 15), by no
+  // more than the head went, and the eye comes to it. A mouse turn over a still head is exactly the undamped one. ----
+  {
+    const double slow = 1000.0 / 30, dt = 1000.0 / 144;
+    static Twice t;
+    float went[2][2] = {{0, 0}, {0, 0}}; // [frame switch][damped]: the farthest the eye went from where it stood
+    for (int frame = 0; frame < 2; ++frame) {
+      twice(t, false, 180, [&](Game &g, auto keep) {
+        const float head[3] = {1.5f, 2.2f, 1.5f};
+        std::memcpy(g.s.head, head, 12);
+        for (int i = 0; i < 10; ++i) { g.hip(); g.frame(slow); keep(); }
+        for (int i = 1; i <= 8; ++i) { g.pose(1, 2, 0, .2f + .288f * i); std::memcpy(g.s.head, head, 12); g.hip(); g.frame(slow); keep(); }
+        for (int i = 0; i < 10; ++i) { g.hip(); g.frame(slow); keep(); }
+      }, frame != 0);
+      CHECK(t.frames[0] == 28 && t.frames[1] == 28);
+      for (int damped = 0; damped < 2; ++damped) for (int i = 10; i < 28; ++i) {
+        float d = 0; for (int k = 0; k < 3; ++k) d += (t.at[damped][i][k] - t.at[damped][9][k]) * (t.at[damped][i][k] - t.at[damped][9][k]);
+        went[frame][damped] = std::fmax(went[frame][damped], std::sqrt(d));
+      }
+      std::printf("the root alone turning 132 degrees under a still view and a still head, the damping's frame %s: the eye went %.4f m at most, undamped %.4f m\n",
+                  frame ? "on" : "off", went[frame][1], went[frame][0]);
+    }
+    CHECK(std::fabs(went[0][0] - went[1][0]) < 1e-6f);  // the switch changes nothing without damping
+    CHECK(went[0][1] > went[0][0] + .03f);              // the root's axes: swung further than the undamped eye
+    CHECK(went[1][1] <= went[1][0] + 1e-4f);            // the frame: no further
+    twice(t, false, 180, [&](Game &g, auto keep) {
+      for (int i = 0; i < 40; ++i) { g.hip(); g.frame(dt); keep(); }
+      for (int i = 1; i <= 40; ++i) { g.pose(1, 2, 0, .2f + .04f * i); g.hip(); g.frame(dt); keep(); } // the body, the view still
+      for (int i = 0; i < 200; ++i) { g.hip(); g.frame(dt); keep(); }
+    }, true);
+    float worst = 0;
+    for (int i = 0; i < t.frames[0]; ++i) worst = std::fmax(worst, t.apart(i));
+    CHECK(t.frames[0] == 280 && t.frames[1] == 280 && worst > .01f && worst < .0671f * 1.6f && t.apart(279) < 1e-3f); // the head's arc: 0.067 m out, 92 degrees
+    std::printf("the damping's frame on, the body turning 92 degrees under a still view, the head carried round: the eye at most %.5f m from the undamped one, %.5f m at the end\n", worst, t.apart(279));
+    twice(t, false, 180, [&](Game &g, auto keep) {
+      for (int i = 0; i < 40; ++i) { g.hip(); g.frame(dt); keep(); }
+      for (int i = 1; i <= 40; ++i) { g.look(.2f + .04f * i, 0); g.hip(); g.frame(dt); keep(); }
+      for (int i = 0; i < 40; ++i) { g.hip(); g.frame(dt); keep(); }
+    }, true);
+    CHECK(t.frames[0] == 120 && t.same(0, 120));
+    tfp_camera_set_damp_frame(false);
   }
   // ---- 16. The way out of damping. A lag is carried (the head dropped 0.5 m in a frame: 0.10 m, the limit), then
   // the body leaves 'on foot' or full aim begins. The lag is not dropped in that frame: it is let go on 40 ms, is

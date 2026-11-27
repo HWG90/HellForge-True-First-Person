@@ -117,6 +117,13 @@ static const Control CONTROLS[] = {
           "the world around you, the suit's weapons and its shadow. The cockpit's console and sticks are part of the suit's body and go "
           "with it (they are one mesh in the game's data). Other vehicles' seats keep first person but are never seen through. "
           "Others still see your suit.")),
+  /* round 45 (src/cockpit_frame.h): needs the see-through cockpit, drawn by the Goose Overlay Host */
+  ROW("cockpit_frame", TFP_MK_TOGGLE, "Cockpit frame", 2, L(cockpit_frame), .see_through_only = true,
+      TIP("With the cockpit seen through, a cockpit frame is drawn around your view in an exosuit: pillars, a dash with a heading "
+          "strip and a status lamp, and roof rails, kept clear of the game's own HUD. It is a flat frame over the screen and does not "
+          "turn with the suit. Needs the Goose Overlay Host; without it you keep the plain clear view.")),
+  ROW("cockpit_frame_opacity", TFP_MK_SLIDER, "Cockpit frame opacity (%)", 2, L(cockpit_frame_opacity), RANGE(20, 100, 5), .frame_only = true,
+      TIP("How solid the cockpit frame is drawn. Default 90.")),
 };
 #undef ROW
 #undef NONE
@@ -161,6 +168,7 @@ typedef struct Menu {
   bool drawn_weapon; char drawn_key[TFP_SETTINGS_ID], drawn_identity[24]; bool drawn_profile; double drawn_hip, drawn_aim;
   char message[200];                    /* a button's answer */
   int bodycam_shown, aim_shown;                    /* the camera style the Bodycam-only sliders were last enabled for; -1: not yet */
+  int see_through_shown, frame_shown;              /* round 45: the cockpit frame's two rows' state as last sent; -1: not yet */
   /* What the user did in MCM, kept for the next tick: MCM calls back from its own update, outside this
    * mod's tick (no engine frame, the runtime not in its update), so nothing that reaches the runtime runs there. */
   struct { char id[40]; TfpMenuValue value, previous; } queued[8];
@@ -327,6 +335,16 @@ static void sync_bodycam(TfpWire *w, Menu *m) {
   m->bodycam_shown = bodycam;
   for (int i = 0; i < CONTROL_COUNT; i++) if (CONTROLS[i].bodycam_only) m->host.set_disabled(m->host.user, CONTROLS[i].id, !bodycam);
 }
+/* Round 45: Cockpit frame is enabled while the cockpit is seen through; its opacity while both are on. Sent on a change only. */
+static void sync_cockpit(TfpWire *w, Menu *m) {
+  const int see_through = tfp_locked_view_see_through_cockpit(w), frame = see_through && tfp_locked_view_cockpit_frame(w);
+  if (see_through == m->see_through_shown && frame == m->frame_shown) return;
+  m->see_through_shown = see_through, m->frame_shown = frame;
+  for (int i = 0; i < CONTROL_COUNT; i++) {
+    if (CONTROLS[i].see_through_only) m->host.set_disabled(m->host.user, CONTROLS[i].id, !see_through);
+    if (CONTROLS[i].frame_only) m->host.set_disabled(m->host.user, CONTROLS[i].id, !frame);
+  }
+}
 bool tfp_wire_menu_bind(TfpWire *w, const TfpMenuHost *host, unsigned unavailable, TfpMenuEditFn edit) {
   if (!tfp_wire_settings(w) || !host || !host->get || !host->set || !host->set_disabled || !host->set_label) return false;
   Menu *m = state(w);
@@ -356,9 +374,10 @@ bool tfp_wire_menu_bind(TfpWire *w, const TfpMenuHost *host, unsigned unavailabl
   }
   host->set_disabled(host->user, "weapon_composition_status", true), host->set_disabled(host->user, "runtime_status", true);
   for (int i = 0; i < CONTROL_COUNT; i++) if (CONTROLS[i].inert) host->set_disabled(host->user, CONTROLS[i].id, true);
-  m->bodycam_shown = m->aim_shown = -1;
+  m->bodycam_shown = m->aim_shown = m->see_through_shown = m->frame_shown = -1;
   sync_bodycam(w, m);
   sync_aim(w, m);
+  sync_cockpit(w, m);
   if (unavailable & TFP_MENU_NO_ARMS) {
     host->set_disabled(host->user, "fird_person_arms", true);
     tfp_wire_say(w, "Menu: \"First Person Arms\" is shown disabled: the arm drive's render hook is refused, so the left hand cannot be put on the grip "
@@ -563,6 +582,7 @@ void tfp_wire_menu_frame(TfpWire *w) {
   if (m->queue_count) run_queue(w, m);
   sync_bodycam(w, m);
   sync_aim(w, m);
+  sync_cockpit(w, m);
   snprintf(text, sizeof text, "Status: %s", w->controller.label[0] ? w->controller.label : "First person off");
   if (strcmp(text, m->status)) { snprintf(m->status, sizeof m->status, "%s", text); m->host.set_label(m->host.user, "runtime_status", text); }
   bool weapon = current_weapon(w, key, identity, text, sizeof text);

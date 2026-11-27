@@ -9,6 +9,9 @@
  *                                          scaled by main row +0x11ac put where round 40 holds them. MODE "read": the
  *                                          scale read (the second's largest +0x11ac of its Gate: line); "none": not read
  *   reload_hold_test [LOG] [LOG58]         LOG58: the feel.58 window (tests/reference/reload/feel58-L4150-4266.log)
+ *   reload_hold_test [LOG] [LOG58] [LOG60] round 49e: LOG60: the feel.60 window of a sidearm's reload the hold did not
+ *                                          keep still (tests/reference/reload/feel60-L3545-3625.log): what the log has of
+ *                                          it, and the edges looked at (the "Reload rest/start/end:" lines)
  *
  * TFP_GAME_IMAGE=path: the game.dll image (file offset = RVA) the pinned bytes and C's address are checked against too. */
 #define _POSIX_C_SOURCE 200809L
@@ -257,6 +260,74 @@ static int replay_edges(Row *rows, int n, char **text, int lines, bool mode_read
     if (e >= 0 && why != TFP_RELOAD_ADDED) return -1;
   }
   return scaled;
+}
+
+/* ---- round 49e: the sidearm of 0.6.0-feel.60 (optic distance 0.2467 m, the rig's forward value -0.125 m at rest) ----
+ * What the log has (tests/reference/reload/feel60-L3545-3625.log): the hold put back the whole 0.125 m in every frame
+ * and the eye still went 0.064 m forward over the reload's first three frames, stayed there, and came back over its
+ * last four, passing 0.0155 m behind where it rests. Something other than the share of C moved it. The model here is
+ * the listing's: the eye hangs on the root at the rig eye node's local place (node 50, read at game+0x1287a41 into
+ * the rig's own vector v = e + the optic's term), the root at minus v' along the view:
+ *     the eye's place along the view = -(v' ) + e as drawn - what the hold put on node 5,   v' = request+0x4c - C
+ * with a mover X of 0.0645 m over 100 ms as a reload begins and back as it ends, either in e (`in_eye`: then it is in
+ * v as the evaluator reads it, a frame late where `late`) or in the anchor request+0x60 (not in v). Nothing is held by
+ * any of it: it says what the "Reload start:" and "Reload end:" lines will show for each. */
+#define PISTOL_V   (-.125f)
+#define PISTOL_X   .0645f
+#define PISTOL_E0  (-.3717f) /* node 50's local forward part at rest: the rig's value less the optic distance */
+typedef struct Pistol { Eval e; TfpReloadHold h; TfpReloadWatch w; double t, edge_at; int direction; float x_shown, x_read; bool in_eye, late, watched;
+                        int reports; TfpReloadEdges report; float place, place_least, place_most; bool placed; uint32_t delta_bits_sum; } Pistol;
+static float pistol_mover(const Pistol *p, double t) {
+  if (!p->direction) return 0;
+  double u = (t-p->edge_at)/100.0; u = u < 0 ? 0 : u > 1 ? 1 : u;
+  return (float)(p->direction > 0 ? u : 1-u)*PISTOL_X;
+}
+/* One frame; returns the eye's place along the view less its place at rest (N in the notes). */
+static float pistol_frame(Pistol *p, float dt, float share, uint64_t lease) {
+  p->t += dt;
+  const float shown = pistol_mover(p, p->t);
+  p->x_read = p->late ? p->x_shown : shown; /* what the evaluator reads of it: last frame's where the animation is written after it */
+  p->x_shown = shown;
+  float before = 0, after = 0;
+  const float v = PISTOL_V+(p->in_eye ? p->x_read : 0);
+  const float game = eval_frame(&p->e, v, 0, dt, &before, &after);
+  TfpReloadInput in; memset(&in, 0, sizeof in);
+  in.blend = p->e.blend; in.ability = p->e.ability; in.mix_before = before; in.mix_after = after; in.argument = game; in.constant = 0;
+  in.constant_known = true; in.share = share; in.on = true;
+  float put = 7; TfpReloadEnd end;
+  const uint32_t why = tfp_reload_frame(&p->h, &in, lease, &put, &end);
+  uint32_t bits; memcpy(&bits, &put, 4); p->delta_bits_sum = p->delta_bits_sum*31u+bits;
+  if (p->watched) {
+    TfpReloadProbe probe; tfp_reload_probe(&probe, &in, why, put, (uint64_t)(p->t+.5));
+    probe.eye[0] = .01f; probe.eye[1] = PISTOL_E0+(p->in_eye ? p->x_read : 0); probe.eye[2] = .02f; probe.eye_known = true;
+    probe.anchor[0] = 0; probe.anchor[1] = p->in_eye ? 0 : p->x_read; probe.anchor[2] = 0; probe.anchor_known = true;
+    { /* the eye's parents, nodes 1 to 4: axes the identity, node 4 at (0, 0, 1.5), still */
+      uint8_t records[4*TFP_RELOAD_LOCAL_SIZE]; memset(records, 0, sizeof records);
+      for (int n = 0; n < 4; ++n) { const float one = 1; for (int a = 0; a < 3; ++a) memcpy(records+n*TFP_RELOAD_LOCAL_SIZE+16*a, &one, 4); }
+      const float high = 1.5f; memcpy(records+3*TFP_RELOAD_LOCAL_SIZE+TFP_RELOAD_LOCAL_POSITION+8, &high, 4);
+      tfp_reload_probe_parents(&probe, records, 4);
+    }
+    TfpReloadEdges out;
+    if (tfp_reload_watch_frame(&p->w, &p->h, &probe, lease, &out)) { ++p->reports; p->report = out; }
+  }
+  const float place = -(game-0)+shown-put-(-PISTOL_V); /* less the rest: -v at rest */
+  if (!p->placed) { p->place_least = p->place_most = place; p->placed = true; }
+  if (place < p->place_least) p->place_least = place;
+  if (place > p->place_most) p->place_most = place;
+  p->place = place;
+  return place;
+}
+static void pistol_begin(Pistol *p, bool in_eye, bool late, bool watched) {
+  memset(p, 0, sizeof *p); p->e = (Eval){1, 1, 0, 0, 1}; p->in_eye = in_eye; p->late = late; p->watched = watched;
+}
+static void pistol_edge(Pistol *p, uint8_t ability) { eval_edge(&p->e, ability, false); p->direction = ability ? 1 : -1; p->edge_at = p->t; }
+/* The eye's place along the view in a traced row, less the first row's, and its part across the view (up, in the view's
+ * vertical plane). */
+static void along_view(const Row *rows, int k, double *along, double *across) {
+  const double *v = rows[k].view; const double h = sqrt(v[0]*v[0]+v[1]*v[1]);
+  double d[3]; for (int i = 0; i < 3; ++i) d[i] = rows[k].eye[i]-rows[0].eye[i];
+  *along = d[0]*v[0]+d[1]*v[1]+d[2]*v[2];
+  *across = -d[0]*v[0]*v[2]/h-d[1]*v[1]*v[2]/h+d[2]*h;
 }
 
 int main(int argc, char **argv) {
@@ -631,6 +702,200 @@ int main(int argc, char **argv) {
       CHECK(least >= rest-.005 && most <= rest+.03 && step_most <= fmax(.01, own_most)); /* held: within the game's own motion after it (0.023 m) */
     }
   }
+
+  /* ---- round 49e: the edges of a reload looked at (TfpReloadWatch): a diagnostic; the hold's numbers are not its ---- */
+  printf("  round 49e, the sidearm's reload as the listing models it: the eye's place along the view less its rest (m)\n");
+  for (int k = 0; k < 4; ++k) {
+    const float dt = DT[k]; const int second = (int)(1000.0f/dt);
+    /* 1. nothing reloads: nothing is reported, whatever the frames hold */
+    {
+      Pistol p; pistol_begin(&p, true, true, true);
+      for (int i = 0; i < 3*second; ++i) pistol_frame(&p, dt, 1, 1);
+      CHECK(p.reports == 0 && p.place_least == 0 && p.place_most == 0);
+    }
+    /* 2. the hold's own numbers are the same to the bit with the watch fed or not (it reads the hold, and writes nothing of it) */
+    {
+      Pistol a, b; pistol_begin(&a, true, true, true); pistol_begin(&b, true, true, false);
+      for (int pass = 0; pass < 2; ++pass) {
+        Pistol *p = pass ? &b : &a;
+        for (int i = 0; i < second; ++i) pistol_frame(p, dt, 1, 1);
+        pistol_edge(p, 1); for (int i = 0; i < 2*second; ++i) pistol_frame(p, dt, 1, 1);
+        pistol_edge(p, 0); for (int i = 0; i < second; ++i) pistol_frame(p, dt, 1, 1);
+      }
+      CHECK(a.delta_bits_sum == b.delta_bits_sum && !memcmp(&a.h, &b.h, sizeof a.h) && a.reports == 1 && b.reports == 0);
+    }
+    /* 3. the mover in node 50 (read a frame late or not) or in the anchor: the eye is not kept still by today's hold in
+     * any of them (the log's 0.064 m), and the report says which it was */
+    for (int variant = 0; variant < 3; ++variant) {
+      const bool in_eye = variant < 2, late = variant == 0;
+      Pistol p; pistol_begin(&p, in_eye, late, true);
+      for (int i = 0; i < second; ++i) pistol_frame(&p, dt, 1, 1);
+      CHECK(p.place == 0);
+      pistol_edge(&p, 1); for (int i = 0; i < 2*second; ++i) pistol_frame(&p, dt, 1, 1);
+      CHECK(near(p.place, PISTOL_X, 1e-6) && p.reports == 0);       /* settled in the reload: the mover, whole, whichever it is */
+      pistol_edge(&p, 0); for (int i = 0; i < second; ++i) pistol_frame(&p, dt, 1, 1);
+      CHECK(near(p.place, 0, 1e-6) && p.reports == 1);
+      printf("    %4.1f ms  mover in %s: the eye %.4f to %.4f m; reported %u frames of the start, %u of the end\n", (double)dt,
+             in_eye ? (late ? "node 50, read a frame late" : "node 50") : "request+0x60", (double)p.place_least, (double)p.place_most, p.report.starts, p.report.ends);
+      /* an anchor's mover never takes the eye behind its rest; node 50's does at the end unless read in its own frame at r = 0 */
+      if (!in_eye) CHECK(p.place_least > -1e-6f);
+      if (in_eye && late) CHECK(p.place_least < -.005f);
+      const TfpReloadEdges *e = &p.report;
+      CHECK(e->ready && e->rest_known && e->held_known && near(e->held, PISTOL_V, 1e-6) && e->constant_known && e->constant == 0);
+      CHECK(e->rest.r == 0 && near(e->rest.argument, PISTOL_V, 1e-6) && near(e->rest.eye[1], PISTOL_E0, 1e-6) && e->rest.anchor[1] == 0);
+      CHECK(e->starts >= 3 && e->starts <= TFP_RELOAD_EDGE_FRAMES && e->ends >= 3 && e->ends <= TFP_RELOAD_EDGE_FRAMES);
+      /* the start: its first frame has C in it; the share only rises; it runs to 150 ms or the frames kept */
+      CHECK(e->start[0].r > 0 && e->start[0].tick > e->rest.tick);
+      for (uint32_t i = 1; i < e->starts; ++i) CHECK(e->start[i].r >= e->start[i-1].r && e->start[i].tick > e->start[i-1].tick);
+      const TfpReloadProbe *last = &e->start[e->starts-1];
+      CHECK(e->starts == TFP_RELOAD_EDGE_FRAMES || (last->r == 1 && last->tick-e->start[0].tick >= TFP_RELOAD_EDGE_MS));
+      for (uint32_t i = 0; i < e->starts; ++i) {
+        const TfpReloadProbe *f = &e->start[i];
+        CHECK(near(f->put, f->r*PISTOL_V, 1e-6) && f->own == 0 && f->share == 1 && !f->scale_known && f->why == TFP_RELOAD_ADDED);
+        /* the listing's vector, from the line's own columns: request+0x4c - C = (1-r) (v + node 50's move as read) + r C */
+        if (in_eye) CHECK(near(f->argument, (1-f->r)*(PISTOL_V+(f->eye[1]-e->rest.eye[1])), 2e-6));
+        else CHECK(near(f->argument, (1-f->r)*PISTOL_V, 2e-6) && f->eye[1] == e->rest.eye[1]);
+        if (in_eye) CHECK(f->anchor[1] == 0);
+      }
+      /* which moved: the column that did, by most of the mover where the frames kept reach its end */
+      const float moved_eye = last->eye[1]-e->rest.eye[1], moved_anchor = last->anchor[1]-e->rest.anchor[1];
+      if (e->starts < TFP_RELOAD_EDGE_FRAMES) CHECK(near(in_eye ? moved_eye : moved_anchor, PISTOL_X, late ? PISTOL_X*dt/100+1e-6 : 1e-6));
+      else CHECK((in_eye ? moved_eye : moved_anchor) > .5f*PISTOL_X);
+      CHECK((in_eye ? moved_anchor : moved_eye) == 0);
+      /* the end: from the last frame with all of C through the blend back and after it */
+      CHECK(e->end[0].r == 1 && e->end[1].r < 1);
+      for (uint32_t i = 1; i < e->ends; ++i) CHECK(e->end[i].r <= e->end[i-1].r && e->end[i].tick > e->end[i-1].tick);
+      CHECK(e->end[e->ends-1].r == 0 && e->end[e->ends-1].why == TFP_RELOAD_NONE && e->end[e->ends-1].put == 0);
+      CHECK(e->ends == TFP_RELOAD_EDGE_FRAMES || e->end[e->ends-1].tick-e->end[1].tick >= TFP_RELOAD_EDGE_MS);
+    }
+    /* 4. a reload cancelled inside its first frames: one report, its end begun where the share turned */
+    {
+      Pistol p; pistol_begin(&p, true, true, true);
+      for (int i = 0; i < second/2; ++i) pistol_frame(&p, dt, 1, 1);
+      pistol_edge(&p, 1); pistol_frame(&p, dt, 1, 1);
+      pistol_edge(&p, 0); for (int i = 0; i < second; ++i) pistol_frame(&p, dt, 1, 1);
+      CHECK(p.reports == 1 && p.report.ready && p.report.starts >= 1 && p.report.rest_known);
+    }
+    /* 5. a second reload begun before the first one's end was all taken: the first is reported at that frame, the second after it */
+    {
+      Pistol p; pistol_begin(&p, true, true, true);
+      for (int i = 0; i < second/2; ++i) pistol_frame(&p, dt, 1, 1);
+      pistol_edge(&p, 1); for (int i = 0; i < second; ++i) pistol_frame(&p, dt, 1, 1);
+      pistol_edge(&p, 0);
+      int frames = 0; while (p.h.active || frames == 0) { pistol_frame(&p, dt, 1, 1); ++frames; } /* to the first frame with nothing of C */
+      CHECK(p.reports == 0);
+      pistol_edge(&p, 1); pistol_frame(&p, dt, 1, 1);
+      CHECK(p.reports == 1 && p.report.ends >= 2 && p.report.end[p.report.ends-1].r == 0);
+      for (int i = 0; i < second; ++i) pistol_frame(&p, dt, 1, 1);
+      pistol_edge(&p, 0); for (int i = 0; i < second; ++i) pistol_frame(&p, dt, 1, 1);
+      CHECK(p.reports == 2 && p.report.rest_known && p.report.rest.r == 0);
+    }
+    /* 6. another lease in the reload: what was taken of the old one is dropped; the new lease's reload has no rest frame */
+    {
+      Pistol p; pistol_begin(&p, true, true, true);
+      for (int i = 0; i < second/2; ++i) pistol_frame(&p, dt, 1, 1);
+      pistol_edge(&p, 1); for (int i = 0; i < second; ++i) pistol_frame(&p, dt, 1, 1);
+      for (int i = 0; i < second; ++i) pistol_frame(&p, dt, 1, 2);
+      pistol_edge(&p, 0); for (int i = 0; i < second; ++i) pistol_frame(&p, dt, 1, 2);
+      CHECK(p.reports == 1 && !p.report.rest_known && !p.report.held_known && p.report.starts >= 1 && p.report.ends >= 2);
+      char line[640]; CHECK(tfp_reload_edges_line(&p.report, 0, line, sizeof line) && strstr(line, "Reload rest: not seen"));
+    }
+  }
+  /* the lines: a reload at 33.3 ms, the mover in node 50 read a frame late (what the log's rows fit best) */
+  {
+    Pistol p; pistol_begin(&p, true, true, true);
+    for (int i = 0; i < 30; ++i) pistol_frame(&p, 33.3f, 1, 1);
+    pistol_edge(&p, 1); for (int i = 0; i < 60; ++i) pistol_frame(&p, 33.3f, 1, 1);
+    pistol_edge(&p, 0); for (int i = 0; i < 30; ++i) pistol_frame(&p, 33.3f, 1, 1);
+    CHECK(p.reports == 1);
+    p.report.sidearm = true;
+    char line[640]; uint32_t lines = 0, starts = 0, ends = 0;
+    while (tfp_reload_edges_line(&p.report, lines, line, sizeof line)) {
+      printf("    %s\n", line);
+      CHECK(strlen(line) < 600);
+      if (lines == 0) CHECK(!strcmp(line, "Reload rest: tick 999; node 50 at (0.0100 -0.3717 0.0200), its parents 1 to 4 (0.0000 0.0000 1.5000), axes 12.0000, request+0x60 (0.0000 0.0000 0.0000); argument -0.1250 m, C 0.0000 m, "
+                                           "the rig's own vector held -0.1250 m; hip share 1.00; sidearm 1"));
+      starts += !strncmp(line, "Reload start: ", 14); ends += !strncmp(line, "Reload end: ", 12);
+      ++lines;
+    }
+    CHECK(lines == 1+starts+ends && starts == (p.report.starts+TFP_RELOAD_EDGE_LINE-1)/TFP_RELOAD_EDGE_LINE && ends == (p.report.ends+TFP_RELOAD_EDGE_LINE-1)/TFP_RELOAD_EDGE_LINE);
+    const char *first = "Reload start: +33 ms r 0.444 arg -0.0695 own +0.0000 put -0.0555 n50 (+0.0000 +0.0000 +0.0000) a60 (+0.0000 +0.0000 +0.0000); "
+                        "+67 ms r 0.888 arg -0.0116 own +0.0000 put -0.1110 n50 (+0.0000 +0.0215 +0.0000) a60 (+0.0000 +0.0000 +0.0000); ";
+    CHECK(tfp_reload_edges_line(&p.report, 1, line, sizeof line) && !strncmp(line, first, strlen(first)));
+    CHECK(!tfp_reload_edges_line(&p.report, lines, line, sizeof line) && !tfp_reload_edges_line(NULL, 0, line, sizeof line));
+    CHECK(!strstr(line, " up "));                                          /* the parents still: not said in a frame */
+    { /* one of them moved, or turned, or not read: said */
+      TfpReloadEdges m = p.report; m.start[1].up[2] += .01f;
+      CHECK(tfp_reload_edges_line(&m, 1, line, sizeof line) && strstr(line, "a60 (+0.0000 +0.0000 +0.0000) up (+0.0000 +0.0000 +0.0100) axes +0.0000;"));
+      m = p.report; m.start[0].turn -= .25f;
+      CHECK(tfp_reload_edges_line(&m, 1, line, sizeof line) && strstr(line, " up (+0.0000 +0.0000 +0.0000) axes -0.2500; "));
+      m = p.report; m.start[0].up_known = false;
+      CHECK(tfp_reload_edges_line(&m, 1, line, sizeof line) && strstr(line, " up ?; "));
+    }
+    /* the longest a line can be: every frame kept, scaled, eased by the hip share, not held, far ticks */
+    TfpReloadEdges worst = p.report; worst.starts = worst.ends = TFP_RELOAD_EDGE_FRAMES;
+    for (uint32_t i = 0; i < TFP_RELOAD_EDGE_FRAMES; ++i) {
+      TfpReloadProbe *f = &worst.start[i]; memset(f, 0, sizeof *f);
+      f->tick = worst.rest.tick+99999; f->r = .123f; f->argument = f->own = f->put = -1.2345f; f->share = .5f; f->scale = .3103f; f->scale_known = true; f->kind = TFP_RELOAD_SCALED;
+      f->why = TFP_RELOAD_SCALED; f->eye_known = f->anchor_known = true; for (int a = 0; a < 3; ++a) { f->eye[a] = -3.9999f; f->anchor[a] = -1234.5678f; f->up[a] = -9.8765f; } f->turn = -12.3456f; f->up_known = true;
+      worst.end[i] = *f;
+    }
+    for (uint32_t i = 0; tfp_reload_edges_line(&worst, i, line, sizeof line); ++i) CHECK(strlen(line) < 639);
+    worst.start[0].eye_known = worst.start[0].anchor_known = false; worst.start[0].scale_known = false;
+    CHECK(tfp_reload_edges_line(&worst, 1, line, sizeof line) && strstr(line, "n50 ? a60 ?") && strstr(line, " x?") && strstr(line, " hip 0.50") && strstr(line, " not held"));
+    /* the second's: two kept, all counted */
+    TfpReloadSecond s; memset(&s, 0, sizeof s); TfpReloadEdges none; memset(&none, 0, sizeof none);
+    tfp_reload_note_edges(&s, &none); CHECK(s.edge_count == 0);
+    for (int i = 0; i < 3; ++i) { p.report.starts = (uint32_t)i+1; tfp_reload_note_edges(&s, &p.report); }
+    CHECK(s.edge_count == 3 && s.edges[TFP_RELOAD_EDGES_LOGGED-1].starts == TFP_RELOAD_EDGES_LOGGED);
+  }
+  /* ---- round 49e: the sidearm's reload of 0.6.0-feel.60 (19:36:08.7 to 19:36:11.5), as the log has it ---- */
+  if (argc > 3) {
+    Row *rows = NULL; char **text = NULL; int lines = 0; const int n = read_rows(argv[3], &rows, &text, &lines);
+    CHECK(n == 42);
+    if (n == 42) {
+      double along[42], across[42], root_most = 0;
+      for (int k = 0; k < n; ++k) { along_view(rows, k, &along[k], &across[k]); for (int i = 0; i < 3; ++i) root_most = fmax(root_most, fabs(rows[k].root[i]-rows[0].root[i])); }
+      /* the edges: the start's three frames (rows 7 to 9), the end's four (rows 27 to 30) */
+      int s0 = -1, e0 = -1;
+      for (int k = 1; k < n && s0 < 0; ++k) if (along[k]-along[k-1] > .01) s0 = k;
+      for (int k = s0+4; s0 > 0 && k < n && e0 < 0; ++k) if (along[k]-along[k-1] < -.01) e0 = k;
+      CHECK(s0 == 7 && e0 == 27 && root_most == 0);
+      if (s0 == 7 && e0 == 27) {
+        const double in = along[s0+2], settled = along[e0-1], rest = along[e0+3];
+        printf("  the sidearm's reload of feel.60 (%s): held by the line (%s), and the eye went %.4f m along the view over three frames (%.4f, %.4f, %.4f),\n"
+               "    %.4f m across it in three equal steps; at the end %.4f, %.4f, %.4f, %.4f m: %.4f m behind its rest, then forward to it\n",
+               argv[3], strstr(text[lines-2], "Reload: ") ? "Reload: ... would have slid 0.125 m" : "?", in, along[s0]-along[s0-1], along[s0+1]-along[s0], along[s0+2]-along[s0+1],
+               across[s0+2]-across[s0-1], along[e0]-along[e0-1], along[e0+1]-along[e0], along[e0+2]-along[e0+1], along[e0+3]-along[e0+2], rest-along[e0+2]);
+        bool said = false; for (int i = 0; i < lines; ++i) if (strstr(text[i], "Reload: eye held through the reload (would have slid 0.125 m)\n")) said = true;
+        CHECK(said);                                                       /* every frame held, by the hold's own count */
+        CHECK(near(in, .064, .002) && near(settled, in, .004));            /* and the eye 0.064 m off for the whole reload (the view turns a little in it) */
+        /* not a share of the hold: the blend's shares are 0.44, 0.89, 1 of it (33 ms frames, 75 ms), the eye's thirds */
+        for (int i = 0; i < 3; ++i) CHECK(near((along[s0+i]-along[s0-1])/in, (i+1)/3.0, .04));
+        CHECK(fabs(along[s0]/in-.445) > .08);
+        /* a part across the view, in equal steps: no forward value makes it (the hold's pair and the game's root go along the view) */
+        for (int i = 0; i < 3; ++i) CHECK(near(across[s0+i]-across[s0+i-1], -.0029, .0003));
+        for (int i = 0; i < 3; ++i) CHECK(near(across[e0+i]-across[e0+i-1], +.0029, .0003));
+        /* the end goes behind the rest and comes forward again: the rig's own vector had the mover in it as the blend
+         * went back (a mover outside the vector cannot: case 3 above) */
+        CHECK(along[e0+2] < rest-.012 && near(rest, 0, .004) && near(along[e0+3]-along[e0+2], .0155, .002));
+        /* the model with the mover in node 50, read a frame late, against the rows: the start to 2.5 mm */
+        Pistol p; pistol_begin(&p, true, true, false);
+        for (int i = 0; i < 30; ++i) pistol_frame(&p, 33.3f, 1, 1);
+        pistol_edge(&p, 1);
+        double worst = 0; float model[3];
+        for (int i = 0; i < 3; ++i) { model[i] = pistol_frame(&p, (float)(rows[s0+i].tick-rows[s0+i-1].tick), 1, 1); worst = fmax(worst, fabs(model[i]-(along[s0+i]-along[s0-1]))); }
+        printf("    the model (the mover in node 50, read a frame late) at the start: %.4f, %.4f, %.4f m against %.4f, %.4f, %.4f\n",
+               (double)model[0], (double)model[1], (double)model[2], along[s0]-along[s0-1], along[s0+1]-along[s0-1], along[s0+2]-along[s0-1]);
+        CHECK(worst < .0025);
+        /* read in its own frame it would not fit: the first frame would show 0.44 of a third less */
+        Pistol q; pistol_begin(&q, true, false, false);
+        for (int i = 0; i < 30; ++i) pistol_frame(&q, 33.3f, 1, 1);
+        pistol_edge(&q, 1);
+        CHECK(fabs(pistol_frame(&q, (float)(rows[s0].tick-rows[s0-1].tick), 1, 1)-(along[s0]-along[s0-1])) > .008);
+      }
+    }
+  } else printf("  the sidearm's reload of feel.60: no log given\n");
   printf("Reload hold: %d checks, %d failed\n", checks, failed);
   return failed ? 1 : 0;
 }
