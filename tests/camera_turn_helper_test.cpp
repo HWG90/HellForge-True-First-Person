@@ -226,6 +226,29 @@ int main() {
     CHECK(most[2] > .03f && std::memcmp(sent_at[2], sent_at[3], sizeof sent_at[2]) == 0); // Bodycam: the same bytes, told or not
     CHECK(dives[0] == 0 && dives[1] > 0 && dives[3] > 0); // and the rows say it
   }
+  // ---- 7. Full aim keeps the sights on the eye: nothing is carried in a frame of full aim. Into full aim straight
+  // from the head camera with the direction 39.5 degrees off: shown as the game gives it, at once; and a carry under
+  // way when full aim begins ends there. Out of full aim into the head camera the carry runs as anywhere. ----
+  {
+    fresh(true, true, true);
+    Game g; g.pose(1, 2, 0, LOOK); g.look(LOOK, 0); g.hip(); g.begin();
+    standing(g, 12, 16.7, false); standing(g, 30, 16.7, true);
+    const TfpQ world = tfp_q_normalised(tfp_q_mul(yaw_q(LOOK), about_up(29))), local = about_up(-39.5f), plain = tfp_q_normalised(local);
+    tfp_camera_trace_edge();
+    for (int i = 0; i < 3; ++i) { g.hip(2); std::memcpy(g.s.argument_rotation, &world, 16); g.frame(16.7); } // a carry of 29 degrees under way
+    { float now[3]; shown_forward(g, now); const float game[3] = {-std::sin(LOOK + 29 * TFP_PI / 180), std::cos(LOOK + 29 * TFP_PI / 180), 0}; CHECK(degrees_apart(now, game) > 20); }
+    int different = 0;
+    for (int i = 0; i < 10; ++i) { g.native(0, true); std::memcpy(g.s.argument_rotation, &local, 16); g.frame(16.7); const TfpQ got = handed(); different += std::memcmp(&plain, &got, 16) != 0; }
+    CHECK(different == 0);
+    TfpCameraTraceRow rows[64]; const uint32_t count = tfp_camera_trace_read(rows, 64);
+    int carried = 0; for (uint32_t i = 0; i < count; ++i) if (rows[i].kind == 6) carried += rows[i].turn_carry != 0 || rows[i].turn_edge != 0;
+    CHECK(count > 5 && carried == 0);
+    // and out of it: the head camera's first frame is shown the way full aim's last was
+    float before[3], now[3]; shown_forward(g, before);
+    g.hip(2); std::memcpy(g.s.argument_rotation, &world, 16); g.frame(16.7); shown_forward(g, now);
+    CHECK(degrees_apart(before, now) < .05f);
+    g.end();
+  }
   std::printf("camera turn through the helper: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

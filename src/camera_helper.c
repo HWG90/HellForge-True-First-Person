@@ -1038,7 +1038,9 @@ static void lock_rotation(Policy *p, const float *native, uint32_t kind, double 
   if (held) tfp_turn_reset(&lock_turn);
   else {
     const bool known = kind != 6 || (trace_parent_tick == tick && tfp_turn_world(trace_parent, given, &game));
-    turn = tfp_turn_step(&lock_turn, game, known, kind, tick, p->c.max_gap_ms, &turn_began);
+    /* Not in full aim: the sights stay on the eye there (as the damping and the continuity leave it alone). */
+    if (p->full_ads) tfp_turn_drop(&lock_turn, game, known, kind, tick);
+    else turn = tfp_turn_step(&lock_turn, game, known, kind, tick, p->c.max_gap_ms, &turn_began);
     if (kind != 6) view = tfp_turn_apply(view, turn);
     if (kind == 4 && read((uint64_t)(uintptr_t)native, game_position, 16) && finite3(game_position)) { memcpy(lock_game_cam, game_position, 12); lock_game_cam_tick = tick; }
   }

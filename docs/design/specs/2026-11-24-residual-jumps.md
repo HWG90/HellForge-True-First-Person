@@ -1132,6 +1132,8 @@ out of the picture, and writes what a cause can be read from.
 - Under 0.5 degrees nothing is carried and the rotation handed on is main's, bit for bit. Over 120 is another view.
 - The carry sits on top of each frame's own rotation, so the mouse and recoil go through whole during the ease.
 - A second change while a carry is under way starts from what is shown then.
+- Nothing is carried in a frame of full aim: the sights stay on the eye, as the damping and the continuity leave them.
+  A carry under way when full aim begins ends there in one frame (at most what main turned at the change itself).
 - **Cost.** During the ease the picture points off the game's aim by what is still carried (`turn_carry=` on the row);
   a shot in that time lands where the game aims, not at the centre of the picture. And the turn itself remains.
 - **Left as it is.** The head camera's eye is still built 0.18 m along the game's own level direction, so at the

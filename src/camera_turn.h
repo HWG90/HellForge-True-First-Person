@@ -22,7 +22,9 @@
  *   - a difference under TFP_TURN_SKIP_DEG carries nothing, and a frame nothing is carried in gets the identity back,
  *     bit for bit, which the caller does not multiply by: such frames are main's;
  *   - a difference over TFP_TURN_MOST_DEG is another view (a camera cut the game means) and is shown as it is;
- *   - a second change while a carry is under way starts again from what is shown then.
+ *   - a second change while a carry is under way starts again from what is shown then;
+ *   - nothing is carried in a frame of full aim (tfp_turn_drop): the sights stay on the eye. A carry under way ends
+ *     there, in one frame.
  * During the ease the picture points off the game's own aim by what is still carried. */
 #ifndef TFP_CAMERA_TURN_H
 #define TFP_CAMERA_TURN_H
@@ -107,6 +109,12 @@ static inline TfpQ tfp_turn_step(TfpTurn *t, TfpQ game, bool game_known, uint32_
   else t->known = false;
   t->kind = kind; t->tick = tick;
   return carry;
+}
+/* A frame that carries nothing by rule (full aim: the sights stay on the eye, as everywhere in the lock): shown with
+ * the game's own direction. A carry under way ends, none begins, and the frame is the start for the next change. */
+static inline void tfp_turn_drop(TfpTurn *t, TfpQ game, bool game_known, uint32_t kind, double tick) {
+  t->active = false; t->degrees = 0;
+  t->shown = game; t->known = game_known && tfp_q_valid(game); t->kind = kind; t->tick = tick;
 }
 /* The argument with the carry on it; the argument itself, bit for bit, where nothing is carried. */
 static inline TfpQ tfp_turn_apply(TfpQ argument, TfpQ carry) {

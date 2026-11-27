@@ -106,6 +106,20 @@ int main(void) {
     const TfpQ third = tfp_turn_step(&t, a, true, 6, 1050, 250, &began);
     CHECK(began == 0 && tfp_turn_degrees(third) < tfp_turn_degrees(second)); /* the ease goes on; nothing new is begun */
   }
+  /* A frame that carries nothing by rule (full aim: the sights stay on the eye): a carry under way ends, none begins,
+   * and the frame is still the start for the next change. */
+  {
+    TfpTurn t; tfp_turn_reset(&t); float began = 0;
+    const TfpQ a = about(0, 0, 1, 0), b = about(0, 0, 1, 40);
+    tfp_turn_step(&t, a, true, 4, 1000, 250, &began);
+    tfp_turn_drop(&t, b, true, 6, 1016);                      /* into full aim, 40 degrees off: as the game gives it */
+    CHECK(!t.active && t.known && same(t.shown, b) && t.kind == 6);
+    const TfpQ out = tfp_turn_step(&t, a, true, 4, 1033, 250, &began); /* and out again: carried from what full aim showed */
+    CHECK(!tfp_turn_none(out) && fabsf(began-40) < .02f);
+    tfp_turn_drop(&t, a, true, 6, 1050);
+    CHECK(!t.active && tfp_turn_none(tfp_turn_step(&t, a, true, 6, 1066, 250, &began)));
+    tfp_turn_drop(&t, a, false, 6, 1083); CHECK(!t.known);
+  }
   /* THE DIRECTION: the rig eye's axes times the local argument. */
   {
     const float yaw = 1.1f, c = cosf(yaw), s = sinf(yaw);
