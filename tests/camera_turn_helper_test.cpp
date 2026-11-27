@@ -249,6 +249,70 @@ int main() {
     CHECK(degrees_apart(before, now) < .05f);
     g.end();
   }
+  // ---- 8. The check's blocker: a pan through a change out of the head camera into the native view. That change comes
+  // a whole frame after the last head-camera frame, so the game's direction is off the one last shown by one frame of
+  // the player's own turn. With the cameras agreeing nothing may be carried: every rotation handed on is the game's
+  // own, bit for bit (main's), and the picture turns the same in every frame (it stood still for one: 1.67, 0.00,
+  // 1.76, 1.90 degrees at 100 degrees a second). At 100 and 300 degrees a second, 16.7 and 33 ms a frame, in both
+  // styles. ----
+  for (float rate : {100.f, 300.f}) for (double dt : {16.7, 33.0}) for (bool bodycam : {true, false}) {
+    fresh(true, true, true, 0, bodycam);
+    float look = LOOK; const float step = rate * (float)dt / 1000;
+    Game g; g.pose(1, 2, 0, look); g.look(look, 0); g.hip(); g.begin();
+    standing(g, 12, dt, false);
+    float last[3], now[3]; bool have = false; int different = 0, uneven = 0, carried = 0;
+    for (int i = 0; i < 44; ++i) {
+      look += step * TFP_PI / 180; g.look(look, 0);
+      if (i < 20) g.hip(2); else g.native(0);
+      if (i == 20) tfp_camera_trace_edge(); // the rows either side of the change
+      TfpQ plain; std::memcpy(&plain, g.s.argument_rotation, 16); plain = tfp_q_normalised(plain);
+      g.frame(dt);
+      const TfpQ got = handed(); different += std::memcmp(&plain, &got, 16) != 0;
+      shown_forward(g, now);
+      if (have) uneven += std::fabs(degrees_apart(last, now) - step) > .01f;
+      std::memcpy(last, now, 12); have = true;
+    }
+    TfpCameraTraceRow rows[64]; const uint32_t count = tfp_camera_trace_read(rows, 64);
+    for (uint32_t i = 0; i < count; ++i) carried += rows[i].turn_carry != 0 || rows[i].turn_edge != 0;
+    CHECK(count >= 10 && different == 0 && uneven == 0 && carried == 0);
+    g.end();
+  }
+  // ---- 9. The same pan with the cameras really 29 degrees apart at the change (the rig eye's direction 29 degrees
+  // off the head camera's): the 29 degrees are carried and eased, not 29 and a frame of the pan; the frame of the
+  // change turns by the pan's own step (no stand-still, no cut), what is still carried falls every frame, and the pan
+  // goes on under it: when the ease is over the frames are the game's own again, bit for bit. ----
+  for (float rate : {100.f, 300.f}) for (double dt : {16.7, 33.0}) {
+    fresh(true, true, true);
+    float look = LOOK; const float step = rate * (float)dt / 1000;
+    Game g; g.pose(1, 2, 0, look); g.look(look, 0); g.hip(); g.begin();
+    standing(g, 12, dt, false);
+    float last[3], now[3], game[3], at_change = -1, left_over = 30; bool have = false, falling = true, slow = true; int different = 0;
+    const int frames = 20 + (int)(400 / dt);
+    for (int i = 0; i < frames; ++i) {
+      look += step * TFP_PI / 180;
+      if (i < 20) { g.look(look, 0); g.hip(2); }
+      else { g.look(look - 29 * TFP_PI / 180, 0); g.native(0); } // the rig eye 29 degrees to the right of the pan
+      if (i == 20) tfp_camera_trace_edge();
+      const float a = look - (i < 20 ? 0 : 29 * TFP_PI / 180); game[0] = -std::sin(a); game[1] = std::cos(a); game[2] = 0;
+      g.frame(dt);
+      shown_forward(g, now);
+      if (i == 20) at_change = degrees_apart(last, now);
+      if (i >= 20) {
+        const float off = degrees_apart(now, game);
+        if (off > left_over + 1e-2f) falling = false;
+        if (left_over - off > TFP_TURN_RATE_DEG_S * (float)dt / 1000 + .05f) slow = false;
+        left_over = off;
+        if ((i - 20) * dt >= 218 + dt) { const TfpQ plain = tfp_q_normalised(tfp_q_identity()), got = handed(); different += std::memcmp(&plain, &got, 16) != 0; }
+      }
+      std::memcpy(last, now, 12); have = true;
+    }
+    CHECK(have && std::fabs(at_change - step) < .05f); // the pan's own step in the frame of the change (was 0; main: 29 less the step)
+    CHECK(falling && slow && left_over < 1e-3f && different == 0);
+    TfpCameraTraceRow rows[64]; const uint32_t count = tfp_camera_trace_read(rows, 64);
+    int edges = 0; for (uint32_t i = 0; i < count; ++i) if (rows[i].turn_edge != 0) { ++edges; CHECK(std::fabs(rows[i].turn_edge - 29) < .05f); }
+    CHECK(edges == 1);
+    g.end();
+  }
   std::printf("camera turn through the helper: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

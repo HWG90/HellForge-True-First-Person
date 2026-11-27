@@ -23,6 +23,17 @@
  *     bit for bit, which the caller does not multiply by: such frames are main's;
  *   - a difference over TFP_TURN_MOST_DEG is another view (a camera cut the game means) and is shown as it is;
  *   - a second change while a carry is under way starts again from what is shown then;
+ *   - THE PLAYER'S OWN TURN is not part of the difference. Into the native view the frame before is a whole frame
+ *     earlier (33 ms in every logged change; out of it both calls come in one game frame, 0 to 1 ms apart), so the
+ *     game's new direction is off the one last shown by one frame of mouse turn as well, and carrying that froze a pan
+ *     for a frame (100 degrees a second at 16.7 ms: 1.67, 0.00, 1.76, 1.90 degrees a frame where main turns 1.67 in
+ *     each). So at a change from kind 4 to kind 6 the direction last shown is first advanced by the turn the game's
+ *     own direction made over the ordinary camera's last frame, about the world's axes, in proportion to the time
+ *     since; the difference is taken from there and the skip applies to what is left. A pan through agreeing cameras
+ *     carries nothing; with the cameras 29 degrees apart the frame of the change is shown where the pan would have
+ *     taken the last one and the 29 degrees ease out under the pan. What cannot be told apart is a turn that changes
+ *     speed in that very frame: the change of speed times the frame is left over (a pan that stops dead leaves one
+ *     frame of it, as much as before), and is carried when it is over the skip;
  *   - nothing is carried in a frame of full aim (tfp_turn_drop): the sights stay on the eye. A carry under way ends
  *     there, in one frame.
  * During the ease the picture points off the game's own aim by what is still carried. */
@@ -34,14 +45,18 @@
 #define TFP_TURN_MOST_DEG 120.0f    /* over this: another view, shown as it is */
 #define TFP_TURN_RATE_DEG_S 200.0f  /* the ease's steepest point turns no faster */
 #define TFP_TURN_LEAST_MS 120.0f    /* and no ease is shorter (the held direction's own ease, LOCK_CARRY_MS) */
+#define TFP_TURN_FRAME_MS 4.0       /* calls closer than this are one game frame (a camera set twice in a frame) */
+#define TFP_TURN_AHEAD_MOST 4.0f    /* the player's own turn is carried forward over this many of its frames at most */
+#define TFP_TURN_OWN_LEAST_DEG 0.01f /* a turn under this over a frame is a still view: the direction is not advanced */
 
 /* shown: the rotation last shown, in the world, without the kick; kind, tick: of that frame; known: there is one.
  * from: the carry as the ease began (in the view's own frame: shown = the game's rotation times the carry); started,
  * duration_ms: of the ease; active: one is under way. degrees: what the last change of camera began with (0: nothing
- * was carried), for the log. */
-typedef struct TfpTurn { TfpQ shown, from; double tick, started; float duration_ms, degrees; uint32_t kind; bool known, active; } TfpTurn;
+ * was carried), for the log. game: the game's own direction in that frame (where known); prior, prior_tick: the
+ * game's own direction a frame of the same camera earlier (prior_known), which the player's own turn is read from. */
+typedef struct TfpTurn { TfpQ shown, from, game, prior; double tick, started, prior_tick; float duration_ms, degrees; uint32_t kind; bool known, active, prior_known; } TfpTurn;
 
-static inline void tfp_turn_reset(TfpTurn *t) { memset(t, 0, sizeof *t); t->shown = t->from = tfp_q_identity(); }
+static inline void tfp_turn_reset(TfpTurn *t) { memset(t, 0, sizeof *t); t->shown = t->from = t->game = t->prior = tfp_q_identity(); }
 static inline bool tfp_turn_none(TfpQ carry) { return carry.x == 0 && carry.y == 0 && carry.z == 0 && carry.w == 1; }
 /* How far a rotation turns, degrees (0 to 180). From the vector part: through the arc cosine of w one float step
  * below 1 already reads 0.04 degrees. */
@@ -82,6 +97,30 @@ static inline TfpQ tfp_turn_carry_at(TfpQ from, float passed_ms, float duration_
   const TfpQ carry = tfp_slerp(tfp_q_identity(), from, 1-x*x*(3-2*x));
   return tfp_q_valid(carry) ? carry : tfp_q_identity();
 }
+/* The game's own direction of this frame, kept for the next one: the frame before stays the `prior` while the camera
+ * is the same and its direction known; a second call within one game frame replaces the first. Called with the old
+ * frame still in t->kind, t->tick and `was_known`. */
+static inline void tfp_turn_note(TfpTurn *t, TfpQ game, bool game_known, bool was_known, uint32_t kind, double tick) {
+  if (!(game_known && was_known && kind == t->kind && tick >= t->tick)) t->prior_known = false;
+  else if (tick-t->tick >= TFP_TURN_FRAME_MS) { t->prior = t->game; t->prior_tick = t->tick; t->prior_known = true; }
+  if (game_known) t->game = game;
+}
+/* THE PLAYER'S OWN TURN: the direction last shown, advanced to `tick` by the turn the game's own direction made over
+ * the last frame of the camera it was shown in. The direction itself, bit for bit, where there is no such frame or the
+ * view stood still in it. */
+static inline TfpQ tfp_turn_ahead(const TfpTurn *t, double tick, uint32_t max_gap_ms) {
+  const double span = t->tick-t->prior_tick;
+  if (!t->prior_known || !(span >= TFP_TURN_FRAME_MS) || !(span <= max_gap_ms) || !(tick > t->tick)) return t->shown;
+  TfpQ own = tfp_q_normalised(tfp_q_mul(t->game, tfp_q_inv(t->prior))); /* about the world's axes: a pan is about up */
+  if (own.w < 0) own = tfp_q(-own.x, -own.y, -own.z, -own.w);
+  const float length = sqrtf(own.x*own.x+own.y*own.y+own.z*own.z), degrees = tfp_turn_degrees(own);
+  if (!tfp_q_valid(own) || !(degrees >= TFP_TURN_OWN_LEAST_DEG) || !(length > 0)) return t->shown;
+  float part = (float)((tick-t->tick)/span);
+  if (part > TFP_TURN_AHEAD_MOST) part = TFP_TURN_AHEAD_MOST;
+  const float half = atan2f(length, own.w)*part, s = sinf(half)/length;
+  const TfpQ ahead = tfp_q_normalised(tfp_q_mul(tfp_q(own.x*s, own.y*s, own.z*s, cosf(half)), t->shown));
+  return tfp_q_valid(ahead) ? ahead : t->shown;
+}
 /* One frame the lock shows with the game's own direction. `game`: the rotation the game means in the world (kind 4:
  * its argument; kind 6: tfp_turn_world), used only where `game_known`; a frame that does not know it carries on with
  * an ease under way and is no start for the next change. `kind`: 4 or 6. Returns the carry: the rotation to apply
@@ -92,7 +131,9 @@ static inline TfpQ tfp_turn_step(TfpTurn *t, TfpQ game, bool game_known, uint32_
   const bool near = t->known && tick >= t->tick && tick-t->tick <= max_gap_ms;
   if (t->active && !(tick >= t->tick && tick-t->tick <= max_gap_ms)) t->active = false; /* a pause: nothing is carried over it */
   if (game_known && near && kind != t->kind && (kind == 4 || kind == 6) && (t->kind == 4 || t->kind == 6)) {
-    const TfpQ apart = tfp_q_normalised(tfp_q_mul(tfp_q_inv(game), t->shown));
+    /* into the native view the frame before is a frame earlier: the player's own turn since is not the cameras' */
+    const TfpQ last = t->kind == 4 && kind == 6 ? tfp_turn_ahead(t, tick, max_gap_ms) : t->shown;
+    const TfpQ apart = tfp_q_normalised(tfp_q_mul(tfp_q_inv(game), last));
     const float degrees = tfp_turn_degrees(apart);
     if (tfp_q_valid(apart) && degrees >= TFP_TURN_SKIP_DEG && degrees <= TFP_TURN_MOST_DEG) {
       t->from = apart.w < 0 ? tfp_q(-apart.x, -apart.y, -apart.z, -apart.w) : apart; t->started = tick;
@@ -105,16 +146,21 @@ static inline TfpQ tfp_turn_step(TfpTurn *t, TfpQ game, bool game_known, uint32_
     carry = tfp_turn_carry_at(t->from, (float)(tick-t->started), t->duration_ms);
     if (tfp_turn_none(carry) || tfp_turn_degrees(carry) < .02f) { carry = tfp_q_identity(); t->active = false; }
   }
+  const bool was_known = t->known;
   if (game_known) { t->shown = tfp_turn_none(carry) ? game : tfp_q_normalised(tfp_q_mul(game, carry)); t->known = tfp_q_valid(t->shown); }
   else t->known = false;
+  tfp_turn_note(t, game, t->known, was_known, kind, tick);
   t->kind = kind; t->tick = tick;
   return carry;
 }
 /* A frame that carries nothing by rule (full aim: the sights stay on the eye, as everywhere in the lock): shown with
  * the game's own direction. A carry under way ends, none begins, and the frame is the start for the next change. */
 static inline void tfp_turn_drop(TfpTurn *t, TfpQ game, bool game_known, uint32_t kind, double tick) {
+  const bool was_known = t->known;
   t->active = false; t->degrees = 0;
-  t->shown = game; t->known = game_known && tfp_q_valid(game); t->kind = kind; t->tick = tick;
+  t->shown = game; t->known = game_known && tfp_q_valid(game);
+  tfp_turn_note(t, game, t->known, was_known, kind, tick);
+  t->kind = kind; t->tick = tick;
 }
 /* The argument with the carry on it; the argument itself, bit for bit, where nothing is carried. */
 static inline TfpQ tfp_turn_apply(TfpQ argument, TfpQ carry) {
