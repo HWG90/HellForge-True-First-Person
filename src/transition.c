@@ -16,6 +16,11 @@ void tfp_transition_init(TfpTransition *t) {
   t->max_gap = .25;                  /* :19 */
   t->max_step = t->duration / 3;     /* :22 one slow frame spends at most a third of a blend */
   t->merge_until = .5;               /* :26 */
+  t->enter_duration = t->duration;   /* round 42: retail's until tfp_transition_set_enter */
+}
+void tfp_transition_set_enter(TfpTransition *t, double seconds) { /* round 42, not in retail */
+  if (!finite_number(seconds) || seconds > 1) return;
+  t->enter_duration = seconds > 0 ? seconds : 0;
 }
 static void retire(TfpTransition *t) { t->has_packet = t->has_previous = false; } /* :33 */
 void tfp_transition_reset(TfpTransition *t) { retire(t); }
@@ -28,14 +33,22 @@ static bool joins(const TfpTransition *t, TfpTransitionReason reason, bool ads) 
          t->packet.progress < t->merge_until;
 }
 static void advance(TfpTransition *t, double now) { /* :41 */
-  double elapsed = fmax(0, fmin(now - t->previous.time, t->max_step));
-  t->packet.progress = fmax(t->packet.progress, fmin(1, t->packet.progress + elapsed / t->duration));
+  /* Round 42: the packet's own duration (an ADS_ENTER's may be shorter than t->duration); with t->duration's own packets
+   * this is retail's sum to the bit (packet.duration == t->duration, t->max_step == duration / 3). A packet of no duration
+   * began at 1 and is not divided by. */
+  const double duration = t->packet.duration;
+  if (!(duration > 0)) { t->packet.progress = 1; return; }
+  double elapsed = fmax(0, fmin(now - t->previous.time, duration / 3)); /* t->max_step for t->duration's packets */
+  t->packet.progress = fmax(t->packet.progress, fmin(1, t->packet.progress + elapsed / duration));
 }
 static void begin(TfpTransition *t, TfpTransitionReason reason, bool ads, uint64_t identity, uint64_t player,
                   double now, double progress, bool continuous) {
   t->epoch++;
+  /* Round 42: an ADS_ENTER takes the aim-in time; at 0 it begins done. */
+  const double duration = reason == TFP_REASON_ADS_ENTER ? t->enter_duration : t->duration;
+  if (!(duration > 0)) progress = 1;
   t->packet = (TfpTransitionPacket){.epoch = t->epoch, .progress = progress, .started = now,
-      .duration = t->duration, .ads = ads, .continuous = continuous, .reason = reason,
+      .duration = duration, .ads = ads, .continuous = continuous, .reason = reason,
       .merged = TFP_REASON_NONE, .identity = identity, .player_identity = player};
   t->has_packet = true;
 }

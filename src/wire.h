@@ -124,6 +124,7 @@ typedef struct TfpWire {
   TfpTransition transition;
   TfpTransitionPacket packet;   /* the packet behind the TRANS table's ref */
   bool has_packet;
+  double aim_in_ms;             /* round 42: the ADS_ENTER packet's duration, ms (tfp_wire_set_aim_in; 180 from tfp_wire_init) */
   TfpWireSnap snaps[TFP_WIRE_SNAPS];
   unsigned snap_next;
   char arena[TFP_WIRE_ARENA];
@@ -202,6 +203,11 @@ void tfp_wire_set_memo(TfpWire *w, bool on);
 bool tfp_wire_memo_start(TfpWire *w, bool memo_off_file);
 /* Round 35: the memo's state for the Perf snapshots line (TFP_PERF_MEMO_*). */
 int tfp_wire_memo_state(const TfpWire *w);
+
+/* Round 42, "Aim-in time" (locked_view.json ads_transition_ms): the shared clock's ADS_ENTER duration in ms, handed to it
+ * (tfp_transition_set_enter) before each of its updates. 0 .. 300; anything else is ignored. 180 after tfp_wire_init, the
+ * clock's own time, so a wire that is never told (the view build) is as before. Game thread. */
+void tfp_wire_set_aim_in(TfpWire *w, double ms);
 
 /* Builds the host (off answers first, then the wired view) and the runtime's start state. The
  * TfpOpsHost's four hook pointers are filled in here; its other members are the caller's. */
