@@ -4,8 +4,9 @@
 # tools/retail_ref/gen_backend_ops.py). Two programs: the production object (the presentation
 # switch refuses: its constants are open on build 25480438) and a second object built with the
 # test-only open constants of tests/backend_ops_open.h, which runs every script. Each prints
-# one summary line; exits non-zero on any difference. Each runs twice: as the game runs by default, and with the
-# snapshot memo live (TFP_OPS_MEMO=1, the game's memo_on.txt; round 35). Needs only a C compiler.
+# one summary line; exits non-zero on any difference. Each runs twice: with the snapshot memo off (the backend as
+# tfp_ops_init leaves it; the game with memo_off.txt), and with it live (TFP_OPS_MEMO=1: the game's default since
+# round 40). Needs only a C compiler.
 #   tests/run-vectors-backend-ops.sh [retail commit the vectors must come from]
 # TFP_BACKEND_OPS_SOURCE / TFP_BACKEND_OPS_WORK: another C source / build folder (the mutation
 # check uses them). TFP_BACKEND_OPS_KEEP_TEST_OBJECT: reuse the compiled test objects.
@@ -33,6 +34,6 @@ fi
 "$TFP_CC" "$TFP_WORK/backend_ops_open_test.o" "$TFP_WORK/backend_ops_open_under_test.o" -lm -o "$TFP_WORK/backend_ops_open_test"
 "$TFP_WORK/backend_ops_test" "$@"
 "$TFP_WORK/backend_ops_open_test" "$@"
-# Round 35: again with the snapshot memo live (memo_on.txt in the game; tfp_ops_set_memo after every "new").
+# Round 35: again with the snapshot memo live (the game's default since round 40; tfp_ops_set_memo after every "new").
 TFP_OPS_MEMO=1 "$TFP_WORK/backend_ops_test" "$@"
 TFP_OPS_MEMO=1 "$TFP_WORK/backend_ops_open_test" "$@"

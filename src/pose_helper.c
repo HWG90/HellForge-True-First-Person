@@ -814,7 +814,7 @@ static _Atomic uint32_t steady_mode;
 static _Atomic uint32_t aim_steady;
 static bool steady_frame(Policy *p, const DepthObservation *observation, uint64_t native_stack, uint64_t now, uint32_t mode, float argument, float *delta) {
   const uint64_t generation = atomic_load_explicit(&active_generation, memory_order_relaxed);
-  uint8_t request[0x24] = {0}; float depth = 0, held = 0; uint32_t reason = TFP_STEADY_NO_LENS; bool bit = false, stopped_now = false, carried = false;
+  uint8_t request[0x24] = {0}; float depth = 0, held = 0; uint32_t reason = TFP_STEADY_NO_LENS; bool bit = false, stopped_now = false, carried = false, scaled_held = false;
   *delta = 0;
   /* The root's half is a second call with proofs of its own (carrier_position_locked). Where node 5 was moved in
    * TFP_STEADY_ALONE frames running and the root's half was not done, or in TFP_STEADY_ALONE_LEASE frames of the
@@ -834,6 +834,7 @@ static bool steady_frame(Policy *p, const DepthObservation *observation, uint64_
     in.target = field_f32(observation->frame, 0x18); in.lens = field_f32(observation->frame, 0x1C); in.prior = field_f32(request, 0x20);
     in.current = field_f32(request, 0x10); in.previous = field_f32(request, 0x1C);
     in.bit = observation->frame[0] != 0; in.blend = request[0xD]; in.ability = request[0xF];
+    in.unscaled = observation->frame[1] != 0; /* round 40: [rsp+0x45], the evaluator's other byte of the scaling's test */
     in.mix_before = field_f32(observation->request_state, 8); in.mix_after = field_f32(request, 8);
     in.on = mode == 1 && !stopped;
     /* Where to rest at the hip: the selected optic's own distance, or the mod's reference for it where the zoom depth
@@ -860,25 +861,45 @@ static bool steady_frame(Policy *p, const DepthObservation *observation, uint64_
      * game's C in it (`argument`, less C, with what the held depth added) is put back in the share of C, by the hip
      * share: node 5 forward and the root back, the held depth's own pair. Added only to a frame the held depth worked
      * out (the request proven this frame's, the switch on); every other frame here is counted as not held. Nothing is
-     * added to a frame with none of C in it. */
+     * added to a frame with none of C in it.
+     * Round 40: also to a frame the held depth passes because the game scales the rig by main row +0x11ac (the request
+     * is proven this frame's there too, the switch on): the main row's float is read in such a frame only (one guarded
+     * read, as the "Gate:" line's), and what goes to node 5 is the hold's whole number for it, the held depth's own
+     * term as it would be unscaled in it (tfp_steady_carry's, by the share), through the same pair. */
     if (reason != TFP_STEADY_RANGE) {
       if (!reload_read || reload_lease != generation) { reload_read = true; reload_lease = generation; reload_known = reload_constant(&p->c, &reload_forward); }
       TfpReloadInput r; memset(&r, 0, sizeof r);
-      r.blend = in.blend; r.ability = in.ability; r.bit = in.bit; r.mix_before = in.mix_before; r.mix_after = in.mix_after;
+      r.blend = in.blend; r.ability = in.ability; r.bit = in.bit; r.unscaled = in.unscaled; r.mix_before = in.mix_before; r.mix_after = in.mix_after;
       r.argument = argument; r.constant = reload_forward; r.constant_known = reload_known; r.added = reason == TFP_STEADY_WORKED ? *delta : 0;
-      r.share = p->weight; r.on = reason == TFP_STEADY_WORKED;
+      float r_share = 0;
+      const bool scaled = reason == TFP_STEADY_SCALED
+          && tfp_reload_share(r.blend, r.ability, r.bit, r.unscaled, r.mix_before, r.mix_after, &r_share) == TFP_RELOAD_SCALED;
+      r.share = p->weight; r.on = reason == TFP_STEADY_WORKED || scaled; /* a frame held is a frame whose number goes out */
+      if (scaled) {
+        float unscaled_term = 0;
+        if (carried) unscaled_term = *delta;
+        else if (tfp_steady_carry(&steady, &in, TFP_STEADY_SCALED, true, generation, (double)now, depth, &unscaled_term))
+          unscaled_term *= in.share < 0 ? 0 : in.share > 1 ? 1 : in.share;
+        else unscaled_term = 0;
+        r.added = unscaled_term;
+        if (p->c.avatar_index < 8) {
+          const uint64_t row = p->c.avatar_owner + B_AVATAR_MAIN + (uint64_t)p->c.avatar_index*B_AVATAR_MAIN_STRIDE;
+          r.scale_known = value(row + 0x11ac, r.scale);
+        }
+      }
       float added = 0; TfpReloadEnd end;
-      tfp_reload_frame(&reload_hold, &r, generation, &added, &end);
+      const uint32_t held_now = tfp_reload_frame(&reload_hold, &r, generation, &added, &end);
       tfp_reload_note(&steady_log.now.reload, &end);
       if (reason == TFP_STEADY_WORKED) *delta += added;
+      else if (scaled && held_now == TFP_RELOAD_ADDED) { *delta = added; scaled_held = true; }
     }
     bit = in.bit;
     tfp_steady_aim_note(&steady_log, p->full_ads, reason == TFP_STEADY_WORKED || reason == TFP_STEADY_OFF || reason == TFP_STEADY_NO_ROOT
-                        || (carried && reason == TFP_STEADY_SCALED), depth+*delta);
+                        || ((carried || scaled_held) && reason == TFP_STEADY_SCALED), depth+*delta);
   }
   steady_log.now.lease = generation;
   tfp_steady_note(&steady_log, reason, bit, depth, held, *delta, argument);
-  return reason == TFP_STEADY_WORKED || carried;
+  return reason == TFP_STEADY_WORKED || carried || scaled_held;
 }
 /* cpp:555-576. Optional native input policy. The only engine datum it
  * changes is DWORD80 of the exact owned camera6 request. All backing records

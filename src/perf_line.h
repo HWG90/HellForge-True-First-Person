@@ -142,8 +142,8 @@ typedef struct TfpPerfSnapshots {
   uint32_t invokes, invoke_bodies;
   uint32_t calls[3], hits[3], mismatches[3]; /* the memo: public snapshot calls, those in the same frame epoch, those that differed */
   uint32_t moved;              /* hits whose own take changed the backend's state */
-  /* Round 35: TFP_PERF_MEMO_SHADOW (no memo_on.txt: the line is round 32's, byte for byte), _LIVE, or _TURNED_OFF (a check
-   * failed this session: the shadow again). With the switch: hits answered from the memo, live hits checked against a
+  /* Round 35: TFP_PERF_MEMO_SHADOW (memo_off.txt since round 40: the line is round 32's, byte for byte), _LIVE (the
+   * default since round 40), or _TURNED_OFF (a check failed this session: the shadow again). Live or turned off: hits answered from the memo, live hits checked against a
    * fresh take, and the guarded reads the served hits did not make. */
   int memo;
   uint32_t served[3], checked[3], saved_reads;
@@ -177,7 +177,7 @@ static inline int tfp_perf_mismatch_line(char *out, size_t size, int mode, const
                   "%.48s (+0x%llx); the memo stays a shadow (answers are always fresh)",
                   mode >= 0 && mode < 3 ? modes[mode] : "?", (unsigned long long)epoch, field ? field : "?", (unsigned long long)offset);
 }
-/* Round 35, once per session with memo_on.txt: a check turned the memo off. moved: the fresh take changed the backend's
+/* Round 35, once per session with the memo on (the default since round 40): a check turned the memo off. moved: the fresh take changed the backend's
  * state (a served hit skips that work) rather than answering differently. */
 static inline int tfp_perf_memo_off_line(char *out, size_t size, int mode, bool moved, const char *field, size_t offset, uint64_t epoch) {
   static const char *const modes[] = {"full", "player", "pin"};
@@ -185,11 +185,25 @@ static inline int tfp_perf_memo_off_line(char *out, size_t size, int mode, bool 
   if (moved)
     return snprintf(out, size,
                     "Memo: off for the session: a check of a %s snapshot in frame epoch %llu found that a fresh take changed the backend's "
-                    "own state, which a served hit skips; every answer is fresh from here (memo_on.txt is still read at the next start)",
+                    "own state, which a served hit skips; every answer is fresh from here (on again at the next start unless memo_off.txt is beside the DLL)",
                     name, (unsigned long long)epoch);
   return snprintf(out, size,
                   "Memo: off for the session: a check of a %s snapshot in frame epoch %llu found the stored answer differs from a fresh take, "
-                  "first at %.48s (+0x%llx); every answer is fresh from here (memo_on.txt is still read at the next start)",
+                  "first at %.48s (+0x%llx); every answer is fresh from here (on again at the next start unless memo_off.txt is beside the DLL)",
                   name, (unsigned long long)epoch, field ? field : "?", (unsigned long long)offset);
+}
+/* Round 40, once at start: the memo is on unless memo_off.txt is beside the DLL; memo_on.txt (round 35's switch) is still
+ * read and changes nothing. */
+static inline int tfp_perf_memo_start_line(char *out, size_t size, bool off_file, bool on_file) {
+  if (off_file)
+    return snprintf(out, size,
+                    "Test: memo_off.txt: the snapshot memo is off; every snapshot is taken fresh and the memo only compares (the shadow, "
+                    "\"memo (shadow)\" in the Perf snapshots line)%s",
+                    on_file ? "; memo_on.txt is no longer needed and does not turn it on" : "");
+  return snprintf(out, size,
+                  "Ready: snapshot memo on: a snapshot asked for again in the same frame epoch answers the one already taken; the first "
+                  "and every 16th such answer is still taken fresh and compared, and a difference turns the memo off for the session; "
+                  "memo_off.txt beside the DLL switches it off%s",
+                  on_file ? " (memo_on.txt is no longer needed and changes nothing)" : "");
 }
 #endif
