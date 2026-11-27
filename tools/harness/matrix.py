@@ -85,6 +85,13 @@ PHASES = {
     "dive": ("down w; wait 0.3; key alt; wait 0.6; up w", 2.5),
     "dive-back": ("down s; wait 0.3; key alt; wait 0.6; up s", 2.5),
     "dive-swap": (dive.script(dive.SWAP_AFTER_S[0]), 2.0),   # played by dive.dive_swap() (DIVES): this is one of its tries
+    # Round 49. The body is stood up before these and before the two dives (STAND_FIRST), and each fails where its
+    # stretch of the log does not say it was played (NEEDS). Not yet run in the game.
+    "prone-swap": ("key z; wait 1.5; key 2; wait 2.0; key 1; wait 2.0; key z", 1.8),   # both swaps lying prone: the primary back turned the view 72.7 degrees (soak 62)
+    "aim-swap": ("down right; wait 0.35; click middle; wait 0.8; key 2; wait 1.0; up right; wait 1.0; key 1", 2.0),   # a swap out of full aim, and back
+    # a dive backwards lands on the back; the gun out of the hands (the stratagem list and a throw: the head camera); up again there; the primary back (soak 60 #56)
+    "stand-up-supine": ("down s; wait 0.3; key alt; wait 0.6; up s; wait 2.0; key ctrl; wait 0.6; key g; wait 1.0; key z; wait 2.5; key 1", 2.0),
+    "stand-up-prone-head": ("key z; wait 1.5; key ctrl; wait 0.6; key g; wait 1.0; key z; wait 2.5; key 1", 2.0),   # the same from lying prone
     "stand-up": ("key c; wait 0.2; key c", 1.5),
     "fire": ("click left 0.6", 1.0),
     # The aim phases are played by aim.full_aim() (AIMED below); the scripts are what a plain run of them sends.
@@ -129,6 +136,17 @@ AIMED = {
 # Round 30: phases played by dive.dive_swap(), judged by dive.verdict().
 DIVES = {"dive-swap"}
 DRIVEN = set(AIMED) | DIVES   # the phases play() hands to a function that reads the log as it goes
+# Round 49: the body is brought to its feet before these (dive.stand_up, before the phase's stretch of the log begins).
+# The feel.59 matrix's "dive" landed prone and the dive key of "dive-back" stood the body up: no dive was played, and
+# the phase passed on a stand-up.
+STAND_FIRST = {"dive", "dive-back", "prone-swap", "stand-up-supine", "stand-up-prone-head"}
+# What a phase's own stretch of the log has to say for it to have been played: (a pattern, what its absence means).
+_DIVED = (re.compile(r" Motion: action=dive\b"), "no dive in the log (no \"Motion: action=dive\"): the phase did not dive")
+_PRONE = (re.compile(r" Motion: action=prone\b"), "the body never lay down (no \"Motion: action=prone\")")
+_HEAD = (re.compile(r" Trace: t=\S+ kind=4 "), "no head-camera frame was traced: the view never left the native view")
+_FULL_AIM = (re.compile(r" State: aim in\b"), "full aim was not reached (no \"State: aim in\")")
+NEEDS = {"dive": [_DIVED], "dive-back": [_DIVED], "prone-swap": [_PRONE, _HEAD], "aim-swap": [_FULL_AIM, _HEAD],
+         "stand-up-supine": [_DIVED, _PRONE, _HEAD], "stand-up-prone-head": [_PRONE, _HEAD]}
 # Round 39: phases judged on the traced eye and its slide along the view (reload_slide).
 RELOADS = {"reload", "pistol-reload"}
 SLIDE_M = 0.05      # the eye's offset from the root along the level view may change by this much ...
@@ -625,6 +643,29 @@ def judge(lines, toggles=False, reload=False, throw=False, mouse=False):
             "largest_float_m": floated, "float_at": float_row["at"] if float_row else None, "masks": sorted(masks)}
 
 
+def unplayed(name, lines):
+    """Round 49: why the phase `name` was not played, from its own stretch of the log: one note for each thing NEEDS
+    says the log has to show and does not. Empty: played, or the phase needs nothing."""
+    return [f"NOT PLAYED: {text}" for pattern, text in NEEDS.get(name, []) if not any(pattern.search(line) for line in lines)]
+
+
+def judge_played(name, lines, judged):
+    """Adds unplayed() to a phase's verdict `judged` (in place): a phase that was not played fails."""
+    notes = unplayed(name, lines)
+    if notes:
+        judged["pass"] = False
+        judged["notes"] = notes + judged["notes"]
+    judged["played"] = not notes
+    return judged
+
+
+def stand_first(device, name, log):
+    """Round 49: brings the body to its feet before a phase of STAND_FIRST (dive.stand_up); what it did, or None."""
+    if name not in STAND_FIRST:
+        return None
+    return dive.stand_up(device, aim.LogTail(log))
+
+
 def play(device, name, log, out=None):
     """Plays phase `name`: its script, or for a phase of AIMED full aim read from the log `log` (aim.full_aim). Returns
     the aim's result, or None for a plain phase. With `out`, the zoom captures each range there. A phase of DIVES is
@@ -702,6 +743,9 @@ def main(argv):
         print(style_header(before), flush=True)
         for name in names:
             script, settle = PHASES[name]
+            stood = stand_first(device, name, log)   # before the phase's stretch of the log begins
+            if stood and not stood["standing"]:
+                print(f"  ({name}: the body could not be stood up first: {stood['before']} -> {stood['after']} after {stood['presses']})")
             start = log.stat().st_size
             aimed = play(device, name, log, out)
             time.sleep(min(settle, 1.0))
@@ -712,7 +756,8 @@ def main(argv):
             time.sleep(max(0.0, settle - 1.0) + 1.2)   # the Lock line is written once a second
             with open(log, errors="replace") as handle:
                 handle.seek(start); lines = handle.read().splitlines()
-            results[name] = judge_aim(name, aimed, lines, judge(lines, name.startswith('toggle'), reload=name in RELOADS, throw=name in THROWS, mouse="look" in script))
+            results[name] = judge_played(name, lines, judge_aim(name, aimed, lines, judge(lines, name.startswith('toggle'), reload=name in RELOADS, throw=name in THROWS,
+                                                                                         mouse="look" in script)))
             r = results[name]
             for text in style_changes(lines):
                 print(text)

@@ -142,6 +142,57 @@ class VeilBound(unittest.TestCase):
         self.assertAlmostEqual(j["veil_open_m"], 0.191, places=3)
 
 
+class Phases(unittest.TestCase):
+    """Round 49: the phases that have to say they were played, and the body stood up before a dive."""
+    NEW = ("prone-swap", "aim-swap", "stand-up-supine", "stand-up-prone-head")
+
+    def test_the_new_phases_are_scripts_the_driver_reads(self):
+        import drive
+        for name in self.NEW:
+            script, settle = matrix.PHASES[name]
+            lines, seconds = drive.events(script)
+            self.assertTrue(lines and seconds > 2.0, name)
+            self.assertNotIn("look", script)   # no mouse: a turn at a change of camera fails them
+            self.assertIn(name, matrix.NEEDS)
+        self.assertNotIn("prone-swap", matrix.DRIVEN)
+
+    def test_a_dive_phase_without_a_dive_fails(self):
+        # the feel.59 matrix's "dive-back", 19:34:44 to 19:34:50: a stand-up and a walk back, judged as a dive
+        stood = ["19:34:45.100 Motion: action=idle placement=idle>imported(own)", "19:34:46.000 Lock: +30 frames held (+0 in another camera, kind now 6), +0 missed (kind 0, helper error 0), largest kick 0.0"]
+        for name in ("dive", "dive-back"):
+            self.assertEqual(len(matrix.unplayed(name, stood)), 1)
+            judged = matrix.judge_played(name, stood, {"pass": True, "notes": ["x"]})
+            self.assertFalse(judged["pass"])
+            self.assertFalse(judged["played"])
+            self.assertTrue(judged["notes"][0].startswith("NOT PLAYED: no dive in the log"))
+            dived = stood + ["19:34:45.300 Motion: action=dive placement=idle>imported(own)"]
+            self.assertEqual(matrix.judge_played(name, dived, {"pass": True, "notes": []}), {"pass": True, "notes": [], "played": True})
+        self.assertEqual(matrix.unplayed("walk", stood), [])
+
+    def test_the_dive_swap_of_soak_60_counts_as_played_for_what_it_shows(self):
+        lines = cut(DIVE)   # a dive, a swap, the head camera
+        self.assertEqual(matrix.unplayed("dive", lines), [])
+        self.assertEqual(matrix.unplayed("stand-up-supine", lines), [])          # (the log does not tell lying on the back from lying prone)
+        flying = [line for line in lines if " Motion: action=prone" not in line]   # the same stretch cut before the landing
+        self.assertEqual([n[:35] for n in matrix.unplayed("stand-up-supine", flying)], ["NOT PLAYED: the body never lay down"])
+        self.assertEqual(len(matrix.unplayed("aim-swap", lines)), 1)             # no full aim
+        self.assertEqual(len(matrix.unplayed("prone-swap", cut(FOOT_SWAP))), 1)  # a swap on foot: the head camera, never prone
+
+    def test_the_body_is_stood_up_before_a_dive_and_not_before_a_walk(self):
+        calls = []
+        real = matrix.dive.stand_up
+        matrix.dive.stand_up = lambda device, tail: calls.append(device) or {"before": "prone", "presses": ["key z"], "after": "idle", "standing": True}
+        try:
+            with tempfile.NamedTemporaryFile(dir=os.environ.get("TMPDIR")) as log:
+                self.assertIsNone(matrix.stand_first("device", "walk", log.name))
+                self.assertEqual(calls, [])
+                for name in ("dive", "dive-back", "prone-swap", "stand-up-supine", "stand-up-prone-head"):
+                    self.assertTrue(matrix.stand_first("device", name, log.name)["standing"])
+                self.assertEqual(len(calls), 5)
+        finally:
+            matrix.dive.stand_up = real
+
+
 def let_out(ms):
     """src/camera_helper.h tfp_camera_veil_let_out: what is left of the veil's move `ms` after its frame."""
     x = min(1.0, max(0.0, ms / 300.0))
