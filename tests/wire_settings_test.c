@@ -28,8 +28,11 @@ typedef TfpRtValue V;
 
 static char lines[64][700];
 static int line_count;
+static char clip_lines[12][700]; /* round 53: the Clip: lines apart (whole frames also write the view's own lines) */
+static int clip_count;
 static void capture(void *user, const char *text) {
   (void)user;
+  if (!strncmp(text, "Clip:", 5) && clip_count < 12) snprintf(clip_lines[clip_count++], sizeof clip_lines[0], "%s", text);
   if (line_count < 64) snprintf(lines[line_count++], sizeof lines[0], "%s", text);
 }
 static const char *logged(const char *part) {
@@ -85,6 +88,9 @@ static void new_wire(void) {
   tfp_wire_init(&wire, &memory, &platform, &helpers);
 }
 
+static void (*reader_real)(void *user, TfpNearOptions *out);
+static unsigned reader_calls; static TfpNearOptions reader_last; static bool reader_row;
+static void reader_spy(void *user, TfpNearOptions *out) { reader_real(user, out); reader_calls++; reader_last = *out; reader_row = wire.has_row; }
 static unsigned saves;
 static bool save_fails;
 static char saved_text[TFP_SETTINGS_MAX];
@@ -1592,66 +1598,81 @@ int main(int argc, char **argv) {
     char source[48];
     CHECK(!strcmp(tfp_wire_settings_source(&wire, "0123456789abcdef", TFP_ACT_ADS, source, sizeof source), "ads default") ||
           !strncmp(source, "imported(__all)", 15));
-    { /* ---- round 53 (src/weapon_clip.h): the near clip held in front of the gun, the full-aim scale, the Clip: line ---- */
+    { /* ---- round 53 (src/weapon_clip.h), through whole frames (tfp_wire_frame, then the settings frame as the feel binder's
+       * frame_extra calls it): the hip and normal-aim distances the near helper is handed are main's whatever the fields of
+       * view, and the Clip: line says what the helpers read ---- */
       const float pi = 3.14159265358979f;
-      /* the AR-11 has nothing saved: the global 20 cm, and the placement the user's file makes the global one */
-      TfpActionPlacement idle = {0, 0, 0, 0, 0, 0, 0};
-      CHECK(tfp_wire_settings_resolve(&wire, "b2b69248b51ea9a8", TFP_ACT_IDLE, &idle, NULL));
-      const bool row = wire.has_row, row_fov = wire.row_has_fov;
-      const double applied = wire.row_fov_applied, native = wire.row_fov_native;
-      wire.has_row = false;
-      wire.near_io.options(wire.near_io.user, &options); /* no diagnostics row: no field of view to go by, the setting as it is */
-      CHECK(options.hip == .2 && options.aim == 0 && tfp_wire_clip_ads_scale(&wire) == 1);
-      wire.has_row = wire.row_has_fov = true, wire.row_fov_native = pi/4, wire.row_fov_applied = pi/4;
-      CHECK(tfp_wire_settings_locked_set(&wire, TFP_LOCKED_fov_lock, true, false, 0));
-      wire.near_io.options(wire.near_io.user, &options); /* the game's own lens and no lock: the gun is off screen at 20 cm, the setting stands */
-      float x = 0, z = 0;
-      const float first45 = tfp_wire_clip_place(&wire, "b2b69248b51ea9a8", false, pi/4, &x, &z);
-      CHECK(first45 > 0 && z < -TFP_CLIP_RISE_M && z >= (float)idle.z - 1e-6f);        /* the highest the gun's top is in any hip action */
-      CHECK(options.hip == (first45 >= .2f ? .2 : (double)first45));
-      wire.row_fov_applied = pi/2;
-      const float first90 = tfp_wire_clip_place(&wire, "b2b69248b51ea9a8", false, pi/2, &x, &z);
-      CHECK(first90 > 0 && first90 < .2f && first90 < first45);
-      wire.near_io.options(wire.near_io.user, &options); /* shown at 90 degrees: held at the depth the gun is first on screen at */
-      CHECK(options.is_table && options.hip_is_number && options.aim == 0);
-      CHECK(first90 > TFP_CLIP_GAME_M ? fabs(options.hip - first90) < 1e-6 : options.hip == 0);
-      wire.row_fov_applied = 2*pi/3; /* 120 degrees: under the game's own 0.05 is the game's own (0: off) */
-      const float first120 = tfp_wire_clip_place(&wire, "b2b69248b51ea9a8", false, 2*pi/3, &x, &z);
-      wire.near_io.options(wire.near_io.user, &options);
-      CHECK(first120 > TFP_CLIP_GAME_M ? fabs(options.hip - first120) < 1e-6 : options.hip == 0);
-      /* the lock holds 90 while the row still shows full aim's 30: the hip's value is made for the lock's field of view */
-      CHECK(tfp_wire_settings_locked_set(&wire, TFP_LOCKED_fov_lock, true, true, 0) &&
-            tfp_wire_settings_locked_set(&wire, TFP_LOCKED_fov_degrees, false, false, 90));
-      wire.row_fov_applied = wire.row_fov_native = pi/6;
-      wire.near_io.options(wire.near_io.user, &options);
-      CHECK(first90 > TFP_CLIP_GAME_M ? fabs(options.hip - first90) < 1e-6 : options.hip == 0);
-      CHECK(tfp_wire_clip_ads_scale(&wire) == 1);                                       /* the game's lens: its near clip to the bit */
-      wire.row_fov_applied = pi/2;
-      CHECK(fabs(tfp_wire_clip_ads_scale(&wire) - tan(pi/12)) < 1e-6);                  /* full aim shown at 90 */
-      wire.row_has_fov = false;
-      CHECK(tfp_wire_clip_ads_scale(&wire) == 1);
-      wire.row_has_fov = true;
-      /* the line: once the figures have stood for half a second, and again only when they change */
-      CHECK(!logged("Clip:"));
-      wire.row_fov_native = pi/4;
+#define WHOLE_FRAME() do { now_seconds += 1 / 60.0; reader_calls = 0; tfp_wire_frame(&wire, NULL); tfp_wire_settings_frame(&wire); } while (0)
+      reader_real = wire.near_io.options, wire.near_io.options = reader_spy;
       wire.controller.enabled = true;
-      for (int i = 0; i < 45; i++) { now_seconds += 1 / 60.0; wire.rt.clock_previous = (V){TFP_RT_NUMBER, now_seconds, 0, 0, NULL}; tfp_wire_settings_frame(&wire); }
-      line = logged("Clip:");
-      CHECK(line && strstr(line, "Clip: weapon=b2b69248b51ea9a8 name=\"AR-11 Arbitrator\" view=hip fov=90.0 (game 45.0) near in force") &&
-            strstr(line, "setting 0.200 m held at 0.080 m") && strstr(line, "by placement the gun's top is 0.080 m under and 0.100 m beside the view axis"));
-      before = line_count;
-      for (int i = 0; i < 120; i++) { now_seconds += 1 / 60.0; wire.rt.clock_previous = (V){TFP_RT_NUMBER, now_seconds, 0, 0, NULL}; tfp_wire_settings_frame(&wire); }
-      CHECK(line_count == before);                                                      /* nothing changed: no second line */
-      wire.row_fov_applied = pi/3;
-      for (int i = 0; i < 20; i++) { now_seconds += 1 / 60.0; wire.rt.clock_previous = (V){TFP_RT_NUMBER, now_seconds, 0, 0, NULL}; tfp_wire_settings_frame(&wire); }
-      CHECK(line_count == before);                                                      /* a change still under way: not yet */
-      for (int i = 0; i < 20; i++) { now_seconds += 1 / 60.0; wire.rt.clock_previous = (V){TFP_RT_NUMBER, now_seconds, 0, 0, NULL}; tfp_wire_settings_frame(&wire); }
-      CHECK(line_count == before + 1 && strstr(lines[line_count - 1], "view=hip fov=60.0 (game 45.0)"));
+      /* the AR-11 has nothing saved: the global 20 cm at the hip, normal aim off */
+      static const float pairs[][3] = {{0, 0, 0}, {1, 45, 90}, {1, 70, 80}, {1, 70, 90}, {1, 70, 120}, {1, 30, 90}, {1, 30, 30}};
+      for (size_t k = 0; k < COUNT(pairs); k++) {
+        tfp_wire_clip_note(&wire, pairs[k][0] != 0, pairs[k][1]*pi/180, pairs[k][2]*pi/180, 1);
+        wire.has_row = wire.row_has_fov = true, wire.row_fov_native = pairs[k][1]*pi/180, wire.row_fov_applied = pairs[k][2]*pi/180; /* (a row left over: cleared by the frame) */
+        for (int i = 0; i < 3; i++) {
+          WHOLE_FRAME();
+          CHECK(reader_calls == 1 && !reader_row);                 /* the near update reads its distances before the frame's row is written */
+          CHECK(reader_last.is_table && reader_last.hip_is_number && reader_last.aim_is_number && reader_last.hip == .2 && reader_last.aim == 0);
+          CHECK(wire.has_row && wire.controller.enabled);          /* and the row is this frame's by the time the line is made */
+        }
+      }
+      CHECK(tfp_settings_set_menu(tfp_wire_settings(&wire), TFP_MENU_near_clip_cm, false, false, 15)); /* the 15 cm default, 40 cm, off: as set */
+      WHOLE_FRAME(); CHECK(reader_last.hip == .15 && reader_last.aim == 0);
+      CHECK(tfp_settings_set_menu(tfp_wire_settings(&wire), TFP_MENU_near_clip_cm, false, false, 40));
+      WHOLE_FRAME(); CHECK(reader_last.hip == .4);
+      CHECK(tfp_settings_set_menu(tfp_wire_settings(&wire), TFP_MENU_near_clip_cm, false, false, 5));
+      WHOLE_FRAME(); CHECK(reader_last.hip == 0);
+      CHECK(tfp_settings_set_menu(tfp_wire_settings(&wire), TFP_MENU_near_clip_cm, false, false, 20));
+      /* the line. Without a snapshot of the frame there is no view to name: nothing said */
+      for (int i = 0; i < 45; i++) WHOLE_FRAME();
+      CHECK(clip_count == 0);
+      wire.snap_next = 1;
+      memset(&wire.snaps[0], 0, sizeof wire.snaps[0]);
+      wire.ops.has_pose_placement = true, wire.ops.pose_placement.x = .15, wire.ops.pose_placement.z = -.12;
+      wire.near_clip.last.has = true, wire.near_clip.last.last_native = .05, wire.near_clip.last.last_applied = .2;
+      tfp_wire_clip_note(&wire, true, 70*pi/180, pi/2, 1);
+      for (int i = 0; i < 25; i++) WHOLE_FRAME();
+      CHECK(clip_count == 0);                                     /* not yet: the figures have to stand for half a second */
+      for (int i = 0; i < 20; i++) WHOLE_FRAME();
+      CHECK(clip_count == 1 && !strcmp(clip_lines[0], "Clip: weapon=b2b69248b51ea9a8 name=\"AR-11 Arbitrator\" view=hip fov=90.0 (game 70.0) near in force 0.200 m (game "
+                                  "0.050 m, setting 0.200 m); computed from the placement alone, not measured: the gun's top 0.080 m under and 0.100 m "
+                                  "beside the view axis, on screen from 0.080 m, so the near plane would cut 0.080 to 0.200 m of it on screen"));
+      for (int i = 0; i < 120; i++) WHOLE_FRAME();
+      CHECK(clip_count == 1);                                 /* nothing changed: no second line */
+      wire.snaps[0].s.shoulder_aim = true;                         /* normal aim: its own setting (off for this weapon), the game's 0.05 handed on */
+      wire.near_clip.last.last_applied = .05;
+      for (int i = 0; i < 20; i++) WHOLE_FRAME();
+      CHECK(clip_count == 1);                                 /* a change still under way: not yet */
+      for (int i = 0; i < 20; i++) WHOLE_FRAME();
+      CHECK(clip_count == 2 && strstr(clip_lines[clip_count - 1], "view=aim fov=90.0 (game 70.0) near in force 0.050 m (game 0.050 m, setting off); computed from") &&
+            strstr(clip_lines[clip_count - 1], "so the near plane would cut nothing of it on screen"));
+      /* full aim shown at the locked 90 with the game's 30 degree lens and its sight's 0.098 m: what the helpers handed on */
+      wire.snaps[0].s.shoulder_aim = false, wire.snaps[0].s.controller_active = true;
+      wire.near_clip.last.last_native = .098, wire.near_clip.last.last_applied = .05;
+      tfp_wire_clip_note(&wire, true, pi/6, pi/2, tanf(pi/12));
+      for (int i = 0; i < 40; i++) WHOLE_FRAME();
+      CHECK(clip_count == 3 && strstr(clip_lines[clip_count - 1], "view=ads fov=90.0 (game 30.0) near in force 0.050 m (game 0.098 m, scaled by 0.268); "
+                                                                      "computed: the near plane is on screen to 0.050 m from the view axis (the game's value at the game's lens: 0.026 m)"));
+      /* the same aim at the game's zoom: the game's value, nothing scaled */
+      wire.near_clip.last.last_applied = .098;
+      tfp_wire_clip_note(&wire, true, pi/6, pi/6, 1);
+      for (int i = 0; i < 40; i++) WHOLE_FRAME();
+      CHECK(clip_count == 4 && strstr(clip_lines[clip_count - 1], "view=ads fov=30.0 (game 30.0) near in force 0.098 m (game 0.098 m); computed: the near plane is on screen to 0.026 m"));
+      /* the field-of-view helper not read: said, and nothing computed from a field of view */
+      tfp_wire_clip_note(&wire, false, 0, 0, 1);
+      for (int i = 0; i < 40; i++) WHOLE_FRAME();
+      CHECK(clip_count == 5 && strstr(clip_lines[clip_count - 1], "view=ads fov not read near in force 0.098 m (game 0.098 m)") &&
+            !strstr(clip_lines[clip_count - 1], "computed"));
+      /* the diagnostics row's own fields of view are nothing to the line (they never hold the lock's value) */
+      CHECK(!strstr(clip_lines[clip_count - 1], "fov="));
       wire.controller.enabled = false;
-      wire.row_fov_applied = pi/2;
-      for (int i = 0; i < 60; i++) { now_seconds += 1 / 60.0; wire.rt.clock_previous = (V){TFP_RT_NUMBER, now_seconds, 0, 0, NULL}; tfp_wire_settings_frame(&wire); }
-      CHECK(line_count == before + 1);                                                  /* the mode off: nothing said */
-      wire.has_row = row, wire.row_has_fov = row_fov, wire.row_fov_applied = applied, wire.row_fov_native = native;
+      tfp_wire_clip_note(&wire, true, pi/6, pi/2, tanf(pi/12));
+      for (int i = 0; i < 60; i++) WHOLE_FRAME();
+      CHECK(clip_count == 5);                             /* the mode off: nothing said */
+      wire.snap_next = 0, wire.near_clip.last.has = false;
+      wire.near_io.options = reader_real;
+#undef WHOLE_FRAME
     }
     wire.controller.lease = NULL, wire.controller.phase = TFP_PHASE_IDLE, wire.ops.has_placement_weapon_key = false;
     free(lease);

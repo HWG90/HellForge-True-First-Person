@@ -1,5 +1,5 @@
-/* Round 53: the near plane and the gun (src/weapon_clip.h): the depth a placed gun is first on screen at, the hip
- * near clip held in front of it, the full-aim near clip scaled to the shown field of view, and the "Clip:" line.
+/* Round 53: the near plane and the gun (src/weapon_clip.h): the full-aim near clip scaled to the shown field of view,
+ * the "Clip:" line, and the line's computed figure (the depth a placed gun would first be on screen at; the log only).
  * The figures are the game data's (filediver, HellForge 0.5 build 25480438): the sight node and the mesh bounds of the
  * AR-23 Liberator, the BR-14 Adjudicator, the R-63 Diligence and the JAR-5 Dominator. No game. */
 #include "../src/weapon_clip.h"
@@ -31,24 +31,12 @@ int main(void) {
   CHECK(tfp_clip_first_depth(.15f, -.12f, 0) == 0 && tfp_clip_first_depth(.15f, -.12f, NAN) == 0 && tfp_clip_first_depth(.15f, -.12f, DEG(180)) == 0);
   CHECK(tfp_clip_first_depth(NAN, -.12f, DEG(90)) == 0 && tfp_clip_first_depth(.15f, NAN, DEG(90)) == 0);
 
-  /* ---- the hip (and normal-aim) near clip: never past the depth the gun is first on screen at ---- */
-  CHECK(near(tfp_clip_hip_near(.15f, .15f, -.12f, DEG(90)), .08, 1e-5));        /* the shipped 15 cm at the lock's 90: held at 0.08 m */
-  CHECK(near(tfp_clip_hip_near(.15f, .15f, -.12f, DEG(80)), .0953, 1e-4));
-  CHECK(tfp_clip_hip_near(.15f, .15f, -.12f, DEG(45)) == .15f);                 /* the game's own lens: the gun is off screen there, the setting stands */
-  CHECK(tfp_clip_hip_near(.40f, .15f, -.12f, DEG(45)) > .19f && tfp_clip_hip_near(.40f, .15f, -.12f, DEG(45)) < .20f);
-  CHECK(tfp_clip_hip_near(.15f, .15f, -.12f, DEG(120)) == TFP_CLIP_GAME_M);     /* never under the game's own 0.05 */
-  CHECK(tfp_clip_hip_near(.15f, 0, 0, DEG(90)) == TFP_CLIP_GAME_M);             /* a gun on the axis: the game's own */
-  CHECK(tfp_clip_hip_near(.10f, .0997f, -.0995f, DEG(90)) > .059f && tfp_clip_hip_near(.10f, .0997f, -.0995f, DEG(90)) < .060f);
-  CHECK(tfp_clip_hip_near(.06f, .15f, -.12f, DEG(90)) == .06f);                 /* nearer than the gun: the setting stands */
-  CHECK(tfp_clip_hip_near(0, .15f, -.12f, DEG(90)) == 0 && tfp_clip_hip_near(.05f, .15f, -.12f, DEG(90)) == .05f); /* off stays off */
-  CHECK(tfp_clip_hip_near(.15f, .15f, -.12f, 0) == .15f && tfp_clip_hip_near(.15f, .15f, -.12f, NAN) == .15f);     /* no field of view: retail's */
-  CHECK(tfp_clip_hip_near(.15f, NAN, -.12f, DEG(90)) == .15f);                  /* no placement: retail's */
-  CHECK(isnan(tfp_clip_hip_near(NAN, .15f, -.12f, DEG(90))));                    /* not a setting: handed back as it came */
-
   /* ---- full aim: the game's near clip is its sight's distance, made for the game's lens ---- */
   /* the Adjudicator in the user's log: near 0.098 m at the game's 30 degrees. The same cut drawn at 90 degrees shows
    * 0.098 m of the sliced receiver under the sight line where the game's lens showed 0.026 m. */
   CHECK(near(tfp_clip_ads_scale(DEG(30), DEG(30)), 1, 0) && tfp_clip_ads_scale(DEG(30), DEG(20)) == 1); /* the game's lens, or more zoom: the game's */
+  CHECK(tfp_clip_ads_scale(DEG(30), DEG(30.1)) == 1 && tfp_clip_ads_scale(DEG(30), DEG(30) + TFP_CLIP_SAME_FOV) == 1); /* the lock's glide ending on the game's zoom: the game's */
+  CHECK(tfp_clip_ads_scale(DEG(30), DEG(30.3)) < 1 && tfp_clip_ads_scale(DEG(30), DEG(30.3)) > .98f);                 /* past it: a step of under 2 %, eased by the helper */
   CHECK(near(tfp_clip_ads_scale(DEG(30), DEG(90)), tan(DEG(15)), 1e-6));
   CHECK(near(tfp_clip_ads_scale(DEG(30), DEG(50)), tan(DEG(15))/tan(DEG(25)), 1e-6));
   CHECK(tfp_clip_ads_scale(0, DEG(90)) == 1 && tfp_clip_ads_scale(DEG(30), 0) == 1 && tfp_clip_ads_scale(NAN, DEG(90)) == 1 &&
@@ -76,39 +64,59 @@ int main(void) {
     CHECK(over < TFP_CLIP_RISE_M && over > -.02f); /* the mesh's top is within 2 cm of the sight line: the rise covers it */
   }
 
-  /* ---- the "Clip:" line ---- */
-  char line[400];
-  TfpClipSample hip = {.view = TFP_CLIP_HIP, .key = "e8a3969f81abec5f", .name = "BR-14 Adjudicator", .fov = DEG(90), .game_fov = DEG(45),
-                       .has_near = true, .game_near = .05f, .near = .08f, .wanted = .15f, .x = .15f, .z = -.12f};
+  /* ---- the "Clip:" line: what was read is said as read, what is computed is said to be computed ---- */
+  char line[560];
+  TfpClipSample ads = {.view = TFP_CLIP_ADS, .key = "e8a3969f81abec5f", .name = "BR-14 Adjudicator", .has_fov = true, .fov = DEG(90), .game_fov = DEG(30),
+                       .has_near = true, .game_near = .098f, .near = .05f, .scale = tanf(DEG(15))};
+  tfp_clip_line(&ads, line, sizeof line);
+  CHECK(!strcmp(line, "Clip: weapon=e8a3969f81abec5f name=\"BR-14 Adjudicator\" view=ads fov=90.0 (game 30.0) near in force 0.050 m (game 0.098 m, "
+                      "scaled by 0.268); computed: the near plane is on screen to 0.050 m from the view axis (the game's value at the game's "
+                      "lens: 0.026 m)"));
+  ads.fov = DEG(30), ads.near = .098f, ads.scale = 1; /* the game's zoom: nothing scaled, and the line says so by saying nothing */
+  tfp_clip_line(&ads, line, sizeof line);
+  CHECK(strstr(line, "view=ads fov=30.0 (game 30.0) near in force 0.098 m (game 0.098 m); computed: the near plane is on screen to 0.026 m from the "
+                     "view axis (the game's value at the game's lens: 0.026 m)") && !strstr(line, "scaled"));
+  ads.has_fov = false; /* the field-of-view helper not read: no field of view, and nothing computed from one */
+  tfp_clip_line(&ads, line, sizeof line);
+  CHECK(strstr(line, "view=ads fov not read near in force 0.098 m (game 0.098 m)") && !strstr(line, "computed"));
+  ads.has_fov = true, ads.has_near = false;
+  tfp_clip_line(&ads, line, sizeof line);
+  CHECK(strstr(line, "view=ads fov=30.0 (game 30.0) near in force not read") && !strstr(line, "computed") && !strstr(line, "(game 0."));
+  ads.has_near = true, ads.fov = DEG(90), ads.near = .05f, ads.scale = tanf(DEG(15));
+  TfpClipSample hip = {.view = TFP_CLIP_HIP, .key = "e8a3969f81abec5f", .name = "BR-14 Adjudicator", .has_fov = true, .fov = DEG(90), .game_fov = DEG(70),
+                       .has_near = true, .game_near = .05f, .near = .15f, .scale = 1, .wanted = .15f, .x = .15f, .z = -.12f};
   tfp_clip_line(&hip, line, sizeof line);
-  CHECK(!strcmp(line, "Clip: weapon=e8a3969f81abec5f name=\"BR-14 Adjudicator\" view=hip fov=90.0 (game 45.0) near in force 0.080 m (game 0.050 m, "
-                      "setting 0.150 m held at 0.080 m); by placement the gun's top is 0.080 m under and 0.100 m beside the view axis, first on "
-                      "screen 0.080 m from the eye; cut on screen: none"));
-  hip.near = .15f; /* what a build before this one did */
+  CHECK(!strcmp(line, "Clip: weapon=e8a3969f81abec5f name=\"BR-14 Adjudicator\" view=hip fov=90.0 (game 70.0) near in force 0.150 m (game 0.050 m, "
+                      "setting 0.150 m); computed from the placement alone, not measured: the gun's top 0.080 m under and 0.100 m beside the view "
+                      "axis, on screen from 0.080 m, so the near plane would cut 0.080 to 0.150 m of it on screen"));
+  CHECK(!strstr(line, "held")); /* nothing holds the hip's near clip: the setting is what the game is handed */
+  hip.near = .05f, hip.wanted = 0;
   tfp_clip_line(&hip, line, sizeof line);
-  CHECK(strstr(line, "near in force 0.150 m") && strstr(line, "cut on screen: the gun from 0.080 to 0.150 m"));
-  hip.wanted = 0, hip.near = .05f, hip.x = 0, hip.z = 0;
+  CHECK(strstr(line, "near in force 0.050 m (game 0.050 m, setting off); computed from the placement alone, not measured:") &&
+        strstr(line, "so the near plane would cut nothing of it on screen"));
+  hip.x = 0, hip.z = 0;
   tfp_clip_line(&hip, line, sizeof line);
-  CHECK(strstr(line, "(game 0.050 m, setting off)") && strstr(line, "the gun's top is on the view axis, first on screen 0.000 m from the eye; cut on screen: the gun to 0.050 m"));
+  CHECK(strstr(line, "the gun's top on the view axis, on screen from the eye on, so the near plane would cut 0.000 to 0.050 m of it on screen"));
   hip.has_near = false;
   tfp_clip_line(&hip, line, sizeof line);
-  CHECK(strstr(line, "near in force not read (setting off)") && strstr(line, "cut on screen: not known"));
-  TfpClipSample ads = {.view = TFP_CLIP_ADS, .key = "e8a3969f81abec5f", .name = "BR-14 Adjudicator", .fov = DEG(90), .game_fov = DEG(30),
-                       .has_near = true, .game_near = .098f, .near = .05f};
-  tfp_clip_line(&ads, line, sizeof line);
-  CHECK(!strcmp(line, "Clip: weapon=e8a3969f81abec5f name=\"BR-14 Adjudicator\" view=ads fov=90.0 (game 30.0) near in force 0.050 m (game 0.098 m: "
-                      "its sight); the gun is on the view axis; cut on screen at the near plane: 0.050 m under the sight line (the game's own "
-                      "lens: 0.026 m)"));
-  ads.fov = DEG(30), ads.near = .098f;
-  tfp_clip_line(&ads, line, sizeof line);
-  CHECK(strstr(line, "view=ads fov=30.0 (game 30.0) near in force 0.098 m") && strstr(line, "0.026 m under the sight line (the game's own lens: 0.026 m)"));
-  TfpClipSample none = {.view = TFP_CLIP_AIM, .fov = DEG(90), .game_fov = DEG(45), .has_near = true, .game_near = .05f, .near = .05f, .x = .1f, .z = -.1f};
+  CHECK(strstr(line, "near in force not read (setting off); computed from the placement alone, not measured:") && strstr(line, "the near plane was not read"));
+  hip.has_fov = false;
+  tfp_clip_line(&hip, line, sizeof line);
+  CHECK(strstr(line, "view=hip fov not read near in force not read (setting off)") && !strstr(line, "computed"));
+  hip.has_fov = hip.has_near = true;
+  TfpClipSample none = {.view = TFP_CLIP_AIM, .has_fov = true, .fov = DEG(90), .game_fov = DEG(45), .has_near = true, .game_near = .05f, .near = .05f, .x = .1f, .z = -.1f};
   tfp_clip_line(&none, line, sizeof line);
-  CHECK(strstr(line, "Clip: weapon=? name=\"?\" view=aim "));
+  CHECK(strstr(line, "Clip: weapon=? name=\"?\" view=aim fov=90.0 (game 45.0) near in force 0.050 m (game 0.050 m, setting off)"));
   char small[24];
   tfp_clip_line(&hip, small, sizeof small); /* a short buffer: cut, terminated */
   CHECK(strlen(small) == sizeof small - 1);
-  /* a change worth a line: the view, a millimetre of the near plane, half a degree; not the noise under them */
+  { /* the longest line fits the binder's buffer */
+    TfpClipSample longest = hip;
+    longest.key = "0123456789abcdef", longest.name = "A weapon with a name as long as a name gets here, forty-eight", longest.near = 123.456f, longest.wanted = 123.456f;
+    longest.x = 123.456f, longest.z = -123.456f, longest.game_near = 123.456f;
+    CHECK(tfp_clip_line(&longest, line, sizeof line) < (int)sizeof line);
+  }
+  /* a change worth a line: the view, a millimetre of the near plane, half a degree, the scale; not the noise under them */
   TfpClipSample other = ads;
   CHECK(!tfp_clip_changed(&ads, &other));
   other.near += .0004f; CHECK(!tfp_clip_changed(&ads, &other));
@@ -118,7 +126,9 @@ int main(void) {
   other = ads; other.view = TFP_CLIP_HIP; CHECK(tfp_clip_changed(&ads, &other));
   other = ads; other.key = "0294f1b2a3523d8d"; CHECK(tfp_clip_changed(&ads, &other));
   other = ads; other.has_near = false; CHECK(tfp_clip_changed(&ads, &other));
+  other = ads; other.has_fov = false; CHECK(tfp_clip_changed(&ads, &other));
   other = ads; other.wanted = .1f; CHECK(tfp_clip_changed(&ads, &other));
+  other = ads; other.scale = 1; CHECK(tfp_clip_changed(&ads, &other));
 
   printf("weapon clip: %d checks, %d failed\n", checks, failed);
   return failed != 0;

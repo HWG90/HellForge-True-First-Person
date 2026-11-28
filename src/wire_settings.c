@@ -47,7 +47,10 @@ typedef struct Settings {
   char weapon[17];
   /* Round 53 (src/weapon_clip.h): the `Clip:` line. standing: this frame's figures and since when they have stood;
    * said: the last line's. The keys are copies (the samples point at them). */
-  struct { TfpClipSample standing, said; char standing_key[17], said_key[17]; double since; bool has_standing, has_said; } clip;
+  struct {
+    TfpClipSample standing, said; char standing_key[17], said_key[17]; double since; bool has_standing, has_said;
+    bool has_fov; float game_fov, shown_fov, scale; /* tfp_wire_clip_note: the helpers' own figures, as the binder last read them */
+  } clip;
 } Settings;
 static Settings *state(TfpWire *w) { return w ? w->ext[TFP_WIRE_EXT_SETTINGS] : NULL; }
 #define S(h) state((TfpWire *)(h)->user)
@@ -300,71 +303,41 @@ static bool rt_menu_near_options(TfpRtHost *h, V *o1) { /* menu:172-182 */
   *o1 = tfp_wire_ref(&st->near_clip);
   return true;
 }
-/* ---- round 53 (src/weapon_clip.h): the near clip and the gun ---------------------------------------- */
-/* The placement the near clip is held by: of the hip's actions (or normal aim's one) the one whose gun is first on
- * screen nearest the eye at `fov`; returns that depth (0: from the eye on, or nothing resolved). */
-float tfp_wire_clip_place(TfpWire *w, const char *key, bool aim, float fov, float *x, float *z) {
-  static const TfpAct hip[] = {TFP_ACT_IDLE, TFP_ACT_SPRINT, TFP_ACT_RELOAD, TFP_ACT_CROUCH, TFP_ACT_PRONE, TFP_ACT_SLIDE, TFP_ACT_DIVE};
-  static const TfpAct shoulder[] = {TFP_ACT_AIM};
-  const TfpAct *actions = aim ? shoulder : hip;
-  const size_t count = aim ? 1 : sizeof hip/sizeof *hip;
-  float least = -1;
-  *x = *z = 0;
-  for (size_t i = 0; i < count; i++) {
-    TfpActionPlacement p = {0, 0, 0, 0, 0, 0, 0};
-    if (!tfp_wire_settings_resolve(w, key, actions[i], &p, NULL)) continue;
-    const float first = tfp_clip_first_depth((float)p.x, (float)p.z, fov);
-    if (least < 0 || first < least) least = first, *x = (float)p.x, *z = (float)p.z;
-  }
-  return least < 0 ? 0 : least;
+/* ---- round 53 (src/weapon_clip.h): the `Clip:` line ----------------------------------------------- */
+void tfp_wire_clip_note(TfpWire *w, bool has_fov, float game_fov, float shown_fov, float ads_scale) {
+  Settings *st = state(w);
+  if (!st) return;
+  st->clip.has_fov = has_fov && tfp_clip_fov(game_fov) && tfp_clip_fov(shown_fov);
+  st->clip.game_fov = game_fov, st->clip.shown_fov = shown_fov;
+  st->clip.scale = ads_scale > 0 && ads_scale < 1 ? ads_scale : 1;
 }
-/* The field of view the hip's near clip is made for: what is shown, or the lock's when that is wider (the frames
- * after full aim, where the row still holds the aim's lens). 0: none known. */
-static float clip_fov(TfpWire *w) {
-  if (!w->has_row || !w->row_has_fov || !tfp_clip_fov((float)w->row_fov_applied)) return 0;
-  float fov = (float)w->row_fov_applied;
-  if (tfp_locked_view_fov_lock(w)) {
-    const float locked = (float)(tfp_locked_view_fov_degrees(w)*3.14159265358979/180);
-    if (tfp_clip_fov(locked) && locked > fov) fov = locked;
-  }
-  return fov;
-}
-float tfp_wire_clip_ads_scale(TfpWire *w) {
-  if (!w || !w->has_row || !w->row_has_fov) return 1;
-  return tfp_clip_ads_scale((float)w->row_fov_native, (float)w->row_fov_applied);
-}
-/* A setting in metres (0: the game's own) held in front of the gun; 0 again when that is the game's own. */
-static double clip_held(TfpWire *w, const char *key, bool aim, double wanted) {
-  const float fov = clip_fov(w);
-  float x, z;
-  if (!(wanted > TFP_CLIP_GAME_M) || !(fov > 0)) return wanted;
-  tfp_wire_clip_place(w, key, aim, fov, &x, &z);
-  const float held = tfp_clip_hip_near((float)wanted, x, z, fov);
-  if (!(held < (float)wanted)) return wanted;
-  return held > TFP_CLIP_GAME_M ? held : 0;
-}
+/* After on_update (the row and the snapshot are this frame's): the figures of the frame, said once they have stood
+ * for half a second and again when they change. Reads only; nothing here reaches the near clip. */
 static void clip_frame(TfpWire *w, Settings *st, const char *key) {
-  if (!w->controller.enabled || !key || !w->has_row || !w->row_has_fov || w->rt.clock_previous.kind != TFP_RT_NUMBER) {
+  if (!w->controller.enabled || !key || !w->has_row || !w->snap_next || w->rt.clock_previous.kind != TFP_RT_NUMBER) {
     st->clip.has_standing = false;
     return;
   }
-  const TfpWireSnap *last = w->snap_next ? &w->snaps[(w->snap_next - 1) % TFP_WIRE_SNAPS] : NULL;
+  const TfpOpsSnapshot *last = &w->snaps[(w->snap_next - 1) % TFP_WIRE_SNAPS].s;
   const double now = w->rt.clock_previous.number;
   const TfpActionWeapon *info = tfp_action_weapon_info(&st->catalogue, key);
   double hip, aim;
   TfpNearResult result;
   TfpClipSample s;
   memset(&s, 0, sizeof s);
-  s.view = last && last->s.controller_active ? TFP_CLIP_ADS : last && last->s.shoulder_aim ? TFP_CLIP_AIM : TFP_CLIP_HIP;
+  s.view = last->controller_active ? TFP_CLIP_ADS : last->shoulder_aim ? TFP_CLIP_AIM : TFP_CLIP_HIP;
   s.name = info ? info->name : NULL;
-  s.fov = (float)w->row_fov_applied, s.game_fov = (float)w->row_fov_native;
+  s.has_fov = st->clip.has_fov;
+  if (s.has_fov) s.fov = st->clip.shown_fov, s.game_fov = st->clip.game_fov;
   tfp_near_lease_result(&w->near_clip, &result);
   s.has_near = result.stats.has;
   s.game_near = (float)result.stats.last_native, s.near = (float)result.stats.last_applied;
-  if (s.view != TFP_CLIP_ADS) {
+  s.scale = 1;
+  if (s.view == TFP_CLIP_ADS) s.scale = st->clip.scale;
+  else {
     tfp_settings_near_options(&st->store, key, &hip, &aim, NULL);
     s.wanted = (float)(s.view == TFP_CLIP_AIM ? aim : hip);
-    tfp_wire_clip_place(w, key, s.view == TFP_CLIP_AIM, s.fov, &s.x, &s.z);
+    if (w->ops.has_pose_placement) s.x = (float)w->ops.pose_placement.x, s.z = (float)w->ops.pose_placement.z; /* the placement in force */
   }
   s.key = key;
   if (!st->clip.has_standing || tfp_clip_changed(&st->clip.standing, &s)) {
@@ -374,7 +347,7 @@ static void clip_frame(TfpWire *w, Settings *st, const char *key) {
     return;
   }
   if (now - st->clip.since < .5 || (st->clip.has_said && !tfp_clip_changed(&st->clip.said, &st->clip.standing))) return;
-  char line[480];
+  char line[560];
   tfp_clip_line(&st->clip.standing, line, sizeof line);
   tfp_wire_say(w, line);
   memcpy(st->clip.said_key, st->clip.standing_key, sizeof st->clip.said_key);
@@ -383,8 +356,7 @@ static void clip_frame(TfpWire *w, Settings *st, const char *key) {
 }
 
 /* What the near-clip adapter reads (rt:713-716): the menu's table when the menu answered, else the
- * runtime's {hip=0, aim=0}. Replaces the view build's reader, which knew no menu table. Round 53: each distance is
- * held in front of the gun (src/weapon_clip.h), so the near plane cuts nothing of it that is on screen. */
+ * runtime's {hip=0, aim=0}. Replaces the view build's reader, which knew no menu table. */
 static void near_options(void *user, TfpNearOptions *out) {
   TfpWire *w = user;
   Settings *st = state(w);
@@ -398,10 +370,6 @@ static void near_options(void *user, TfpNearOptions *out) {
   } else if (st && r[0].kind == TFP_RT_REF && r[0].ref == &st->near_clip) {
     out->is_table = out->hip_is_number = out->aim_is_number = true;
     out->hip = st->near_clip.hip, out->aim = st->near_clip.aim;
-  }
-  if (st && out->is_table && out->hip_is_number && out->aim_is_number) {
-    const char *key = w->ops.has_placement_weapon_key ? w->ops.placement_weapon_key : NULL;
-    out->hip = clip_held(w, key, false, out->hip), out->aim = clip_held(w, key, true, out->aim);
   }
 }
 
