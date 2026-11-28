@@ -59,6 +59,14 @@ class SoakPlayed(unittest.TestCase):
         self.assertEqual(soak.unplayed("dive", lines_of("feel63-A54-dive-launch.log")), [])
         self.assertEqual(soak.unplayed("walk", lines_of("feel63-matrix-dive-back-not-played.log")), [])
 
+    def test_a_dive_in_the_head_camera_is_judged_as_played(self):
+        # Stable #228 dive-back (G3, a real defect): no Motion: line is written in the head camera
+        lines = lines_of("feel63-A228-head-dive.log")
+        self.assertFalse(any(" Motion: action=dive" in line for line in lines))
+        self.assertEqual(soak.unplayed("dive-back", lines), [])
+        j = soak.judged("dive-back", matrix.PHASES["dive-back"][0], lines)
+        self.assertTrue(soak.flagged(j, matrix.PHASES["dive-back"][0]))
+
     def test_an_action_not_played_is_not_flagged_for_its_steps(self):
         script = matrix.PHASES["clamber-high"][0]
         j = soak.judged("clamber-high", script, lines_of("feel63-A212-clamber-not-played.log"))

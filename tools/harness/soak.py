@@ -36,6 +36,7 @@ Soak 67-A #212 "clamber-high" was a drop of 0.6 m and the game's own landing: no
 (matrix.measure "launch") is printed and not counted, as the stance ramp is.
 """
 import random
+import re
 import sys
 import time
 
@@ -61,9 +62,16 @@ NEEDS = {"dive": [matrix._DIVED], "dive-back": [matrix._DIVED],
          "clamber-low": [matrix._TRAVERSED], "clamber-high": [matrix._TRAVERSED]}
 
 
+# A dive in the head camera writes no Motion: line (the motion runtime is idle without a lease: soak 67-A #228 and
+# 68-C #51, #117, round 55's G3), so where the stretch was in the head camera a missing dive line says nothing.
+UNSEEN = {"dive": re.compile(r" Trace: t=\S+ kind=4 |\bkind now 4\b"), "dive-back": re.compile(r" Trace: t=\S+ kind=4 |\bkind now 4\b")}
+
+
 def unplayed(name, lines):
-    """Round 55C: why the action `name` was not played, from its own stretch of the log (NEEDS); empty: played, or
-    the action needs nothing."""
+    """Round 55C: why the action `name` was not played, from its own stretch of the log (NEEDS); empty: played, the
+    action needs nothing, or (UNSEEN) the log could not have said: a dive in the head camera is judged as played."""
+    if name in UNSEEN and any(UNSEEN[name].search(line) for line in lines):
+        return []
     return [f"NOT PLAYED: {text}" for pattern, text in NEEDS.get(name, []) if not any(pattern.search(line) for line in lines)]
 
 
