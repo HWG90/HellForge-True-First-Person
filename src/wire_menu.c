@@ -55,16 +55,16 @@ static const Control CONTROLS[] = {
   ROW("motion_sway_enabled", TFP_MK_CHECK, "Weapon movement: sway", 0, M(motion_sway_enabled), TIP("The weapon lagging behind when you turn or strafe.")),
   ROW("motion_sprint_enabled", TFP_MK_CHECK, "Weapon movement: sprint pose", 0, M(motion_sprint_enabled), TIP("The weapon lowering and turning while you sprint.")),
   ROW("near_clip_cm", TFP_MK_SLIDER, "Near clip distance (cm)", 0, M(near_clip_cm), RANGE(5, 40, 1),
-      TIP("Hides anything closer to the first-person camera than this, such as armor edges. 5 is the game's own distance (off). It never "
-          "reaches into the part of your weapon that is on screen: with a wide field of view it is held in front of the weapon. Full ADS "
-          "uses the game's distance, brought in when full aim is shown wider than the game's zoom.")),
+      TIP("Hides anything closer to the first-person camera than this, such as armor edges. 5 is the game's own distance (off). Full ADS uses "
+          "the game's distance; when Aim field of view shows full aim wider than the game's zoom, that distance is brought closer to the "
+          "eye, never under the game's 5 cm.")),
   ROW("near_clip_aim", TFP_MK_TOGGLE, "Near clip while aiming", 0, M(near_clip_aim),
       TIP("Keep the near clip during normal aim. Off returns to the game's distance while aiming so sights are not cut.")),
   ROW("weapon_composition_status", TFP_MK_STATUS, "Weapon: no active firearm", 0, NONE),
   ROW("weapon_near_hip_cm", TFP_MK_SLIDER, "This weapon: hip clearance (cm)", 0, M(weapon_near_hip_cm), RANGE(5, 40, 1),
-      TIP("Draft for this firearm only. Save below to apply. 5 keeps the game distance. Held in front of the weapon, like the distance above.")),
+      TIP("Draft for this firearm only. Save below to apply. 5 keeps the game distance.")),
   ROW("weapon_near_aim_cm", TFP_MK_SLIDER, "This weapon: normal-aim clearance (cm)", 0, M(weapon_near_aim_cm), RANGE(5, 40, 1),
-      TIP("Independent normal-aim clearance. Full native ADS always keeps the game distance.")),
+      TIP("Independent normal-aim clearance. Full ADS is not changed by it.")),
   ROW("save_weapon_near", TFP_MK_BUTTON, "Save clipping for this weapon", 0, NONE),
   ROW("reset_weapon_near", TFP_MK_BUTTON, "Use global clipping for this weapon", 0, NONE),
   ROW("runtime_status", TFP_MK_STATUS, "Status: First person off", 0, NONE),
