@@ -81,7 +81,24 @@
  * after each begins): the tick, r, request+0x4c, what the held depth and the hold put on node 5, the hip share, main
  * row +0x11ac where read, node 50's local position and request+0x60..0x68 as the node 5 call found them, and the eye's
  * parents (rig nodes 1 to 4: the eye hangs on the root through them, and none of them is in v); said once a reload on
- * the "Reload rest:", "Reload start:" and "Reload end:" lines, beside the frame's "Trace:" rows. */
+ * the "Reload rest:", "Reload start:" and "Reload end:" lines, beside the frame's "Trace:" rows.
+ *
+ * NODE 50 HELD (round 56). The lines read it off the feel.63 matrix (P-4 Senator, 11:10:23.2 to 25.6,
+ * tests/reference/reload/feel63-L6193-6292.log): node 50's local position moves (0, +0.0215, -0.0026) a frame from the
+ * reload's second frame, to (0, +0.0644, -0.0078), and back from the second frame of the blend back; its parents and C
+ * are still, request+0x60 only creeps up (0.3 mm a frame, before the reload too). Its forward part (y) is the eye's
+ * move along the view, one to one. And what the node 5 call puts on the rig (the game's vector and the hold's pair
+ * alike) shows a frame after node 50 does: the rows fit
+ *     the eye along the view (frame k) = node 50's forward move (k) - (request+0x4c (k-1) - C + put (k-1) - held)
+ * to 1.8 mm, and do not fit (18 mm) with all of it in one frame. So the eye went 0.063 m forward at the start and, at the
+ * end, 0.015 m behind its rest a frame after node 50 was back (the game's vector still had it): the judge's 0.078 m.
+ * Now, in a frame the hold takes, node 50's move since the last frame without C (`moved`) is put back with it, by the
+ * hip share: r of it where the frame's own vector is in the blend (the other 1-r is in the game's (1-r) v already),
+ * all of it where the eye is held by its offset (round 40). The eye is then off by about one frame of node 50's own
+ * move (it shows a frame before anything put back with it can), 0.021 m at the run's 33 ms frames (8 ms frames: 5 mm),
+ * and still while node 50 is. A move over TFP_RELOAD_EYE_MOST, or node 50 not read, is not taken; where node 50 is
+ * where it was (or no reload), the hold's number is the same to the bit. Its part across the view (0.0078 m, down) is
+ * left as the game has it, as the Liberator's C is; the creep of request+0x60 too (up, not a reload's: it runs before). */
 #ifndef TFP_RELOAD_HOLD_H
 #define TFP_RELOAD_HOLD_H
 #include <math.h>
@@ -102,6 +119,7 @@
 #define TFP_RELOAD_EDGE_MS     150u              /* an edge is kept this long after its first frame (the blend's 75 ms, the mover's 100) */
 #define TFP_RELOAD_EDGE_LINE   3u                /* frames a line */
 #define TFP_RELOAD_EDGES_LOGGED 2u               /* reloads a second whose edges are kept */
+#define TFP_RELOAD_EYE_MOST    .15f              /* round 56: m: node 50 moved more than this since the rest is no reload's (the logs: 0.064) */
 
 /* The evaluator from game+0x1287a44, two hex digits a byte; "xxxxxxxx": a displacement that is read, not compared:
  * the nine of C (TFP_RELOAD_SITES) and five that are not this header's (the divisor at 0x1287ac0, the avatar row at
@@ -201,6 +219,8 @@ typedef struct TfpReloadInput {
   bool on;                        /* the held depth on and not stopped for the lease */
   float scale;                    /* round 40: main row +0x11ac as read in a frame the game scales */
   bool scale_known;               /* it was read */
+  float eye;                      /* round 56: node 50's local forward part (its position's y) as the node 5 call found it */
+  bool eye_known;                 /* it was read */
 } TfpReloadInput;
 typedef struct TfpReloadHold {
   uint64_t lease;
@@ -209,9 +229,11 @@ typedef struct TfpReloadHold {
   float would, most;              /* the largest the eye would have slid in it (r (held - C)) and what was put back of it */
   uint32_t frames, missed, why;   /* its frames with r > 0; of those, not put back, and the last reason */
   uint32_t scaled, by_offset;     /* round 40: its frames the game scaled by main row +0x11ac that were held; of those, by the eye's offset */
+  bool eye_rest_known; float eye_rest; /* round 56: node 50's forward part in the last frame without C */
+  float eye_most;                 /* the largest of node 50's move put back in this reload */
 } TfpReloadHold;
 /* One reload, from its first frame with r > 0 to the next with r = 0. */
-typedef struct TfpReloadEnd { bool ended; float would, most; uint32_t frames, missed, why, scaled, by_offset; } TfpReloadEnd;
+typedef struct TfpReloadEnd { bool ended; float would, most; uint32_t frames, missed, why, scaled, by_offset; float eye_most; } TfpReloadEnd;
 
 /* Round 40: a frame the game scales by main row +0x11ac (TFP_RELOAD_SCALED), `r` its share of C. True: `*delta` is the
  * whole of what goes to node 5's forward part (the held depth's own unscaled term, in->added, included), `*would` how
@@ -239,6 +261,21 @@ static inline bool tfp_reload_scaled(const TfpReloadHold *h, const TfpReloadInpu
   return true;
 }
 
+/* Round 56: node 50's move since the last frame without C, put back with the hold's number `put` in a frame it holds.
+ * `part`: how much of the move the rig's vector is not already taking out: r where the frame's own vector is in the
+ * blend ((1-r) v, and v has node 50 in it), all of it where the eye is held by its offset (the vector held, without
+ * the move). Returns `put` itself, the same bits, where node 50 did not move or was not read, or the move is no
+ * reload's, or the sum would be out of range. */
+static inline float tfp_reload_eye_add(TfpReloadHold *h, const TfpReloadInput *in, float part, float share, float put) {
+  if (!in->eye_known || !h->eye_rest_known || !tfp_reload_finite(in->eye)) return put;
+  const float moved = in->eye-h->eye_rest;
+  if (moved == 0 || !(fabsf(moved) <= TFP_RELOAD_EYE_MOST)) return put;
+  const float eye = share*part*moved;
+  if (eye == 0 || !(fabsf(put+eye) <= TFP_RELOAD_MOST)) return put;
+  if (fabsf(eye) > fabsf(h->eye_most)) h->eye_most = eye;
+  return put+eye;
+}
+
 /* One frame of node 5. `*delta`: what to add to its forward part (and to take from the root along the view): 0 on
  * every frame with r = 0 the game does not scale, so such a frame is the same as without this, to the bit. In a frame
  * the game scales (round 40) it is the whole of what node 5 takes, the held depth's own term (in->added) included.
@@ -252,14 +289,17 @@ static inline uint32_t tfp_reload_frame(TfpReloadHold *h, const TfpReloadInput *
   if (why == TFP_RELOAD_NONE) {
     if (h->active) { end->ended = true; end->would = h->would; end->most = h->most; end->frames = h->frames; end->missed = h->missed; end->why = h->why;
                      end->scaled = h->scaled; end->by_offset = h->by_offset; }
-    h->active = false; h->would = h->most = 0; h->frames = h->missed = 0; h->why = TFP_RELOAD_NONE; h->scaled = h->by_offset = 0;
+    if (end->ended) end->eye_most = h->eye_most;
+    h->active = false; h->would = h->most = 0; h->frames = h->missed = 0; h->why = TFP_RELOAD_NONE; h->scaled = h->by_offset = 0; h->eye_most = 0;
+    h->eye_rest_known = in->on && in->eye_known && tfp_reload_finite(in->eye) && fabsf(in->eye) <= 4;
+    h->eye_rest = h->eye_rest_known ? in->eye : 0;
     if (!in->on) { h->known = false; return TFP_RELOAD_OFF; }
     const float held = in->argument-(in->constant_known ? in->constant : 0)+in->added;
     if (in->constant_known && tfp_reload_finite(held) && fabsf(held) <= 4) { h->held = held; h->known = true; }
     else h->known = false;
     return TFP_RELOAD_NONE;
   }
-  if (!h->active) { h->active = true; h->would = h->most = 0; h->frames = h->missed = 0; h->why = TFP_RELOAD_NONE; h->scaled = h->by_offset = 0; }
+  if (!h->active) { h->active = true; h->would = h->most = 0; h->frames = h->missed = 0; h->why = TFP_RELOAD_NONE; h->scaled = h->by_offset = 0; h->eye_most = 0; }
   ++h->frames;
   if (why == TFP_RELOAD_ADDED || why == TFP_RELOAD_SCALED) {
     const uint32_t kind = why;
@@ -275,7 +315,7 @@ static inline uint32_t tfp_reload_frame(TfpReloadHold *h, const TfpReloadInput *
       if (fabsf(would) > fabsf(h->would)) h->would = would;
       if (fabsf(out-in->added) > fabsf(h->most)) h->most = out-in->added;
       ++h->scaled; h->by_offset += offset;
-      *delta = out;
+      *delta = tfp_reload_eye_add(h, in, offset ? 1 : r, share, out);
       return TFP_RELOAD_ADDED;
     }
   }
@@ -285,7 +325,7 @@ static inline uint32_t tfp_reload_frame(TfpReloadHold *h, const TfpReloadInput *
   if (!(fabsf(add) <= TFP_RELOAD_MOST)) { ++h->missed; h->why = TFP_RELOAD_RANGE; return TFP_RELOAD_RANGE; }
   if (fabsf(would) > fabsf(h->would)) h->would = would;
   if (fabsf(add) > fabsf(h->most)) h->most = add;
-  *delta = add;
+  *delta = tfp_reload_eye_add(h, in, r, share, add);
   return TFP_RELOAD_ADDED;
 }
 
@@ -459,8 +499,9 @@ static inline void tfp_reload_note(TfpReloadSecond *s, const TfpReloadEnd *end) 
 /* The line for the `i`th reload of the second. "Held" where every frame of it was put back. Round 40: where frames the
  * game scaled by main row +0x11ac were held, how many, and how many of them by the eye's offset. */
 static inline void tfp_reload_line(const TfpReloadEnd *e, char *text, size_t size) {
-  char scaled[120] = "";
+  char scaled[200] = "";
   if (e->scaled) snprintf(scaled, sizeof scaled, "; %u frames the game scaled by main row +0x11ac held, %u of them by the eye's offset", e->scaled, e->by_offset);
+  if (e->eye_most != 0) { const size_t used = strlen(scaled); snprintf(scaled+used, sizeof scaled-used, "; node 50 held up to %.3f m", (double)fabsf(e->eye_most)); }
   if (!e->missed)
     snprintf(text, size, "Reload: eye held through the reload (would have slid %.3f m)%s", (double)fabsf(e->would), scaled);
   else if (e->missed == e->frames)
