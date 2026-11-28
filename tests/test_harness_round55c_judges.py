@@ -153,6 +153,25 @@ class DiveLaunch(unittest.TestCase):
         self.assertIn("1 the game's dive launch", soak.counted(matrix.judge(lines)["pops"]))
         self.assertEqual(soak.unlisted(matrix.judge(lines)["pops"], set()), [])
 
+    def test_a_launch_frame_over_the_cap_is_counted(self):
+        # the launch frames over all 49 soak logs run 0.060 to 0.094 m; stance.CAP_M (0.10) is their bound. The game's
+        # eye and the wanted eye both moved 0.08 m up in the launch frame (untouched still): 0.112 and 0.132 m shown
+        import re
+        lines = []
+        for line in lines_of("feel63-A54-dive-launch.log"):
+            if line.startswith("11:14:26.423 Trace"):
+                for key in ("eye_world", "wanted"):
+                    m = re.search(key + r"=\((\S+) (\S+) (\S+)\)", line)
+                    line = line.replace(m[0], f"{key}=({m[1]} {m[2]} {float(m[3]) + 0.08:.5f})")
+            lines.append(line)
+        j = matrix.judge(lines)
+        for at in ("11:14:26.423", "11:14:26.457"):
+            p = pop_at(j, at)
+            self.assertGreaterEqual(p["shown"], 0.10)
+            self.assertNotEqual(p["whose"], "launch", at)
+        self.assertGreater(j["largest_jump_m"], 0.10)
+        self.assertTrue(soak.flagged(soak.judged("dive", matrix.PHASES["dive"][0], lines), matrix.PHASES["dive"][0]))
+
     def test_not_without_the_dive_line(self):
         lines = [line for line in lines_of("feel63-A54-dive-launch.log") if " Motion: action=dive" not in line]
         self.assertEqual(pop_at(matrix.judge(lines), "11:14:26.423")["whose"], "own")
