@@ -313,6 +313,88 @@ int main() {
     CHECK(edges == 1);
     g.end();
   }
+  // ---- 10. Round 55, THE DIRECTION SHOWN (soak 67 #29, 11:13:22.390: a leave with a carry of 62.8 degrees). In the
+  // game the context's axes (basis(), what the head camera's eye is built along) are the game's own new direction in
+  // the frame of the leave, and the direction shown the frame before in every frame after it. So the eye of the leave's
+  // frame went 0.18 m along a direction 63 degrees off the one shown, and the next frame's along the one shown: a
+  // sideways flick of about 0.49 m x 2 sin(31.5) in the log, there and back. Played here with the context set the way
+  // the game sets it: the drawn eye's step may change across the view by 0.03 m at most around the leave, at 16.7 and
+  // 33 ms a frame, in both styles, the veil and the push armed or not; and the push and the veil go along the view
+  // shown (the head is behind the drawn eye along it). ----
+  for (double dt : {16.7, 33.3}) for (bool bodycam : {true, false}) for (bool veiled : {false, true}) {
+    fresh(true, true, true, 0, bodycam);
+    if (veiled) { tfp_camera_set_veil(true); tfp_camera_set_clear(true); }
+    Game g; g.pose(1, 2, 0, LOOK); g.look(LOOK, 0); g.hip(); g.begin();
+    CHECK(tfp_camera_set_weapon_key(g.gen, 0x1111) == 1);
+    standing(g, 12, dt, false); standing(g, 30, dt, true); standing(g, 4, dt, true, 2);
+    auto context_from = [&](TfpQ q) { // the context's axis rows (right, forward, up) from a rotation in the world
+      const float x[3] = {1, 0, 0}, y[3] = {0, 1, 0}, z[3] = {0, 0, 1}; float r[3], f[3], u[3];
+      tfp_q_rotate(q, x, r); tfp_q_rotate(q, y, f); tfp_q_rotate(q, z, u);
+      for (int i = 0; i < 3; ++i) { g.s.context[i] = r[i]; g.s.context[4 + i] = f[i]; g.s.context[8 + i] = u[i]; }
+    };
+    const TfpQ game_q = tfp_q_normalised(tfp_q_mul(yaw_q(LOOK), about_up(63)));
+    float eyes[40][3], views[40][3]; int n = 0; float worst = 0, behind = -1e9f;
+    for (int i = 0; i < 30; ++i) {
+      if (i == 0) context_from(game_q); else context_from(handed()); // the game's new one at the leave, then the one shown
+      g.hip(2); std::memcpy(g.s.argument_rotation, &game_q, 16);
+      g.frame(dt);
+      if (veiled) tfp_camera_veil_tick(i == 1);
+      std::memcpy(eyes[n], g.shown, 12); shown_forward(g, views[n]); ++n;
+      // the head node from the drawn eye along the level view shown: behind it (the push and the veil go that way)
+      const float h = std::sqrt(views[n - 1][0] * views[n - 1][0] + views[n - 1][1] * views[n - 1][1]);
+      const float ahead = ((g.s.head[0] - g.shown[0]) * views[n - 1][0] + (g.s.head[1] - g.shown[1]) * views[n - 1][1]) / h;
+      behind = std::fmax(behind, ahead);
+    }
+    for (int k = 1; k + 1 < n; ++k) {
+      float change[3]; for (int i = 0; i < 3; ++i) change[i] = (eyes[k + 1][i] - eyes[k][i]) - (eyes[k][i] - eyes[k - 1][i]);
+      const float h = std::sqrt(views[k][0] * views[k][0] + views[k][1] * views[k][1]);
+      worst = std::fmax(worst, std::fabs(change[0] * views[k][1] / h - change[1] * views[k][0] / h));
+    }
+    std::printf("  a leave carrying 63 degrees at %.1f ms (%s%s): the step changed across the view by %.3f m at most; the head %.3f m in front of the eye at most\n", dt, bodycam ? "Bodycam" : "Stable", veiled ? ", veil and push" : "", worst, behind);
+    CHECK(worst <= .03f);
+    CHECK(behind <= -.10f); // the head stays behind the drawn eye along the view shown (d19fd57: 0.03 m behind)
+    g.end();
+  }
+  // ---- 11. Round 55: with nothing carried (the direction the same at every change of camera) every eye handed on,
+  // every rotation and every Trace row's eye, wanted eye, veil, push, head_shown and direction are what d19fd57 gave,
+  // bit for bit: a digest of them, taken with the helper of d19fd57 (TFP_CAMERA_HELPER_C=<d19fd57's camera_helper.c>
+  // tests/run-camera-turn-helper.sh prints it as "digest"). Swaps on foot through the native view and back, the
+  // body moving in the head camera, the veil and the push armed, both styles, Stable with its damping. No veil is open at an entry
+  // and none opens over 0.15 m: those are what round 55 changes. ----
+  {
+    uint64_t digest = 1469598103934665603ull; int carried = 0, veils = 0;
+    auto mix = [&](const void *data, size_t length) { const uint8_t *b = static_cast<const uint8_t *>(data); for (size_t i = 0; i < length; ++i) { digest ^= b[i]; digest *= 1099511628211ull; } };
+    auto rows_into = [&]() {
+      TfpCameraTraceRow rows[64]; std::memset(rows, 0, sizeof rows); const uint32_t count = tfp_camera_trace_read(rows, 64);
+      for (uint32_t i = 0; i < count; ++i) {
+        const TfpCameraTraceRow &r = rows[i];
+        mix(&r.kind, 4); mix(r.eye, 12); mix(r.wanted, 12); mix(&r.step, 4); mix(&r.correction, 4); mix(r.damp, 12); mix(r.view, 12);
+        mix(r.veil, 12); mix(r.turn, 12); mix(r.veil_head, 8); mix(r.head_shown, 8); mix(&r.clear, 4); mix(&r.turn_carry, 4); mix(&r.turn_edge, 4); carried += r.turn_carry != 0 || r.turn_edge != 0; veils += r.veil[0] != 0 || r.veil[1] != 0 || r.veil[2] != 0;
+      }
+    };
+    for (bool bodycam : {true, false}) for (double dt : {16.7, 33.3}) {
+      fresh(true, true, true, bodycam ? 0.f : 350.f, bodycam);
+      tfp_camera_set_veil(true); tfp_camera_set_clear(true);
+      Game g; g.eye[1] = 0; g.eye[2] = .13f; // the weapon's eye level with the head: the veil moves it 0.09 m at a leave
+      g.pose(1, 2, 0, LOOK); g.look(LOOK, 0); g.hip(); g.begin();
+      CHECK(tfp_camera_set_weapon_key(g.gen, 0x1111) == 1);
+      tfp_camera_trace_edge();
+      for (int round = 0; round < 3; ++round) {
+        for (int i = 0; i < 24; ++i) { g.native(i > 18 ? 2 : 0); g.frame(dt); mix(sent.position, 16); const TfpQ q = handed(); mix(&q, 16); }
+        rows_into(); tfp_camera_trace_edge();
+        for (int i = 0; i < 30; ++i) {
+          g.pose(1, 2 + .01f * i, 0, LOOK, 1.5f - .002f * i);
+          g.hip(i < 6 ? 2 : 0); g.frame(dt); tfp_camera_veil_tick(i == 1);
+          mix(sent.position, 16); const TfpQ q = handed(); mix(&q, 16);
+        }
+        rows_into(); tfp_camera_trace_edge();
+      }
+      g.end();
+    }
+    std::printf("  digest %016llx (%d rows carried, %d veiled)\n", static_cast<unsigned long long>(digest), carried, veils);
+    CHECK(carried == 0 && veils > 0);
+    CHECK(digest == 0x0e42c7547a15410cull); // d19fd57's
+  }
   std::printf("camera turn through the helper: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

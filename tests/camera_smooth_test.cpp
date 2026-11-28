@@ -71,9 +71,14 @@ struct Game {
     right[0] = c; right[1] = n; right[2] = 0; ahead[0] = -n * cp; ahead[1] = c * cp; ahead[2] = sp; above[0] = n * sp; above[1] = -c * sp; above[2] = cp;
     for (int i = 0; i < 3; ++i) { s.context[i] = right[i]; s.context[4 + i] = ahead[i]; s.context[8 + i] = above[i]; s.camera_rotation[i] = right[i]; s.camera_rotation[4 + i] = ahead[i]; s.camera_rotation[8 + i] = above[i]; }
   }
-  void rotation_from_look() { // yaw only in these scripts
-    const float yaw = std::atan2(right[1], right[0]);
-    s.argument_rotation[0] = 0; s.argument_rotation[1] = 0; s.argument_rotation[2] = std::sin(yaw / 2); s.argument_rotation[3] = std::cos(yaw / 2);
+  // The game's rotation in the ordinary camera: the look's, about up by its yaw and then about its right by its pitch.
+  // (Until round 55 yaw only, and the head camera's eye was built along the context's axes, which have the pitch: a
+  // pitched look left a carry of its pitch at every change of camera, src/camera_turn.h, that the game does not have.)
+  void rotation_from_look() {
+    const float yaw = std::atan2(right[1], right[0]), pitch = std::atan2(ahead[2], std::sqrt(ahead[0] * ahead[0] + ahead[1] * ahead[1]));
+    const float cy = std::cos(yaw / 2), sy = std::sin(yaw / 2), cp = std::cos(pitch / 2), sp = std::sin(pitch / 2);
+    if (pitch == 0) { s.argument_rotation[0] = 0; s.argument_rotation[1] = 0; s.argument_rotation[2] = sy; s.argument_rotation[3] = cy; return; } // as before, bit for bit
+    s.argument_rotation[0] = cy * sp; s.argument_rotation[1] = sy * sp; s.argument_rotation[2] = sy * cp; s.argument_rotation[3] = cy * cp;
   }
   void hip(uint32_t mask = 0) {
     s.request[0] = 4; s.linked = false; s.mask = mask; s.aim = 0; s.camera_rotation_given = false;

@@ -985,11 +985,12 @@ static bool commit_current(Policy *p, uint32_t expected_kind, uint32_t *failure)
  * that is not the game's first-person or ordinary one (a death camera) the direction is the last first-person one.
  * `native` + L_ARGUMENT_ROTATION is the rotation the game passes next: world for an unparented camera, parent-local
  * in the native view (kind 6), where a rotation in the view's own frame is applied the same way. */
-static TfpQ lock_carry_step(float passed_ms) {
-  if (lock_carry.w == 1 && lock_carry.x == 0 && lock_carry.y == 0 && lock_carry.z == 0) return lock_carry;
-  const TfpQ next = tfp_slerp(lock_carry, tfp_q_identity(), 1-expf(-passed_ms/LOCK_CARRY_MS));
+static TfpQ lock_carry_next(TfpQ carry, float passed_ms) {
+  if (carry.w == 1 && carry.x == 0 && carry.y == 0 && carry.z == 0) return carry;
+  const TfpQ next = tfp_slerp(carry, tfp_q_identity(), 1-expf(-passed_ms/LOCK_CARRY_MS));
   return tfp_q_valid(next) && tfp_degrees_between(next, tfp_q_identity()) > .05f ? tfp_q_normalised(next) : tfp_q_identity();
 }
+static TfpQ lock_carry_step(float passed_ms) { return lock_carry_next(lock_carry, passed_ms); }
 static void lock_rotation(Policy *p, const float *native, uint32_t kind, double tick) {
   if (!p->lock_now) { lock_view_known = false; tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity(); lock_carry = tfp_q_identity(); lock_was_held = false; lock_first_known = false;
     tfp_turn_reset(&lock_turn); lock_game_cam_tick = -1; return; }
@@ -1086,6 +1087,38 @@ static void lock_rotation(Policy *p, const float *native, uint32_t kind, double 
       }
     }
   }
+}
+
+/* Round 55, THE DIRECTION SHOWN (src/camera_turn.h tfp_turn_peek). The head camera's eye was built along the context's
+ * axes (basis()), and lock_rotation's carry was put on the rotation only after the eye was built. In the game those
+ * axes are the game's own new direction in the frame of a leave of the native view and the direction shown the frame
+ * before in every frame after it, so in the frame a carry began the eye, the push, the veil and head_shown went 0.18 m
+ * and more along a direction up to 63 degrees off the one shown, and from the next frame along the one shown: a flick
+ * across the view of about 0.49 m x 2 sin(theta/2), there and back (soak 67 #29, 11:13:22.390, built 62.0 degrees
+ * against 117.3 shown, the step changed across the view by 0.519 m; the matrix dive-swap 0.366). Here the frame's turn
+ * is worked out before the eye is built, from the state lock_rotation will start from and the rotation it will read:
+ * true, with `shown` the rotation the frame will be shown with (less the kick), only where something is carried in it.
+ * Otherwise false, and the eye is built as before, bit for bit. Not in a held frame (a body that is down: lock_view
+ * already), full aim (nothing carried there), a seat or the glide out of one (seat_back turns the view itself there,
+ * after lock_rotation), or any camera but the ordinary one. (Where the retail rotation handoff
+ * eases the argument after the eye is built, ease_normal_rotation, the carry here is the one on the argument as it
+ * stands now.) Policy lock. */
+static bool lock_turn_preview(const Policy *p, const float *native, uint32_t kind, double tick, TfpQ *shown) {
+  if (!p->lock_now || kind != 4 || p->lock_down || p->full_ads || seat_in || seat_out) return false;
+  TfpQ given = tfp_q_identity();
+  if (!read((uint64_t)(uintptr_t)native + L_ARGUMENT_ROTATION, &given, 16) || !tfp_q_valid(given)) return false;
+  given = tfp_q_normalised(given);
+  /* the view lock_rotation's ordinary branch will give: the game's, with what is left of a held stretch's carry */
+  TfpQ view = given, held = lock_carry;
+  if (lock_was_held && lock_view_known) held = tfp_q_normalised(tfp_q_mul(tfp_q_inv(given), lock_view));
+  if (held.w != 1 || held.x != 0 || held.y != 0 || held.z != 0) {
+    held = lock_carry_next(held, lock_tick > 0 && tick > lock_tick ? (float)(tick-lock_tick) : 0);
+    view = tfp_q_normalised(tfp_q_mul(given, held));
+  }
+  const TfpQ carry = tfp_turn_peek(&lock_turn, view, true, kind, tick, p->c.max_gap_ms);
+  if (tfp_turn_none(carry)) return false;
+  *shown = tfp_turn_apply(view, carry);
+  return tfp_q_valid(*shown);
 }
 
 /* A head-camera frame the lock held was presented: the body's state for the "Lock:" and "Dead:" lines, and for
@@ -1834,6 +1867,12 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
           /* Beyond retail: in a camera that is not the game's ordinary one the eye is placed along the last
            * first-person direction, not along that camera's own. */
           if (policy.lock_now && (kind != 4 || policy.lock_down) && lock_view_known) held_axes(lock_view, forward, up);
+          /* Round 55, THE DIRECTION SHOWN: in a frame that carries a turn, the eye, the push, the veil and head_shown
+           * go along the direction the frame will be shown with, not the context's (lock_turn_preview). */
+          else if (!held_view) {
+            TfpQ shown_q = tfp_q_identity(); float shown_forward[3], shown_up[3];
+            if (lock_turn_preview(&policy, native, kind, tick, &shown_q) && held_axes(shown_q, shown_forward, shown_up)) { memcpy(forward, shown_forward, 12); memcpy(up, shown_up, 12); }
+          }
           /* Remove current body-root rotation before damping animation.
            * Fresh root translation/rotation is restored after filtering. */
           float local_head[3] = {0};
