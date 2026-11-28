@@ -26,7 +26,12 @@ static struct {
   double wheel, dt;
   TfpEdCommand commands[TFP_ED_COMMANDS];
   int count;
+  /* round 53: the list of saved placements (src/editor_weapons.h), handed over by the binder */
+  bool has_weapons, list_press;   /* list_press: the left button's press began on the list, so it is not the editor's */
+  TfpEwWeapon weapons[TFP_EW_MAX];
+  int weapon_count;
 } shared;
+static TfpEwView list_view;   /* the render thread's: what is folded and scrolled, for the session (until this DLL is loaded again) */
 
 /* ---- the render thread ---- */
 static uint32_t colour(TfpEdColor role) {
@@ -38,31 +43,13 @@ static uint32_t colour(TfpEdColor role) {
     default: return ov->theme(OV_THEME_TEXT);
   }
 }
-static void draw(const OvFrame *frame, void *user) {
-  static TfpEdCommand local[TFP_ED_COMMANDS];
-  int count;
-  float x = 0, y = 0;
-  (void)user;
-  if (InterlockedCompareExchange(&retired, 0, 0)) return;
-  ov->mouse_pos(&x, &y);
-  AcquireSRWLockExclusive(&lock);
-  shared.have_frame = true; shared.width = frame->width; shared.height = frame->height;
-  shared.mouse_x = x; shared.mouse_y = y;
-  for (int i = 0; i < 3; i++) shared.button[i] = ov->mouse_down(i) != 0;
-  for (size_t i = 0; i < sizeof KEYS / sizeof KEYS[0]; i++) shared.key[KEYS[i]] = ov->key_down(KEYS[i]) != 0;
-  shared.wheel += ov->mouse_wheel();
-  shared.dt += frame->delta;
-  count = shared.count;
-  memcpy(local, shared.commands, sizeof local[0] * (size_t)count);
-  ReleaseSRWLockExclusive(&lock);
-  if (!count) return;
-  /* Retail's items are in pixels from the bottom left; the host draws from the top left. Shapes follow
-   * HD2-UI-Style/DESIGN.md: the panel a window (rounding 10, a 1 px line border), the buttons controls (rounding 6,
-   * no border, the hover fill under the pointer), every colour a theme token. */
+/* Retail's items are in pixels from the bottom left; the host draws from the top left. Shapes follow
+ * HD2-UI-Style/DESIGN.md: the panel a window (rounding 10, a 1 px line border), the buttons controls (rounding 6,
+ * no border, the hover fill under the pointer), every colour a theme token. x, y: the pointer, from the top left. */
+static void paint(const OvFrame *frame, const TfpEdCommand *local, int count, float x, float y) {
   float scale = frame->height / 1080.0f;
   if (scale < .6f) scale = .6f;
   if (scale > 1.5f) scale = 1.5f;
-  ov->draw_layer(OV_LAYER_FOREGROUND);
   for (int i = 0; i < count; i++) {
     const TfpEdCommand *c = &local[i];
     if (c->is_text) {
@@ -79,6 +66,38 @@ static void draw(const OvFrame *frame, void *user) {
       ov->draw_rect_filled(x0, y0, x1, y1, ov->theme(hover ? OV_THEME_ROW_HOVER : OV_THEME_ROW), 6 * scale);
     }
   }
+}
+static void draw(const OvFrame *frame, void *user) {
+  static TfpEdCommand local[TFP_ED_COMMANDS], list_local[TFP_EW_COMMANDS];
+  int count, list_count = 0;
+  float x = 0, y = 0;
+  (void)user;
+  if (InterlockedCompareExchange(&retired, 0, 0)) return;
+  ov->mouse_pos(&x, &y);
+  double wheel = ov->mouse_wheel();
+  const bool left = ov->mouse_down(0) != 0;
+  AcquireSRWLockExclusive(&lock);
+  shared.have_frame = true; shared.width = frame->width; shared.height = frame->height;
+  shared.mouse_x = x; shared.mouse_y = y;
+  shared.button[0] = left;
+  for (int i = 1; i < 3; i++) shared.button[i] = ov->mouse_down(i) != 0;
+  for (size_t i = 0; i < sizeof KEYS / sizeof KEYS[0]; i++) shared.key[KEYS[i]] = ov->key_down(KEYS[i]) != 0;
+  count = shared.count;
+  memcpy(local, shared.commands, sizeof local[0] * (size_t)count);
+  /* Round 53: the list of saved placements under the editor's panel, while the editor draws. A click on a header folds
+   * it; a press that began on the list and the wheel over it stay the list's (the editor would move the weapon). */
+  if (count && shared.has_weapons)
+    list_count = tfp_ew_frame(&list_view, shared.weapons, shared.weapon_count, frame->width, frame->height, x, frame->height - y, left, &wheel, list_local,
+                              TFP_EW_COMMANDS);
+  else { list_view.was_down = left; list_view.press_in_list = false; }
+  shared.list_press = list_view.press_in_list;
+  shared.wheel += wheel;
+  shared.dt += frame->delta;
+  ReleaseSRWLockExclusive(&lock);
+  if (!count) return;
+  ov->draw_layer(OV_LAYER_FOREGROUND);
+  paint(frame, local, count, x, y);
+  paint(frame, list_local, list_count, x, y);
   ov->draw_layer(OV_LAYER_WINDOW);
 }
 
@@ -92,6 +111,7 @@ static bool p_acquire(void *u) {
   if (!panel) return false;
   AcquireSRWLockExclusive(&lock);
   shared.have_frame = false; shared.wheel = shared.dt = 0; shared.count = 0; shared.open = true;
+  shared.has_weapons = shared.list_press = false; shared.weapon_count = 0;   /* the binder hands the list over at the first drawn frame */
   memset(shared.button, 0, sizeof shared.button); memset(shared.key, 0, sizeof shared.key);
   ReleaseSRWLockExclusive(&lock);
   ov->set_open(panel, 1);   /* the host takes the game's input and shows its cursor while a window is open */
@@ -110,7 +130,7 @@ static bool p_focused(void *u) { (void)u; return ov && ov->is_focused ? ov->is_f
 static bool p_sample(void *u, TfpEditorSample *out) {
   (void)u;
   AcquireSRWLockExclusive(&lock);
-  out->click = shared.button[0];
+  out->click = shared.button[0] && !shared.list_press;   /* round 53: a press on the list is not a move drag */
   out->x = shared.have_frame ? shared.mouse_x : NAN;
   out->y = shared.have_frame ? shared.height - shared.mouse_y : NAN;
   out->wheel = shared.wheel * 120; shared.wheel = 0;
@@ -148,6 +168,15 @@ static void p_draw(void *u, const TfpEdCommand *commands, int count) {
   if (commands) memcpy(shared.commands, commands, sizeof commands[0] * (size_t)count);
   ReleaseSRWLockExclusive(&lock);
 }
+static void p_weapons(void *u, const TfpEwWeapon *list, int count) {   /* round 53 */
+  (void)u;
+  if (count > TFP_EW_MAX) count = TFP_EW_MAX;
+  AcquireSRWLockExclusive(&lock);
+  shared.has_weapons = list != NULL;
+  shared.weapon_count = list ? count : 0;
+  if (list) memcpy(shared.weapons, list, sizeof list[0] * (size_t)count);
+  ReleaseSRWLockExclusive(&lock);
+}
 static bool p_window(void *u, bool *mouse_focus, bool *show_cursor) {
   const char *error = NULL;
   (void)u;
@@ -158,7 +187,7 @@ static bool p_window(void *u, bool *mouse_focus, bool *show_cursor) {
 
 const TfpEditorPlatform *tfp_mod_editor_platform(const TfpFxPlatform *window) {
   static TfpEditorPlatform platform = {NULL, p_available, p_menu_close, p_menu_is_open, p_busy, p_acquire, p_release, p_focused, p_sample, p_down,
-                                       p_resolution, p_draw, p_window};
+                                       p_resolution, p_draw, p_window, p_weapons};
   window_platform = window;
   if (!window || !window->window_mouse_focus || !window->window_show_cursor) platform.window = NULL;
   return &platform;

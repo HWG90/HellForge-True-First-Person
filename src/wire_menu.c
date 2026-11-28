@@ -10,6 +10,7 @@
 typedef TfpMenuControl Control;
 const char *const tfp_wire_menu_presets[3] = {"Custom (keep existing sliders)", "Comfort", "Natural"};
 static const char *const STYLES[2] = {"Stable", "Bodycam"};
+static const char *const THUMBS[2] = {"Straight", "Wrapped"};
 const char *const tfp_wire_menu_aim_fields[3] = {"The game's zoom", "Your locked view", "A chosen value"};
 /* Every entry names its store, so one without a store says -1 and never 0 (a real id). */
 #define ROW(id_, kind_, label_, page_, ...) {.id = id_, .kind = kind_, .label = label_, .page = page_, __VA_ARGS__}
@@ -55,15 +56,16 @@ static const Control CONTROLS[] = {
   ROW("motion_sway_enabled", TFP_MK_CHECK, "Weapon movement: sway", 0, M(motion_sway_enabled), TIP("The weapon lagging behind when you turn or strafe.")),
   ROW("motion_sprint_enabled", TFP_MK_CHECK, "Weapon movement: sprint pose", 0, M(motion_sprint_enabled), TIP("The weapon lowering and turning while you sprint.")),
   ROW("near_clip_cm", TFP_MK_SLIDER, "Near clip distance (cm)", 0, M(near_clip_cm), RANGE(5, 40, 1),
-      TIP("Hides anything closer to the first-person camera than this, such as armor edges. 5 is the game's own distance (off). Full ADS always "
-          "uses the game's distance.")),
+      TIP("Hides anything closer to the first-person camera than this, such as armor edges. 5 is the game's own distance (off). Full ADS uses "
+          "the game's distance; when Aim field of view shows full aim wider than the game's zoom, that distance is brought closer to the "
+          "eye, never under the game's 5 cm.")),
   ROW("near_clip_aim", TFP_MK_TOGGLE, "Near clip while aiming", 0, M(near_clip_aim),
       TIP("Keep the near clip during normal aim. Off returns to the game's distance while aiming so sights are not cut.")),
   ROW("weapon_composition_status", TFP_MK_STATUS, "Weapon: no active firearm", 0, NONE),
   ROW("weapon_near_hip_cm", TFP_MK_SLIDER, "This weapon: hip clearance (cm)", 0, M(weapon_near_hip_cm), RANGE(5, 40, 1),
       TIP("Draft for this firearm only. Save below to apply. 5 keeps the game distance.")),
   ROW("weapon_near_aim_cm", TFP_MK_SLIDER, "This weapon: normal-aim clearance (cm)", 0, M(weapon_near_aim_cm), RANGE(5, 40, 1),
-      TIP("Independent normal-aim clearance. Full native ADS always keeps the game distance.")),
+      TIP("Independent normal-aim clearance. Full ADS is not changed by it.")),
   ROW("save_weapon_near", TFP_MK_BUTTON, "Save clipping for this weapon", 0, NONE),
   ROW("reset_weapon_near", TFP_MK_BUTTON, "Use global clipping for this weapon", 0, NONE),
   ROW("runtime_status", TFP_MK_STATUS, "Status: First person off", 0, NONE),
@@ -109,6 +111,10 @@ static const Control CONTROLS[] = {
       TIP("One-handed weapons are held as your character holds them. This comes from the character's own animation while Animated arms is on; "
           "there is nothing to set here."),
       .note = "Comes from your character's own animation while Animated arms is on.", .inert = true),
+  /* round 42b (src/grip_fingers.h): Boolean `foregrip_thumb_wrapped` in the file, a choice of two here */
+  ROW("foregrip_thumb", TFP_MK_CHOICE, "Foregrip thumb", 2, L(foregrip_thumb_wrapped), .choices = THUMBS, .choice_count = 2,
+      TIP("How the left thumb holds a vertical foregrip. Straight: laid up along the grip. Wrapped: closed round it. Other grips and the "
+          "weapon's own handguard are not changed.")),
   ROW("put_away", TFP_MK_TOGGLE, "Weapon put-away", 2, L(put_away), TIP("Keep first person while the weapon is put away for a swap, grenade or stim.")),
   ROW("smooth_eye", TFP_MK_TOGGLE, "Smooth eye", 2, L(smooth_eye), TIP("No camera pops when the game changes its camera.")),
   /* round 38 (docs/design/specs/2026-11-25-exosuit-seat.md) */

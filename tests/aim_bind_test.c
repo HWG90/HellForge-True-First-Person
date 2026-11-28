@@ -13,13 +13,14 @@ int main(void) {
   TfpPoseAdsProbe ads; bool count = true, steady = true; float lens = -1;
   CHECK(tfp_pose_ads_probe(&ads) && !ads.aim_steady && !ads.editing && ads.sight == 0 && ads.wanted == 0);
   tfp_fov_aim_watch_probe(&count, &steady, &lens);
-  CHECK(!count && !steady && lens == 0 && tfp_near_ads_source() == NULL);
+  CHECK(!count && !steady && lens == 0 && tfp_near_ads_source() == NULL && tfp_near_fov_source() == NULL && tfp_near_ads_scale() == 1);
 
   /* the pose host: the frame's lens goes to the field-of-view helper (else every "Aim:" lens field reads "not noted"),
    * and the near helper reads the pose helper's closer in its own calls */
   TfpPoseHost host; memset(&host, 0, sizeof host);
   tfp_aim_bind_pose(&host);
   CHECK(host.note_lens != NULL && tfp_near_ads_source() == tfp_pose_ads_near);
+  CHECK(tfp_near_fov_source() == tfp_fov_frame_pair); /* round 53: the frame's fields of view, read in the near helper's own calls */
   if (host.note_lens) host.note_lens(host.user, false, .40f, .35f);
   tfp_fov_aim_watch_probe(NULL, NULL, &lens);
   CHECK(lens == .35f);
@@ -44,6 +45,7 @@ int main(void) {
   CHECK(tfp_pose_ads_probe(&ads) && ads.sight == .22f && ads.wanted == .05f && !ads.editing);
 
   tfp_near_set_ads_source(NULL);
+  tfp_near_set_fov_source(NULL);
   printf("aim bind: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

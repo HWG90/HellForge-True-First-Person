@@ -37,8 +37,12 @@ only while the game and launcher are closed, and keep a copy.
 | `session.sh` | `up`: install a build with a backup, set the mod list, launch to a mission; `down`: quit and restore the list |
 | `peek.py`, `watch_field.py` | read the running game's memory from Linux by module offset |
 
-Input script words: `wait S`, `key NAME`, `hold NAME S`, `click left|right|middle [S]`, `down NAME`,
-`up NAME`, `keep NAME`, `look DX DY`. Names: letters, digits, `shift ctrl alt space tab esc f9 f10 f11`, the arrows
+Input script words: `wait S`, `key NAME [S]`, `tap NAME MS`, `hold NAME S`, `click left|right|middle [S]`, `down NAME`,
+`up NAME`, `keep NAME`, `look DX DY`. `key NAME` (round 50) holds the keys the mod polls once per game update (the
+toggle key, the function keys, Page Up) for 250 ms, the game's own keys for 80 ms: at 10 to 30 updates a second an
+80 ms press of U, F10 or F11 fell between two polls about half the time. `tap NAME MS` presses a key for 1 to 1000 ms,
+for tests of what the mod does with a short tap (it takes one that began and ended between two updates as one press:
+`src/key_tap.h`). Names: letters, digits, `shift ctrl alt space tab esc f9 f10 f11`, the arrows
 `arrowup arrowdown arrowleft arrowright`. `keep NAME` (round 26) leaves what the script pressed with `down NAME` down
 when the helper ends; without it the helper lets go of everything it holds, so nothing stays held from one
 `Input.run()` to the next. `aim.py` and `aim-full` in `matrix.py` play full aim (see below).

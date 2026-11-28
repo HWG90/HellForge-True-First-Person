@@ -95,7 +95,10 @@ typedef struct TfpSettingsMenuValue { bool is_bool, boolean; double number; } Tf
   X(bodycam, 1, 0, 0, 1, 1) X(kick_strength, 0, 35, 0, 100, 5) X(kick_max_degrees, 0, 8, 0, 20, 1) X(thrown_kick_strength, 0, 70, 0, 100, 5) \
   X(camera_damping, 0, 60, 0, 100, 5) X(animated_arms, 1, 1, 0, 1, 1) X(one_handed_pistols, 1, 1, 0, 1, 1) X(put_away, 1, 1, 0, 1, 1) X(smooth_eye, 1, 1, 0, 1, 1) \
   X(fov_aim, 0, 1, 1, 3, 1) X(fov_aim_degrees, 0, 50, 20, 90, 1) X(ads_sight_cm, 0, 0, 0, 30, 1) X(see_through_cockpit, 1, 1, 0, 1, 1) \
-  X(cockpit_frame, 1, 1, 0, 1, 1) X(cockpit_frame_opacity, 0, 90, 20, 100, 5)
+  X(cockpit_frame, 1, 1, 0, 1, 1) X(cockpit_frame_opacity, 0, 90, 20, 100, 5) \
+  X(foregrip_thumb_wrapped, 1, 0, 0, 1, 1)
+/* Round 42b: foregrip_thumb_wrapped is "Foregrip thumb" (src/grip_fingers.h): off, the default, is Straight (the thumb
+ * laid up along a vertical grip); on is Wrapped (round it, as before the option). A file from before reads as off. */
 /* Round 20 (docs/design/specs/2026-11-22-locked-view-design.md "Round 20"): fov_aim is "Aim field of view", 1 the game's
  * zoom, 2 your locked view, 3 the chosen fov_aim_degrees. It took the place of the toggle fov_zoom_when_aiming, which
  * is still stored and kept in step (on exactly when fov_aim is 1) so a build before this one reads the nearest answer;

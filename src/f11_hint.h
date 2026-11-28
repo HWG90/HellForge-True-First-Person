@@ -16,7 +16,8 @@
  * editor opens as before.
  *
  * Cost: one level read of F11 a tick, beside the toggle key's own, only while the watch is on (in the game, in front,
- * before the first notice or after the quiet time); acted on only on its press edge. The SDK has no key event.
+ * before the first notice or after the quiet time); acted on only on its press edge. The SDK has no key event. Round 50:
+ * a tap that began and ended between two ticks is that edge too (src/key_tap.h).
  *
  * Header only, no Windows: the readers, the log and the HUD's host are the caller's (src/mod_view.c), tests/f11_hint_test.c. */
 #ifndef TFP_F11_HINT_H
@@ -49,6 +50,8 @@ typedef struct TfpF11HintIo {
   bool (*panel)(void *user);     /* the mod's own panel or placement editor is open */
   void (*say)(void *user, const char *line);
   bool (*show)(void *user, const char *notice, char *why, size_t why_size); /* false: not drawn, and why */
+  /* Round 50, may be NULL: F11 is up now but was pressed and let go since the previous tick (src/key_tap.h). */
+  bool (*key_tapped)(void *user, int vk);
 } TfpF11HintIo;
 
 /* One tick. key_name: the toggle key's name as the menu shows it (tfp_wire_menu_key_name). Returns true when a notice
@@ -61,7 +64,8 @@ static inline bool tfp_f11_hint_tick(TfpF11Hint *h, const TfpF11HintIo *io, uint
     return false;
   }
   const bool down = io->key_down(io->user, TFP_F11_VK);
-  const bool pressed = h->seen && down && !h->held;
+  const bool tapped = !down && io->key_tapped && io->key_tapped(io->user, TFP_F11_VK); /* a tap between two ticks: a press */
+  const bool pressed = h->seen && (down || tapped) && !h->held;
   h->held = down, h->seen = true;
   if (!pressed) return false;
   if (io->chat(io->user) == 1 || io->overlay(io->user) || io->panel(io->user)) return false; /* F11 is no text key: -1 shows */

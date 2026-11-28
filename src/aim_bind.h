@@ -17,10 +17,13 @@ static inline void tfp_aim_bind_note_lens(void *user, bool gated, float target, 
   tfp_fov_note_lens(gated, target, lens);
 }
 /* Before tfp_pose_set_host(host): the lens note on the pose host, and the near helper asks the pose helper in each of
- * its own calls how far the gun is drawn in (so the near clip moves in with the gun in the same frame). */
+ * its own calls how far the gun is drawn in (so the near clip moves in with the gun in the same frame). Round 53
+ * (src/weapon_clip.h): and the field-of-view helper for the frame's two fields of view, so full aim shown wider than
+ * the game's lens has its near clip scaled in the frame it is drawn in. */
 static inline void tfp_aim_bind_pose(TfpPoseHost *host) {
   host->note_lens = tfp_aim_bind_note_lens;
   tfp_near_set_ads_source(tfp_pose_ads_near);
+  tfp_near_set_fov_source(tfp_fov_frame_pair);
 }
 /* At start: zoom_steady.txt (round 20c, docs/guides/AIM-TEST.md). Without it full aim is feel.51's (the held depth and
  * the field-of-view correction off) and full aim is only counted for the "Aim:" line; with it both corrections are on. */

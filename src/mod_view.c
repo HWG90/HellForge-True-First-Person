@@ -26,6 +26,7 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "wire_win_engine.h"
 #include "wire_win_effects.h"
 #include "perf_line.h"
+#include "trace_row.h"
 #include "wire_warp.h"
 #include "engine.h"
 #include "mod_menu.h"
@@ -156,6 +157,9 @@ static bool panel_wanted;
  * shoulder instead of following the body; rest_trace.txt makes the "Rest:" line (the resting weapon pose, once a
  * second) come every tick. */
 static bool arms_live, arms_keep, arms_restore, arms_bend, arms_rest_trace, grip_off;
+/* Round 42b test switch game_ik_off.txt: the gun's own IK_left (the target of the game's left-hand IK) is never moved onto a
+ * fitted grip (src/game_ik.h), to compare. */
+static bool game_ik_off;
 /* Test switch depth_off.txt, read once at the start: the pose helper's zoom-depth term adds nothing on any frame, so
  * neither the rig nor its root is shifted for the optic. It is there to find out in the game whether that shift is
  * part of the unzoom gate's flipping (docs/design/specs/2026-11-23-gate-flip.md). */
@@ -293,7 +297,7 @@ static bool same_user_file(void *user, TfpSettingsFile which, const char *suffix
 
 static uint64_t say_lines; /* round 28: lines said, for the Perf line */
 static void say(const char *format, ...) {
-  char line[700];
+  char line[700]; /* TFP_LOG_LINE (src/trace_row.h): what is longer is cut; tests/trace_row_test.c holds the Trace row under it */
   say_lines++;
   va_list args;
   va_start(args, format);
@@ -493,6 +497,23 @@ static void entry_note(void) {
  *   head_shown   round 44: in every head-camera frame of the lock, the head node from the eye shown (eye_world + veil):
  *                (ahead up), m; a negative ahead is the eye that far in front of the head. 0 in any other frame
  *   clear        round 44: how far src/camera_clear.h pushed the eye the frame was built on along the level view (m)
+ * Round 49's fields are not on the row (it has no room: src/trace_row.h). They are on two lines written straight after
+ * the row they belong to, each with that row's t=, tick= and kind=:
+ * "Turn:", in every frame a direction is carried in:
+ *   turn_carry   how far the direction shown (the row's turn) is off the game's own in this frame, degrees: the
+ *                difference carried across a change of camera and eased out (src/camera_turn.h)
+ *   turn_edge    only on the frame a change of camera began a carry: the degrees it began with (the player's own turn
+ *                of that frame taken out), then the probe: game_turn, the game's own direction in the world; game_cam,
+ *                where the game put its ordinary (kind 4) camera, in this frame at a leave of the native view, in the
+ *                last ordinary frame at an entry ("-": not known); heading, the body root's forward axis as a compass
+ *                angle, degrees (atan2(x, y)). Why the game's two cameras point apart is not known; this is what a
+ *                cause can be read from
+ * "Held:", for a row that has either:
+ *   hold         only in a head-camera frame whose eye a swap holds: the held difference, the eye from the head
+ *                camera's own in the body root's frame (m): the held native eye, its glide to the incoming weapon's
+ *                eye, or its release
+ *   dive         only where it is 1: the body is in a dive (the motion runtime's action), as the camera helper was
+ *                told (Stable's eye damping is let go there)
  * A window is also opened when the body's action changes (src/trace_edges.h); such a window has no State line before
  * it, and "t=" starts again in it. So does one the eye opens itself (eye_edge), unless a window was open. */
 static void trace_note(void) {
@@ -502,6 +523,7 @@ static void trace_note(void) {
   const int action = motion && motion->state.phase == TFP_MOTION_PHASE_ACTIVE && motion->state.action != TFP_ACT_NONE ? (int)motion->state.action : -1;
   const unsigned edge = tfp_trace_edges_step(&edges, wire.log.has_lease, wire.controller.holding, action);
   if ((edge & TFP_TRACE_EDGE_EVENT) && lock_wanted) tfp_camera_continuity_event(); /* a lease or a hold begun or ended: the rig may be re-seated */
+  tfp_camera_set_dive(lock_wanted && action == (int)TFP_ACT_DIVE); /* round 49: Stable's eye damping is let go in a dive (src/camera_helper.h) */
   /* Round 24: the native view left because its request or firearm changed (a backpack picked up): the next entry may
    * hold the eye until the rig has settled (THE SETTLE). On the leave only. */
   static bool had_lease;
@@ -523,7 +545,6 @@ static void trace_note(void) {
   memset(&pose, 0, sizeof pose);
   tfp_pose_hold_probe(&pose);
   const unsigned long long lease = wire.controller.lease ? (unsigned long long)wire.controller.lease->request : 0;
-  static const char *const sources[] = {"-", "head", "native", "repeat"};
   for (uint32_t i = 0; i < count; i++) {
     const TfpCameraTraceRow *r = &rows[i];
     /* root: the body root the eye was measured against, axes: its three axis rows (the soak of 2026-11-22 on feel.59:
@@ -536,31 +557,14 @@ static void trace_note(void) {
      * run it again frame for frame (the soaks of 2026-11-22 on feel.59: without the time across edges, full aim and
      * the starts, and with places to 0.1 mm, 29 of 3447 frames could not be replayed: two decisions that fell
      * within the rounding). */
-    char taken[64] = "";
-    snprintf(taken, sizeof taken, "%s%s%s%s%s%s%s", r->what & TFP_CAMERA_TRACE_JUMP ? "+jump" : "", r->what & TFP_CAMERA_TRACE_EDGE ? "+edge" : "",
-             r->what & TFP_CAMERA_TRACE_ROOT ? "+root" : "", r->what & TFP_CAMERA_TRACE_RESTART ? "+restart" : "",
-             r->what & TFP_CAMERA_TRACE_START ? "+start" : "", r->what & TFP_CAMERA_TRACE_CUT ? "+cut" : "",
-             r->what & TFP_CAMERA_TRACE_SETTLE ? "+settle" : "");
-    char veil[64] = "0";
-    if (r->veil[0] != 0 || r->veil[1] != 0 || r->veil[2] != 0)
-      snprintf(veil, sizeof veil, "(%.5f %.5f %.5f)", (double)r->veil[0], (double)r->veil[1], (double)r->veil[2]);
-    char veil_head[48] = "0";
-    if (r->veil_head[0] != 0 || r->veil_head[1] != 0) snprintf(veil_head, sizeof veil_head, "(%.4f %.4f)", (double)r->veil_head[0], (double)r->veil_head[1]);
-    char head_shown[48] = "0";
-    if (r->head_known) snprintf(head_shown, sizeof head_shown, "(%.4f %.4f)", (double)r->head_shown[0], (double)r->head_shown[1]);
-    say("Trace: t=%.1f kind=%u eye_world=(%.5f %.5f %.5f) step=%.4f wanted=(%.5f %.5f %.5f) correction=%.4f lease=0x%llx pose_armed=%d entry_ease=%.2f source=%s"
-        " root=(%.5f %.5f %.5f) axes=(%.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f) looked=%d taken=%s quiet=%d tick=%.3f"
-        " off_foot=%d damped=%d damp=(%.5f %.5f %.5f) view=(%.5f %.5f %.5f) sock=%.5f arms=%u eye_edge=%d veil=%s turn=(%.4f %.4f %.4f) veil_head=%s"
-        " head_shown=%s clear=%.4f",
-        (double)r->ms, r->kind, (double)r->eye[0], (double)r->eye[1], (double)r->eye[2], (double)r->step, (double)r->wanted[0], (double)r->wanted[1],
-        (double)r->wanted[2], (double)r->correction, lease, (int)(pose.armed != 0), (double)r->entry_ease, sources[r->source < 4 ? r->source : 0],
-        (double)r->root[0], (double)r->root[1], (double)r->root[2], (double)r->axes[0], (double)r->axes[1], (double)r->axes[2], (double)r->axes[3],
-        (double)r->axes[4], (double)r->axes[5], (double)r->axes[6], (double)r->axes[7], (double)r->axes[8],
-        (int)((r->what & TFP_CAMERA_TRACE_LOOKED) != 0), taken[0] ? taken + 1 : "-", (int)((r->what & TFP_CAMERA_TRACE_QUIET) != 0), r->tick,
-        (int)((r->what & TFP_CAMERA_TRACE_OFF_FOOT) != 0), (int)((r->what & TFP_CAMERA_TRACE_DAMPED) != 0), (double)r->damp[0], (double)r->damp[1],
-        (double)r->damp[2], (double)r->view[0], (double)r->view[1], (double)r->view[2], (double)r->sock, (unsigned)r->arms,
-        (int)((r->what & TFP_CAMERA_TRACE_SELF) != 0), veil, (double)r->turn[0], (double)r->turn[1], (double)r->turn[2], veil_head,
-        head_shown, (double)r->clear);
+    /* The text is src/trace_row.h's (its length is tested there). Round 49's fields are not on the row, which has no
+     * room for them (701 to 706 characters on a dive + swap's edge row, of the 699 a line holds): Turn and Held follow
+     * the row they belong to, with its t=, tick= and kind=. */
+    char line[TFP_LOG_LINE];
+    tfp_trace_row_text(line, sizeof line, r, lease, pose.armed != 0);
+    say("%s", line);
+    if (tfp_trace_turn_text(line, sizeof line, r) > 0) say("%s", line);
+    if (tfp_trace_held_text(line, sizeof line, r) > 0) say("%s", line);
   }
 }
 #endif
@@ -747,6 +751,12 @@ static void arms_start(void) {
   else say("Grip: the left hand of the drawn arms holds the weapon's grip node (a foregrip's or vertical grip's own node when one is fitted) "
            "whenever the body's left hand is on it, while First Person Arms and Animated arms are on, also while aiming (on the game's own aim "
            "pose, the left arm only); not for a handgun. A file grip_off.txt beside the DLL leaves the hand as the body puts it, to compare");
+  if (!grip_off && game_ik_off) say("Test: game_ik_off.txt: the game's left-hand IK keeps its target on the gun's own IK_left node; a fitted grip is held "
+                                    "by the mod's reach alone");
+  else if (!grip_off)
+    say("Grip: on a fitted foregrip or vertical grip the game's own left-hand IK is aimed there too: the gun's own IK_left node (its "
+        "target) is moved onto the grip's node while the hand holds it, and put back when it lets go. A file game_ik_off.txt beside "
+        "the DLL leaves the game's IK on the gun's own node, to compare");
   const char *why = tfp_render_slot_contract();
   if (why) {
     snprintf(arms_refusal, sizeof arms_refusal, "%s", why);
@@ -788,6 +798,8 @@ static void arms_tick(void) {
     /* Round 23: the left hand on the weapon's grip (src/offhand_grip.h): the option, the test switch, a handgun at the hip */
     tfp_arm_drive_set_grip(!grip_off && tfp_wire_settings_first_person_arms(&wire), tfp_wire_settings_sidearm(&wire));
     tfp_pose_set_sidearm(tfp_wire_settings_sidearm(&wire)); /* round 49e: for the "Reload rest:" line only */
+    tfp_arm_drive_set_game_ik(!game_ik_off); /* round 42b: the game's IK target on a fitted grip (only while the grip runs) */
+    tfp_arm_drive_set_grip_thumb(!tfp_locked_view_foregrip_thumb_wrapped(&wire)); /* round 42b: "Foregrip thumb", Straight unless Wrapped */
   }
   { /* The resting weapon pose (src/arm_drive.h): the clock, whether this tick is a rest and in which stance, and the body's layer states.
      * The action alone is not a rest: a walk, hip fire, an ammo check and a melee are "idle" to it (src/action_select.c), and in the game
@@ -832,6 +844,8 @@ static void arms_tick(void) {
         if (g.frames) say("Grip: gate: %s", tfp_arm_drive_grip_gate_line(&g)); /* round 38b: why it holds or lets go */
         const char *drawn = g.frames ? tfp_arm_drive_grip_drawn_line(&g) : NULL; /* round 36b: the hand as drawn, a line of its own */
         if (drawn) say("Grip: %s", drawn);
+        const char *ik = tfp_arm_drive_grip_ik_line(&g); /* round 42b: which path holds the hand */
+        if (ik) say("Grip: hand: %s", ik);
         const char *units = g.frames ? tfp_arm_drive_grip_units_line(&g, true) : NULL; /* round 36: whenever the gun's units change */
         if (units) say("Grip: %s", units);
         if (g.frames && g.state != told_state && g.state != TFP_ARM_GRIP_HELD && g.state != TFP_ARM_GRIP_EASING)
@@ -1083,9 +1097,9 @@ static void start(void) {
           say("%s", memo_line);
         }
 #ifdef TFP_FEEL
-        static const char *const arm_files[] = {"arms_live_keep.txt", "arms_live_restore.txt", "arm_bend.txt", "rest_trace.txt", "grip_off.txt"};
-        bool *const arm_switches[] = {&arms_keep, &arms_restore, &arms_bend, &arms_rest_trace, &grip_off};
-        for (int i = 0; i < 5; i++) {
+        static const char *const arm_files[] = {"arms_live_keep.txt", "arms_live_restore.txt", "arm_bend.txt", "rest_trace.txt", "grip_off.txt", "game_ik_off.txt"};
+        bool *const arm_switches[] = {&arms_keep, &arms_restore, &arms_bend, &arms_rest_trace, &grip_off, &game_ik_off};
+        for (int i = 0; i < 6; i++) {
           strcpy(slash + 1, arm_files[i]);
           FILE *arm_file = fopen(parts_path, "r");
           if (arm_file) fclose(arm_file);
@@ -1443,6 +1457,11 @@ static void ads_seat_tick(void) {
   const bool near_on = tfp_near_ads_probe(&sight, &native, &applied);
   const TfpEditor *editor = tfp_wire_editor_of(&wire);
   tfp_aim_bind_tick(near_on, sight, tfp_locked_view_ads_sight_cm(&wire), tfp_editor_motion_editing_ads(editor)); /* src/aim_bind.h */
+  { /* round 53: the "Clip:" line's fields of view and full-aim scale, the helpers' own (src/wire_settings.h); the log only */
+    float game_fov = 0, shown_fov = 0;
+    const bool has_fov = tfp_fov_frame_pair(&game_fov, &shown_fov, NULL);
+    tfp_wire_clip_note(&wire, has_fov, game_fov, shown_fov, tfp_near_ads_scale());
+  }
   TfpPoseAdsProbe ads;
   const bool pose_on = tfp_pose_ads_probe(&ads) && ads.armed;
   TfpFovLockStats f; tfp_fov_lock_stats(&f);
@@ -1470,8 +1489,10 @@ static void fov_note(void) { /* once a second, on its own: the field-of-view loc
 }
 /* Round 36b: the toggle key (a letter since round 36) is not taken while text is typed (src/key_guard.h). The chat
  * flag's place is read from the game's code once its pages read (tried every 5 s); until then one snapshot of the
- * keyboard is taken each tick for the typing fallback. The flag and the host are only asked on a press. Round 36c: the
- * whole toggle path (level, edge, sample, verdict) is tfp_key_guard_toggle, so the tick's press only comes out of it. */
+ * keyboard is taken each tick for the typing fallback. Round 36c: the whole toggle path (level, edge, sample, verdict)
+ * is tfp_key_guard_toggle, so the tick's press only comes out of it. Round 50c: the flag (three guarded reads), the host
+ * (one call) and the panel are asked every tick the key is watched with the game in front, not only on a press: a tap
+ * is refused when any of them had the keyboard at the previous tick, or the window took an Enter since. */
 #include "key_guard.h"
 #include "goose_overlay.h"
 static TfpKeyGuard key_guard;
@@ -1479,7 +1500,11 @@ static TfpChatLayout chat_layout;
 static uint64_t chat_next_try;
 static char chat_why[160];
 static bool guard_read(void *u, uint64_t at, void *out, size_t size) { (void)u; return tfp_win_read(at, out, size); }
-static bool guard_key(void *u, int vk) { (void)u; return tfp_win_key_down(vk); }
+/* round 50: the toggle key and F11 through the tap reader (src/key_tap.h): the level, and a tap between two ticks */
+static bool guard_key(void *u, int vk) { (void)u; return tfp_win_key_level(vk); }
+static bool guard_tapped(void *u, int vk) { (void)u; return tfp_win_key_tapped(vk); }
+/* round 50c: when the game window last took an Enter (a chat line sent, a text field committed): src/key_guard.h */
+static uint64_t guard_enter(void *u) { (void)u; return tfp_win_enter_ms(); }
 static bool guard_keyboard(void *u, uint8_t keys[256]) { (void)u; return tfp_win_keyboard(keys); }
 static int guard_chat(void *u) { (void)u; return tfp_chat_open(guard_read, NULL, &chat_layout); }
 static bool guard_overlay(void *u) { /* a host window open or look capture held: the host has the keyboard */
@@ -1513,7 +1538,7 @@ static bool guard_edge(void *u, int key, bool down) {
   return pressed;
 #endif
 }
-static const TfpKeyGuardIo guard_io = {NULL, guard_key, guard_edge, guard_keyboard, guard_chat, guard_overlay, guard_panel, guard_say};
+static const TfpKeyGuardIo guard_io = {NULL, guard_key, guard_edge, guard_keyboard, guard_chat, guard_overlay, guard_panel, guard_say, guard_tapped, guard_enter};
 /* Round 41: F11 (the old toggle key, HellForge's Armor LUT editor now) pressed in the game gets one notice naming the
  * toggle key (src/f11_hint.h): the host's HUD, the chat/overlay/panel answers of the guard above, F11 only read. */
 #include "f11_hint.h"
@@ -1526,7 +1551,7 @@ static bool f11_show(void *u, const char *notice, char *why, size_t why_size) {
   return tfp_f11_hint_hud_show(&f11_hud, get ? get(3) : NULL, "goose.true-first-person/f11-notice", notice, why, why_size);
 }
 static void f11_hint_tick(int toggle_key, bool focused) {
-  static const TfpF11HintIo io = {NULL, guard_key, guard_chat, guard_overlay, guard_panel, guard_say_line, f11_show};
+  static const TfpF11HintIo io = {NULL, guard_key, guard_chat, guard_overlay, guard_panel, guard_say_line, f11_show, guard_tapped};
   char name[16] = "";
 #ifdef TFP_FEEL
   if (toggle_key) tfp_wire_menu_key_name(toggle_key, name);
@@ -1630,6 +1655,10 @@ static void tick_body(void) {
   const int toggle_key = TFP_TOGGLE_KEY;
 #endif
   const bool focused = tfp_win_focused();
+  /* round 50: the keys below are level-polled once a tick, and a tap that began and ended between two ticks (20 to 30
+   * ticks a second in a heavy mission, fewer in a hitch) is a press too: src/key_tap.h, tfp_win_keys_begin */
+  tfp_win_keys_begin(focused);
+  for (char keys_line[320]; tfp_win_keys_note(keys_line, sizeof keys_line);) say("%s", keys_line);
   if (toggle_key && focused) guard_resolve();
   /* round 36b/36c: the press, refused while text is typed (src/key_guard.h tfp_key_guard_toggle) */
   const bool pressed = tfp_key_guard_toggle(&key_guard, &guard_io, GetTickCount64(), toggle_key, focused, !chat_layout.resolved);
@@ -1663,8 +1692,11 @@ static void tick_body(void) {
    * the menu knows whether to offer the editor. */
   int editor_key = tfp_wire_menu_editor_key(&wire, TFP_EDITOR_KEY);
   tfp_mod_editor_tick(hf, owner, editor_key);
-  bool editor_down = editor_key && tfp_win_focused() && tfp_win_key_down(editor_key);
-  if (tfp_wire_menu_key_edge(&editor_edge, editor_key, editor_down)) {
+  const bool editor_down = editor_key && focused && tfp_win_key_level(editor_key);
+  const bool editor_tapped = editor_key && focused && !editor_down && tfp_win_key_tapped(editor_key); /* round 50: down and up in one tick */
+  const bool editor_pressed = tfp_wire_menu_key_edge(&editor_edge, editor_key, editor_down || editor_tapped);
+  if (editor_tapped) tfp_wire_menu_key_edge(&editor_edge, editor_key, false);
+  if (editor_pressed) {
     const char *refused = tfp_wire_editor_toggle(&wire);
     if (refused) say("Placement editor: %s", refused);
   }
@@ -1794,6 +1826,9 @@ __declspec(dllexport) int hellforge_mod_unload(const HfApi *api, HfMod *mod, uin
       Sleep(1);
     }
   }
+  /* round 50: the keyboard hook (src/key_tap.h) must be off the game window's thread, and no call of it under way,
+   * before this build may be taken out of memory. Last: nothing after it refuses. */
+  if (!why && !tfp_win_keys_end()) why = "the keyboard hook on the game window's thread could not be taken off";
   if (why) {
     InterlockedExchange(&release_state, 0);
     InterlockedExchange(&closing, 0);

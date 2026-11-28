@@ -24,8 +24,11 @@ static const OvApi *p_connect(void *u, uint32_t version) {
   return get ? get(version) : NULL;
 }
 static TfpMcmState p_mcm(void *u, TfpWire *w, unsigned unavailable, TfpMenuEditFn edit) { (void)u; return tfp_mod_menu_try(hf_api, hf_mod, w, unavailable, edit); }
-static bool p_key(void *u, int vk) { (void)u; return tfp_win_focused() && tfp_win_key_down(vk); }
-static void p_show(void *u) { (void)u; tfp_mod_menu_show(); }
+/* round 50: F10 through the tap reader (src/key_tap.h); the tap itself is only answered with the game in front */
+static bool p_key(void *u, int vk) { (void)u; return tfp_win_focused() && tfp_win_key_level(vk); }
+static bool p_tapped(void *u, int vk) { (void)u; return tfp_win_key_tapped(vk); }
+static const char *p_show(void *u, bool *opened) { (void)u; return tfp_mod_menu_show(opened); }
+static bool p_editing(void *u) { (void)u; return tfp_mod_menu_editing(); }
 
 void tfp_mod_panel_tick(const HfApi *hf, HfMod *mod, TfpWire *w, bool panel_forced, unsigned unavailable, TfpMenuEditFn edit) {
   ULONGLONG now = GetTickCount64();
@@ -36,7 +39,7 @@ void tfp_mod_panel_tick(const HfApi *hf, HfMod *mod, TfpWire *w, bool panel_forc
    * case every load also has an id of its own, tried when the host does not take the first. */
   if (!panel_id[0])
     snprintf(panel_id, sizeof panel_id, "%s@%lx-%llx", PANEL_ID, (unsigned long)GetCurrentProcessId(), (unsigned long long)now);
-  const TfpPanelPlatform platform = {NULL, p_lock, p_unlock, p_connect, p_mcm, panel_forced, PANEL_ID, panel_id, TFP_EDITOR_KEY, p_key, p_show};
+  const TfpPanelPlatform platform = {NULL, p_lock, p_unlock, p_connect, p_mcm, panel_forced, PANEL_ID, panel_id, TFP_EDITOR_KEY, p_key, p_show, p_tapped, p_editing};
   tfp_wire_panel_tick(w, &platform, now, unavailable, edit);
 }
 bool tfp_mod_panel_is_open(void) { return bound && tfp_wire_panel_is_open(bound); }

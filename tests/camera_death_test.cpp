@@ -76,19 +76,22 @@ struct Game {
     const float c = std::cos(yaw), n = std::sin(yaw);
     right[0] = c; right[1] = n; right[2] = 0; ahead[0] = -n; ahead[1] = c; ahead[2] = 0; above[0] = 0; above[1] = 0; above[2] = 1;
     for (int i = 0; i < 3; ++i) { s.context[i] = right[i]; s.context[4 + i] = ahead[i]; s.context[8 + i] = above[i]; s.camera_rotation[i] = right[i]; s.camera_rotation[4 + i] = ahead[i]; s.camera_rotation[8 + i] = above[i]; }
-    const Q q = yaw_q(yaw); std::memcpy(s.argument_rotation, &q, 16);
+    looked = yaw_q(yaw); std::memcpy(s.argument_rotation, &looked, 16);
   }
+  Q looked = {0, 0, 0, 1}; // the look as a rotation in the world: the ordinary camera's argument
   // The game's ordinary camera (kind 4), `back` metres behind the head.
   void hip(float back = 2.0f) {
     s.request[0] = 4; s.linked = false; s.mask = 0; s.aim = 0; s.camera_rotation_given = false;
     for (int i = 0; i < 3; ++i) s.argument[i] = s.head[i] - ahead[i] * back + above[i] * .4f;
-    s.argument[3] = 0;
+    s.argument[3] = 0; std::memcpy(s.argument_rotation, &looked, 16);
   }
   void native() {
     s.request[0] = 6; s.linked = true; s.mask = 0; s.aim = 0; s.camera_rotation_given = true;
     for (int i = 0; i < 3; ++i) { s.rig[i] = right[i]; s.rig[4 + i] = ahead[i]; s.rig[8 + i] = above[i]; s.rig[12 + i] = s.head[i] + ahead[i] * .1f + above[i] * .05f; }
     s.rig[3] = s.rig[7] = s.rig[11] = 0; s.rig[15] = 1;
     s.argument[0] = .02f; s.argument[1] = .01f; s.argument[2] = .03f; s.argument[3] = 0;
+    // Round 49: in the native view the rotation argument is local to the rig eye, whose axes are the look's here: none.
+    const Q none = {0, 0, 0, 1}; std::memcpy(s.argument_rotation, &none, 16);
   }
   void begin_config(TfpCameraConfig &c) {
     c.size = sizeof c; c.abi = 1; c.game = W.a[A_GAME]; c.exe = W.a[A_EXE]; c.context = W.a[A_CONTEXT]; c.camera = W.a[A_CAMERA]; c.avatar_owner = W.a[A_OWNER];
@@ -228,7 +231,11 @@ int main() {
     fresh(true);
     Game g; g.stand(1, 1, 0); g.alive(first);
     g.s.state = 50;
-    for (int i = 0; i < 10; ++i) { g.look(corpse_camera); g.hip(); g.frame(); CHECK(g.own && g.error == 0); }
+    // (Round 49: the game's direction is 92 degrees off the native view's here, under the 120 that is another view; the
+    // difference is carried across the change of camera and eased out, 688 ms, src/camera_turn.h: not in one frame.)
+    Q before = yaw_q(first); // the native view was shown along the rig eye
+    for (int i = 0; i < 30; ++i) { g.look(corpse_camera); g.hip(); g.frame(); CHECK(g.own && g.error == 0);
+      CHECK(degrees(before, g.out) < 200 * .0333f + .1f); before = g.out; }
     CHECK(degrees(g.out, yaw_q(corpse_camera)) < .5f);
     TfpCameraDownStats down{}; tfp_camera_down_stats(&down);
     CHECK(down.frames == 0 && tfp_camera_lock_off_foot_body() == BODY);
