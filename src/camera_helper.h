@@ -259,7 +259,7 @@ void tfp_camera_set_orphan(bool on);
  * reads, so the Stable style's eye damping ran through it: with the continuity's carry on top the eye stood 0.36 to
  * 0.38 m above the rig eye when the native view came back, and floated down after the landing (soak 60: 0.355 m).
  * While this is on, in the Stable style, the head camera's eye is not damped and a lag carried is let go on 40 ms, as
- * in a clamber or a vault (src/camera_traversal.h). Bodycam is as before. The Trace rows say dive=1 while it is on.
+ * in a clamber or a vault (src/camera_traversal.h). Bodycam is as before. The log says dive=1 while it is on (the "Held:" line after a Trace row).
  * Off (the default) and without the lock: nothing changes. */
 void tfp_camera_set_dive(bool on);
 /* Counts since the start; behind_m: on the last such frame, how far behind the presented point the game's own eye

@@ -1132,19 +1132,45 @@ out of the picture, and writes what a cause can be read from.
 - Under 0.5 degrees nothing is carried and the rotation handed on is main's, bit for bit. Over 120 is another view.
 - The carry sits on top of each frame's own rotation, so the mouse and recoil go through whole during the ease.
 - A second change while a carry is under way starts from what is shown then.
+- **The player's own turn is not part of the difference.** Out of the native view both calls come in one game frame
+  (0 to 1 ms apart in every logged change). Into it the frame before is a whole frame earlier (32 to 35 ms), so the
+  game's new direction is off the one last shown by one frame of mouse turn as well. The first build carried that:
+  any pan over 30 degrees a second at 60 frames a second stood still for the frame of the change and caught up after
+  (100 degrees a second at 16.7 ms: 1.67, 0.00, 1.76, 1.90, 1.98, 2.02 degrees a frame, where main turns 1.67 in each;
+  found by the round's check). Now, at a change from kind 4 to kind 6, the direction last shown is first advanced by
+  the turn the game's own direction made over the ordinary camera's last frame (about the world's axes, in proportion
+  to the time since, four frames at most; a second call within 4 ms is the same frame), the difference is taken from
+  there and the 0.5 degrees apply to what is left. A pan through agreeing cameras carries nothing and is main's bit
+  for bit at 30 to 600 degrees a second (`tests/camera_turn_test.c`, `tests/camera_turn_helper_test.cpp` 8); with the
+  cameras 29 degrees apart the frame of the change is shown where the pan would have taken the last one and the 29
+  degrees ease out under the pan (helper 9).
+  **What cannot be told apart** is a turn that changes speed in that very frame: the change of speed times the frame
+  is left over, and is carried where it is over 0.5 degrees. A pan that stops dead in that frame leaves one frame of
+  itself (as much as the first build carried in every pan), shown as one more frame of the pan and eased back. A
+  mouse that is uneven by a tenth at 300 degrees a second leaves 0.5 to 1 degree, eased out in 120 ms.
 - Nothing is carried in a frame of full aim: the sights stay on the eye, as the damping and the continuity leave them.
   A carry under way when full aim begins ends there in one frame (at most what main turned at the change itself).
-- **Cost.** During the ease the picture points off the game's aim by what is still carried (`turn_carry=` on the row);
+- **Cost.** During the ease the picture points off the game's aim by what is still carried (`turn_carry=` on the `Turn:` line);
   a shot in that time lands where the game aims, not at the centre of the picture. And the turn itself remains.
 - **Left as it is.** The head camera's eye is still built 0.18 m along the game's own level direction, so at the
   change it stands up to 0.09 m (29 degrees) to 0.21 m (73) off the direction shown; the continuity takes that up as
   the change of camera it is. The veil also pushes along the game's direction.
 
-**The probe** (the log only). On the row of the frame a carry begins: `turn_edge=` (degrees), `game_turn=` (the
-game's own direction, what `turn=` would have been), `game_cam=` (where the game put its ordinary camera: the kind 4
-position argument, of this frame at a leave, of the last ordinary frame at an entry) and `heading=` (the body root's
-forward as a compass angle). With the eye and the root on the same row these say whether the game's camera, the eye
-and one point in the world are in line (parallax) or not.
+**The probe** (the log only). A `Turn:` line straight after the Trace row of every frame something is carried in,
+with that row's `t=`, `tick=` and `kind=` and `turn_carry=`. On the frame a carry begins it also has `turn_edge=`
+(degrees), `game_turn=` (the game's own direction, what `turn=` would have been), `game_cam=` (where the game put its
+ordinary camera: the kind 4 position argument, of this frame at a leave, of the last ordinary frame at an entry) and
+`heading=` (the body root's forward as a compass angle). With the eye and the root on the row before it these say
+whether the game's camera, the eye and one point in the world are in line (parallax) or not.
+
+**Not on the Trace row, and why.** The first build wrote these on the row itself, and `hold=` and `dive=1` (below)
+after them. A line of the log holds 699 characters and cuts the rest without a word; the edge row of a dive + swap
+came to 701 (soak 60 L6779) and 706 (soak 62 L1993), so `dive=1` and part of `hold=` were lost on the very row they
+were added for (found by the round's check). The row has no room to give: the longest of the six last sessions is 603
+characters before any of this round's fields, and the same shape with a lease at 1 km from the origin is 634. So the
+row is main's, character for character, and the round's fields are on `Turn:` and `Held:` lines (`src/trace_row.h`).
+`tests/trace_row_test.c` holds a session's widest row under 640 and the widest row there can be (every mark at once,
+10 km out: 689) under the line.
 
 ### 3. The orphan's eye (`orphan_head`)
 
@@ -1187,8 +1213,14 @@ obstacle).
   a float (a real 0.58 m between the two poses; it closes only with eye memory kept per posture). Bodycam, replayed
   the same way, gained nothing that matters (0.106 to 0.051 m, never a float) and its largest step grew (0.063 to
   0.082), which is why Bodycam is left alone.
-- **The log.** `hold=` on a head-camera row whose eye a swap holds: the held difference in the root's frame. `dive=1`
-  on the rows of a dive.
+- **Kept, as the owner decided, with its price.** The rule takes the float from 0.355 m to 0.144 m (the check's own
+  replay; 0.142 here) and puts one native frame at 0.083 m where it was 0.043: over the judge's 0.06 m step limit,
+  where main's worst frame in the same window was 0.065. One frame over the limit either way; the float is worth it.
+  The replay is an approximation (the logged damping subtracted, not the game). To go back: the dive rule in
+  `lock_damp_eye`; the log lines stay.
+- **The log.** A `Held:` line straight after the Trace row it belongs to (with that row's `t=`, `tick=`, `kind=`):
+  `hold=` for a head-camera row whose eye a swap holds, the held difference in the root's frame; `dive=1` for the rows
+  of a dive.
 - **Not built: no glide to the incoming weapon's eye in a dive, and round 44's push let go in a dive.** Both rest on
   inference. That the glide (begun one frame after the weapon's identity changes, to an eye remembered standing) makes
   the jump the continuity then carries is read from timing and size alone; the held delta was never logged, and no
