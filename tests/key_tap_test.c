@@ -65,6 +65,13 @@ typedef struct Rig {
   struct { int key; bool held; } edge;   /* src/wire_menu.c tfp_wire_menu_key_edge */
   int chat;
   bool overlay, panel, no_keyboard;
+  /* round 50c: from change_at on (0: never), chat, overlay and panel answer these instead (a chat line sent, a text
+   * field or window closed, between two updates) */
+  uint64_t change_at;
+  int chat_after;
+  bool overlay_after, panel_after;
+  uint64_t enter_at[4];   /* Enter key-downs the window took, in order */
+  int enters;
   int says;
   char said[200];
 } Rig;
@@ -83,11 +90,18 @@ static bool r_keyboard(void *u, uint8_t keys[256]) {
   for (int i = 0; i < 256; i++) keys[i] = r->board.level[i] ? 0x80 : 0;
   return true;
 }
-static int r_chat(void *u) { return ((Rig *)u)->chat; }
-static bool r_overlay(void *u) { return ((Rig *)u)->overlay; }
-static bool r_panel(void *u) { return ((Rig *)u)->panel; }
+static bool r_changed(const Rig *r) { return r->change_at && r->board.now >= r->change_at; }
+static int r_chat(void *u) { Rig *r = u; return r_changed(r) ? r->chat_after : r->chat; }
+static bool r_overlay(void *u) { Rig *r = u; return r_changed(r) ? r->overlay_after : r->overlay; }
+static bool r_panel(void *u) { Rig *r = u; return r_changed(r) ? r->panel_after : r->panel; }
+static uint64_t r_enter(void *u) {   /* round 50c: the last Enter the window took by now (the hook's stamp) */
+  Rig *r = u;
+  uint64_t last = 0;
+  for (int i = 0; i < r->enters; i++) if (r->enter_at[i] <= r->board.now) last = r->enter_at[i];
+  return last;
+}
 static void r_say(void *u, const char *line) { Rig *r = u; r->says++; snprintf(r->said, sizeof r->said, "%s", line); }
-static const TfpKeyGuardIo guard_io = {NULL, r_down, r_edge, r_keyboard, r_chat, r_overlay, r_panel, r_say, r_tapped};
+static const TfpKeyGuardIo guard_io = {NULL, r_down, r_edge, r_keyboard, r_chat, r_overlay, r_panel, r_say, r_tapped, r_enter};
 static Rig *rig(unsigned mode) {
   static Rig r;
   memset(&r, 0, sizeof r);
@@ -399,6 +413,65 @@ static void guards_still_refuse_a_tap(void) {
   CHECK(run(r, 3700, 5000, 100) == 1);
 }
 
+/* Round 50c (the independent check's chatdet.c): the last letter of a chat line is the toggle key and Enter sends the
+ * line before the next update. The update that answers the tap sees chat closed, but chat had the keyboard at the
+ * previous update: the tap is the chat's, refused. The same for a host window or the mod's panel closed in the gap. */
+static void text_closed_in_the_gap_keeps_its_tap(void) {
+  static const unsigned modes[] = {MESSAGES, LOW_WINDOWS, LOW_WINDOWS | MESSAGES, LOW_PROTON | MESSAGES};
+  for (size_t m = 0; m < sizeof modes / sizeof modes[0]; m++) {
+    const int before = failed;
+    /* chatdet.c: updates at 1000, 1100, 1200; "u" 1110-1170; Enter closes chat at 1150 */
+    Rig *r = rig(modes[m]);
+    r->chat = 1, r->change_at = 1150, r->chat_after = 0;
+    tap(&r->board, 1110, 'U', 60);
+    CHECK(RUN_AT(r, 1000, 1100, 1200, 1300, 1400) == 0);
+    CHECK(r->says == 1 && !strcmp(r->said, "toggle key ignored: typing in chat") && r->guard.refused == 1);
+    /* ... and the next tap, after an update that saw chat closed, is the player's: taken */
+    tap(&r->board, 1710, 'U', 40);   /* past the low bit's quiet time after the refused tap */
+    CHECK(RUN_AT(r, 1500, 1600, 1700, 1800, 1900) == 1);
+    /* a long gap (a hitch of 400 ms), "u" let go 150 ms before Enter */
+    r = rig(modes[m]);
+    r->chat = 1, r->change_at = 1350, r->chat_after = 0;
+    tap(&r->board, 1150, 'U', 50);
+    CHECK(RUN_AT(r, 900, 1000, 1400, 1500) == 0 && (modes[m] == LOW_WINDOWS || r->guard.refused == 1)); /* the low bit: gap too long */
+    /* a host window's text field, and the mod's own panel, closed in the gap */
+    r = rig(modes[m]);
+    r->overlay = true, r->change_at = 1150, r->overlay_after = false;
+    tap(&r->board, 1110, 'U', 60);
+    CHECK(RUN_AT(r, 1000, 1100, 1200, 1300) == 0 && strstr(r->said, "a Goose Overlay Host window has the keyboard"));
+    r = rig(modes[m]);
+    r->panel = true, r->change_at = 1150, r->panel_after = false;
+    tap(&r->board, 1110, 'U', 60);
+    CHECK(RUN_AT(r, 1000, 1100, 1200, 1300) == 0 && strstr(r->said, "settings panel or placement editor is open"));
+    /* a held press is the level's, as before: chat closed by the update that sees it down, it is taken */
+    r = rig(modes[m]);
+    r->chat = 1, r->change_at = 1150, r->chat_after = 0;
+    ev(&r->board, 1160, 'U', true); ev(&r->board, 1400, 'U', false);
+    CHECK(RUN_AT(r, 1000, 1100, 1200, 1300, 1400, 1500) == 1);
+    /* chat opened in the gap after the tap: refused as before (chat open at the update that answers it) */
+    r = rig(modes[m]);
+    r->chat = 0, r->change_at = 1150, r->chat_after = 1;
+    tap(&r->board, 1110, 'U', 20);
+    CHECK(RUN_AT(r, 1000, 1100, 1200, 1300) == 0);
+    /* chat opened and closed inside one gap (Enter, "u", Enter): never seen open, but the window took an Enter */
+    r = rig(modes[m]);
+    r->enter_at[0] = 1105, r->enter_at[1] = 1180, r->enters = 2;
+    tap(&r->board, 1130, 'U', 30);
+    CHECK(RUN_AT(r, 1000, 1100, 1200, 1300) == 0 && strstr(r->said, "Enter went down since the previous game update") && r->guard.gap_refused == 1);
+    /* an Enter before the previous update (a line sent long ago) refuses nothing */
+    r = rig(modes[m]);
+    r->enter_at[0] = 950, r->enters = 1;
+    tap(&r->board, 1130, 'U', 30);
+    CHECK(RUN_AT(r, 900, 1000, 1100, 1200, 1300) == 1 && !r->says && !r->guard.gap_refused);
+    /* ... nor a press the level saw, Enter or not */
+    r = rig(modes[m]);
+    r->enter_at[0] = 1105, r->enters = 1;
+    ev(&r->board, 1130, 'U', true); ev(&r->board, 1260, 'U', false);
+    CHECK(RUN_AT(r, 1000, 1100, 1200, 1300) == 1);
+    if (failed != before) printf("  (text closed in the gap: source %u)\n", modes[m]);
+  }
+}
+
 /* ---- F11's notice (src/f11_hint.h) ---- */
 typedef struct Hint { Board board; TfpKeyTaps taps; int chat; unsigned shows, says; } Hint;
 static bool h_down(void *u, int vk) { Hint *h = u; return (tfp_key_taps_read(&h->taps, vk, raw, &h->board) & TFP_KEY_DOWN) != 0; }
@@ -445,6 +518,7 @@ int main(void) {
   focus_lost_between_updates_ignores_the_tap();
   stale_answers_are_ignored();
   guards_still_refuse_a_tap();
+  text_closed_in_the_gap_keeps_its_tap();
   f11_tap_gets_its_notice();
   printf("key_tap: %d checks, %d failed\n", checks, failed);
   return failed ? 1 : 0;

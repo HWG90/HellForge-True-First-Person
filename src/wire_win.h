@@ -53,6 +53,9 @@ void tfp_win_keys_begin(bool focused);
 bool tfp_win_key_level(int virtual_key);
 bool tfp_win_key_tapped(int virtual_key);
 unsigned tfp_win_key_taps(void);     /* taps answered, in all */
+/* Round 50c (src/key_guard.h): when the game window last took an Enter (GetTickCount64; 0: none seen): the hook's
+ * stamp, or while the window gives no key messages the last update that saw Enter by GetAsyncKeyState. */
+uint64_t tfp_win_enter_ms(void);
 unsigned tfp_win_key_messages(void); /* fresh key-down messages the hook saw, in all (any key) */
 bool tfp_win_keys_note(char *out, size_t size);
 bool tfp_win_keys_end(void);

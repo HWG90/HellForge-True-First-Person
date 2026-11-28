@@ -381,8 +381,9 @@ static volatile LONG64 key_latch[256];
 static volatile LONG key_proc_inside, key_messages;
 static HHOOK key_hook;
 static DWORD key_hook_thread, key_hook_refused_thread, key_hook_error;
-static unsigned key_notes;   /* 1: the hook's line is due; 2: its refusal's; 4: the first tap's */
+static unsigned key_notes;   /* 1: the hook's line is due; 2: its refusal's; 4: the first tap's; 8: the old hook kept */
 static bool key_tap_told;
+static uint64_t enter_low_ms;   /* round 50c: tfp_win_enter_ms */
 static LRESULT CALLBACK key_proc(int code, WPARAM key, LPARAM flags) {
   InterlockedIncrement(&key_proc_inside);
   /* HC_ACTION: the message is being taken off the queue (a peek that leaves it there would count it twice);
@@ -405,13 +406,20 @@ static unsigned key_raw(void *u, int vk, uint64_t *message_ms) {
 void tfp_win_keys_begin(bool focused) {
   /* the low bit is asked only while the window's thread gives no key messages (src/key_tap.h) */
   key_taps.hooked = key_hook && InterlockedCompareExchange(&key_messages, 0, 0);
-  tfp_key_taps_begin(&key_taps, GetTickCount64(), focused);
+  const uint64_t now = GetTickCount64();
+  tfp_key_taps_begin(&key_taps, now, focused);
   if (!focused) return;
+  if (!key_taps.hooked && (GetAsyncKeyState(VK_RETURN) & 0x8001)) enter_low_ms = now;   /* round 50c */
   DWORD process = 0;
   const HWND window = GetForegroundWindow();
   const DWORD thread = window ? GetWindowThreadProcessId(window, &process) : 0;
   if (!thread || process != GetCurrentProcessId() || thread == key_hook_thread || thread == key_hook_refused_thread) return;
-  if (key_hook) UnhookWindowsHookEx(key_hook);   /* the window moved to another thread */
+  if (key_hook && !UnhookWindowsHookEx(key_hook)) {
+    /* the window moved to another thread and Windows kept the old hook: it stays (and key_hook with it), so that
+     * tfp_win_keys_end still owns it; a second hook would leave this one on with nothing to take it off */
+    key_hook_refused_thread = thread, key_hook_error = GetLastError(), key_notes |= 8;
+    return;
+  }
   for (int vk = 0; vk < 256; vk++) InterlockedExchange64(&key_latch[vk], 0);
   key_hook = SetWindowsHookExW(WH_KEYBOARD, key_proc, NULL, thread);
   if (key_hook) key_hook_thread = thread, key_notes |= 1;
@@ -424,6 +432,13 @@ bool tfp_win_key_tapped(int virtual_key) {
   return tapped;
 }
 unsigned tfp_win_key_taps(void) { return key_taps.taps; }
+/* Round 50c: when the game window last took an Enter key-down (the hook's stamp; Enter is no key read above, so its
+ * latch is only looked at, never taken), or, while the window gives no key messages, the last update whose low bit
+ * or level showed Enter (tfp_win_keys_begin: one GetAsyncKeyState a focused update, only then). */
+uint64_t tfp_win_enter_ms(void) {
+  const uint64_t message = (uint64_t)(InterlockedCompareExchange64(&key_latch[VK_RETURN], 0, 0) & (KEY_LATCH_SET - 1));
+  return message > enter_low_ms ? message : enter_low_ms;
+}
 unsigned tfp_win_key_messages(void) { return (unsigned)InterlockedCompareExchange(&key_messages, 0, 0); }
 bool tfp_win_keys_note(char *out, size_t size) {
   if (key_notes & 1) {
@@ -435,6 +450,11 @@ bool tfp_win_keys_note(char *out, size_t size) {
     snprintf(out, size, "Keys: no keyboard hook on the game window's thread %lu (error %lu): a key tapped between two game updates is "
              "seen only where GetAsyncKeyState remembers it (not under Proton); hold the key a moment",
              (unsigned long)key_hook_refused_thread, (unsigned long)key_hook_error);
+  } else if (key_notes & 8) {
+    key_notes &= ~8u;
+    snprintf(out, size, "Keys: the game window moved to thread %lu, but Windows did not take the keyboard hook off thread %lu (error %lu): "
+             "it stays there, and a key tapped between two game updates may be missed; hold the key a moment",
+             (unsigned long)key_hook_refused_thread, (unsigned long)key_hook_thread, (unsigned long)key_hook_error);
   } else if (key_notes & 4) {
     char name[16];
     key_notes &= ~4u;
@@ -456,7 +476,10 @@ bool tfp_win_keys_end(void) {
     if (waited >= 2000) return false;
     Sleep(1);
   }
-  return true;
+  /* round 50c: a call that had just entered key_proc but not yet counted itself, or had counted itself out and not
+   * yet returned, is a few instructions from done: give it 50 ms, and look again */
+  Sleep(50);
+  return InterlockedCompareExchange(&key_proc_inside, 0, 0) == 0;
 }
 bool tfp_win_keyboard(uint8_t keys[256]) { return GetKeyboardState(keys) != 0; }
 /* Retail reads stingray.Mouse.button('right' / 'middle') (runtime.lua:395-421). src/wire_mouse.c chooses:

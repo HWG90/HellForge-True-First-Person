@@ -111,7 +111,7 @@ static inline int tfp_chat_open(TfpGuardRead live, void *user, const TfpChatLayo
 }
 
 /* ---- the press ----------------------------------------------------------------------------------------------------- */
-typedef enum TfpKeyVerdict { TFP_KEY_TAKEN, TFP_KEY_CHAT, TFP_KEY_OVERLAY, TFP_KEY_PANEL, TFP_KEY_TYPING } TfpKeyVerdict;
+typedef enum TfpKeyVerdict { TFP_KEY_TAKEN, TFP_KEY_CHAT, TFP_KEY_OVERLAY, TFP_KEY_PANEL, TFP_KEY_TYPING, TFP_KEY_ENTER } TfpKeyVerdict;
 typedef struct TfpKeyContext {
   int chat;       /* tfp_chat_open: 1, 0, or -1 unknown */
   bool overlay;   /* the overlay host has the keyboard */
@@ -127,7 +127,13 @@ typedef struct TfpKeyGuard {
   bool in_burst;           /* a refusal was logged; quiet until a taken press or BURST_MS without a refusal */
   uint64_t last_refusal_ms;
   unsigned refused;        /* presses refused, in all */
+  /* round 50c: what had the keyboard at the previous tick, for a tap (tfp_key_guard_toggle) */
+  bool had_tick;           /* had and had_ms are of the previous tick: the key watched, the game in front, taps asked */
+  uint8_t had;             /* TFP_KEY_HAD_*: what had the keyboard then */
+  uint64_t had_ms;         /* that tick's time */
+  unsigned gap_refused;    /* taps refused only for what had the keyboard at the previous tick, or an Enter since */
 } TfpKeyGuard;
+enum { TFP_KEY_HAD_CHAT = 1, TFP_KEY_HAD_OVERLAY = 2, TFP_KEY_HAD_PANEL = 4 };
 
 /* The keys whose edges mean typing: letters, digits, space, the OEM punctuation keys, backspace. Not Enter (it sends
  * the line), not the modifiers or the function keys. */
@@ -162,12 +168,14 @@ static inline bool tfp_key_guard_typing(const TfpKeyGuard *g, uint64_t now_ms) {
   const bool game = g->any_game && now_ms - g->last_game_ms <= TFP_KEY_GUARD_TYPING_MS;
   return text || (game && g->any_text && now_ms - g->last_text_ms <= TFP_KEY_GUARD_WORD_MS);
 }
-/* A press of the toggle key: taken, or refused and why. `line` gets the one log line of a new burst ("" otherwise). */
-static inline TfpKeyVerdict tfp_key_guard_press(TfpKeyGuard *g, uint64_t now_ms, const TfpKeyContext *c, char *line, size_t line_size) {
+/* A press of the toggle key: taken, or refused and why. `line` gets the one log line of a new burst ("" otherwise).
+ * enter (round 50c, a tap only): the game window took an Enter key-down since the previous tick. */
+static inline TfpKeyVerdict tfp_key_guard_judge(TfpKeyGuard *g, uint64_t now_ms, const TfpKeyContext *c, bool enter, char *line, size_t line_size) {
   TfpKeyVerdict v = TFP_KEY_TAKEN;
   if (c->chat == 1) v = TFP_KEY_CHAT;
   else if (c->overlay) v = TFP_KEY_OVERLAY;
   else if (c->panel) v = TFP_KEY_PANEL;
+  else if (enter) v = TFP_KEY_ENTER;
   else if (c->chat < 0 && tfp_key_guard_typing(g, now_ms)) v = TFP_KEY_TYPING;
   if (line_size) line[0] = 0;
   if (v == TFP_KEY_TAKEN) { g->in_burst = false; return v; }
@@ -176,9 +184,13 @@ static inline TfpKeyVerdict tfp_key_guard_press(TfpKeyGuard *g, uint64_t now_ms,
   g->in_burst = true, g->last_refusal_ms = now_ms;
   static const char *const why[] = {"", "typing in chat", "a Goose Overlay Host window has the keyboard",
                                     "the mod's settings panel or placement editor is open",
-                                    "typing (another text key just before it; the game's chat state is not readable)"};
+                                    "typing (another text key just before it; the game's chat state is not readable)",
+                                    "Enter went down since the previous game update (a chat line or a text field may have taken it)"};
   snprintf(line, line_size, "toggle key ignored: %s", why[v]);
   return v;
+}
+static inline TfpKeyVerdict tfp_key_guard_press(TfpKeyGuard *g, uint64_t now_ms, const TfpKeyContext *c, char *line, size_t line_size) {
+  return tfp_key_guard_judge(g, now_ms, c, false, line, line_size);
 }
 
 /* ---- one tick of the toggle key (round 36c) ------------------------------------------------------------------------ */
@@ -196,6 +208,18 @@ static inline TfpKeyVerdict tfp_key_guard_press(TfpKeyGuard *g, uint64_t now_ms,
  *              ticks). The edge is told down, then up, in this one tick, so a tap is a press exactly when a level press
  *              would have been (a key just bound stays refused until it was seen up) and the next press has its edge;
  *              the press then goes through the same chat, overlay, panel and typing answers as any other
+ *   enter_ms (round 50c, may be NULL)   when the game window last took an Enter key-down (the keyboard hook's stamp,
+ *              on now_ms's clock; 0: none seen)
+ * Round 50c (the independent check: "u" as the last letter of a chat line, Enter sending it before the next tick,
+ * toggled the view): a tap is a press that no tick saw down, so the text that took it may have closed before the tick
+ * that answers it. With key_tapped given, chat, overlay and panel are asked at every tick the key is watched (the chat
+ * flag is three guarded reads, the host one call, the panel two: every tick, not only on a press), and a tap is
+ * refused when any of them had the keyboard at the previous tick as well as now. That previous tick is the last look
+ * before the tap began: the reader answers a tap only for a key read up at the previous tick (src/key_tap.h), and the
+ * key's message, which is what the text takes, is taken after that read. A text opened and closed inside one gap
+ * (Enter, "u", Enter between two ticks) is never seen open; for that, a tap is also refused when the window took an
+ * Enter since the previous tick (enter_ms; a tap just before opening chat is refused then too, as main refuses it
+ * when chat is open at the tick that sees it). A press the level saw is judged as before, by now alone.
  * Returns true for a press to act on. */
 typedef struct TfpKeyGuardIo {
   void *user;
@@ -207,7 +231,11 @@ typedef struct TfpKeyGuardIo {
   bool (*panel)(void *user);
   void (*say)(void *user, const char *line);
   bool (*key_tapped)(void *user, int vk);
+  uint64_t (*enter_ms)(void *user);
 } TfpKeyGuardIo;
+static inline uint8_t tfp_key_guard_had(const TfpKeyContext *c) {
+  return (uint8_t)((c->chat == 1 ? TFP_KEY_HAD_CHAT : 0) | (c->overlay ? TFP_KEY_HAD_OVERLAY : 0) | (c->panel ? TFP_KEY_HAD_PANEL : 0));
+}
 static inline bool tfp_key_guard_toggle(TfpKeyGuard *g, const TfpKeyGuardIo *io, uint64_t now_ms, int toggle_key, bool focused, bool sample) {
   const bool down = toggle_key && focused && io->key_down(io->user, toggle_key);
   const bool tapped = toggle_key && focused && !down && io->key_tapped && io->key_tapped(io->user, toggle_key);
@@ -217,10 +245,31 @@ static inline bool tfp_key_guard_toggle(TfpKeyGuard *g, const TfpKeyGuardIo *io,
     uint8_t keys[256];
     if (io->keyboard(io->user, keys)) tfp_key_guard_sample(g, now_ms, toggle_key, keys);
   }
+  /* round 50c: the context every watched tick, and the previous tick's kept for a tap */
+  const bool every_tick = toggle_key && focused && io->key_tapped;
+  const bool had_tick = g->had_tick;
+  const uint8_t had = g->had;
+  const uint64_t had_ms = g->had_ms;
+  TfpKeyContext c = {0, false, false};
+  if (every_tick) {
+    c = (TfpKeyContext){io->chat(io->user), io->overlay(io->user), io->panel(io->user)};
+    g->had_tick = true, g->had = tfp_key_guard_had(&c), g->had_ms = now_ms;
+  } else g->had_tick = false;
   if (!pressed) return false;
-  const TfpKeyContext c = {io->chat(io->user), io->overlay(io->user), io->panel(io->user)};
+  if (!every_tick) c = (TfpKeyContext){io->chat(io->user), io->overlay(io->user), io->panel(io->user)};
+  bool enter = false;
+  if (tapped) {
+    /* a tap whose tick before was not watched is refused by the reader (the game not in front, or not read): no case */
+    const uint8_t now_had = tfp_key_guard_had(&c);
+    if (had_tick && (had & TFP_KEY_HAD_CHAT)) c.chat = 1;
+    if (had_tick && (had & TFP_KEY_HAD_OVERLAY)) c.overlay = true;
+    if (had_tick && (had & TFP_KEY_HAD_PANEL)) c.panel = true;
+    const uint64_t e = io->enter_ms ? io->enter_ms(io->user) : 0;
+    enter = had_tick && e > had_ms;
+    if (!now_had && (tfp_key_guard_had(&c) || enter)) g->gap_refused++;
+  }
   char line[200];
-  const bool taken = tfp_key_guard_press(g, now_ms, &c, line, sizeof line) == TFP_KEY_TAKEN;
+  const bool taken = tfp_key_guard_judge(g, now_ms, &c, enter, line, sizeof line) == TFP_KEY_TAKEN;
   if (line[0]) io->say(io->user, line);
   return taken;
 }

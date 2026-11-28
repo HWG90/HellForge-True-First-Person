@@ -1483,8 +1483,10 @@ static void fov_note(void) { /* once a second, on its own: the field-of-view loc
 }
 /* Round 36b: the toggle key (a letter since round 36) is not taken while text is typed (src/key_guard.h). The chat
  * flag's place is read from the game's code once its pages read (tried every 5 s); until then one snapshot of the
- * keyboard is taken each tick for the typing fallback. The flag and the host are only asked on a press. Round 36c: the
- * whole toggle path (level, edge, sample, verdict) is tfp_key_guard_toggle, so the tick's press only comes out of it. */
+ * keyboard is taken each tick for the typing fallback. Round 36c: the whole toggle path (level, edge, sample, verdict)
+ * is tfp_key_guard_toggle, so the tick's press only comes out of it. Round 50c: the flag (three guarded reads), the host
+ * (one call) and the panel are asked every tick the key is watched with the game in front, not only on a press: a tap
+ * is refused when any of them had the keyboard at the previous tick, or the window took an Enter since. */
 #include "key_guard.h"
 #include "goose_overlay.h"
 static TfpKeyGuard key_guard;
@@ -1495,6 +1497,8 @@ static bool guard_read(void *u, uint64_t at, void *out, size_t size) { (void)u; 
 /* round 50: the toggle key and F11 through the tap reader (src/key_tap.h): the level, and a tap between two ticks */
 static bool guard_key(void *u, int vk) { (void)u; return tfp_win_key_level(vk); }
 static bool guard_tapped(void *u, int vk) { (void)u; return tfp_win_key_tapped(vk); }
+/* round 50c: when the game window last took an Enter (a chat line sent, a text field committed): src/key_guard.h */
+static uint64_t guard_enter(void *u) { (void)u; return tfp_win_enter_ms(); }
 static bool guard_keyboard(void *u, uint8_t keys[256]) { (void)u; return tfp_win_keyboard(keys); }
 static int guard_chat(void *u) { (void)u; return tfp_chat_open(guard_read, NULL, &chat_layout); }
 static bool guard_overlay(void *u) { /* a host window open or look capture held: the host has the keyboard */
@@ -1528,7 +1532,7 @@ static bool guard_edge(void *u, int key, bool down) {
   return pressed;
 #endif
 }
-static const TfpKeyGuardIo guard_io = {NULL, guard_key, guard_edge, guard_keyboard, guard_chat, guard_overlay, guard_panel, guard_say, guard_tapped};
+static const TfpKeyGuardIo guard_io = {NULL, guard_key, guard_edge, guard_keyboard, guard_chat, guard_overlay, guard_panel, guard_say, guard_tapped, guard_enter};
 /* Round 41: F11 (the old toggle key, HellForge's Armor LUT editor now) pressed in the game gets one notice naming the
  * toggle key (src/f11_hint.h): the host's HUD, the chat/overlay/panel answers of the guard above, F11 only read. */
 #include "f11_hint.h"

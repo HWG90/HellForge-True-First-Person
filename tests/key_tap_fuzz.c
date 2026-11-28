@@ -101,7 +101,7 @@ int main(int argc, char **argv) {
     TfpKeyGuard g;
     memset(&g, 0, sizeof g);
     held_edge = false, phys_down = low_bit = prev_call_down = 0, latch = false, latch_ms = 0, focus = 1;
-    const TfpKeyGuardIo io = {NULL, k_down, k_edge, k_kb, k_chat, k_no, k_no, k_say, k_tap};
+    const TfpKeyGuardIo io = {NULL, k_down, k_edge, k_kb, k_chat, k_no, k_no, k_say, k_tap, NULL};
     int i = 0, cur = -1;
     long tick = 0, prev_tick = 0;
     bool main_held = false;
