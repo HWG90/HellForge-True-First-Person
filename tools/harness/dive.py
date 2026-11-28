@@ -165,12 +165,68 @@ def body_action(tail):
     return last_action(before[1:] if start else before)   # the first line of a cut read may be half a line
 
 
+# Round 55C. The feel.63 matrix (tfp-soak-67-A.modlog): dive-back was not played because its dive key went in while
+# the body was still getting up from prone (Motion: action=idle 11:08:17.948 is written as the stand-up begins; the
+# stand ramp ran to 11:08:18.315 and the dive key, about 0.35 s after the phase began, was not taken). So a body
+# stood up is given this long before the phase: the matrix's own prone phase lets 1.8 s pass after its last z.
+STAND_SETTLE_S = 1.8
+# And stand-up-prone-head was not set up: the phase before left the body prone and then the head camera (the gun out
+# of the hands, 11:08:53.804). The motion runtime writes no Motion: line there (it is idle without a lease), so the
+# last one, "prone" (11:08:51.834), was stale: the body had stood up (eye 4.04 m at 11:08:57.476); stand_up pressed z
+# (it lay down: 2.94 m at 11:09:03.485), the dive key and z, and read "prone" throughout. A Motion: line written before
+# the view last left the game's own is not taken as the stance: the primary is brought back first (the view comes
+# back to the game's with a Motion: line, as at 11:09:10.764), and where it does not, the stance is not known and
+# nothing is pressed.
+
+
+def known_lines(tail):
+    """The log before the harness began reading it (LOOKBACK_BYTES of it) and what `tail` has read since."""
+    try:
+        with open(tail.path, "rb") as handle:
+            start = max(0, tail.offset - LOOKBACK_BYTES)
+            handle.seek(start)
+            before = handle.read(tail.offset - start).decode(errors="replace").splitlines()
+    except OSError:
+        before, start = [], 0
+    return (before[1:] if start else before) + list(tail.lines)
+
+
+def stance_stale(lines):
+    """Round 55C: True where the game's view was left after the last "Motion: action=" line of `lines` and has not come
+    back (no "entered the native view" or View line of kind 6 since): that line says what the body did before the view
+    left, not what it does now. False otherwise, and where the log names no action."""
+    last_motion = last_left = None
+    for i, line in enumerate(lines):
+        if MOTION.match(line):
+            last_motion = i
+        elif LEFT.match(line):
+            last_left = i
+        elif ENTERED.match(line) or ((m := VIEW_KIND.match(line)) and m[2] == "6"):
+            last_left = None
+    return last_motion is not None and last_left is not None and last_left > last_motion
+
+
 def stand_up(device, tail, sleep=time.sleep, clock=time.monotonic):
     """Brings the body to its feet where the log says it is not: waits for a dive to land, then presses the key that
     stands it up from where it is, and reads the log for the next Motion: line, up to STAND_PRESSES times. Returns
-    {before, presses, after, standing}; standing is True where the last action is not in LOWERED (or the log never
-    named one: nothing is pressed then)."""
+    {before, presses, after, standing, why}; standing is True where the last action is not in LOWERED (or the log never
+    named one: nothing is pressed then). Round 55C: where the action read was written before the view last left the
+    game's own (stance_stale), the primary is brought back first and the stance read from the Motion: line the game's
+    view comes back with; where none comes, standing is False and `why` says so, and no stance key is pressed. A body
+    stood up is given STAND_SETTLE_S before this returns (the stand-up takes the dive key from it)."""
     before = action = body_action(tail)
+    primary = []   # the primary, where it was brought back first
+    if action in LOWERED and stance_stale(known_lines(tail)):
+        start = len(tail.lines)
+        device.run(PRIMARY)
+        back = aim.wait_for(tail, lambda lines: in_native_view(lines[start:]) is True and last_action(lines[start:]) is not None,
+                            NATIVE_WAIT_S, sleep, clock)
+        if not back:
+            return {"before": before, "presses": [PRIMARY], "after": None, "standing": False,
+                    "why": (f"the stance is not known: the log's last Motion: line ({before}) is from before the view left the game's own, "
+                            "and the game's view did not come back with the primary")}
+        action = last_action(tail.lines[start:])
+        primary = [PRIMARY]
     if action == DIVE_ACTION:
         start = len(tail.lines)
         aim.wait_for(tail, lambda lines: last_action(lines[start:]) is not None, LANDING_WAIT_S, sleep, clock)
@@ -185,7 +241,9 @@ def stand_up(device, tail, sleep=time.sleep, clock=time.monotonic):
         presses.append(key)
         aim.wait_for(tail, lambda lines: last_action(lines[start:]) is not None, STAND_WAIT_S, sleep, clock)
         action = last_action(tail.lines[start:]) or action
-    return {"before": before, "presses": presses, "after": action, "standing": action not in LOWERED}
+    if presses and action not in LOWERED:
+        sleep(STAND_SETTLE_S)   # round 55C: the stand-up runs on after its Motion: line
+    return {"before": before, "presses": primary + presses, "after": action, "standing": action not in LOWERED, "why": None}
 
 
 def in_native_view(lines):

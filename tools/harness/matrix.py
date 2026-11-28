@@ -70,6 +70,31 @@ raw vertical step alone, which may not be over LAND_STEP_M: an eye that went dow
 (0.272 m at 51-B 23:23:20.749 with the eye made to follow the root with no lag) is no less beyond the body's own for
 fitting it. The builds of feel.48 on show at most 0.089 m there (soak 25 10:13:52.579, a step off a ledge with the
 root going on down; at most 0.044 m from feel.50 on).
+
+Round 55C: more honest classes, from the feel.63 run of 2026-11-28 (tfp-soak-67-A, Stable; tfp-soak-68-C, Bodycam).
+No limit was raised; tests/test_harness_round55c_judges.py and _played.py have every case.
+  Context. A phase's or an action's stretch of the log is judged with the traced frames of the CONTEXT_MS before it
+  (context_rows): its first frames are measured against them, and nothing of them is judged or listed itself. Until
+  now a stretch's first two frames were measured against nothing, and a root's change of step a frame before the
+  stretch was not seen (68-C #20, crouch: 0.117 m "the eye's own" at 11:29:46.404 is the rig eye a frame after the
+  root's change of 0.119 m, the body's own; 68-C #83: its first veiled frame read as an opening of 0.40021 m, while
+  the leave was two frames before it, in #82's stretch).
+  Veil. A step or a cut of the veil's bound is judged on the eye shown too: where the eye shown moved no more than the
+  bound against the body in that frame, the eye before the veil made the veil's change up (THE PUSH) and the frame is
+  said, not failed (68-C #196: the veil 0.053 and 0.054 m a frame, the eye shown 0.003 and 0.006 m).
+  Dive launch (whose "launch", dive.launch): the game's own eye one or two frames after the root leaves its run at a
+  dive, an untouched native frame (kind 6, nothing looked for, taken or carried, the wanted eye shown, source native),
+  the root's own change under POP_M: printed and not counted, as the stance ramp's (0.069 to 0.090 m in both styles,
+  the matrix's "dive" 0.073).
+  Fall landing (whose "body", with fall and held): one to two frames after the root went FALL_M or more down in one
+  native frame, where the game's eye less the body's lunge is under POP_M and the eye shown has no more beyond the body
+  than the filter's hold of that frame (67-A #216: the root 1.109 m down, a hold's end opened the window, the filter
+  took up 0.060 m and the frame read as "the filter's" 0.929).
+  Played. The clambers need a traversal mask (0x20) in their stretch, as the dives need a dive line (NEEDS); the
+  feel.63 matrix's clamber-low and clamber-high passed with mask 0 only. A phase whose body could not be stood up
+  first is a harness failure (judge_stood), counted apart from the camera's failures; dive.stand_up reads no stance
+  from a Motion: line written before the view left the game's own, and lets a stand-up settle (dive.STAND_SETTLE_S).
+  Bound. A measure printed beside its bound has the places that tell it from the bound (over): "0.4002 (over 0.40)".
 """
 import bisect
 import json
@@ -158,8 +183,25 @@ _DIVED = (re.compile(r" Motion: action=dive\b"), "no dive in the log (no \"Motio
 _PRONE = (re.compile(r" Motion: action=prone\b"), "the body never lay down (no \"Motion: action=prone\")")
 _HEAD = (re.compile(r" Trace: t=\S+ kind=4 "), "no head-camera frame was traced: the view never left the native view")
 _FULL_AIM = (re.compile(r" State: aim in\b"), "full aim was not reached (no \"State: aim in\")")
+
+
+class _MaskBit:
+    """A pattern for NEEDS that a Hold/Return/Drop/Wait line matches where its control mask has `bit`."""
+    def __init__(self, bit):
+        self.bit = bit
+
+    def search(self, line):
+        m = MASK.search(line)
+        return bool(m and int(m[1], 16) & self.bit)
+
+
+# Round 55C: a clamber is played where the log's control mask says a traversal (0x20). Soak 67-A #212 "clamber-high"
+# never had it (a drop of 0.6 m off an edge and the game's own landing), and the feel.63 matrix's clamber-low and
+# clamber-high passed with mask 0 only: no ledge was walked to first, and nothing was climbed.
+_TRAVERSED = (_MaskBit(0x20), "no traversal in the log (no control mask with 0x20): nothing was vaulted or climbed")
 NEEDS = {"dive": [_DIVED], "dive-back": [_DIVED], "prone-swap": [_PRONE, _HEAD], "aim-swap": [_FULL_AIM, _HEAD],
-         "stand-up-supine": [_DIVED, _PRONE, _HEAD], "stand-up-prone-head": [_PRONE, _HEAD]}
+         "stand-up-supine": [_DIVED, _PRONE, _HEAD], "stand-up-prone-head": [_PRONE, _HEAD],
+         "clamber-low": [_TRAVERSED], "clamber-high": [_TRAVERSED]}
 # Round 39: phases judged on the traced eye and its slide along the view (reload_slide).
 RELOADS = {"reload", "pistol-reload"}
 SLIDE_M = 0.05      # the eye's offset from the root along the level view may change by this much ...
@@ -928,13 +970,42 @@ def unplayed(name, lines):
 
 
 def judge_played(name, lines, judged):
-    """Adds unplayed() to a phase's verdict `judged` (in place): a phase that was not played fails."""
+    """Adds unplayed() to a phase's verdict `judged` (in place): a phase that was not played fails, and (round 55C) is
+    a harness failure, not a camera result (harness True)."""
     notes = unplayed(name, lines)
     if notes:
         judged["pass"] = False
         judged["notes"] = notes + judged["notes"]
     judged["played"] = not notes
+    judged["harness"] = bool(notes) or judged.get("harness", False)
     return judged
+
+
+def judge_stood(name, stood, judged):
+    """Round 55C: a phase whose body could not be brought to its feet first (stand_first: `stood`) was not set up, so
+    whatever its stretch of the log shows is no camera result: it fails as a harness failure (harness True, played
+    False, the reason first in its notes; the camera's lines stay below it for reading). `judged` is changed in place."""
+    failed = bool(stood) and not stood["standing"]
+    judged["harness"] = failed or judged.get("harness", False)
+    if failed:
+        why = stood.get("why") or f"the log said {stood['before']} -> {stood['after']} after {stood['presses']}"
+        judged["pass"] = False
+        judged["played"] = False
+        judged["notes"] = [f"HARNESS FAILURE: the body could not be stood up first ({why}): not a camera result"] + judged["notes"]
+    return judged
+
+
+def result_summary(results):
+    """The run's last line: how many passed, which failed, and apart from them the harness failures: the phases not
+    played (judge_played) or not set up (judge_stood)."""
+    failed = [n for n, r in results.items() if not r["pass"] and not r.get("harness")]
+    harness = [n for n, r in results.items() if r.get("harness")]
+    text = f"{len(results) - len(failed) - len(harness)} of {len(results)} passed"
+    if failed:
+        text += f"; failed: {', '.join(failed)}"
+    if harness:
+        text += f"; harness failures, not camera results: {', '.join(harness)}"
+    return text
 
 
 def stand_first(device, name, log):
@@ -1025,8 +1096,6 @@ def main(argv):
             script, settle = PHASES[name]
             phases_levers.prepare(name)                    # nothing for a phase of this file's own
             stood = stand_first(device, name, log)   # before the phase's stretch of the log begins
-            if stood and not stood["standing"]:
-                print(f"  ({name}: the body could not be stood up first: {stood['before']} -> {stood['after']} after {stood['presses']})")
             start = log.stat().st_size
             aimed = play(device, name, log, out)
             time.sleep(min(settle, 1.0))
@@ -1037,13 +1106,14 @@ def main(argv):
             time.sleep(max(0.0, settle - 1.0) + 1.2)   # the Lock line is written once a second
             with open(log, errors="replace") as handle:
                 handle.seek(start); lines = handle.read().splitlines()
-            results[name] = judge_played(name, lines, judge_aim(name, aimed, lines, phase_judge(name, script, lines)))
+            context = lines_before(log, start)   # round 55C: the frames before the stretch, as context
+            results[name] = judge_stood(name, stood, judge_played(name, lines, judge_aim(name, aimed, lines, phase_judge(name, script, lines, context))))
             r = results[name]
             for text in style_changes(lines):
                 print(text)
             style = style_in_force(lines) or style
             r["camera_style"] = style
-            print(f"{'pass' if r['pass'] else 'FAIL':4} {name:16} frames {r['frames']:4} other-camera {r['other_camera_frames']:4} missed {r['missed']:3} "
+            print(f"{'pass' if r['pass'] else 'HARN' if r.get('harness') else 'FAIL':4} {name:16} frames {r['frames']:4} other-camera {r['other_camera_frames']:4} missed {r['missed']:3} "
                   f"{describe(r)} kick {r['largest_kick_deg']:.1f} deg kinds {r['kinds']}")
             if aimed is not None:
                 print(f"       {aim_text(r['dive'] if name in DIVES else r['aim'])}")
@@ -1054,7 +1124,7 @@ def main(argv):
     with open(log, errors="replace") as handle:
         handle.seek(begun); run = handle.read().splitlines()
     print(style_summary(style_in_force(before), run))
-    print(f"{len(results) - len(failed)} of {len(results)} passed" + (f"; failed: {', '.join(failed)}" if failed else ""))
+    print(result_summary(results))
     return 1 if failed else 0
 
 
