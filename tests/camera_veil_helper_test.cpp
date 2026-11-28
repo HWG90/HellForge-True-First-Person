@@ -777,13 +777,13 @@ int main() {
     CHECK(steepest < 1.5f * moved * 33.3f / 300 + .003f && std::fabs(last - held_ahead) < .004f);
     g.end();
   }
-  // ---- Round 55, the veil's own pops (soak 68, Bodycam #68 11:32:00.915, #82, #200; the matrix's stand-up-prone-head,
-  // 11:09:12.265). As the game has it: the continuity and the push on, the swap holding the eye `behind` metres behind
-  // the head at the leave (prone: the head well in front of the held eye), the veil closed by the tick after the frame
-  // with the body. ----
-  struct Played { float eye[40][3]; float veil[40]; int kinds[40]; int n = 0; };
-  auto play_leave = [&](float behind, int head_frames, int native_frames, Played &p, bool open = true) {
-    fresh(true, true, true); tfp_camera_set_veil_open(open);
+  // ---- Round 55, the veil at a leave and an entry (soak 68, Bodycam #68 11:32:00.915, #82, #200; the matrix's
+  // stand-up-prone-head, 11:09:12.265). As the game has it: the continuity and the push on, the swap holding the eye
+  // `behind` metres behind the head at the leave (prone: the head well in front of the held eye), the veil closed by
+  // the tick after the frame with the body. Every helper suite runs the shipped defaults (fresh() changes none). ----
+  struct Played { float eye[40][3]; float veil[40]; float head_shown[40]; bool head_known[40]; int kinds[40]; int n = 0; };
+  auto play_leave = [&](float behind, int head_frames, int native_frames, Played &p) {
+    fresh(true, true, true);
     tfp_camera_set_veil(true); tfp_camera_set_clear(true);
     Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
     g.eye[0] = 0; g.eye[1] = -behind; g.eye[2] = .13f;
@@ -792,8 +792,10 @@ int main() {
     tfp_camera_trace_edge();
     auto note = [&](int kind) {
       TfpCameraTraceRow rows[8]; std::memset(rows, 0, sizeof rows); const uint32_t got = tfp_camera_trace_read(rows, 8);
-      const float *v = got ? rows[got - 1].veil : nullptr;
-      std::memcpy(p.eye[p.n], g.shown, 12); p.veil[p.n] = v ? std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) : 0; p.kinds[p.n] = kind; ++p.n;
+      const TfpCameraTraceRow *r = got ? &rows[got - 1] : nullptr;
+      const float *v = r ? r->veil : nullptr;
+      std::memcpy(p.eye[p.n], g.shown, 12); p.veil[p.n] = v ? std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) : 0; p.kinds[p.n] = kind;
+      p.head_known[p.n] = r && r->head_known; p.head_shown[p.n] = r ? r->head_shown[0] : 0; ++p.n;
       tfp_camera_trace_edge();
     };
     g.native(2); g.frame(33.3); note(6); // the swap's last native frame: p.eye[0]
@@ -801,28 +803,23 @@ int main() {
     for (int i = 0; i < native_frames; ++i) { g.native(2); g.frame(33.3); tfp_camera_veil_tick(false); note(6); }
     g.end();
   };
-  auto step_of = [](const Played &p, int k) { float d = 0; for (int i = 0; i < 3; ++i) d += (p.eye[k][i] - p.eye[k - 1][i]) * (p.eye[k][i] - p.eye[k - 1][i]); return std::sqrt(d); };
   auto change_of = [](const Played &p, int k) {
     float d = 0; for (int i = 0; i < 3; ++i) { const float c = (p.eye[k + 1][i] - p.eye[k][i]) - (p.eye[k][i] - p.eye[k - 1][i]); d += c * c; } return std::sqrt(d);
   };
-  // (b) THE OPEN, spread: a veil that opens over TFP_CAMERA_VEIL_OPEN_STEP_M moves the eye no more than that in any frame,
-  // and the whole move is made within three frames; one that opens under it is made at once, as before.
+  // THE OPEN is the round 44 clearance, whole in the leave's frame: an open of 0.4 m on foot (the head that far in front
+  // of the held eye) puts the eye shown TFP_CAMERA_VEIL_CLEAR in front of the head in the leave's own frame and in every
+  // head-camera frame after it, as the matrix's behind_head judge and the throw-eye judges want. (Round 55 tried
+  // spreading it, 0.15 m a frame: those frames went 0.05 to 0.19 m behind the head on the throw-eye judges, so it was
+  // dropped.)
   for (float behind : {.31f, .28f, .10f, .03f}) {
     Played p; play_leave(behind, 12, 0, p);
-    Played main_veil; play_leave(behind, 12, 0, main_veil, false); // THE OPEN off: main's, the whole move at once
-    // p.eye[0] is the native view's last frame, p.eye[1] the leave's
-    float most = 0, first = step_of(p, 1), reached = 0; int frames = 0;
-    for (int k = 1; k < 7; ++k) most = std::fmax(most, step_of(p, k));
-    for (int k = 1; k < 7; ++k) if (p.veil[k] > reached + 1e-4f) { reached = p.veil[k]; frames = k; }
-    float whole = 0; for (int k = 1; k < 7; ++k) whole = std::fmax(whole, p.veil[k]);
-    std::printf("  round 55, a veil opening behind the head by %.2f m: the leave's step %.3f m, the veil's largest %.3f m reached in %d frame(s), the eye's largest step %.3f m\n",
-                behind, first, whole, frames, most);
-    std::printf("    (main's veil: the leave's step %.3f m)\n", step_of(main_veil, 1));
-    if (whole > TFP_CAMERA_VEIL_OPEN_STEP_M + .01f) {
-      CHECK(step_of(main_veil, 1) > whole - .03f);        // main: the whole move in the leave's frame
-      CHECK(most <= TFP_CAMERA_VEIL_OPEN_STEP_M + .02f); // no frame over the step (and what the eye before the veil moves)
-      CHECK(frames >= 2 && frames <= 3);                // and the whole move within three frames
-    } else CHECK(frames <= 1 && most < whole + .03f);   // under it: at once, as before
+    float least = 1e9f; int known = 0;
+    for (int k = 1; k < p.n; ++k) if (p.kinds[k] == 4 && p.head_known[k]) { ++known; least = std::fmin(least, -p.head_shown[k]); }
+    std::printf("  round 55, a veil opening behind the head by %.2f m: the leave's veil %.3f m; the eye shown at least %.3f m in front of the head over %d head-camera frames\n",
+                behind, p.veil[1], least, known);
+    CHECK(known >= 10 && p.head_known[1]);
+    CHECK(least >= TFP_CAMERA_VEIL_CLEAR - 2e-3f);
+    if (behind > .25f) CHECK(p.veil[1] > .30f); // the whole move in the leave's frame
   }
   // (a) THE ENTRY: back into the native view while a veil of 0.26 m is still let out. The native view's first frame
   // took the eye without the veil (main: the eye stepped back the veil's whole 0.26 m in one frame and the step

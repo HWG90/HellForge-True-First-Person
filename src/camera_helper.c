@@ -287,12 +287,9 @@ static bool veil_in_on; static unsigned veil_in_frames;
  * (veil_carry), let out over TFP_CAMERA_VEIL_LET_OUT_MS from veil_carry_tick in the head-camera frames after it. All
  * the game thread, under the policy lock. */
 static float veil_eye_last[3]; static double veil_eye_tick; static bool veil_eye_known;
-/* Round 55. THE OPEN (camera_helper.h tfp_camera_veil_open_cap): the head-camera frames counted from the leave while the
- * cap holds the veil's move back. THE ENTRY: what the last head-camera frame's eye shown was moved after the continuity
- * (the veil, its let-out, the floor, the clamp's carry), in that frame's root axes, and the frame's tick: the
- * continuity is handed it at an entry into the native view (smooth_present), so it lets the rest out. */
-static _Atomic uint32_t veil_open_cap = 1u; /* tfp_camera_set_veil_open */
-static bool veil_open_on; static unsigned veil_open_frames;
+/* Round 55, THE ENTRY: what the last head-camera frame's eye shown was moved after the continuity (the veil, its
+ * let-out, the floor, the clamp's carry), in that frame's root axes, and the frame's tick: the continuity is handed it
+ * at an entry into the native view (smooth_present), so it lets the rest out. */
 static float veil_shown_moved[3]; static double veil_shown_tick; static bool veil_shown_on;
 static float veil_carry[3]; static double veil_carry_tick; static bool veil_carry_on;
 static _Atomic uint64_t veil_clamped;
@@ -1407,7 +1404,7 @@ static void veil_forget(void) {
   atomic_store_explicit(&veil_last_kind, 0, memory_order_relaxed); atomic_store_explicit(&veil_open, 0, memory_order_relaxed);
   atomic_store_explicit(&veil_ticks, 0, memory_order_relaxed); atomic_store_explicit(&veil_pending, 0, memory_order_relaxed);
   veil_out_on = false; veil_in_on = false; veil_in_frames = 0; veil_eye_known = false; veil_carry_on = false;
-  veil_open_on = false; veil_shown_on = false; /* round 55 */
+  veil_shown_on = false; /* round 55 */
   clear_state = (TfpClear){0}; /* round 44 */
 }
 /* Round 32: a kept leave's frame (veil_same_frame_leave) whose eye is more than tfp_camera_veil_let_in(1) from the eye
@@ -2125,20 +2122,12 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
                 }
                 if (veil_frame && !veil_clear && tfp_clear_ahead(adjusted, head, horizontal) >= TFP_CAMERA_VEIL_CLEAR-1e-4f) veil_clear = true;
               }
-              /* Round 55, THE OPEN (camera_helper.h tfp_camera_veil_open_cap): from a leave of the native view the eye shown
-               * moves at most TFP_CAMERA_VEIL_OPEN_STEP_M a frame more from the eye before the veil than the frame before,
-               * until a frame needs no more; a move under that is made at once, as before. Not in a kept leave's frames,
-               * whose caps hold there (tfp_camera_veil_let_in, veil_clamp_kept). */
+              /* Round 55 did not cap the veil's open (0.39 to 0.45 m along the view at leaves out of prone, dive-swaps,
+               * quick swaps, aim swaps: soak 68 #68, #82, #83, #200, the matrix's dive-swap). Every one of those leaves is
+               * on foot (off_foot=0 on its rows), so the matrix's behind_head judge and the round 44 throw-eye judges
+               * measure it, and any cap leaves those frames behind the head (the throw-eye judges: 0.05 to 0.19 m behind,
+               * where this keeps 0.10 m in front). The whole move stays in the leave's frame, as in round 44. */
               if (policy.lock_now && kind == 4) {
-                if (from_native) { veil_open_on = true; veil_open_frames = 0; }
-                if (veil_open_on && !veil_kept && !veil_in_on && atomic_load_explicit(&veil_open_cap, memory_order_relaxed) && ++veil_open_frames <= TFP_CAMERA_VEIL_OPEN_FRAMES) {
-                  const float d[3] = {adjusted[0]-before[0], adjusted[1]-before[1], adjusted[2]-before[2]};
-                  const float length = sqrtf(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]), most = tfp_camera_veil_open_cap(veil_open_frames);
-                  if (isfinite(length) && length > most) {
-                    for (unsigned i = 0; i < 3; ++i) adjusted[i] = before[i]+d[i]*(most/length);
-                    veil_clear = false;
-                  } else veil_open_on = false;
-                } else veil_open_on = false;
                 /* Round 55, THE ENTRY: what this frame's eye shown was moved after the continuity, for the continuity at a
                  * native frame next (smooth_present). Nothing moved: nothing handed on. */
                 const float moved[3] = {adjusted[0]-before[0], adjusted[1]-before[1], adjusted[2]-before[2]};
@@ -2146,7 +2135,7 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
                 for (unsigned axis = 0; axis < 3; ++axis) { veil_shown_moved[axis] = 0;
                   for (unsigned component = 0; component < 3; ++component) veil_shown_moved[axis] += moved[component]*root_basis[axis*3+component]; }
                 veil_shown_tick = tick;
-              } else veil_open_on = veil_shown_on = false;
+              } else veil_shown_on = false;
               memcpy(veil_eye_last, adjusted, 12); veil_eye_tick = tick; veil_eye_known = true;
               /* Round 19, the log only: the move on this frame's Trace row (smooth_present wrote it above, with the eye
                * before the veil), so that eye + veil is what is shown. Round 26: the let-out too, and in a frame the veil
@@ -2484,7 +2473,6 @@ void tfp_camera_set_veil_fov(float vertical_radians) {
   atomic_store(&veil_fov, isfinite(vertical_radians) && vertical_radians > 0 && vertical_radians < 3.1f ? float_bits(vertical_radians) : 0u);
 }
 void tfp_camera_set_veil_second(bool on) { atomic_store(&veil_second, on ? 1u : 0u); if (!on) atomic_store(&veil_pending, 0); }
-void tfp_camera_set_veil_open(bool on) { atomic_store(&veil_open_cap, on ? 1u : 0u); }
 void tfp_camera_veil_from_head(const TfpHeadTick *tick) {
   if (!tick) { tfp_camera_set_veil(false); return; }
   tfp_camera_veil_tick(tick->full && tick->on_again > 0 && tick->left_on == 0);
@@ -2622,7 +2610,7 @@ void tfp_camera_reset_for_tests(void) {
   atomic_store(&veil_armed, 0); atomic_store(&veil_open, 0); atomic_store(&veil_ticks, 0); atomic_store(&veil_last_kind, 0); atomic_store(&veil_largest, 0);
   atomic_store(&veil_leaves, 0); atomic_store(&veil_frames, 0); atomic_store(&veil_moved, 0); atomic_store(&veil_behind, 0);
   atomic_store(&veil_second, 0); atomic_store(&veil_pending, 0);
-  atomic_store(&veil_fov, 0); atomic_store(&veil_under, 0); atomic_store(&veil_far, 0); atomic_store(&veil_held_back, 0); veil_out_on = false; veil_in_on = false; veil_in_frames = 0; veil_open_on = false; veil_shown_on = false; atomic_store(&veil_open_cap, 1u);
+  atomic_store(&veil_fov, 0); atomic_store(&veil_under, 0); atomic_store(&veil_far, 0); atomic_store(&veil_held_back, 0); veil_out_on = false; veil_in_on = false; veil_in_frames = 0; veil_shown_on = false;
   atomic_store(&veil_clamped, 0); veil_eye_known = false; veil_carry_on = false;
   clear_state = (TfpClear){0}; atomic_store(&clear_on, 0); atomic_store(&clear_floored, 0); atomic_store(&clear_largest, 0); atomic_store(&eye_held_body, 0); atomic_store(&eye_held_at, 0);
   atomic_store(&lock_frames, 0); atomic_store(&view_frames, 0); atomic_store(&lock_foreign_frames, 0); atomic_store(&lock_missed, 0); atomic_store(&lock_missed_kind, 0); atomic_store(&lock_missed_error, 0);
