@@ -223,6 +223,27 @@ int main(void) {
     const float skew[9] = {1, 0, 0, .5f, .5f, 0, 0, 0, 1};
     CHECK(!tfp_turn_world(skew, local, &world));
   }
+  /* Round 55, THE DIRECTION SHOWN: tfp_turn_peek tells the carry of a frame before the frame is played (the head
+   * camera's eye is built along it), the same to the bit as tfp_turn_step will give, and leaves the state as it was. A
+   * leave of 63 degrees, every frame of its ease; and a frame of no change (the identity, bit for bit). */
+  {
+    TfpTurn t; tfp_turn_reset(&t);
+    const TfpQ before = about(0, 0, 1, 20), after = tfp_q_normalised(tfp_q_mul(before, about(0, 0, 1, -63)));
+    double tick = 7000; float began = 0;
+    for (int i = 0; i < 6; ++i, tick += 33.3) tfp_turn_step(&t, before, true, 6, tick, 250, &began);
+    int carried = 0, agree = 0, frames = 0;
+    for (int i = 0; i < 24; ++i, tick += 33.3, ++frames) {
+      const TfpTurn kept = t;
+      const TfpQ peek = tfp_turn_peek(&t, after, true, 4, tick, 250);
+      CHECK(memcmp(&kept, &t, sizeof t) == 0); /* nothing of the state changed */
+      const TfpQ carry = tfp_turn_step(&t, after, true, 4, tick, 250, &began);
+      agree += same(peek, carry); carried += !tfp_turn_none(carry);
+      if (i == 0) CHECK(fabsf(began-63) < .02f && between(before, tfp_turn_apply(after, peek)) < .02f);
+    }
+    CHECK(agree == frames && carried > 10);
+    const TfpQ none = tfp_turn_peek(&t, after, true, 4, tick, 250);
+    CHECK(tfp_turn_none(none) && same(none, tfp_q_identity()));
+  }
   printf("camera turn: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

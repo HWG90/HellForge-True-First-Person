@@ -287,6 +287,10 @@ static bool veil_in_on; static unsigned veil_in_frames;
  * (veil_carry), let out over TFP_CAMERA_VEIL_LET_OUT_MS from veil_carry_tick in the head-camera frames after it. All
  * the game thread, under the policy lock. */
 static float veil_eye_last[3]; static double veil_eye_tick; static bool veil_eye_known;
+/* Round 55, THE ENTRY: what the last head-camera frame's eye shown was moved after the continuity (the veil, its
+ * let-out, the floor, the clamp's carry), in that frame's root axes, and the frame's tick: the continuity is handed it
+ * at an entry into the native view (smooth_present), so it lets the rest out. */
+static float veil_shown_moved[3]; static double veil_shown_tick; static bool veil_shown_on;
 static float veil_carry[3]; static double veil_carry_tick; static bool veil_carry_on;
 static _Atomic uint64_t veil_clamped;
 /* Round 44 (src/camera_clear.h): the push of the eye in front of the head and its last frame's figures; the frames the
@@ -1088,6 +1092,36 @@ static void lock_rotation(Policy *p, const float *native, uint32_t kind, double 
   }
 }
 
+/* Round 55, THE DIRECTION SHOWN (src/camera_turn.h tfp_turn_peek). The head camera's eye was built along the context's
+ * axes (basis()), and lock_rotation's carry was put on the rotation only after the eye was built. In the game those
+ * axes are the game's own new direction in the frame of a leave of the native view and the direction shown the frame
+ * before in every frame after it, so in the frame a carry began the eye, the push, the veil and head_shown went 0.18 m
+ * and more along a direction up to 63 degrees off the one shown, and from the next frame along the one shown: a flick
+ * across the view of about 0.49 m x 2 sin(theta/2), there and back (soak 67 #29, 11:13:22.390, built 62.0 degrees
+ * against 117.3 shown, the step changed across the view by 0.519 m; the matrix dive-swap 0.366). Here the frame's turn
+ * is worked out before the eye is built, from the state lock_rotation will start from and the rotation it will read:
+ * true, with `shown` the rotation the frame will be shown with (less the kick), only where something is carried in it.
+ * Otherwise false, and the eye is built as before, bit for bit. Not in a held frame (a body that is down: lock_view
+ * already), full aim (nothing carried there), a seat or the glide out of one (seat_back turns the view itself there,
+ * after lock_rotation), or any camera but the ordinary one. (Where the retail rotation handoff
+ * eases the argument after the eye is built, ease_normal_rotation, the carry here is the one on the argument as it
+ * stands now.) Policy lock. */
+static bool lock_turn_preview(const Policy *p, const float *native, uint32_t kind, double tick, TfpQ *shown) {
+  if (!p->lock_now || kind != 4 || p->lock_down || p->full_ads || seat_in || seat_out) return false;
+  TfpQ given = tfp_q_identity();
+  if (!read((uint64_t)(uintptr_t)native + L_ARGUMENT_ROTATION, &given, 16) || !tfp_q_valid(given)) return false;
+  given = tfp_q_normalised(given);
+  /* The view lock_rotation's ordinary branch gives is the game's, times what is left of a held stretch's carry
+   * (lock_carry). That carry is never under way in a frame whose turn carry is: a native frame (the only start of a
+   * turn carry) sets lock_carry to the identity, and a held frame resets lock_turn, so the first ordinary frame after
+   * one has no turn state to carry from. So the game's own is the view here, the same to the bit wherever the peek
+   * gives a carry. (Round 55's review: the held-stretch lines once here could change no frame; no test could see them.) */
+  const TfpQ carry = tfp_turn_peek(&lock_turn, given, true, kind, tick, p->c.max_gap_ms);
+  if (tfp_turn_none(carry)) return false;
+  *shown = tfp_turn_apply(given, carry);
+  return tfp_q_valid(*shown);
+}
+
 /* A head-camera frame the lock held was presented: the body's state for the "Lock:" and "Dead:" lines, and for
  * head hiding (tfp_camera_lock_off_foot_body). `head` is the head node in the world, read and proven this frame. */
 static void lock_body_shown(Policy *p, uint32_t kind, const float *head, double tick) {
@@ -1167,6 +1201,14 @@ static bool smooth_present(Policy *p, uint32_t kind, uint32_t source, const floa
     const bool armed = settle_armed_at > 0 && tick >= settle_armed_at && tick-settle_armed_at <= SETTLE_ARM_MS;
     smooth.settle_ok = atomic_load_explicit(&settle_on, memory_order_relaxed) && (armed || smooth.settling) && source != SMOOTH_HEAD && p->control_mask == 0 && !p->full_ads;
     const uint64_t settles = smooth.settles;
+    /* Round 55, THE ENTRY: a native frame straight after a head-camera frame whose eye shown was moved after the
+     * continuity (the veil, being let out): the continuity is handed the eye shown, eye + that move, as the last frame's,
+     * so the change of camera lets the rest out. The native view used to cut it in a frame (the matrix's
+     * stand-up-prone-head, 11:09:12.265: a veil of 0.264 m, the step changed by 0.164 and then 0.300). */
+    if (veil_shown_on && source != SMOOTH_HEAD && smooth.known && smooth.source == SMOOTH_HEAD && smooth.tick == veil_shown_tick && tick > smooth.tick) {
+      for (unsigned axis = 0; axis < 3; ++axis) smooth.wanted[axis] += veil_shown_moved[axis];
+    }
+    veil_shown_on = false;
     correction = tfp_continuity_step_cut(&smooth, wanted_relative, wanted, root_basis, head_given ? head : NULL, source == SMOOTH_REPEAT ? SMOOTH_NATIVE : source,
                                          detect, p->full_ads, tick, p->c.max_gap_ms, &smooth_tuning, relative);
     if (smooth.settles != settles) settle_armed_at = 0; /* one settle for one arm */
@@ -1359,6 +1401,7 @@ static void veil_forget(void) {
   atomic_store_explicit(&veil_last_kind, 0, memory_order_relaxed); atomic_store_explicit(&veil_open, 0, memory_order_relaxed);
   atomic_store_explicit(&veil_ticks, 0, memory_order_relaxed); atomic_store_explicit(&veil_pending, 0, memory_order_relaxed);
   veil_out_on = false; veil_in_on = false; veil_in_frames = 0; veil_eye_known = false; veil_carry_on = false;
+  veil_shown_on = false; /* round 55 */
   clear_state = (TfpClear){0}; /* round 44 */
 }
 /* Round 32: a kept leave's frame (veil_same_frame_leave) whose eye is more than tfp_camera_veil_let_in(1) from the eye
@@ -1834,6 +1877,12 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
           /* Beyond retail: in a camera that is not the game's ordinary one the eye is placed along the last
            * first-person direction, not along that camera's own. */
           if (policy.lock_now && (kind != 4 || policy.lock_down) && lock_view_known) held_axes(lock_view, forward, up);
+          /* Round 55, THE DIRECTION SHOWN: in a frame that carries a turn, the eye, the push, the veil and head_shown
+           * go along the direction the frame will be shown with, not the context's (lock_turn_preview). */
+          else if (!held_view) {
+            TfpQ shown_q = tfp_q_identity(); float shown_forward[3], shown_up[3];
+            if (lock_turn_preview(&policy, native, kind, tick, &shown_q) && held_axes(shown_q, shown_forward, shown_up)) { memcpy(forward, shown_forward, 12); memcpy(up, shown_up, 12); }
+          }
           /* Remove current body-root rotation before damping animation.
            * Fresh root translation/rotation is restored after filtering. */
           float local_head[3] = {0};
@@ -2070,6 +2119,20 @@ void tfp_camera_setter_from(uint64_t caller, void *camera, uint32_t unit, const 
                 }
                 if (veil_frame && !veil_clear && tfp_clear_ahead(adjusted, head, horizontal) >= TFP_CAMERA_VEIL_CLEAR-1e-4f) veil_clear = true;
               }
+              /* Round 55 did not cap the veil's open (0.39 to 0.45 m along the view at leaves out of prone, dive-swaps,
+               * quick swaps, aim swaps: soak 68 #68, #82, #83, #200, the matrix's dive-swap). Every one of those leaves is
+               * on foot (off_foot=0 on its rows), so the matrix's behind_head judge and the round 44 throw-eye judges
+               * measure it, and any cap leaves those frames behind the head (the throw-eye judges: 0.05 to 0.19 m behind,
+               * where this keeps 0.10 m in front). The whole move stays in the leave's frame, as in round 44. */
+              if (policy.lock_now && kind == 4) {
+                /* Round 55, THE ENTRY: what this frame's eye shown was moved after the continuity, for the continuity at a
+                 * native frame next (smooth_present). Nothing moved: nothing handed on. */
+                const float moved[3] = {adjusted[0]-before[0], adjusted[1]-before[1], adjusted[2]-before[2]};
+                veil_shown_on = finite3(moved) && (moved[0] != 0 || moved[1] != 0 || moved[2] != 0);
+                for (unsigned axis = 0; axis < 3; ++axis) { veil_shown_moved[axis] = 0;
+                  for (unsigned component = 0; component < 3; ++component) veil_shown_moved[axis] += moved[component]*root_basis[axis*3+component]; }
+                veil_shown_tick = tick;
+              } else veil_shown_on = false;
               memcpy(veil_eye_last, adjusted, 12); veil_eye_tick = tick; veil_eye_known = true;
               /* Round 19, the log only: the move on this frame's Trace row (smooth_present wrote it above, with the eye
                * before the veil), so that eye + veil is what is shown. Round 26: the let-out too, and in a frame the veil
@@ -2544,7 +2607,7 @@ void tfp_camera_reset_for_tests(void) {
   atomic_store(&veil_armed, 0); atomic_store(&veil_open, 0); atomic_store(&veil_ticks, 0); atomic_store(&veil_last_kind, 0); atomic_store(&veil_largest, 0);
   atomic_store(&veil_leaves, 0); atomic_store(&veil_frames, 0); atomic_store(&veil_moved, 0); atomic_store(&veil_behind, 0);
   atomic_store(&veil_second, 0); atomic_store(&veil_pending, 0);
-  atomic_store(&veil_fov, 0); atomic_store(&veil_under, 0); atomic_store(&veil_far, 0); atomic_store(&veil_held_back, 0); veil_out_on = false; veil_in_on = false; veil_in_frames = 0;
+  atomic_store(&veil_fov, 0); atomic_store(&veil_under, 0); atomic_store(&veil_far, 0); atomic_store(&veil_held_back, 0); veil_out_on = false; veil_in_on = false; veil_in_frames = 0; veil_shown_on = false;
   atomic_store(&veil_clamped, 0); veil_eye_known = false; veil_carry_on = false;
   clear_state = (TfpClear){0}; atomic_store(&clear_on, 0); atomic_store(&clear_floored, 0); atomic_store(&clear_largest, 0); atomic_store(&eye_held_body, 0); atomic_store(&eye_held_at, 0);
   atomic_store(&lock_frames, 0); atomic_store(&view_frames, 0); atomic_store(&lock_foreign_frames, 0); atomic_store(&lock_missed, 0); atomic_store(&lock_missed_kind, 0); atomic_store(&lock_missed_error, 0);

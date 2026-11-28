@@ -20,6 +20,9 @@
 #include <fstream>
 #include <string>
 #include <vector>
+extern "C" {
+#include "camera_math.h"
+}
 
 static const float FRONT = .05f; // the least in front of the head an eye shown on foot may be (the matrix's measure)
 static const double SETTLE_MS = 600; // head visibility's TORSO_SETTLE
@@ -31,7 +34,17 @@ static uint32_t eye_held_now() {
   return 0; // main: Show torso does not wait for the hold
 #endif
 }
-static float level_ahead(const Game &g) { return g.ahead_of_head(); }
+// Along the level direction the frame is shown with (the rotation the helper handed the game; the scripts' frames are
+// the ordinary camera's, unparented: the rotation is the world's). Until round 55 along the context's axes (g.ahead), the
+// direction the head camera's eye was built along: the two part where a change of camera carries a turn
+// (src/camera_turn.h), and from round 55 the eye is built along the one shown (src/camera_helper.c lock_turn_preview).
+static float level_ahead(const Game &g) {
+  TfpQ q; std::memcpy(&q, reinterpret_cast<void *>(W.native() + 64), 16);
+  const float y[3] = {0, 1, 0}; float f[3]; tfp_q_rotate(tfp_q_normalised(q), y, f);
+  const float n = std::sqrt(f[0] * f[0] + f[1] * f[1]);
+  if (g.s.linked || !(n > 1e-4f)) return g.ahead_of_head();
+  return ((g.shown[0] - g.s.head[0]) * f[0] + (g.shown[1] - g.s.head[1]) * f[1]) / n;
+}
 
 // What head visibility would do with Show torso on: the torso drawn once kind 4 with mask 0 has been steady for
 // TORSO_SETTLE, and (round 44) the camera holds no eye of the body's (TfpHeadIo.eye_held).

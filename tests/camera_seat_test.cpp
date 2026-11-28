@@ -102,12 +102,17 @@ struct Game {
     s.request[0] = kind; s.linked = false; s.mask = 0; s.aim = 0; s.camera_rotation_given = false; s.camera_split = false;
     for (int i = 0; i < 3; ++i) s.argument[i] = s.head[i] - ahead[i] * back + above[i] * high;
     s.argument[3] = 0;
+    const Q q = yaw_q(std::atan2(right[1], right[0])); std::memcpy(s.argument_rotation, &q, 16); // the look's, in the world
   }
   void native(float ahead_m = .1f) { // the rig eye ahead_m ahead of the head
     s.request[0] = 6; s.linked = true; s.mask = 0; s.aim = 0; s.camera_rotation_given = true;
     for (int i = 0; i < 3; ++i) { s.rig[i] = right[i]; s.rig[4 + i] = ahead[i]; s.rig[8 + i] = above[i]; s.rig[12 + i] = s.head[i] + ahead[i] * ahead_m + above[i] * .05f; }
     s.rig[3] = s.rig[7] = s.rig[11] = 0; s.rig[15] = 1;
     s.argument[0] = .02f; s.argument[1] = .01f; s.argument[2] = .03f; s.argument[3] = 0;
+    // Round 55: the rotation argument of the native view is local to the rig eye, whose axes are the look's here: none.
+    // (Until then it kept the look's yaw in the world, so the native view was shown turned by the yaw twice: 23 degrees
+    // off the head camera at every change of camera, which the lock's turn carry eased, src/camera_turn.h.)
+    { const Q none = {0, 0, 0, 1}; std::memcpy(s.argument_rotation, &none, 16); }
     s.camera_split = true; for (int i = 0; i < 3; ++i) { s.camera_local[i] = s.argument[i]; s.camera_world[i] = s.rig[12 + i]; }
   }
   void seat(bool on) { if (on) s.flags[SEATED] |= 4; else s.flags[SEATED] &= static_cast<uint8_t>(~4u); }

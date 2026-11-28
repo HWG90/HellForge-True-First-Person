@@ -777,6 +777,61 @@ int main() {
     CHECK(steepest < 1.5f * moved * 33.3f / 300 + .003f && std::fabs(last - held_ahead) < .004f);
     g.end();
   }
+  // ---- Round 55, the veil at a leave and an entry (soak 68, Bodycam #68 11:32:00.915, #82, #200; the matrix's
+  // stand-up-prone-head, 11:09:12.265). As the game has it: the continuity and the push on, the swap holding the eye
+  // `behind` metres behind the head at the leave (prone: the head well in front of the held eye), the veil closed by
+  // the tick after the frame with the body. Every helper suite runs the shipped defaults (fresh() changes none). ----
+  struct Played { float eye[40][3]; float veil[40]; float head_shown[40]; bool head_known[40]; int kinds[40]; int n = 0; };
+  auto play_leave = [&](float behind, int head_frames, int native_frames, Played &p) {
+    fresh(true, true, true);
+    tfp_camera_set_veil(true); tfp_camera_set_clear(true);
+    Game g; g.pose(1, 2, 0, .2f); g.look(.2f, 0); g.hip(); g.begin();
+    g.eye[0] = 0; g.eye[1] = -behind; g.eye[2] = .13f;
+    CHECK(tfp_camera_set_weapon_key(g.gen, 0x1111) == 1);
+    standing(g, 30, 33.3, true); standing(g, 3, 33.3, true, 2);
+    tfp_camera_trace_edge();
+    auto note = [&](int kind) {
+      TfpCameraTraceRow rows[8]; std::memset(rows, 0, sizeof rows); const uint32_t got = tfp_camera_trace_read(rows, 8);
+      const TfpCameraTraceRow *r = got ? &rows[got - 1] : nullptr;
+      const float *v = r ? r->veil : nullptr;
+      std::memcpy(p.eye[p.n], g.shown, 12); p.veil[p.n] = v ? std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) : 0; p.kinds[p.n] = kind;
+      p.head_known[p.n] = r && r->head_known; p.head_shown[p.n] = r ? r->head_shown[0] : 0; ++p.n;
+      tfp_camera_trace_edge();
+    };
+    g.native(2); g.frame(33.3); note(6); // the swap's last native frame: p.eye[0]
+    for (int i = 0; i < head_frames; ++i) { g.hip(2); g.frame(33.3); tfp_camera_veil_tick(i == 1); note(4); }
+    for (int i = 0; i < native_frames; ++i) { g.native(2); g.frame(33.3); tfp_camera_veil_tick(false); note(6); }
+    g.end();
+  };
+  auto change_of = [](const Played &p, int k) {
+    float d = 0; for (int i = 0; i < 3; ++i) { const float c = (p.eye[k + 1][i] - p.eye[k][i]) - (p.eye[k][i] - p.eye[k - 1][i]); d += c * c; } return std::sqrt(d);
+  };
+  // THE OPEN is the round 44 clearance, whole in the leave's frame: an open of 0.4 m on foot (the head that far in front
+  // of the held eye) puts the eye shown TFP_CAMERA_VEIL_CLEAR in front of the head in the leave's own frame and in every
+  // head-camera frame after it, as the matrix's behind_head judge and the throw-eye judges want. (Round 55 tried
+  // spreading it, 0.15 m a frame: those frames went 0.05 to 0.19 m behind the head on the throw-eye judges, so it was
+  // dropped.)
+  for (float behind : {.31f, .28f, .10f, .03f}) {
+    Played p; play_leave(behind, 12, 0, p);
+    float least = 1e9f; int known = 0;
+    for (int k = 1; k < p.n; ++k) if (p.kinds[k] == 4 && p.head_known[k]) { ++known; least = std::fmin(least, -p.head_shown[k]); }
+    std::printf("  round 55, a veil opening behind the head by %.2f m: the leave's veil %.3f m; the eye shown at least %.3f m in front of the head over %d head-camera frames\n",
+                behind, p.veil[1], least, known);
+    CHECK(known >= 10 && p.head_known[1]);
+    CHECK(least >= TFP_CAMERA_VEIL_CLEAR - 2e-3f);
+    if (behind > .25f) CHECK(p.veil[1] > .30f); // the whole move in the leave's frame
+  }
+  // (a) THE ENTRY: back into the native view while a veil of 0.26 m is still let out. The native view's first frame
+  // took the eye without the veil (main: the eye stepped back the veil's whole 0.26 m in one frame and the step
+  // changed by 0.30). Now the continuity is handed the eye shown, eye + veil, and lets the rest out.
+  {
+    Played p; play_leave(.28f, 4, 10, p);
+    int entry = -1; for (int k = 2; k < p.n; ++k) if (p.kinds[k] == 6) { entry = k; break; } // p.eye[0] is the swap's native frame
+    CHECK(entry > 0 && p.veil[entry - 1] > .15f);
+    float worst = 0; for (int k = entry - 1; k + 1 < p.n && k < entry + 4; ++k) worst = std::fmax(worst, change_of(p, k));
+    std::printf("  round 55, back into the native view with a veil of %.3f m let out: the step changed by %.3f m at most\n", entry > 0 ? p.veil[entry - 1] : 0, worst);
+    CHECK(worst < .07f);
+  }
   std::printf("camera veil through the helper: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

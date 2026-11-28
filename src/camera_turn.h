@@ -156,6 +156,14 @@ static inline TfpQ tfp_turn_step(TfpTurn *t, TfpQ game, bool game_known, uint32_
   t->kind = kind; t->tick = tick;
   return carry;
 }
+/* Round 55, THE DIRECTION SHOWN: the carry tfp_turn_step will give for this frame, told before the frame is played and
+ * with the state left as it is, so the head camera's eye (and the push, the veil, head_shown) can be built along the
+ * direction that will be shown (src/camera_helper.c lock_turn_preview). The same to the bit as that step, given the
+ * same arguments and no step between. */
+static inline TfpQ tfp_turn_peek(const TfpTurn *t, TfpQ game, bool game_known, uint32_t kind, double tick, uint32_t max_gap_ms) {
+  TfpTurn ahead = *t;
+  return tfp_turn_step(&ahead, game, game_known, kind, tick, max_gap_ms, NULL);
+}
 /* A frame that carries nothing by rule (full aim: the sights stay on the eye, as everywhere in the lock): shown with
  * the game's own direction. A carry under way ends, none begins, and the frame is the start for the next change. */
 static inline void tfp_turn_drop(TfpTurn *t, TfpQ game, bool game_known, uint32_t kind, double tick) {
