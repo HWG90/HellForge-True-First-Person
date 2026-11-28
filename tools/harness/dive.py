@@ -41,6 +41,7 @@ ENTERED = re.compile(STAMP + r"State: entered the native view\b")
 VIEW_KIND = re.compile(STAMP + r"View: .*?\bkind=(\d+)")
 MOTION = re.compile(STAMP + r"Motion: action=([\w-]+)")
 DIVE_ACTION = "dive"   # the mod's name for a dive (src/action_select.c), forward or back; never "dive-back"
+GAP_MS = 80.0          # as matrix.GAP_MS
 VEIL_HEAD = re.compile(STAMP + r"Trace: t=\S+ kind=(\d+)\b.*? veil_head=\((-?[\d.]+) (-?[\d.]+)\)")
 
 # Round 32: the swap's key goes down this long after the dive's key went down, tried in turn until a leave comes in the
@@ -68,6 +69,59 @@ STAND_PRESSES = 3                     # presses at most (prone -> crouch -> idle
 STAND_WAIT_S = 2.0                    # how long the log is read for a new Motion: line after a press
 LANDING_WAIT_S = 2.0                  # where the last action is the dive: how long the log is read for its landing
 LOOKBACK_BYTES = 1 << 20              # the log before the harness began reading it, searched for the last Motion: line
+
+
+# Round 55C: the game's dive launch, for matrix.measure (whose "launch").
+LAUNCH_SOURCE = re.compile(r" Trace: .*? source=(\w+)\b.*? tick=([\d.]+)")
+LAUNCH_AFTER = (2, 3)      # the frame judged is this many frames after the dive's own (its Motion: line's frame)
+LAUNCH_STAMP_S = 0.0025    # the dive's frame: a row written within this of the Motion: line ...
+LAUNCH_EDGE_MS = 5.0       # ... at t= this near 0 (the trace counts from the dive's line: -0.8 to -1.1 ms logged)
+
+
+def launch_marks(lines):
+    """What launch() reads of the log `lines`: {dives: [seconds of the day of every "Motion: action=dive" line],
+    sources: {tick: the Trace row's source=}}; None where the log has no dive line (nothing can be a launch)."""
+    dives = [stamp_s(m[1]) for m in map(MOTION.match, lines) if m and m[2] == DIVE_ACTION]
+    if not dives:
+        return None
+    sources = {}
+    for line in lines:
+        m = LAUNCH_SOURCE.search(line)
+        if m:
+            sources[float(m[2])] = m[1]
+    return {"dives": dives, "sources": sources}
+
+
+def launch(rows, i, shown, root, marks, limit):
+    """Round 55C: whether frame i of `rows` (trace.frames, with source= set from `marks`), whose eye changed its step
+    by `shown` and whose root's own change of step is `root` (m, or None), is the game's dive launch: an untouched
+    native frame of the game's own eye, where the mod can have had no part. All of this must hold:
+      - the frame is LAUNCH_AFTER frames after the dive's own: the row written with the dive's "Motion: action=dive"
+        line (within LAUNCH_STAMP_S, at t= within LAUNCH_EDGE_MS of 0). The root leaves its run in the frame after the
+        dive's and the rig eye is the root a frame late, so the eye's step changes one or two frames after that;
+      - in the dive's frame and every frame from it to frame i: kind 6, jumps not looked for, nothing taken up but
+        "root", under stance.NOTHING_M carried, the wanted eye the eye shown, no veil (stance._untouched), source native,
+        and no two of them further apart than GAP_MS;
+      - the root's own change of step in frame i is under `limit` (POP_M): a lunge of the body is measure()'s own rule;
+      - `shown` is under stance.CAP_M.
+    The feel.63 cases: soak 67-A #54 (0.070 m) and #85 (0.071), 68-C #5 (0.069), #22 (0.090) and #218 (0.072), the
+    matrix's "dive" (0.073); every one two frames after the dive's line, the root's change 0.026 to 0.052 m. matrix.py
+    prints such a frame and does not count it, as it does the stance ramp's (tools/harness/stance.py)."""
+    import stance
+    if not marks or root is None or root >= limit or shown >= stance.CAP_M:
+        return False
+    for back in LAUNCH_AFTER:
+        e = i - back
+        if e < 0:
+            continue
+        edge = rows[e]
+        if abs(edge.get("t", 1e9)) > LAUNCH_EDGE_MS or not any(abs(stamp_s(edge["written"]) - d) <= LAUNCH_STAMP_S for d in marks["dives"]):
+            continue
+        span = rows[e:i + 1]
+        if any(not 0 < b["tick"] - a["tick"] <= GAP_MS for a, b in zip(span, span[1:])):
+            return False
+        return all(stance._untouched(row) and row.get("source") == "native" for row in span)
+    return False
 
 
 def script(after):
