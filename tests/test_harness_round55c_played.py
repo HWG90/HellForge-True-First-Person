@@ -171,7 +171,7 @@ class MatrixSetup(unittest.TestCase):
         j = matrix.judge_stood("clamber-high", {"standing": True, "before": None, "after": None, "presses": [], "why": None}, j)
         self.assertTrue(j["harness"])   # not undone by a stand-up that went well
         j = matrix.judge_played("clamber-high", LANDING.read_text().splitlines(), {"pass": True, "notes": []})
-        self.assertEqual((j["pass"], j["played"], j["harness"]), (True, True, False))
+        self.assertEqual((j["pass"], j["played"], j.get("harness", False)), (True, True, False))
 
     def test_the_summary_keeps_harness_failures_apart(self):
         text = matrix.result_summary({"a": {"pass": True}, "b": {"pass": False}, "c": {"pass": False, "harness": True}})

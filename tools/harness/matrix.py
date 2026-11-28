@@ -977,7 +977,8 @@ def judge_played(name, lines, judged):
         judged["pass"] = False
         judged["notes"] = notes + judged["notes"]
     judged["played"] = not notes
-    judged["harness"] = bool(notes) or judged.get("harness", False)
+    if notes:
+        judged["harness"] = True   # (a played phase's verdict keeps its keys as they were)
     return judged
 
 
