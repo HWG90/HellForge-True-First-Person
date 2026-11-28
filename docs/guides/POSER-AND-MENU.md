@@ -6,7 +6,7 @@ Three things retail has that the first HellForge builds lacked. All three are bu
 |---|---|
 | Saving settings | Built. `src/wire_settings.c` (when), `src/mod_view.c` (the file) |
 | Settings menu | Built. DBF-MCM when it is loaded, else the mod's own panel (round 15). `src/wire_menu.c` (the one list), `src/mod_menu.c`, `src/wire_panel.c` |
-| Placement editor | Built for the weapon and arms. `src/placement_editor.c` (retail's editor), `src/wire_editor.c` (binder), `src/mod_editor.c` (the panel) |
+| Placement editor | Built for the weapon and arms. `src/placement_editor.c` (retail's editor), `src/wire_editor.c` (binder), `src/mod_editor.c` (the panel), `src/editor_weapons.h` (the list of saved placements, by category) |
 
 ## Saving
 
@@ -198,6 +198,8 @@ A `Test:` line says when it is on. The `Aim:` line is the same either way.
 | Cancel / Esc / Page Up | Closes and puts the placement back |
 | Reset | Previews the default for this weapon and action; save to keep it |
 | Reset all | Clears every saved placement the editor manages (retail's rule), at once |
+| Click on a category header of the list | Folds or unfolds that category (round 53, below) |
+| Wheel over the list | Scrolls the list instead of moving the depth |
 
 Limits are retail's: 50 cm on each axis, 90 degrees on each angle. A weapon swap, the first-person view ending, the settings menu opening or the game losing focus cancels the edit and puts the placement back.
 
@@ -206,6 +208,33 @@ Limits are retail's: 50 cm on each axis, 90 degrees on each angle. A weapon swap
 **How rotation is shown (fixed in round 16, after 0.6.0-feel.50):** moving and rotating take different roads. A move goes to the controller and the pose helper, which take x, y, z only. Yaw, pitch and roll are drawn by the motion runtime, as in retail: while the editor is open it asks the editor for the draft's rotation and hands it to the pose helper as the motion rotation, on the rig node that carries the arms and the gun (`src/arm_graft.h`, `tfp_graft_view_node`). In play it adds the saved placement's yaw, pitch and roll to its own bob and sway. Up to feel.50 the motion runtime was never given the editor (`src/wire_motion.c` had both editor hooks empty). A right or middle drag changed the numbers on the panel, but nothing on screen moved until the placement was saved and used in play. Now `src/editor_motion.h` hands the editor over, and `tests/run-editor-rotation.sh` drags each axis through the real editor and motion runtime and checks that the drawn rotation changes during the drag, that the save keeps it, and that it is drawn in play. As in retail, bob and sway pause while the editor is open: only the edited rotation is drawn.
 
 **How it is drawn:** the editor lays out its own panel (retail's geometry, top left of the screen) and hit-tests its own buttons. `src/mod_editor.c` draws those rectangles and texts with the overlay host's theme tokens (`ov->theme()`), shaped per `HD2-UI-Style/DESIGN.md` (panel rounding 10 with a 1 px line border, buttons rounding 6, hover fill under the pointer). It holds no placement logic.
+
+**The list of saved placements (round 53):** a tester asked for the editor's weapon list sorted into categories. Up to
+round 53 the editor had no list: it only named the weapon in your hands by its key. Now a second panel under the
+editor's own, "SAVED PLACEMENTS", names every weapon the settings hold a placement for (`action_placements` rows with
+at least one action, and the older `weapon_placements`), by the catalogue's name:
+
+- **First:** the weapon in your hands, as `IN HANDS: <name>` in the accent colour (with `(none saved)` when the settings
+  hold nothing for it). It is not repeated under its category.
+- **Then a header per category that has a weapon:** `PRIMARY`, `SECONDARY`, `SUPPORT`, `OTHER`, with the count. The
+  category is the loadout slot of the kit's catalogue (`src/action_placement_data.h` `kind`: 1, 3, 2), the field the
+  `Weapon:` line's family is derived from; it is not read from the game. A key the catalogue does not know is shown as
+  the key under Other, and the shared `__all` row as "All weapons (shared)" under Other.
+- **Inside a category:** by name, capitals and small letters alike.
+- **A click on a header** folds or unfolds it (`+` folded, `-` open). What is folded is kept until the mod is loaded
+  again (a game start or a live replace); it is not written to a file.
+- **The wheel over the list** scrolls it when it does not fit (the title line then says `1-20 of 34 (wheel)`); anywhere
+  else the wheel is depth as before. A press that begins on the list is not a move drag.
+
+The list is read only: the editor edits the weapon in your hands, as before, and a click on a weapon's row does nothing.
+It is filled when the editor draws its first frame and again after "Reset all". No key is read for it: the keys in the
+table above are unchanged, and the overlay host gives the editor no controller input, before or after. Colours are the
+same five roles as the editor's panel, each an `ov->theme()` token: section headings and the held weapon in the accent
+with the bold face, header rows as controls (rounding 6, hover fill), names in `text`.
+`src/editor_weapons.h` holds the grouping, the order, the layout and the hit test with no game
+(`tests/run-editor-weapons.sh`); `src/wire_editor.c` builds the list from the settings store and the catalogue
+(`tests/run-wire-feel.sh`); `src/mod_editor.c` only draws it. Not yet seen in the game: how the panel sits on screen
+and reads, and that a click on a header reaches it there.
 
 **While it is open** the overlay host has the game's keyboard and mouse, as retail's captured input did: you cannot move or look around.
 
