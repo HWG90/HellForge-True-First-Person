@@ -339,18 +339,28 @@ void tfp_near_setter_from(uint64_t ret, void *camera, float native) {
             target = wanted; if (aim) atomic_fetch_add_explicit(&aim_applied, 1, memory_order_relaxed);
           }
         }
-        /* Round 42 (not in retail): in full aim, an aim-in time below 180 scales the ease (0 is the snap below). */
+        /* Full aim's near clip, the rounds composed in this order (round 54), each step on the one before:
+         *  1. target (above): the game's value, less the gun's move (round 20c), times the fov scale (round 53), never
+         *     under the game's own 0.05 (tfp_clip_ads_near); hip and normal aim their clearances.
+         *  2. the ease toward it: retail's 45 ms; in full aim with an aim-in time below 180, that constant times ms/180
+         *     (round 42; 0 is step 3).
+         *  3. aim-in 0, the first call of full aim: the target at once (round 42).
+         *  4. a near clip coming in (the gun drawn closer, round 20; shown wider than the game's lens, round 53): the
+         *     target at once, at every aim-in time; going out it eases.
+         * Steps 3 and 4 only ever set the target, so in full aim with either of step 4's reasons the near clip is never
+         * past the scaled value, and never under 0.05 (the ease runs between two values at or over it). The aim-in
+         * time changes only steps 2 and 3: at 180 or more (the start-up value) both are retail's / main's, to the bit,
+         * whatever the fov scale; at the game's lens (scale 1) step 1 is the game's value to the bit too. */
         const uint32_t enter = atomic_load_explicit(&ads_enter_ms, memory_order_relaxed);
-        float eased = ease(target, view == VIEW_ADS && enter > 0 && enter < 180 ? EASE_TAU_US*((float)enter/180.0f) : EASE_TAU_US);
-        /* Not in retail (round 42): "Aim-in time" 0, the first call of full aim: full aim's value at once. */
+        const bool aim_in_scaled = view == VIEW_ADS && enter > 0 && enter < 180;
+        float eased = ease(target, aim_in_scaled ? EASE_TAU_US*((float)enter/180.0f) : EASE_TAU_US);
         const bool entered = view == VIEW_ADS && atomic_load_explicit(&ads_was, memory_order_relaxed) == 0;
         atomic_store_explicit(&ads_was, view == VIEW_ADS ? 1u : 0u, memory_order_relaxed);
-        if (entered && enter == 0 && eased != target) {
+        const bool snap_entry = entered && enter == 0;              /* step 3 */
+        const bool snap_in = (closer > 0 || wider) && eased > target; /* step 4 */
+        if ((snap_entry || snap_in) && eased != target) {
           eased = target; atomic_store_explicit(&shown_meters, float_bits(eased), memory_order_relaxed);
         }
-        /* Not in retail (round 20): with the gun drawn closer in full aim, a near clip coming in is taken at once; the
-         * ease would leave it behind the sight's rear while the gun comes in. Going out it eases, as retail's. */
-        if ((closer > 0 || wider) && eased > target) { eased = target; atomic_store_explicit(&shown_meters, float_bits(eased), memory_order_relaxed); }
         if (meters(eased) && eased >= GAME_METERS && eased != native) { applied = eased; atomic_fetch_add_explicit(&replaced, 1, memory_order_relaxed); }
       }
       atomic_store_explicit(&last_native, float_bits(native), memory_order_relaxed);
