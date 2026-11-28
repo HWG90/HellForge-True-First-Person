@@ -1132,12 +1132,15 @@ out of the picture, and writes what a cause can be read from.
 - Under 0.5 degrees nothing is carried and the rotation handed on is main's, bit for bit. Over 120 is another view.
 - The carry sits on top of each frame's own rotation, so the mouse and recoil go through whole during the ease.
 - A second change while a carry is under way starts from what is shown then.
-- **The player's own turn is not part of the difference.** Out of the native view both calls come in one game frame
-  (0 to 1 ms apart in every logged change). Into it the frame before is a whole frame earlier (32 to 35 ms), so the
+- **The player's own turn is not part of the difference.** Out of the native view both calls usually come in one game
+  frame (0 to 1 ms apart), but the second check found 15 of about 660 logged 6 → 4 changes 5 to 34 ms apart, three a
+  whole 33.6 ms frame (session 20261125-045337 L2523, L14177, L19521), where the first build still froze a pan; the
+  advance is now taken in both directions, and scales with the time since the last frame, so a 0-1 ms change moves
+  by almost nothing (0.02 degrees at most on every logged change). Into it the frame before is a whole frame earlier (32 to 35 ms), so the
   game's new direction is off the one last shown by one frame of mouse turn as well. The first build carried that:
   any pan over 30 degrees a second at 60 frames a second stood still for the frame of the change and caught up after
   (100 degrees a second at 16.7 ms: 1.67, 0.00, 1.76, 1.90, 1.98, 2.02 degrees a frame, where main turns 1.67 in each;
-  found by the round's check). Now, at a change from kind 4 to kind 6, the direction last shown is first advanced by
+  found by the round's check). Now, at a change either way, the direction last shown is first advanced by
   the turn the game's own direction made over the ordinary camera's last frame (about the world's axes, in proportion
   to the time since, four frames at most; a second call within 4 ms is the same frame), the difference is taken from
   there and the 0.5 degrees apply to what is left. A pan through agreeing cameras carries nothing and is main's bit

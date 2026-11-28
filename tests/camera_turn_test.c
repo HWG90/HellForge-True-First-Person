@@ -49,14 +49,14 @@ static int play(uint32_t from, uint32_t to, float degrees, double dt, float mous
  * frame, 0: none), then the change `gap` ms later and the native view at `dt`; from the change on the pan is `after`
  * degrees a second and the game's direction `degrees` off in the view's own frame. Returns the degrees the change began
  * a carry with; `carried` and `shown` (40 each), when given, take the frames from the change on. */
-static float pan(float rate, float after, float degrees, double dt, double gap, int twice, TfpQ *carried, TfpQ *shown, TfpQ *last_before) {
+static float pan_kinds(uint32_t k0, uint32_t k1, float rate, float after, float degrees, double dt, double gap, int twice, TfpQ *carried, TfpQ *shown, TfpQ *last_before) {
   TfpTurn t; tfp_turn_reset(&t);
   const TfpQ pitch = about(1, 0, 0, 20), off = about(.3f, .1f, 1, degrees);
   double tick = 9000; float yaw = 12, began = -1, first = 0;
   for (int i = 0; i < 12; ++i) {
     const TfpQ game = tfp_q_normalised(tfp_q_mul(about(0, 0, 1, yaw), pitch));
     for (int call = 0; call < (twice && i%twice == 0 ? 2 : 1); ++call) {
-      const TfpQ carry = tfp_turn_step(&t, game, true, 4, tick+call*.3, 250, &began);
+      const TfpQ carry = tfp_turn_step(&t, game, true, k0, tick+call*.3, 250, &began);
       CHECK(tfp_turn_none(carry) && began == 0);
     }
     if (last_before) *last_before = game;
@@ -66,7 +66,7 @@ static float pan(float rate, float after, float degrees, double dt, double gap, 
   for (int i = 0; i < 40; ++i) {
     TfpQ game = tfp_q_normalised(tfp_q_mul(about(0, 0, 1, yaw), pitch));
     if (degrees != 0) game = tfp_q_normalised(tfp_q_mul(game, off));
-    const TfpQ carry = tfp_turn_step(&t, game, true, 6, tick, 250, &began);
+    const TfpQ carry = tfp_turn_step(&t, game, true, k1, tick, 250, &began);
     if (i == 0) first = began; else CHECK(began == 0);
     if (carried) carried[i] = carry;
     if (shown) shown[i] = tfp_turn_apply(game, carry);
@@ -74,6 +74,9 @@ static float pan(float rate, float after, float degrees, double dt, double gap, 
     tick += dt; yaw += after*(float)dt/1000;
   }
   return first;
+}
+static float pan(float rate, float after, float degrees, double dt, double gap, int twice, TfpQ *carried, TfpQ *shown, TfpQ *last_before) {
+  return pan_kinds(4, 6, rate, after, degrees, dt, gap, twice, carried, shown, last_before);
 }
 int main(void) {
   /* How long: the steepest point at 200 degrees a second, 120 ms at least. */
@@ -113,6 +116,14 @@ int main(void) {
     /* a pan that stops dead in the frame of the change: one frame's turn is left over and carried (it cannot be told
      * from the cameras pointing apart), no more than that */
     { const float began = pan(300, 0, 0, 16.7, 16.7, 0, NULL, NULL, NULL); CHECK(fabsf(began-300*.0167f) < .05f); }
+    /* Round 49f check: the other way, out of the native view into the ordinary camera, is usually 0-1 ms apart but the logs
+     * hold 6 -> 4 changes a whole frame (33.6 ms at 30 fps) and most of one apart: a pan through them is the game's own too. */
+    for (int r = 0; r < 4; ++r) for (int d = 0; d < 3; ++d) for (int twice = 0; twice <= 2; twice += 2) {
+      CHECK(pan_kinds(6, 4, rates[r], rates[r], 0, frames[d], frames[d], twice, NULL, NULL, NULL) == 0);
+      CHECK(pan_kinds(6, 4, rates[r], rates[r], 0, frames[d], frames[d]/2, twice, NULL, NULL, NULL) == 0);
+      CHECK(pan_kinds(6, 4, rates[r], rates[r], 0, frames[d], 1, twice, NULL, NULL, NULL) == 0);
+      CHECK(pan_kinds(6, 4, -rates[r], -rates[r], 0, frames[d], frames[d], twice, NULL, NULL, NULL) == 0);
+    }
   }
   /* The same pan with the cameras really 29 degrees apart at the change: the 29 degrees are carried (not 29 and the
    * pan's frame), the frame of the change is shown where the pan would have taken the last one, and from there what

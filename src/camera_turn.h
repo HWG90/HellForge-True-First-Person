@@ -24,10 +24,11 @@
  *   - a difference over TFP_TURN_MOST_DEG is another view (a camera cut the game means) and is shown as it is;
  *   - a second change while a carry is under way starts again from what is shown then;
  *   - THE PLAYER'S OWN TURN is not part of the difference. Into the native view the frame before is a whole frame
- *     earlier (33 ms in every logged change; out of it both calls come in one game frame, 0 to 1 ms apart), so the
+ *     earlier (33 ms in every logged change; out of it usually 0 to 1 ms apart, but 15 of ~660 logged 6 -> 4 changes are 5
+ *     to 34 ms apart, three a whole 33.6 ms frame), so the
  *     game's new direction is off the one last shown by one frame of mouse turn as well, and carrying that froze a pan
  *     for a frame (100 degrees a second at 16.7 ms: 1.67, 0.00, 1.76, 1.90 degrees a frame where main turns 1.67 in
- *     each). So at a change from kind 4 to kind 6 the direction last shown is first advanced by the turn the game's
+ *     each). So at a change either way the direction last shown is first advanced by the turn the game's
  *     own direction made over the ordinary camera's last frame, about the world's axes, in proportion to the time
  *     since; the difference is taken from there and the skip applies to what is left. A pan through agreeing cameras
  *     carries nothing; with the cameras 29 degrees apart the frame of the change is shown where the pan would have
@@ -131,8 +132,10 @@ static inline TfpQ tfp_turn_step(TfpTurn *t, TfpQ game, bool game_known, uint32_
   const bool near = t->known && tick >= t->tick && tick-t->tick <= max_gap_ms;
   if (t->active && !(tick >= t->tick && tick-t->tick <= max_gap_ms)) t->active = false; /* a pause: nothing is carried over it */
   if (game_known && near && kind != t->kind && (kind == 4 || kind == 6) && (t->kind == 4 || t->kind == 6)) {
-    /* into the native view the frame before is a frame earlier: the player's own turn since is not the cameras' */
-    const TfpQ last = t->kind == 4 && kind == 6 ? tfp_turn_ahead(t, tick, max_gap_ms) : t->shown;
+    /* the frame before may be a frame earlier, either way (into the native view always; out of it usually 0-1 ms, but
+     * the logs hold 6 -> 4 changes a whole frame apart): the player's own turn since is not the cameras'. The advance
+     * scales with the time since that frame, so a change 0-1 ms apart is advanced by almost nothing. */
+    const TfpQ last = tfp_turn_ahead(t, tick, max_gap_ms);
     const TfpQ apart = tfp_q_normalised(tfp_q_mul(tfp_q_inv(game), last));
     const float degrees = tfp_turn_degrees(apart);
     if (tfp_q_valid(apart) && degrees >= TFP_TURN_SKIP_DEG && degrees <= TFP_TURN_MOST_DEG) {
