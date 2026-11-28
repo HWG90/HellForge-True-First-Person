@@ -41,6 +41,9 @@
 #define TFP_CLIP_HALF_M .05f        /* half the widest gun */
 #define TFP_CLIP_ASPECT (32.0f/9)   /* the widest screen: the side comes onto the screen nearest there */
 #define TFP_CLIP_PI 3.14159265358979f
+/* Shown this near the game's lens (radians; 0.17 degrees, where the field-of-view lock's glide ends: TFP_FOV_LOCK_DONE)
+ * is the game's lens: the lock glides onto the game's zoom without ever landing on it to the bit. */
+#define TFP_CLIP_SAME_FOV .003f
 
 static inline bool tfp_clip_fov(float fov) { return isfinite(fov) && fov > 0 && fov < TFP_CLIP_PI; }
 
@@ -64,7 +67,7 @@ static inline float tfp_clip_hip_near(float wanted, float x, float z, float fov)
 /* Full aim: what the game's near clip is scaled by for the near plane to show on screen what it shows at the game's
  * own lens `game_fov`, at the shown field of view. 1: the game's lens or more zoom, or nothing to go by. */
 static inline float tfp_clip_ads_scale(float game_fov, float shown_fov) {
-  if (!tfp_clip_fov(game_fov) || !tfp_clip_fov(shown_fov) || !(shown_fov > game_fov)) return 1;
+  if (!tfp_clip_fov(game_fov) || !tfp_clip_fov(shown_fov) || !(shown_fov > game_fov + TFP_CLIP_SAME_FOV)) return 1;
   return tanf(game_fov/2)/tanf(shown_fov/2);
 }
 /* The near clip in full aim: the game's `native` by `scale`, never under the game's own 0.05 (a native value at or
