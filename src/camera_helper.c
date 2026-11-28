@@ -989,12 +989,11 @@ static bool commit_current(Policy *p, uint32_t expected_kind, uint32_t *failure)
  * that is not the game's first-person or ordinary one (a death camera) the direction is the last first-person one.
  * `native` + L_ARGUMENT_ROTATION is the rotation the game passes next: world for an unparented camera, parent-local
  * in the native view (kind 6), where a rotation in the view's own frame is applied the same way. */
-static TfpQ lock_carry_next(TfpQ carry, float passed_ms) {
-  if (carry.w == 1 && carry.x == 0 && carry.y == 0 && carry.z == 0) return carry;
-  const TfpQ next = tfp_slerp(carry, tfp_q_identity(), 1-expf(-passed_ms/LOCK_CARRY_MS));
+static TfpQ lock_carry_step(float passed_ms) {
+  if (lock_carry.w == 1 && lock_carry.x == 0 && lock_carry.y == 0 && lock_carry.z == 0) return lock_carry;
+  const TfpQ next = tfp_slerp(lock_carry, tfp_q_identity(), 1-expf(-passed_ms/LOCK_CARRY_MS));
   return tfp_q_valid(next) && tfp_degrees_between(next, tfp_q_identity()) > .05f ? tfp_q_normalised(next) : tfp_q_identity();
 }
-static TfpQ lock_carry_step(float passed_ms) { return lock_carry_next(lock_carry, passed_ms); }
 static void lock_rotation(Policy *p, const float *native, uint32_t kind, double tick) {
   if (!p->lock_now) { lock_view_known = false; tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity(); lock_carry = tfp_q_identity(); lock_was_held = false; lock_first_known = false;
     tfp_turn_reset(&lock_turn); lock_game_cam_tick = -1; return; }
@@ -1112,16 +1111,14 @@ static bool lock_turn_preview(const Policy *p, const float *native, uint32_t kin
   TfpQ given = tfp_q_identity();
   if (!read((uint64_t)(uintptr_t)native + L_ARGUMENT_ROTATION, &given, 16) || !tfp_q_valid(given)) return false;
   given = tfp_q_normalised(given);
-  /* the view lock_rotation's ordinary branch will give: the game's, with what is left of a held stretch's carry */
-  TfpQ view = given, held = lock_carry;
-  if (lock_was_held && lock_view_known) held = tfp_q_normalised(tfp_q_mul(tfp_q_inv(given), lock_view));
-  if (held.w != 1 || held.x != 0 || held.y != 0 || held.z != 0) {
-    held = lock_carry_next(held, lock_tick > 0 && tick > lock_tick ? (float)(tick-lock_tick) : 0);
-    view = tfp_q_normalised(tfp_q_mul(given, held));
-  }
-  const TfpQ carry = tfp_turn_peek(&lock_turn, view, true, kind, tick, p->c.max_gap_ms);
+  /* The view lock_rotation's ordinary branch gives is the game's, times what is left of a held stretch's carry
+   * (lock_carry). That carry is never under way in a frame whose turn carry is: a native frame (the only start of a
+   * turn carry) sets lock_carry to the identity, and a held frame resets lock_turn, so the first ordinary frame after
+   * one has no turn state to carry from. So the game's own is the view here, the same to the bit wherever the peek
+   * gives a carry. (Round 55's review: the held-stretch lines once here could change no frame; no test could see them.) */
+  const TfpQ carry = tfp_turn_peek(&lock_turn, given, true, kind, tick, p->c.max_gap_ms);
   if (tfp_turn_none(carry)) return false;
-  *shown = tfp_turn_apply(view, carry);
+  *shown = tfp_turn_apply(given, carry);
   return tfp_q_valid(*shown);
 }
 
