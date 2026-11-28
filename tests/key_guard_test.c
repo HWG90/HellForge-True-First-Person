@@ -73,7 +73,7 @@ static int io_chat(void *u) { Io *io = u; io->chat_calls++; return io->chat; }
 static bool io_overlay(void *u) { Io *io = u; io->overlay_calls++; return io->overlay; }
 static bool io_panel(void *u) { Io *io = u; io->panel_calls++; return io->panel; }
 static void io_say(void *u, const char *line) { Io *io = u; io->says++; snprintf(io->said, sizeof io->said, "%s", line); }
-static TfpKeyGuardIo io_of(Io *io) { return (TfpKeyGuardIo){io, io_key_down, io_edge, io_keyboard, io_chat, io_overlay, io_panel, io_say}; }
+static TfpKeyGuardIo io_of(Io *io) { return (TfpKeyGuardIo){io, io_key_down, io_edge, io_keyboard, io_chat, io_overlay, io_panel, io_say, NULL, NULL}; }
 static void io_reset(Io *io, TfpKeyGuard *g) {
   memset(io, 0, sizeof *io);
   io->keyboard_ok = true, io->chat = -1;

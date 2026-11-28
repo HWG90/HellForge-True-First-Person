@@ -13,6 +13,7 @@
 #include <string.h>
 #include "wire_win.h"
 #include "wire_mouse.h"
+#include "key_tap.h"
 #include "camera_helper.h"
 #include "fov_helper.h"
 #include "near_helper.h"
@@ -366,6 +367,120 @@ bool tfp_win_focused(void) {
   return window && GetWindowThreadProcessId(window, &process) && process == GetCurrentProcessId();
 }
 bool tfp_win_key_down(int virtual_key) { return (GetAsyncKeyState(virtual_key) & 0x8000) != 0; }
+/* Round 50 (src/key_tap.h): the mod's edge keys, with a tap between two game updates. "Pressed since the last read" is
+ * GetAsyncKeyState's low bit (Windows, upstream Wine; not Proton, whose bit needs the key down now) or a fresh
+ * WM_KEYDOWN of the game window, counted by a keyboard hook on the window's thread (WH_KEYBOARD, this process only, no
+ * module: nothing is injected anywhere). The hook only counts and passes the message on: no key is taken or
+ * changed, and without it (refused, or no window yet) the keys are the level and the low bit, as before the round.
+ * Round 50b: the two sources are told apart, and each message carries the time the hook took it (key_tap.h judges a
+ * late message by that time). key_latch[vk]: 0, or the GetTickCount64 of the last message since the last read with
+ * bit 62 set, written in one exchange. */
+#define KEY_LATCH_SET ((LONG64)1 << 62)
+static TfpKeyTaps key_taps;
+static volatile LONG64 key_latch[256];
+static volatile LONG key_proc_inside, key_messages;
+static HHOOK key_hook;
+static DWORD key_hook_thread, key_hook_refused_thread, key_hook_error;
+static unsigned key_notes;   /* 1: the hook's line is due; 2: its refusal's; 4: the first tap's; 8: the old hook kept */
+static bool key_tap_told;
+static uint64_t enter_low_ms;   /* round 50c: tfp_win_enter_ms */
+static LRESULT CALLBACK key_proc(int code, WPARAM key, LPARAM flags) {
+  InterlockedIncrement(&key_proc_inside);
+  /* HC_ACTION: the message is being taken off the queue (a peek that leaves it there would count it twice);
+   * bit 31 clear: a key going down; bit 30 clear: it was up before (not an auto-repeat) */
+  if (code == HC_ACTION && key < 256 && !(flags & (LPARAM)0xC0000000)) {
+    InterlockedExchange64(&key_latch[key], (LONG64)(GetTickCount64() & (ULONG64)(KEY_LATCH_SET - 1)) | KEY_LATCH_SET);
+    InterlockedIncrement(&key_messages);
+  }
+  const LRESULT result = CallNextHookEx(NULL, code, key, flags);
+  InterlockedDecrement(&key_proc_inside);
+  return result;
+}
+static unsigned key_raw(void *u, int vk, uint64_t *message_ms) {
+  (void)u;
+  const SHORT word = GetAsyncKeyState(vk);
+  const LONG64 latch = InterlockedExchange64(&key_latch[vk], 0);
+  *message_ms = (uint64_t)(latch & (KEY_LATCH_SET - 1));
+  return ((word & 0x8000) ? TFP_KEY_RAW_DOWN : 0u) | ((word & 1) ? TFP_KEY_RAW_LOW : 0u) | (latch ? TFP_KEY_RAW_MESSAGE : 0u);
+}
+void tfp_win_keys_begin(bool focused) {
+  /* the low bit is asked only while the window's thread gives no key messages (src/key_tap.h) */
+  key_taps.hooked = key_hook && InterlockedCompareExchange(&key_messages, 0, 0);
+  const uint64_t now = GetTickCount64();
+  tfp_key_taps_begin(&key_taps, now, focused);
+  if (!focused) return;
+  if (!key_taps.hooked && (GetAsyncKeyState(VK_RETURN) & 0x8001)) enter_low_ms = now;   /* round 50c */
+  DWORD process = 0;
+  const HWND window = GetForegroundWindow();
+  const DWORD thread = window ? GetWindowThreadProcessId(window, &process) : 0;
+  if (!thread || process != GetCurrentProcessId() || thread == key_hook_thread || thread == key_hook_refused_thread) return;
+  if (key_hook && !UnhookWindowsHookEx(key_hook)) {
+    /* the window moved to another thread and Windows kept the old hook: it stays (and key_hook with it), so that
+     * tfp_win_keys_end still owns it; a second hook would leave this one on with nothing to take it off */
+    key_hook_refused_thread = thread, key_hook_error = GetLastError(), key_notes |= 8;
+    return;
+  }
+  for (int vk = 0; vk < 256; vk++) InterlockedExchange64(&key_latch[vk], 0);
+  key_hook = SetWindowsHookExW(WH_KEYBOARD, key_proc, NULL, thread);
+  if (key_hook) key_hook_thread = thread, key_notes |= 1;
+  else key_hook_thread = 0, key_hook_refused_thread = thread, key_hook_error = GetLastError(), key_notes |= 2;
+}
+bool tfp_win_key_level(int virtual_key) { return (tfp_key_taps_read(&key_taps, virtual_key, key_raw, NULL) & TFP_KEY_DOWN) != 0; }
+bool tfp_win_key_tapped(int virtual_key) {
+  const bool tapped = (tfp_key_taps_read(&key_taps, virtual_key, key_raw, NULL) & TFP_KEY_TAPPED) != 0;
+  if (tapped && !key_tap_told) key_tap_told = true, key_notes |= 4;
+  return tapped;
+}
+unsigned tfp_win_key_taps(void) { return key_taps.taps; }
+/* Round 50c: when the game window last took an Enter key-down (the hook's stamp; Enter is no key read above, so its
+ * latch is only looked at, never taken), or, while the window gives no key messages, the last update whose low bit
+ * or level showed Enter (tfp_win_keys_begin: one GetAsyncKeyState a focused update, only then). */
+uint64_t tfp_win_enter_ms(void) {
+  const uint64_t message = (uint64_t)(InterlockedCompareExchange64(&key_latch[VK_RETURN], 0, 0) & (KEY_LATCH_SET - 1));
+  return message > enter_low_ms ? message : enter_low_ms;
+}
+unsigned tfp_win_key_messages(void) { return (unsigned)InterlockedCompareExchange(&key_messages, 0, 0); }
+bool tfp_win_keys_note(char *out, size_t size) {
+  if (key_notes & 1) {
+    key_notes &= ~1u;
+    snprintf(out, size, "Keys: a key tapped between two game updates is taken from the game window's own key messages (a keyboard hook on "
+             "its thread %lu, this process only; it reads, it takes no key)", (unsigned long)key_hook_thread);
+  } else if (key_notes & 2) {
+    key_notes &= ~2u;
+    snprintf(out, size, "Keys: no keyboard hook on the game window's thread %lu (error %lu): a key tapped between two game updates is "
+             "seen only where GetAsyncKeyState remembers it (not under Proton); hold the key a moment",
+             (unsigned long)key_hook_refused_thread, (unsigned long)key_hook_error);
+  } else if (key_notes & 8) {
+    key_notes &= ~8u;
+    snprintf(out, size, "Keys: the game window moved to thread %lu, but Windows did not take the keyboard hook off thread %lu (error %lu): "
+             "it stays there, and a key tapped between two game updates may be missed; hold the key a moment",
+             (unsigned long)key_hook_refused_thread, (unsigned long)key_hook_thread, (unsigned long)key_hook_error);
+  } else if (key_notes & 4) {
+    char name[16];
+    key_notes &= ~4u;
+    const int vk = key_taps.last_tap;
+    if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9')) snprintf(name, sizeof name, "%c", vk);
+    else if (vk >= 0x70 && vk <= 0x87) snprintf(name, sizeof name, "F%d", vk - 0x6f);
+    else snprintf(name, sizeof name, "key %d", vk);
+    snprintf(out, size, "Keys: %s was pressed and let go between two game updates; taken as one press (the first such tap of the "
+             "session; later ones are not logged)", name);
+  } else return false;
+  return true;
+}
+bool tfp_win_keys_end(void) {
+  if (key_hook) {
+    if (!UnhookWindowsHookEx(key_hook)) return false;
+    key_hook = NULL, key_hook_thread = 0;
+  }
+  for (int waited = 0; InterlockedCompareExchange(&key_proc_inside, 0, 0); waited++) {
+    if (waited >= 2000) return false;
+    Sleep(1);
+  }
+  /* round 50c: a call that had just entered key_proc but not yet counted itself, or had counted itself out and not
+   * yet returned, is a few instructions from done: give it 50 ms, and look again */
+  Sleep(50);
+  return InterlockedCompareExchange(&key_proc_inside, 0, 0) == 0;
+}
 bool tfp_win_keyboard(uint8_t keys[256]) { return GetKeyboardState(keys) != 0; }
 /* Retail reads stingray.Mouse.button('right' / 'middle') (runtime.lua:395-421). src/wire_mouse.c chooses:
  * the engine's own answer once the feel build has installed its engine caller and the two functions

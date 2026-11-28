@@ -86,16 +86,18 @@ static McmMod *f_register(const char *json, size_t length, const McmCallbacks *c
   return (McmMod *)&token;
 }
 static int f_unregister(McmMod *m) { (void)m; mcm.unregisters++, mcm.registered = 0; return 1; }
-static const char *f_error(void) { return ""; }
+static int mcm_refuses;
+static const char *f_error(void) { return mcm_refuses ? "not now" : ""; }
 static int f_get(McmMod *m, const char *id, McmValue *out) { (void)m; (void)id; (void)out; return 0; }   /* storage: true: no values */
 static int f_set(McmMod *m, const char *id, const McmValue *v) { (void)m; (void)id; (void)v; mcm.sets++; return 1; }
 static int f_set_disabled(McmMod *m, const char *id, int d) { (void)m; (void)id; (void)d; mcm.disables++; return 1; }
 static int f_set_label(McmMod *m, const char *id, const char *l) { (void)m; (void)id; (void)l; mcm.labels++; return 1; }
 static int f_open(void) { mcm.opens++, mcm.open = 1; return 1; }
-static int f_close(void) { mcm.closes++, mcm.open = 0; return 1; }
+static int f_close(void) { if (mcm_refuses) return 0; mcm.closes++, mcm.open = 0; return 1; }
 static int f_is_open(void) { return mcm.open; }
-static int f_focus_page(const char *mod, const char *page) { (void)mod; mcm.focus_pages++, mcm.open = 1; snprintf(mcm.page, sizeof mcm.page, "%s", page); return 1; }
-static int f_status(McmStatus *s) { s->open = mcm.open, s->menu_key = 46, s->editing = 0; return 1; }
+static int f_focus_page(const char *mod, const char *page) { (void)mod; if (mcm_refuses) return 0; mcm.focus_pages++, mcm.open = 1; snprintf(mcm.page, sizeof mcm.page, "%s", page); return 1; }
+static int mcm_editing;
+static int f_status(McmStatus *s) { s->open = mcm.open, s->menu_key = 46, s->editing = mcm_editing; return 1; }
 static McmApi api;
 static const McmApi *fake_mcm_api(void) { return &api; }
 static int mcm_loaded;
@@ -116,7 +118,7 @@ static HfApi hf;
 static TfpMcmState p_mcm(void *u, TfpWire *w, unsigned unavailable, TfpMenuEditFn edit) { (void)u; return tfp_mod_menu_try(&hf, NULL, w, unavailable, edit); }
 static bool f10_down;
 static bool p_key(void *u, int vk) { (void)u; return vk == TFP_PANEL_KEY && f10_down; }
-static void p_show(void *u) { (void)u; tfp_mod_menu_show(); }
+static const char *p_show(void *u, bool *opened) { (void)u; return tfp_mod_menu_show(opened); }
 static void p_lock(void *u) { (void)u; }
 static const OvApi *p_connect(void *u, uint32_t version) { (void)u; (void)version; return NULL; }
 
@@ -127,7 +129,7 @@ int main(void) {
                  .set = f_set, .set_disabled = f_set_disabled, .set_label = f_set_label, .open = f_open, .close = f_close,
                  .is_open = f_is_open, .focus_page = f_focus_page, .status = f_status};
   hf.log = hf_log;
-  const TfpPanelPlatform platform = {NULL, p_lock, p_lock, p_connect, p_mcm, false, "goose.true-first-person/settings", NULL, TFP_EDITOR_KEY, p_key, p_show};
+  const TfpPanelPlatform platform = {NULL, p_lock, p_lock, p_connect, p_mcm, false, "goose.true-first-person/settings", NULL, TFP_EDITOR_KEY, p_key, p_show, NULL, NULL};
   new_wire();
   CHECK(tfp_wire_settings_bind(&wire, settings_json, sizeof settings_json - 1, "test"));
   mcm_loaded = 1;
@@ -138,7 +140,8 @@ int main(void) {
   for (int i = 0; i < 60; i++) ms += 16, tfp_wire_panel_tick(&wire, &platform, ms, 0, NULL), tfp_wire_menu_frame(&wire);
   const unsigned sets = mcm.sets, labels = mcm.labels, disables = mcm.disables;
   /* MCM is open on the Locked view page; two minutes of game updates at 60 a second, with the re-ask once a second */
-  tfp_mod_menu_show();
+  bool opened = false;
+  CHECK(!tfp_mod_menu_show(&opened) && opened);
   CHECK(mcm.focus_pages == 1 && mcm.open && !strcmp(mcm.page, tfp_wire_menu_page_ids[0]));
   mcm.focus_pages = 0;
   for (int i = 0; i < 120 * 60; i++) ms += 16, tfp_wire_panel_tick(&wire, &platform, ms, 0, NULL), tfp_wire_menu_frame(&wire);
@@ -159,6 +162,19 @@ int main(void) {
   f10_down = false, ms += 16, tfp_wire_panel_tick(&wire, &platform, ms, 0, NULL);
   f10_down = true, ms += 16, tfp_wire_panel_tick(&wire, &platform, ms, 0, NULL);
   CHECK(mcm.focus_pages == 1 && mcm.open && mcm.closes == 1 && mcm.registers == 1);
+  /* round 50: what F10 did, or why not, for its log line: closed, opened, MCM typing, MCM refusing */
+  CHECK(!tfp_mod_menu_show(&opened) && !opened && mcm.closes == 2 && !mcm.open);
+  CHECK(!tfp_mod_menu_show(&opened) && opened && mcm.focus_pages == 2 && mcm.open);
+  mcm_editing = 1;
+  const char *why = tfp_mod_menu_show(&opened);
+  CHECK(why && strstr(why, "DBF-MCM is taking a key") && mcm.closes == 2 && mcm.open);
+  mcm_editing = 0, mcm_refuses = 1;
+  why = tfp_mod_menu_show(&opened);
+  CHECK(why && !strcmp(why, "DBF-MCM did not close its window (not now)") && mcm.open);
+  mcm.open = 0;
+  why = tfp_mod_menu_show(&opened);
+  CHECK(why && !strcmp(why, "DBF-MCM did not open this mod's page (not now)") && !mcm.open);
+  mcm_refuses = 0;
   printf("mod menu: %u checks passed (while DBF-MCM holds the menu: one registration, no re-registration, no page or window change "
          "and nothing sent in two minutes of updates with the once-a-second re-ask; F10 one change per press)\n", checks);
   return 0;

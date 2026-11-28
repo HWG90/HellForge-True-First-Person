@@ -79,12 +79,26 @@ TfpMcmState tfp_mod_menu_try(const HfApi *hf, HfMod *mod, TfpWire *w, unsigned u
                "the mod's own is made", TFP_MENU_MOD_ID);
   return TFP_MCM_READY;
 }
-void tfp_mod_menu_show(void) {
+bool tfp_mod_menu_editing(void) {
   McmStatus status = {.size = sizeof status};
-  if (!registered || !mcm) return;
-  if (mcm->status(&status) && status.editing) return;   /* a key or a text being typed: F10 belongs to it */
-  if (mcm->is_open()) mcm->close();
-  else mcm->focus_page(TFP_MENU_MOD_ID, tfp_wire_menu_page_ids[0]);   /* opens the window on this mod's first page */
+  return registered && mcm && mcm->status && mcm->status(&status) && status.editing;
+}
+static char show_why[200];
+const char *tfp_mod_menu_show(bool *opened) {
+  McmStatus status = {.size = sizeof status};
+  if (!registered || !mcm) return "the settings are not registered with DBF-MCM right now";
+  if (mcm->status(&status) && status.editing) /* a key or a text being typed: F10 belongs to it */
+    return "DBF-MCM is taking a key, a text or a colour (F10 belongs to that)";
+  if (mcm->is_open()) {
+    *opened = false;
+    if (mcm->close()) return NULL;
+    snprintf(show_why, sizeof show_why, "DBF-MCM did not close its window (%s)", mcm->error ? mcm->error() : "no reason given");
+    return show_why;
+  }
+  *opened = true;   /* opens the window on this mod's first page */
+  if (mcm->focus_page(TFP_MENU_MOD_ID, tfp_wire_menu_page_ids[0])) return NULL;
+  snprintf(show_why, sizeof show_why, "DBF-MCM did not open this mod's page (%s)", mcm->error ? mcm->error() : "no reason given");
+  return show_why;
 }
 bool tfp_mod_menu_release(const HfApi *hf, HfMod *mod, TfpWire *w) {
   if (!registered) return true;

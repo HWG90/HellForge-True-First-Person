@@ -28,7 +28,7 @@ static bool io_show(void *u, const char *notice, char *why, size_t why_size) {
   if (!io->show_ok) snprintf(why, why_size, "the Goose Overlay Host is not loaded");
   return io->show_ok;
 }
-static TfpF11HintIo io_of(Io *io) { return (TfpF11HintIo){io, io_key, io_chat, io_overlay, io_panel, io_say, io_show}; }
+static TfpF11HintIo io_of(Io *io) { return (TfpF11HintIo){io, io_key, io_chat, io_overlay, io_panel, io_say, io_show, NULL}; }
 
 /* One press: up for a tick, down for a tick, up again. Returns how many ticks reported a notice. */
 static int press(TfpF11Hint *h, Io *io, uint64_t *now, int key, const char *name, bool in_game) {
