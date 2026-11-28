@@ -1456,7 +1456,11 @@ static void ads_seat_tick(void) {
   float sight = 0, native = 0, applied = 0;
   const bool near_on = tfp_near_ads_probe(&sight, &native, &applied);
   const TfpEditor *editor = tfp_wire_editor_of(&wire);
-  tfp_aim_bind_tick(near_on, sight, tfp_locked_view_ads_sight_cm(&wire), tfp_editor_motion_editing_ads(editor)); /* src/aim_bind.h */
+  /* Round 42: "Aim-in time", worked out once (whole ms; not a number or outside 0 .. 300: 180) so the shared clock and
+   * the helpers take the same value (review: 0.4 was instant in the helpers and three frames on the clock). */
+  const double aim_in_ms = (double)tfp_aim_bind_aim_in(tfp_locked_view_ads_transition_ms(&wire));
+  tfp_wire_set_aim_in(&wire, aim_in_ms); /* the shared clock's ADS_ENTER (src/transition.h), before this tick's runtime update */
+  tfp_aim_bind_tick(near_on, sight, tfp_locked_view_ads_sight_cm(&wire), tfp_editor_motion_editing_ads(editor), aim_in_ms); /* src/aim_bind.h */
   { /* round 53: the "Clip:" line's fields of view and full-aim scale, the helpers' own (src/wire_settings.h); the log only */
     float game_fov = 0, shown_fov = 0;
     const bool has_fov = tfp_fov_frame_pair(&game_fov, &shown_fov, NULL);
@@ -1471,7 +1475,8 @@ static void ads_seat_tick(void) {
     .aim_field = tfp_locked_view_aim_field(&wire), .sight = near_on && sight > 0 ? sight : NAN,
     .wanted = (float)(tfp_locked_view_ads_sight_cm(&wire)/100), .pull = ads.pull, .closer = ads.closer, .ads_forward = ads.ads_forward,
     .near_clip = near_on ? applied : NAN, .depth = ads.depth, .editor = editor && tfp_editor_is_active(editor),
-    .editor_action = editor ? tfp_editor_preview_action(editor) : NULL, .now_ms = (double)GetTickCount64()};
+    .editor_action = editor ? tfp_editor_preview_action(editor) : NULL, .now_ms = (double)GetTickCount64(),
+    .aim_in_ms = aim_in_ms};
   TfpFovAimSecond frames; tfp_fov_aim_take(&frames); tfp_aim_log_add_fov(&aim_log, &frames); /* round 20c: the frames since the last tick */
   char line[TFP_AIM_LINE];
   if (tfp_aim_log_step(&aim_log, &sample, line, sizeof line)) say("%s", line);

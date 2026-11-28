@@ -369,6 +369,27 @@ int main() {
       else CHECK(b == NATIVE && a == base && stats().shown_radians == 0);          // let go again
       tfp_fov_end(gen);
     }
+    // round 42, "Aim-in time" 0: the chosen value in the first frame of full aim, both calls of it; at 180 a glide
+    for (int instant = 0; instant < 2; ++instant) {
+      fresh(); F.gap = 1.3; jitter_seed = 21;
+      const double period = 1000.0 / 116;
+      auto ms = [&] { return period * (0.85 + 0.3 * jitter()); };
+      auto gap = [&] { return 0.6 + 1.4 * jitter(); };
+      tfp_fov_set_lock_aim(LOCKED, CHOSEN, 5000);
+      tfp_fov_set_ads_enter_ms(instant ? 0 : 180);
+      float a = 0, b = 0;
+      for (int i = 0; i < 116; ++i) b = frame2(ms(), gap(), &a);
+      CHECK(std::fabs(b - LOCKED) < 1e-3f);
+      aim(true);
+      b = frame2(ms(), gap(), &a);
+      if (instant) CHECK(b == CHOSEN && a == b);
+      else CHECK(b < LOCKED && b > CHOSEN + 5 * RAD && a == b);
+      aim(false);
+      b = frame2(ms(), gap(), &a);
+      CHECK(b > CHOSEN && b < LOCKED - 1e-3f);                                    // out: the glide back, either way
+      tfp_fov_set_ads_enter_ms(180);
+      tfp_fov_end(gen);
+    }
     for (int zoom = 0; zoom < 2; ++zoom) {
       fresh();
       tfp_fov_set_lock_aim(LOCKED, zoom ? TFP_FOV_AIM_ZOOM : TFP_FOV_AIM_LOCKED, 5000);

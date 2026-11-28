@@ -31,6 +31,7 @@ typedef struct TfpTransitionPacket {
 } TfpTransitionPacket;
 typedef struct TfpTransition {
   double duration, max_gap, max_step, merge_until;
+  double enter_duration; /* round 42 (not in retail): an ADS_ENTER packet's own duration, s (tfp_transition_set_enter) */
   uint64_t epoch;
   bool has_packet, has_previous;
   TfpTransitionPacket packet;
@@ -39,6 +40,13 @@ typedef struct TfpTransition {
 } TfpTransition;
 
 void tfp_transition_init(TfpTransition *t); /* duration 0.18, max gap 0.25, step a third, merge below 0.5 */
+/* Round 42, "Aim-in time" (locked_view.json ads_transition_ms; not in retail): the duration of the next ADS_ENTER packet, in
+ * seconds. ADS_LEAVE and every other reason keep `duration` (0.18). 0 (or less): an ADS_ENTER packet begins at progress 1,
+ * so everything that follows the clock is in aim in the frame the game enters it. Not a number, or above 1 s: ignored.
+ * The start-up value is 0.18, retail's: a clock never set behaves as before, frame for frame. A packet keeps the duration
+ * it began with (packet.duration); each advance spends at most the larger of max_step (60 ms) and a third of it, so a short
+ * one ends in the frame its time has passed. The first ACTION after an ADS_ENTER of 0 joins it (no new packet). */
+void tfp_transition_set_enter(TfpTransition *t, double seconds);
 /* input NULL: snapshot unavailable. true and *out filled when a packet exists. */
 bool tfp_transition_update(TfpTransition *t, const TfpTransitionInput *input, double now, bool enabled,
                            bool blocked, TfpTransitionPacket *out);

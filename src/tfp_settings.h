@@ -96,7 +96,7 @@ typedef struct TfpSettingsMenuValue { bool is_bool, boolean; double number; } Tf
   X(camera_damping, 0, 60, 0, 100, 5) X(animated_arms, 1, 1, 0, 1, 1) X(one_handed_pistols, 1, 1, 0, 1, 1) X(put_away, 1, 1, 0, 1, 1) X(smooth_eye, 1, 1, 0, 1, 1) \
   X(fov_aim, 0, 1, 1, 3, 1) X(fov_aim_degrees, 0, 50, 20, 90, 1) X(ads_sight_cm, 0, 0, 0, 30, 1) X(see_through_cockpit, 1, 1, 0, 1, 1) \
   X(cockpit_frame, 1, 1, 0, 1, 1) X(cockpit_frame_opacity, 0, 90, 20, 100, 5) \
-  X(foregrip_thumb_wrapped, 1, 0, 0, 1, 1)
+  X(foregrip_thumb_wrapped, 1, 0, 0, 1, 1) X(ads_transition_ms, 0, 180, 0, 300, 10)
 /* Round 42b: foregrip_thumb_wrapped is "Foregrip thumb" (src/grip_fingers.h): off, the default, is Straight (the thumb
  * laid up along a vertical grip); on is Wrapped (round it, as before the option). A file from before reads as off. */
 /* Round 20 (docs/design/specs/2026-11-22-locked-view-design.md "Round 20"): fov_aim is "Aim field of view", 1 the game's
@@ -108,6 +108,10 @@ typedef struct TfpSettingsMenuValue { bool is_bool, boolean; double number; } Tf
  * (docs/design/specs/2026-11-22-locked-view-design.md "Round 20c"). */
 /* Round 45 (src/cockpit_frame.h): cockpit_frame draws a cockpit frame over the see-through seat (needs see_through_cockpit);
  * cockpit_frame_opacity is its opacity in percent. */
+/* Round 42 (aim-in time): ads_transition_ms is how long the shared transition clock (src/transition.h) takes to bring the
+ * view into aim once the game enters it (ADS_ENTER only; aim-out keeps 180). Default 180, the clock's own time before this
+ * round, so a file without it is the view of feel.59, frame for frame. 0: in one frame. The game's own wait between the aim
+ * button and full aim (about 0.4 s in the logs) is the game's and is not changed. Not in retail. */
 /* "holster_animation" (an option until 0.6.0-feel.23 that did nothing) is read as put_away when the file has no
  * put_away of its own, and is never written: the next save holds put_away only. */
 #define TFP_SETTINGS_LOCKED_OLD_PUT_AWAY "holster_animation"

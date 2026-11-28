@@ -70,6 +70,7 @@ Before the `|`, what is on screen now; after it, the frames since the previous `
 | `wanted 0.000: pull 0.000, closer 0.000` | all 0 in passes A and B | the sight distance is off |
 | `depth D m` | one value per range | the game's own gun depth |
 | `editor closed` / `open on "ads"` | `open on "ads"` during step 5 | the editor works in aim |
+| `aim-in T ms` (round 42) | 180 unless Aim-in time was changed | the Aim-in time the view used (0: in aim in one frame) |
 | `gate set N of M noted, changed K times` | **the main question.** In the open: N and K 0 means the gate does not flip in full aim. At the wall: N close to M (a long set stretch, the game's own unzoom), K small | whether the shake is the gate |
 | `optic target A-B deg (xP-xQ of T)` | one value per range (A = B), magnification P = Q, e.g. x3 / x6 / x12 | the optic's zoom levels |
 | `game/lens xF-xG` | F = G to 3 or 4 places, even at aim-in and range changes | the value is this frame's (no lag); a spread that comes with gate changes means it lags a frame |

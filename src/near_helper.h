@@ -130,4 +130,10 @@ typedef bool (*TfpNearFovSource)(float *game, float *shown, uint64_t *calls);
 void tfp_near_set_fov_source(TfpNearFovSource source);
 TfpNearFovSource tfp_near_fov_source(void); /* what was set (NULL: none). Reads only. */
 float tfp_near_ads_scale(void);
+/* Round 42, "Aim-in time" (locked_view.json ads_transition_ms; not in retail): the shared clock's ADS_ENTER time in ms.
+ * 0: the first call of full aim hands the game full aim's value at once, without the 45 ms ease from the hip's. Below
+ * 180: full aim's calls ease with that time constant scaled by ms/180. 180 or more: retail's ease (180, the start-up
+ * value). Any thread; read in each call. */
+void tfp_near_set_ads_enter_ms(uint32_t ms);
+uint32_t tfp_near_ads_enter_ms(void); /* what was set (180 at start-up). Reads only. */
 #endif
