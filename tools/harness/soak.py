@@ -110,8 +110,16 @@ def act(device, name, script, settle, log, sleep=time.sleep):
 
 def judged(name, script, lines):
     """matrix.judge of one action's stretch of the log. An action that presses the reload key is judged without the
-    stance class (round 49g: matrix.py left it out of its own reload phases only)."""
-    return matrix.judge(lines, stance=not matrix.reloading(name, script))
+    stance class (round 49g: matrix.py left it out of its own reload phases only); a vault action is judged at its
+    landing too (matrix.landings)."""
+    return matrix.judge(lines, stance=not matrix.reloading(name, script), landing=name in matrix.VAULTS)
+
+
+def flagged(j):
+    """Whether an action's verdict flags it: a frame missed, a step at or over the limit, a refusal, or (round 49g, the
+    vault actions) the eye shown over matrix.LAND_M beyond the body's own step at a landing."""
+    return bool(j["missed"] or j["largest_jump_m"] >= matrix.POP_M or any("Refused" in n for n in j["notes"])
+                or j.get("landing_m", 0.0) > matrix.LAND_M)
 
 
 def judge_log(lines):
@@ -173,7 +181,7 @@ def main(argv):
         count += 1
         worst = max(worst, j["largest_jump_m"])
         veiled = max(veiled, j.get("largest_veil_m", 0.0))
-        flag = j["missed"] or j["largest_jump_m"] >= matrix.POP_M or any("Refused" in n for n in j["notes"])
+        flag = flagged(j)
         if flag:
             bad.append((count, name, script, j["missed"], round(j["largest_jump_m"], 3)))
         print(f"{count:3d} {'BAD ' if flag else 'ok  '}{name:16s} missed {j['missed']} {matrix.describe(j)} kinds {j['kinds']}  {script[:60]}", flush=True)
@@ -183,8 +191,8 @@ def main(argv):
         elif aimed is not None:
             aims.append((count, name, aimed["reached"]))
             print(f"      {matrix.aim_text({**aimed, **aim.counts(lines)})}", flush=True)
-        for text in matrix.pop_lines(j):
-            print(text, flush=True)
+        for text in matrix.landing_lines(j.get("landed", [])) + matrix.pop_lines(j):
+            print(text if text.startswith(" ") else f"       {text}", flush=True)
         seen |= listed(j["pops"])
     d.run("up w; up s; up shift; up right; wait 2.0")
     with open(log, errors="replace") as handle:
