@@ -137,6 +137,13 @@ def seat_facts(lines):
             "seen_through": "cockpit: seen through" in text, "no_suit_proven": "no suit proven" in text}
 
 
+def judge_lever(name, script, lines):
+    """matrix.judge of one lever phase's stretch: the stratagem throw against the head, and (round 49g) the stance
+    class left out where the script presses the reload key (matrix.reloading: the foregrip phases, support-weapon)."""
+    import matrix
+    return matrix.judge(lines, throw=name == "stratagem-throw", stance=not matrix.reloading(name, script))
+
+
 def main(argv):
     import drive
     import matrix
@@ -174,7 +181,7 @@ def main(argv):
             with open(log, errors="replace") as handle:
                 handle.seek(start); whole = handle.read().splitlines()
                 handle.seek(played); lines = handle.read().splitlines()
-            judged = matrix.judge(lines, throw=name == "stratagem-throw")
+            judged = judge_lever(name, script, lines)
             result = {"pass": bool(judged["pass"]) and "refused" not in report, "levers": report, "lines": kept(name, whole),
                       "camera": {k: judged[k] for k in ("frames", "other_camera_frames", "missed", "kinds", "notes") if k in judged},
                       "describe": matrix.describe(judged)}

@@ -256,6 +256,32 @@ class Soak(unittest.TestCase):
             self.assertAlmostEqual(soak.judged(name, script, lines)["largest_jump_m"], 0.0542, places=3, msg=script)
         self.assertEqual(matrix.judge(lines, stance=False)["stance_frames"], 0)
 
+    def test_every_caller_leaves_the_class_out_where_the_script_presses_the_reload_key(self):
+        # the independent check's minor finding 3: matrix.py passed reload=name in RELOADS while matrix.reloading()
+        # said it covered the ammo check, and phases_levers.py judged its phases that end on a reload with the class
+        import phases_levers
+        lines = LOG.read_text().splitlines()
+        for name in ("reload", "pistol-reload", "ammo-check", "aim-scope-zoom"):
+            script = matrix.PHASES[name][0]
+            self.assertTrue(matrix.reloading(name, script), name)
+            self.assertEqual(matrix.phase_judge(name, script, lines)["stance_frames"], 0, name)
+            self.assertAlmostEqual(matrix.phase_judge(name, script, lines)["largest_jump_m"], 0.0664, places=3, msg=name)
+        for name in ("prone", "aim", "stratagem-menu"):
+            script = matrix.PHASES[name][0]
+            self.assertFalse(matrix.reloading(name, script), name)
+            self.assertEqual(matrix.phase_judge(name, script, lines)["stance_frames"], 1, name)
+        for name in ("foregrip-liberator", "foregrip-adjudicator", "support-weapon"):
+            script = phases_levers.PHASES[name][0]
+            self.assertTrue(matrix.reloading(name, script), name)
+            self.assertEqual(phases_levers.judge_lever(name, script, lines)["stance_frames"], 0, name)
+        for name, (script, _) in phases_levers.PHASES.items():
+            self.assertEqual(phases_levers.judge_lever(name, script, lines)["stance_frames"], 0 if matrix.reloading(name, script) else 1, name)
+        # and the matrix keeps its other arguments: the reload's slide, the vault's landing, the look's turns
+        self.assertIn("slide_m", matrix.phase_judge("reload", matrix.PHASES["reload"][0], lines))
+        self.assertNotIn("slide_m", matrix.phase_judge("ammo-check", matrix.PHASES["ammo-check"][0], lines))
+        self.assertIn("landing_m", matrix.phase_judge("jump-vault", matrix.PHASES["jump-vault"][0], lines))
+        self.assertNotIn("landing_m", matrix.phase_judge("prone", matrix.PHASES["prone"][0], lines))
+
     def test_the_summary_counts_them_apart(self):
         import soak
         result = matrix.judge(LOG.read_text().splitlines())

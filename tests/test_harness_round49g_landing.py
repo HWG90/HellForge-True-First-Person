@@ -9,6 +9,8 @@ check of 2026-11-27, blocking finding 1).
 The rows: the Trace, Hold, State, Lock and Smooth lines of
   tests/reference/landing/feel58-soak51B-232320.log   ~/.cache/tfp-soak-51-B.modlog 23:23:20.1 to 21.2 (feel.58)
   tests/reference/landing/feel50-soak27-125657.log    ~/.cache/tfp-soak-27.modlog   12:56:56.7 to 57.7 (feel.50)
+  tests/reference/landing/feel49-soak25-101352.log    ~/.cache/tfp-soak-25.modlog   10:13:51.9 to 53.0 (feel.49)
+  tests/reference/landing/feel58-soak51B-232343.log   ~/.cache/tfp-soak-51-B.modlog 23:23:42.9 to 43.7 (feel.58)
 "raw" below is the same rows with the wanted eye shown and nothing carried, which is what the vault rule showed in
 these frames (tools/harness/replay.py with round49d's header: the eye shown equal to the wanted eye, 0 carried)."""
 import re
@@ -23,6 +25,8 @@ import trace  # noqa: E402
 
 B = ROOT / "tests/reference/landing/feel58-soak51B-232320.log"
 S27 = ROOT / "tests/reference/landing/feel50-soak27-125657.log"
+S25 = ROOT / "tests/reference/landing/feel49-soak25-101352.log"
+B2 = ROOT / "tests/reference/landing/feel58-soak51B-232343.log"
 EYES = re.compile(r"eye_world=\(([-\d. ]+)\)(.*?) wanted=\(([-\d. ]+)\) correction=[\d.]+")
 
 
@@ -34,6 +38,32 @@ def raw(lines, share=1.0):
         left = sum((w - n) ** 2 for w, n in zip(wanted, new)) ** 0.5
         return f"eye_world=({' '.join(f'{x:.5f}' for x in new)}){m[2]} wanted=({m[3]}) correction={left:.4f}"
     return [EYES.sub(one, line) if " Trace: " in line else line for line in lines]
+
+
+TRACE_EYE = re.compile(r"eye_world=\(([-\d. ]+)\)(.*?) wanted=\(([-\d. ]+)\) correction=[\d.]+")
+TRACE_TICK = re.compile(r" tick=([\d.]+)")
+
+
+def nolag(lines, drop_at, share=1.0, count=1000):
+    """The rows with the eye made to follow the root with no lag from the drop frame `drop_at` on, for `count` frames
+    (share 1: the eye keeps the offset from the root it had the frame before the drop; 0.5: half the root's move),
+    wanted equal to it and no veil (the independent check's repro, ~/.cache/tfp-verify72-stance/scripts/nolag.py, which
+    let the eye go back to the logged one after four frames; here it stays with the root, so that nothing but the
+    landing is left to judge)."""
+    rows = trace.frames(lines)
+    i = next(k for k, r in enumerate(rows) if r["at"] == drop_at)
+    base, origin = rows[i - 1]["eye"], rows[i - 1]["root"]
+    eyes = {f"{r['tick']:.3f}": [b + share * (q - o) for b, q, o in zip(base, r["root"], origin)] for r in rows[i:i + count]}
+
+    def one(line):
+        tick = TRACE_TICK.search(line)
+        new = eyes.get(f"{float(tick[1]):.3f}") if tick and " Trace: " in line else None
+        if new is None:
+            return line
+        text = " ".join(f"{x:.5f}" for x in new)
+        line = TRACE_EYE.sub(lambda m: f"eye_world=({text}){m[2]} wanted=({text}) correction=0.0000", line)
+        return re.sub(r" veil=\([-\d. ]+\)", " veil=0", line)
+    return [one(line) for line in lines]
 
 
 class Rows(unittest.TestCase):
@@ -160,6 +190,113 @@ class Judge(unittest.TestCase):
         self.assertTrue(matrix.VAULTS <= set(matrix.PHASES))
         self.assertEqual((matrix.LAND_M, matrix.LAND_DROP_M, matrix.LAND_FRAMES), (0.05, 0.15, 2))
         self.assertEqual((matrix.POP_M, matrix.OWN_M, trace.FLOAT_M), (0.06, 0.03, 0.26))
+
+
+class DropFrame(unittest.TestCase):
+    """The independent check's major finding: the drop frame was never measured, and an eye that moves with the root
+    in the same frame was 0 beyond the body's own in every frame measured."""
+
+    def test_the_logged_rows_hardly_move_the_eye_in_the_drop_frame(self):
+        for log, at, shown in ((B, "23:23:20.749", -0.005), (S27, "12:56:57.287", -0.018)):
+            lines = log.read_text().splitlines()
+            found = matrix.landings(trace.frames(lines), matrix.mask_lines(lines))
+            self.assertEqual(found[0]["dropped"]["at"], at)
+            self.assertAlmostEqual(found[0]["dropped"]["shown"], shown, places=2)
+            self.assertAlmostEqual(found[0]["dropped"]["body"], -0.272, places=2)
+            result = matrix.judge(lines, landing=True)
+            self.assertAlmostEqual(result["landing_drop_m"], abs(shown), places=2)
+            self.assertEqual(result["landing_drop_at"], at)
+            self.assertLessEqual(result["landing_drop_m"], matrix.LAND_STEP_M)
+            self.assertEqual(result["pass"], matrix.judge(lines)["pass"])
+            note = next(n for n in result["notes"] if n.startswith("landing"))
+            self.assertIn(f"the eye shown {shown:+.3f}", note)
+            self.assertNotIn("drop frame", note)
+            self.assertIn("in the drop frame", matrix.describe(result))
+
+    def test_the_largest_logged_drop_frame_step_is_under_the_bound(self):
+        # soak 25 (feel.49; main's rules replayed give the same rows): a step off a ledge 167 ms after a landing, the
+        # root going on down. 0.089 m in the drop frame is the most of any logged landing, so the bound passes it; the
+        # landing itself fails on the frames after it (0.071 beyond the body's own), as before.
+        lines = S25.read_text().splitlines()
+        found = matrix.landings(trace.frames(lines), matrix.mask_lines(lines))
+        self.assertEqual([l["at"] for l in found], ["10:13:52.412", "10:13:52.579"])
+        self.assertAlmostEqual(found[1]["dropped"]["shown"], -0.089, places=3)
+        self.assertLess(abs(found[1]["dropped"]["shown"]), matrix.LAND_STEP_M)
+        result = matrix.judge(lines, landing=True)
+        self.assertAlmostEqual(result["landing_drop_m"], 0.089, places=3)
+        self.assertAlmostEqual(result["landing_m"], 0.071, places=3)
+        note = [n for n in result["notes"] if n.startswith("landing")][1]
+        self.assertNotIn("drop frame", note)
+        self.assertIn("a snap of the view at the landing", note)
+
+    def test_an_eye_that_follows_the_root_with_no_lag_was_beyond_nothing(self):
+        for log, at, snap in ((B, "23:23:20.749", -0.272), (S27, "12:56:57.287", -0.272), (B2, "23:23:43.183", -0.188)):
+            lines = nolag(log.read_text().splitlines(), at)
+            found = matrix.landings(trace.frames(lines), matrix.mask_lines(lines))
+            self.assertEqual(len(found), 1)
+            self.assertTrue(all(f["beyond"] < 1e-3 for f in found[0]["frames"]))   # what the measure saw until now
+            self.assertAlmostEqual(found[0]["dropped"]["shown"], snap, places=2)
+            self.assertGreater(abs(found[0]["dropped"]["shown"]), matrix.LAND_STEP_M)
+            by_at = {f["at"]: f for f in matrix.measure(trace.frames(lines))}
+            self.assertEqual(by_at[at]["whose"], "body")                            # and the step judge lets it off
+
+    def test_and_the_phase_passed_without_the_drop_frame_and_fails_with_it(self):
+        # the rows from just before the drop, so that nothing but the landing is left to judge
+        for log, at, begin, snap in ((B, "23:23:20.749", "23:23:20.600", "-0.272"), (B2, "23:23:43.183", "23:23:42.900", "-0.188")):
+            lines = [line for line in nolag(log.read_text().splitlines(), at) if line[:12] >= begin]
+            self.assertTrue(matrix.judge(lines)["pass"])
+            result = matrix.judge(lines, landing=True)
+            self.assertLessEqual(result["landing_m"], matrix.LAND_M)             # the frames after it: nothing beyond
+            self.assertAlmostEqual(result["landing_drop_m"], abs(float(snap)), places=2)
+            self.assertEqual(result["landing_drop_at"], at)
+            self.assertFalse(result["pass"])
+            note = next(n for n in result["notes"] if n.startswith("landing"))
+            self.assertIn(f"the eye shown {snap}", note)
+            self.assertIn("a snap of the view in the drop frame", note)
+            self.assertIn(f"{abs(float(snap)):.3f} in the drop frame", matrix.describe(result))
+
+    def test_half_the_drop_in_the_frame_still_fails(self):
+        lines = nolag(B.read_text().splitlines(), "23:23:20.749", 0.5)
+        found = matrix.landings(trace.frames(lines), matrix.mask_lines(lines))
+        self.assertAlmostEqual(found[0]["dropped"]["shown"], -0.136, places=2)
+        self.assertGreater(abs(found[0]["dropped"]["shown"]), matrix.LAND_STEP_M)
+        self.assertFalse(matrix.judge(lines, landing=True)["pass"])
+
+    def test_the_logged_second_landing_of_51B(self):
+        lines = B2.read_text().splitlines()
+        result = matrix.judge(lines, landing=True)
+        self.assertEqual(result["landings"], 1)
+        self.assertAlmostEqual(result["landing_drop_m"], 0.044, places=3)     # the most of the feel.50+ landings
+        self.assertLessEqual(result["landing_drop_m"], matrix.LAND_STEP_M)
+        self.assertLessEqual(result["landing_m"], matrix.LAND_M)
+
+    def test_the_soak_flags_it(self):
+        import soak
+        script = matrix.PHASES["jump-vault"][0]
+        lines = [line for line in nolag(B.read_text().splitlines(), "23:23:20.749") if line[:12] >= "23:23:20.600"]
+        self.assertFalse(soak.flagged(matrix.judge(lines, mouse="look" in script), script))   # without the landing judge
+        vault = soak.judged("jump-vault", script, lines)
+        self.assertLessEqual(vault["landing_m"], matrix.LAND_M)
+        self.assertLess(vault["largest_jump_m"], matrix.POP_M)
+        self.assertTrue(soak.flagged(vault, script))
+        logged = soak.judged("jump-vault", script, B.read_text().splitlines())
+        self.assertEqual(soak.flagged(logged, script), logged["largest_jump_m"] >= matrix.POP_M)   # not for the landing
+
+    def test_the_eye_judged_is_the_eye_shown_with_the_veil(self):
+        # the veil's move counts in the drop frame and in the frames after it: what is shown is eye + veil
+        def veiled(line, at, z):
+            return re.sub(r" veil=(?:0|\([-\d. ]+\))", f" veil=(0.00000 0.00000 {z:.5f})", line) if line[:12] == at and " Trace: " in line else line
+        lines = B.read_text().splitlines()
+        drop = [veiled(line, "23:23:20.749", -0.2) for line in lines]
+        found = matrix.landings(trace.frames(drop), matrix.mask_lines(drop))
+        self.assertAlmostEqual(found[0]["dropped"]["shown"], -0.205, places=2)
+        after = [veiled(line, "23:23:20.781", -0.2) for line in lines]
+        found = matrix.landings(trace.frames(after), matrix.mask_lines(after))
+        self.assertAlmostEqual(found[0]["frames"][0]["shown"], -0.207, places=2)
+        self.assertGreater(found[0]["frames"][0]["beyond"], matrix.LAND_M)
+
+    def test_the_bound(self):
+        self.assertEqual(matrix.LAND_STEP_M, 0.10)
 
 
 class Soak(unittest.TestCase):

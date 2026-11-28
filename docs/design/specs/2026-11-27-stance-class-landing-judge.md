@@ -55,3 +55,40 @@ Brought over from round49d as it was (`tools/harness/stance.py`, the hook in `me
 Still open: the class names 92 of 715 "eye's own" frames on feel.50+ (soaks 27 to 62-C). The check counted 28 of
 the 96 as dive launches; how many of the 92 are was not counted again. No limit is
 raised: every frame it names leaves under 0.06 m and shows under 0.10 m.
+
+## After the check (2026-11-28)
+
+**The drop frame is judged too.** The check's major finding: the measure never looked at the drop frame, and an eye
+that moved with the root in the same frame was 0 beyond the body's own in every frame it did look at (the 51-B rows
+with the eye made to follow the root with no lag: -0.272 m in one frame at 23:23:20.749, and -0.188 m at
+23:23:43.183, both passed; the step judge names them "body"). Now `landings` also gives the drop frame's raw vertical
+step of the eye shown (`dropped`), judged alone, not against the root: over `LAND_STEP_M` (0.10 m) the phase fails
+("a snap of the view in the drop frame"), and the soak flags the action. The bound is from the logged drop frames
+(main's rules replayed give the same, to 0.001 m):
+
+| Log, the drop | Root | Eye shown in the drop frame |
+|---|---|---|
+| 23 08:17:16.800 (feel.48) | -0.263 | +0.007 |
+| 24 08:28:15.085 (feel.48) | -0.253 | -0.029 |
+| 25 10:13:52.412 (feel.49) | -0.288 | -0.013 |
+| 25 10:13:52.579 (feel.49) | -0.161 | -0.089 |
+| 27 12:56:57.287 | -0.272 | -0.018 |
+| 29 16:16:04.998 | -0.178 | -0.005 |
+| 34 02:10:31.610 | -0.244 | -0.029 |
+| 36 07:13:57.467 | -0.290 | +0.042 |
+| 51-B 23:23:20.749 | -0.272 | -0.005 |
+| 51-B 23:23:43.183 | -0.188 | +0.044 |
+
+At most 0.044 m from feel.50 on, 0.089 m in all (soak 25's second drop, a step off a ledge with the root going on
+down, which fails on the frames after it anyway: 0.071 beyond). The eye that follows the root reads 0.272 and 0.188;
+half of it 0.136 at 23:23:20.749, which fails, and 0.094 at 23:23:43.183, which would not. Soak 18 (feel.44) shows
+-0.183 in its drop frame and fails on the frame after it (0.168 beyond).
+
+**The reload exclusion agrees everywhere.** `matrix.phase_judge` is what the matrix's main loop judges a phase with,
+and it leaves the stance class out wherever `matrix.reloading` says (ammo-check and aim-scope-zoom too, not only
+RELOADS); the slide judge stays on RELOADS. `phases_levers.judge_lever` does the same for the foregrip phases and
+support-weapon.
+
+**Merged with main's round 49a.** Every phase and soak action keeps the turn and veil judges (the mouse let off where
+the script has a look), and the soak's `flagged(j, script)` flags veil faults and turns without a look beside the
+landing.

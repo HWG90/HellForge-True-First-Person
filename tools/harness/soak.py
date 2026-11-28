@@ -110,18 +110,19 @@ def act(device, name, script, settle, log, sleep=time.sleep):
 
 def judged(name, script, lines):
     """matrix.judge of one action's stretch of the log. An action that presses the reload key is judged without the
-    stance class (round 49g: matrix.py left it out of its own reload phases only); a vault action is judged at its
-    landing too (matrix.landings)."""
+    stance class (round 49g: matrix.reloading, as matrix.phase_judge and phases_levers.py ask it); a vault action is
+    judged at its landing too (matrix.landings); the turns of an action that moves the mouse are let off (round 49)."""
     return matrix.judge(lines, mouse="look" in script, stance=not matrix.reloading(name, script), landing=name in matrix.VAULTS)
 
 
 def flagged(j, script=""):
     """Whether an action's verdict flags it: a frame missed, a step at or over the limit, a refusal, (round 49) a fault
     of the veil's bound or a turn at a change of camera over matrix.TURN_DEG where `script` (the action's) did not move
-    the mouse, or (round 49g, the vault actions) a landing over matrix.LAND_M (matrix.landings)."""
+    the mouse, or (round 49g, the vault actions) a landing over matrix.LAND_M, or its drop frame over matrix.LAND_STEP_M
+    (matrix.landings)."""
     flag = j["missed"] or j["largest_jump_m"] >= matrix.POP_M or any("Refused" in n for n in j["notes"])
     flag = flag or bool(j["veil_faults"]) or (bool(j["turn_snaps"]) and "look" not in script)   # round 49
-    return bool(flag or j.get("landing_m", 0.0) > matrix.LAND_M)
+    return bool(flag or j.get("landing_m", 0.0) > matrix.LAND_M or j.get("landing_drop_m", 0.0) > matrix.LAND_STEP_M)
 
 
 def judge_log(lines):
