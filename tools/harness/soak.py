@@ -27,8 +27,16 @@ the summary counts them; before round 26 no soak reached it (one "State: aim in"
 Round 30: the dive-swap action (matrix.DIVES) is played by dive.dive_swap(): a dive and a swap that leave the game's
 view, for the head of a diving body through the veil. Each says whether the view was left and how low the head was;
 the summary counts them and gives the lowest head (round 26's estimate: 0.55 m below the eye).
+
+Round 55C: each action's stretch is judged with the frames just before it as context (matrix.context_rows; soak 68-C
+#20, a crouch, read the rig eye's frame after the root's change of step as the eye's own). The dives and the clambers
+must have been played (NEEDS: a dive line, a traversal mask); one that was not is printed "NOT PLAYED" with what it
+showed, is not flagged for its steps (a frame missed or a refusal still flags it) and is counted apart in the summary.
+Soak 67-A #212 "clamber-high" was a drop of 0.6 m and the game's own landing: no mask had 0x20. The game's dive launch
+(matrix.measure "launch") is printed and not counted, as the stance ramp is.
 """
 import random
+import re
 import sys
 import time
 
@@ -49,6 +57,32 @@ OVERLAPS = [   # two inputs at once, as a player does
 ]
 
 
+# Round 55C: what an action's stretch of the log has to show for it to have been played (matrix.unplayed's patterns).
+NEEDS = {"dive": [matrix._DIVED], "dive-back": [matrix._DIVED],
+         "clamber-low": [matrix._TRAVERSED], "clamber-high": [matrix._TRAVERSED]}
+
+
+# A dive in the head camera writes no Motion: line (the motion runtime is idle without a lease: soak 67-A #228 and
+# 68-C #51, #117, round 55's G3), so where the stretch was in the head camera a missing dive line says nothing.
+UNSEEN = {"dive": re.compile(r" Trace: t=\S+ kind=4 |\bkind now 4\b"), "dive-back": re.compile(r" Trace: t=\S+ kind=4 |\bkind now 4\b")}
+
+
+def unplayed(name, lines):
+    """Round 55C: why the action `name` was not played, from its own stretch of the log (NEEDS); empty: played, the
+    action needs nothing, or (UNSEEN) the log could not have said: a dive in the head camera is judged as played."""
+    if name in UNSEEN and any(UNSEEN[name].search(line) for line in lines):
+        return []
+    return [f"NOT PLAYED: {text}" for pattern, text in NEEDS.get(name, []) if not any(pattern.search(line) for line in lines)]
+
+
+def unplayed_summary(rows):
+    """The summary's line on the actions not played: [(number, name, notes)]; empty where there are none."""
+    if not rows:
+        return ""
+    return (f"{len(rows)} action{'s' if len(rows) > 1 else ''} not played, not judged as camera results: "
+            + "; ".join(f"#{n} {name} ({notes[0][len('NOT PLAYED: '):] if notes else ''})" for n, name, notes in rows))
+
+
 def verdict(frames, flagged):
     """The exit code: 2 when no frame was judged (the view was not on: nothing was looked at), 1 when flagged."""
     if frames <= 0:
@@ -62,20 +96,24 @@ def listed(pops):
     return {p["tick"] for p in pops}
 
 
+NATIVE = ("body", "veil", "stance", "launch")   # whose: not counted (matrix.measure; round 55C: the dive launch)
+
+
 def unlisted(whole, seen):
     """The frames over the limit in the whole log that no action's own stretch listed (`seen`: their ticks)."""
-    return [p for p in whole if p["whose"] not in ("body", "veil", "stance") and p["tick"] not in seen]
+    return [p for p in whole if p["whose"] not in NATIVE and p["tick"] not in seen]
 
 
 def counted(pops):
     """The summary's words for the frames at or over the limit: how many, whose, the largest."""
     counts = matrix.whose_counts(pops)
-    flagged = [p for p in pops if p["whose"] not in ("body", "veil", "stance")]
+    flagged = [p for p in pops if p["whose"] not in NATIVE]
     veiled = [p["beyond"] for p in pops if p["whose"] == "veil"]
     veil = f"{len(veiled)} the veil's" + (f", largest {max(veiled):.3f} m" if veiled else "") + ", not counted"
     return (f"{len(flagged)} frames flagged ({counts['own']} the eye's own, {counts['along']} of them along the view; {counts['filter']} the filter's), "
             f"largest {max([0.0] + [p.get('bare', p['beyond']) for p in flagged]):.3f} m; {veil}; {counts['body']} the body's own, not counted"
-            + (f"; {counts['stance']} the game's stance ramp, not counted" if counts["stance"] else ""))   # round 49 (tools/harness/stance.py)
+            + (f"; {counts['stance']} the game's stance ramp, not counted" if counts["stance"] else "")   # round 49 (tools/harness/stance.py)
+            + (f"; {counts['launch']} the game's dive launch, not counted" if counts["launch"] else ""))   # round 55C (dive.launch)
 
 
 def aim_summary(aims, lines):
@@ -108,19 +146,44 @@ def act(device, name, script, settle, log, sleep=time.sleep):
     return None
 
 
-def judged(name, script, lines):
+def judged(name, script, lines, before=()):
     """matrix.judge of one action's stretch of the log. An action that presses the reload key is judged without the
     stance class (round 49g: matrix.reloading, as matrix.phase_judge and phases_levers.py ask it); a vault action is
-    judged at its landing too (matrix.landings); the turns of an action that moves the mouse are let off (round 49)."""
-    return matrix.judge(lines, mouse="look" in script, stance=not matrix.reloading(name, script), landing=name in matrix.VAULTS)
+    judged at its landing too (matrix.landings); the turns of an action that moves the mouse are let off (round 49).
+    Round 55C: `before`, the log before the stretch, is its context (matrix.context_rows); "unplayed" lists why the
+    action was not played (unplayed) and "played" says whether it was."""
+    j = matrix.judge(lines, mouse="look" in script, stance=not matrix.reloading(name, script), landing=name in matrix.VAULTS,
+                     before=before)
+    j["unplayed"] = unplayed(name, lines)
+    j["played"] = not j["unplayed"]
+    return j
+
+
+UNPLAYED_M = 0.20   # round 55C: the most an untouched native frame of an action not played may change the eye's step
+                    # and not be counted: the largest such frame in the feel.63 soaks is 0.131 m (67-A #212 clamber-high
+                    # at 11:24:15.876; 68-C #210 dive 0.103), with half again for margin. Over it, it is counted
+
+
+def moved(pops):
+    """Round 55C: the frames over the limit of an action not played that still count: every frame the mod had a part in
+    (the filter's, the eye's own with something carried, looked for or taken up, a veil: matrix.measure's untouched
+    False), and an untouched native frame at or over UNPLAYED_M. What is left, the game's own frames under it, is no
+    result of the action named (67-A #212, 68-C #210: wanted eye the eye shown, nothing carried, kind 6)."""
+    return [p for p in pops if p["whose"] not in NATIVE and not (p.get("untouched") and p.get("bare", p["beyond"]) < UNPLAYED_M)]
 
 
 def flagged(j, script=""):
     """Whether an action's verdict flags it: a frame missed, a step at or over the limit, a refusal, (round 49) a fault
     of the veil's bound or a turn at a change of camera over matrix.TURN_DEG where `script` (the action's) did not move
     the mouse, or (round 49g, the vault actions) a landing over matrix.LAND_M, or its drop frame over matrix.LAND_STEP_M
-    (matrix.landings)."""
-    flag = j["missed"] or j["largest_jump_m"] >= matrix.POP_M or any("Refused" in n for n in j["notes"])
+    (matrix.landings). Round 55C: an action that was not played (judged: "played" False) is let off only the steps of
+    its untouched native frames under UNPLAYED_M (moved): what the game alone showed is no result of the action named;
+    a frame the mod moved, a veil fault and a turn snap flag it as they would a played one."""
+    flag = j["missed"] or any("Refused" in n for n in j["notes"])
+    if j.get("played", True):
+        flag = flag or j["largest_jump_m"] >= matrix.POP_M
+    else:
+        flag = flag or any(p.get("bare", p["beyond"]) >= matrix.POP_M for p in moved(j["pops"]))
     flag = flag or bool(j["veil_faults"]) or (bool(j["turn_snaps"]) and "look" not in script)   # round 49
     return bool(flag or j.get("landing_m", 0.0) > matrix.LAND_M or j.get("landing_drop_m", 0.0) > matrix.LAND_STEP_M)
 
@@ -161,6 +224,7 @@ def main(argv):
     end = time.time() + minutes * 60
     worst, veiled, bad, count, seen = 0.0, 0.0, [], 0, set()
     aims = []   # (action number, name, reached) of every aim action
+    skipped = []  # (action number, name, notes) of every action not played (round 55C)
     dives = []  # (action number, dive.dive_swap's result) of every dive + swap
     while time.time() < end:
         if rng.random() < 0.3:
@@ -180,14 +244,18 @@ def main(argv):
             lines = handle.read().splitlines()
         for text in matrix.style_changes(lines):
             print(text, flush=True)
-        j = judged(name, script, lines)
+        j = judged(name, script, lines, matrix.lines_before(log, start))
         count += 1
         worst = max(worst, j["largest_jump_m"])
         veiled = max(veiled, j.get("largest_veil_m", 0.0))
         flag = flagged(j, script)
         if flag:
             bad.append((count, name, script, j["missed"], round(j["largest_jump_m"], 3)))
-        print(f"{count:3d} {'BAD ' if flag else 'ok  '}{name:16s} missed {j['missed']} {matrix.describe(j)} kinds {j['kinds']}  {script[:60]}", flush=True)
+        if not j["played"]:
+            skipped.append((count, name, j["unplayed"]))
+        print(f"{count:3d} {'BAD ' if flag else 'ok  ' if j['played'] else 'n/p '}{name:16s} missed {j['missed']} {matrix.describe(j)} kinds {j['kinds']}  {script[:60]}", flush=True)
+        for note in j["unplayed"]:
+            print(f"       {note}: its untouched native frames below (under {UNPLAYED_M:.2f} m) are not counted", flush=True)
         if aimed is not None and name in matrix.DIVES:
             dives.append((count, aimed))
             print(f"      {dive.text(aimed)}", flush=True)
@@ -209,6 +277,8 @@ def main(argv):
     print("  the whole log: " + counted(j["pops"]))
     print("  " + aim_summary(aims, lines))
     print("  " + dive_summary(dives))
+    if skipped:
+        print("  " + unplayed_summary(skipped))
     for row in bad:
         print("  flagged:", row)
     across = unlisted(j["pops"], seen)

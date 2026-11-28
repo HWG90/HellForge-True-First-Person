@@ -70,6 +70,32 @@ raw vertical step alone, which may not be over LAND_STEP_M: an eye that went dow
 (0.272 m at 51-B 23:23:20.749 with the eye made to follow the root with no lag) is no less beyond the body's own for
 fitting it. The builds of feel.48 on show at most 0.089 m there (soak 25 10:13:52.579, a step off a ledge with the
 root going on down; at most 0.044 m from feel.50 on).
+
+Round 55C: more honest classes, from the feel.63 run of 2026-11-28 (tfp-soak-67-A, Stable; tfp-soak-68-C, Bodycam).
+No limit was raised; tests/test_harness_round55c_judges.py and _played.py have every case.
+  Context. A phase's or an action's stretch of the log is judged with the traced frames of the CONTEXT_MS before it
+  (context_rows): its first frames are measured against them, and nothing of them is judged or listed itself. Until
+  now a stretch's first two frames were measured against nothing, and a root's change of step a frame before the
+  stretch was not seen (68-C #20, crouch: 0.117 m "the eye's own" at 11:29:46.404 is the rig eye a frame after the
+  root's change of 0.119 m, the body's own; 68-C #83: its first veiled frame read as an opening of 0.40021 m, while
+  the leave was two frames before it, in #82's stretch).
+  Veil. A step or a cut of the veil's bound is judged on the eye shown too: where the eye shown moved no more than the
+  bound against the body in that frame, the eye before the veil made the veil's change up (THE PUSH) and the frame is
+  said, not failed (68-C #196: the veil 0.053 and 0.054 m a frame, the eye shown 0.003 and 0.006 m).
+  Dive launch (whose "launch", dive.launch): the game's own eye one or two frames after the root leaves its run at a
+  dive, an untouched native frame (kind 6, nothing looked for, taken or carried, the wanted eye shown, source native),
+  the root's own change under POP_M: printed and not counted, as the stance ramp's (0.069 to 0.090 m in both styles,
+  the matrix's "dive" 0.073).
+  Fall landing (whose "body", with fall and held): one to two frames after the root went FALL_M or more down in one
+  native frame, where the game's eye less the body's lunge is under POP_M and the eye shown has no more beyond the body
+  than the filter's hold of that frame, and under FALL_HELD_M (67-A #216: the root 1.109 m down, a hold's end opened
+  the window, the filter took up 0.060 m and the frame read as "the filter's" 0.929; the only fall landing in all 49
+  soak logs, so the bound is that hold with a third for margin: a filter snap of 0.10 m in the same frames fails).
+  Played. The clambers need a traversal mask (0x20) in their stretch, as the dives need a dive line (NEEDS); the
+  feel.63 matrix's clamber-low and clamber-high passed with mask 0 only. A phase whose body could not be stood up
+  first is a harness failure (judge_stood), counted apart from the camera's failures; dive.stand_up reads no stance
+  from a Motion: line written before the view left the game's own, and lets a stand-up settle (dive.STAND_SETTLE_S).
+  Bound. A measure printed beside its bound has the places that tell it from the bound (over): "0.4002 (over 0.40)".
 """
 import bisect
 import json
@@ -158,8 +184,25 @@ _DIVED = (re.compile(r" Motion: action=dive\b"), "no dive in the log (no \"Motio
 _PRONE = (re.compile(r" Motion: action=prone\b"), "the body never lay down (no \"Motion: action=prone\")")
 _HEAD = (re.compile(r" Trace: t=\S+ kind=4 "), "no head-camera frame was traced: the view never left the native view")
 _FULL_AIM = (re.compile(r" State: aim in\b"), "full aim was not reached (no \"State: aim in\")")
+
+
+class _MaskBit:
+    """A pattern for NEEDS that a Hold/Return/Drop/Wait line matches where its control mask has `bit`."""
+    def __init__(self, bit):
+        self.bit = bit
+
+    def search(self, line):
+        m = MASK.search(line)
+        return bool(m and int(m[1], 16) & self.bit)
+
+
+# Round 55C: a clamber is played where the log's control mask says a traversal (0x20). Soak 67-A #212 "clamber-high"
+# never had it (a drop of 0.6 m off an edge and the game's own landing), and the feel.63 matrix's clamber-low and
+# clamber-high passed with mask 0 only: no ledge was walked to first, and nothing was climbed.
+_TRAVERSED = (_MaskBit(0x20), "no traversal in the log (no control mask with 0x20): nothing was vaulted or climbed")
 NEEDS = {"dive": [_DIVED], "dive-back": [_DIVED], "prone-swap": [_PRONE, _HEAD], "aim-swap": [_FULL_AIM, _HEAD],
-         "stand-up-supine": [_DIVED, _PRONE, _HEAD], "stand-up-prone-head": [_PRONE, _HEAD]}
+         "stand-up-supine": [_DIVED, _PRONE, _HEAD], "stand-up-prone-head": [_PRONE, _HEAD],
+         "clamber-low": [_TRAVERSED], "clamber-high": [_TRAVERSED]}
 # Round 39: phases judged on the traced eye and its slide along the view (reload_slide).
 RELOADS = {"reload", "pistol-reload"}
 SLIDE_M = 0.05      # the eye's offset from the root along the level view may change by this much ...
@@ -190,6 +233,54 @@ VEIL_OUT_MS = 300.0  # ... or by the steepest frame of its own let-out where tha
                      # 0.32 m is let out at 0.053 m a frame at 30 frames a second; that is the let-out, not a flick
 VEIL_OPEN_M = 0.40   # the most the veil may move the eye in the frame it opens in: the most it is built to move at all
                      # (src/camera_helper.h TFP_CAMERA_VEIL_MOST)
+# Round 55C
+CONTEXT_MS = 500.0     # an action's stretch is judged with the traced frames of this long before it, as context only
+CONTEXT_LINES = 600    # of the log before the stretch, the lines read for them (a trace window is 0.5 s)
+CONTEXT_BYTES = 1 << 18
+FALL_M = 1.0           # a fall: the root this far down in one native frame (soak 67-A #216: 1.109 m at 11:24:25.191)
+FALL_HELD_M = 0.08     # ... and the most the eye shown may have beyond the body in its landing frame and still be the
+                       # body's: the largest honest hold in the logs is 0.0603 m (67-A #216 at 11:24:25.257, the only
+                       # fall landing in all 49 soak logs), with a third for margin. A filter snap past this fails
+
+
+def over(m, bound):
+    """Round 55C: a measure as printed beside its bound: three places, or as many more (to six) as it takes to tell it
+    from the bound, so that what is over is not printed at the bound (soak 68-C #83: "opened 0.400 m (over 0.40)" was
+    0.40021). The judges compare the unrounded measures; only the print is at issue."""
+    for places in range(3, 7):
+        text = f"{m:.{places}f}"
+        if text != f"{bound:.{places}f}":
+            return text
+    return text
+
+
+def context_rows(before, rows):
+    """Round 55C: the traced frames of the log lines `before` a stretch (the stretch's own frames: `rows`) that it is
+    judged with: those of the CONTEXT_MS before its first frame, each marked "context". They are never judged
+    themselves (no frame of them is listed or fails anything); they are what the stretch's first frames are measured
+    against. Until round 55 a stretch's first two frames were measured against nothing, and a root's change of step a
+    frame before the stretch was not seen: soak 68-C #20 (crouch) read 0.117 m at 11:29:46.404 as the eye's own, a
+    frame after the root's change of 0.119 m, which is the body's own with that frame."""
+    if not before or not rows:
+        return []
+    import trace as trace_reader
+    first = min(r["tick"] for r in rows)
+    out = [r for r in trace_reader.frames(list(before)[-CONTEXT_LINES:]) if first - CONTEXT_MS <= r["tick"] < first]
+    for r in out:
+        r["context"] = True
+    return out
+
+
+def lines_before(path, offset, size=CONTEXT_BYTES):
+    """The whole lines of the log `path` in the `size` bytes before `offset` (where a stretch begins): its context."""
+    try:
+        with open(path, "rb") as handle:
+            start = max(0, offset - size)
+            handle.seek(start)
+            text = handle.read(offset - start).decode(errors="replace").splitlines()
+    except OSError:
+        return []
+    return text[1:] if start else text
 
 
 def log_path():
@@ -250,7 +341,7 @@ def style_summary(start, lines):
 def whose_counts(pops):
     """How many of the listed frames are whose: own, filter, body, veil (round 19); along: those of the eye's own that
     lie along the view."""
-    counts = {"own": 0, "filter": 0, "body": 0, "veil": 0, "stance": 0, "along": 0}
+    counts = {"own": 0, "filter": 0, "body": 0, "veil": 0, "stance": 0, "launch": 0, "along": 0}
     for p in pops:
         counts[p["whose"]] += 1
         counts["along"] += _along_named(p)
@@ -273,7 +364,7 @@ def _veil(row):
     return _length(row["veil"]) if row.get("veil") else 0.0
 
 
-def measure(rows, stance=True):
+def measure(rows, stance=True, launch=None):
     """One dict for every three consecutive frames of `rows` (trace.frames), named for the third:
       shown    how much the presented eye's step changed, as a vector: |(c-b) - (b-a)|. The presented eye is the eye
                shown: the row's eye plus veil= where the line has it (round 19: the helmet veil moved the eye handed
@@ -326,8 +417,24 @@ def measure(rows, stance=True):
     the root at 1.6 m/s from its first frame) with the root's own change of step of the frame before, under POP_M,
     on top. That change is taken off as the body's is (body, after 1), what is left (beyond, bare) is under POP_M,
     and the frame is printed and not counted. matrix.judge leaves the class out of a reload phase.
+    Round 55C, whose "launch" (with `launch`, dive.launch_marks of the log; tools/harness/dive.py launch): a frame that
+    is the eye's own and the game's dive launch, an untouched native frame one or two frames after the root leaves its
+    run (the dive's Motion line), the root's own change under POP_M. Printed and not counted; the class is left out
+    wherever the stance class is (a reload).
+    Round 55C, a fall landing: a frame that would be the filter's or the eye's own, one to two frames after the root
+    went FALL_M or more down in one native frame, where the body's lunge was taken off, the wanted eye less that lunge
+    is under POP_M (the game's own eye went with the body) and what the eye shown has beyond the body is no more than
+    the filter's hold of that frame (carried) and under FALL_HELD_M: whose "body", fall the drop, held what the filter
+    held. Soak 67-A #216:
+    the root 1.109 m down at 11:24:25.191, a hold's end opened the window at 11:24:25.257 and the frame read as the
+    filter's 0.929 m, 0.060 beyond the body with 0.060 carried and the wanted eye 0.022.
+    Round 55C: untouched says the frame and the two it is measured across are untouched native frames (stance._untouched:
+    kind 6, nothing looked for, taken up but "root" or carried, the wanted eye the eye shown, no veil): the mod had no
+    part in them (soak.moved).
+    Rows marked "context" (context_rows) are measured against and never judged themselves.
     Each dict also has at (the frame's own time), written (the stamp of its line) and tick (the helper's clock: what
     tells two frames apart; frames from before an edge are all written with it, under one stamp)."""
+    import dive as dive_launch
     import stance as stance_ramp
     changes = {}
     for i in range(2, len(rows)):
@@ -361,6 +468,8 @@ def measure(rows, stance=True):
     found = []
     for i, change in changes.items():
         c, b = rows[i], rows[i - 1]
+        if c.get("context"):
+            continue
         shown = _length(change["eye"])
         beyond, body, after, judged = shown, 0.0, None, change["eye"]
         bare = _length(change["bare"])   # the same measure of the eye before the veil
@@ -391,11 +500,31 @@ def measure(rows, stance=True):
             if ramp:
                 whose, beyond, body, after, bare = "stance", ramp[0], ramp[1], 1, min(bare, ramp[0])
                 along = across = None   # they were split from the whole change, not from what is left
+        if whose == "own" and stance and launch and dive_launch.launch(rows, i, shown, change["root"] and _length(change["root"]), launch, POP_M):
+            whose = "launch"   # round 55C: the game's dive launch, an untouched native frame
+        fall = held = None
+        if whose in ("filter", "own") and after is not None and change["wanted"]:
+            drop = _fall(rows, i)
+            game = _length(_sub(change["wanted"], changes[lunge[i]]["root"]))
+            if drop is not None and game < POP_M and beyond <= c["carried"] + stance_ramp.NOTHING_M and beyond < FALL_HELD_M:
+                whose, fall, held, beyond, bare = "body", drop, beyond, game, game   # round 55C: a fall landing
         found.append({"at": c["at"], "written": c["written"], "tick": c["tick"], "kind": c["kind"], "looked": c["looked"], "taken": c["taken"], "carried": c["carried"], "shown": shown,
                       "lengths": change["lengths"], "wanted": wanted, "root": _length(change["root"]) if change["root"] else None,
                       "body": body, "after": after, "beyond": beyond, "whose": whose, "along": along, "across": across,
-                      "veil": change["veil"], "bare": bare})
+                      "veil": change["veil"], "bare": bare, **({"fall": fall, "held": held} if fall is not None else {}),
+                      "untouched": all(stance_ramp._untouched(r) for r in rows[i - 2:i + 1])})   # round 55C: soak.moved
     return found
+
+
+def _fall(rows, i):
+    """Round 55C: the root's drop (m, signed) where it went FALL_M or more down in one native frame, in frame i or one
+    or two frames before it (the drop, the rig eye a frame late, the stop); None otherwise."""
+    for d in range(max(1, i - 2), i + 1):
+        a, b = rows[d - 1], rows[d]
+        if a["kind"] == 6 and b["kind"] == 6 and a.get("root") and b.get("root") and 0 < b["tick"] - a["tick"] <= GAP_MS:
+            if b["root"][2] - a["root"][2] <= -FALL_M:
+                return b["root"][2] - a["root"][2]
+    return None
 
 
 def mask_lines(lines):
@@ -437,8 +566,8 @@ def landings(rows, masks):
     out = []
     for i in range(1, len(rows)):
         a, c = rows[i - 1], rows[i]
-        if a["kind"] != 6 or c["kind"] != 6 or not a.get("root") or not c.get("root") or not 0 < c["tick"] - a["tick"] <= GAP_MS:
-            continue
+        if c.get("context") or a["kind"] != 6 or c["kind"] != 6 or not a.get("root") or not c.get("root") or not 0 < c["tick"] - a["tick"] <= GAP_MS:
+            continue   # (round 55C: a drop in the context frames is the stretch before's)
         drop = c["root"][2] - a["root"][2]
         if drop > -LAND_DROP_M:
             continue
@@ -496,20 +625,27 @@ def turn_snaps(rows):
     The judge fails those over TURN_DEG."""
     out = []
     for a, b in zip(rows, rows[1:]):
-        if a["kind"] == b["kind"] or not (0 < b["tick"] - a["tick"] <= GAP_MS) or not a.get("turn") or not b.get("turn"):
+        if b.get("context") or a["kind"] == b["kind"] or not (0 < b["tick"] - a["tick"] <= GAP_MS) or not a.get("turn") or not b.get("turn"):
             continue
         out.append({"at": b["at"], "tick": b["tick"], "kind": b["kind"], "before": a["kind"], "degrees": _degrees(a["turn"], b["turn"])})
     return out
 
 
-def veil_faults(rows):
+def veil_faults(rows, excused=None):
     """Round 49, the veil's bound: (the largest move of an opening frame, its row or None, [fault]). A fault is
-    {at, tick, what, m}: what "opening" (the first veiled frame moved the eye more than VEIL_OPEN_M), "step" (the
-    veil's move changed by more than the bound from the frame before, after the opening frame: the let-out too, and
-    a veil that fell to nothing in one frame) or "cut" (the same where the frame is a native one: the native view cut
-    a move that was not let out). The bound: VEIL_STEP_M, or the steepest frame of the let-out of the largest move
+    {at, tick, what, m, shown}: what "opening" (the first veiled frame moved the eye more than VEIL_OPEN_M), "step"
+    (the veil's move changed by more than the bound from the frame before, after the opening frame: the let-out too,
+    and a veil that fell to nothing in one frame) or "cut" (the same where the frame is a native one: the native view
+    cut a move that was not let out). The bound: VEIL_STEP_M, or the steepest frame of the let-out of the largest move
     the veil has had since it opened (1.5 times it over VEIL_OUT_MS, for the time between the two frames) where that
-    is more. Frames more than GAP_MS apart are not neighbours: the first veiled frame after a pause is an opening."""
+    is more. Frames more than GAP_MS apart are not neighbours: the first veiled frame after a pause is an opening.
+    Round 55C: a step or a cut is judged on the eye shown too (shown: how far the eye shown moved against the body root
+    in that frame, its step less the root's). The veil's change of move is what it adds to that, so where the eye
+    shown moved no more than the bound against the body, the eye before the veil made the change up: no fault, it goes
+    to `excused` (a list, where given) instead. Soak 68-C #196: the veil let out 0.053 and 0.054 m a frame while THE
+    PUSH (clear= 0.316 to 0.319) brought the eye forward as much; the root stood still and the eye shown moved 0.003 and
+    0.006 m. Where a row has no root the veil's change alone is judged, as before. Rows marked "context"
+    (context_rows) are followed and never judged."""
     largest, where, faults = 0.0, None, []
     zero = [0.0, 0.0, 0.0]
     before, peak = None, 0.0
@@ -517,17 +653,26 @@ def veil_faults(rows):
         near = before is not None and 0 < row["tick"] - before["tick"] <= GAP_MS
         was = (before.get("veil") or zero) if near else zero
         now = row.get("veil") or zero
+        judged = not row.get("context")
         if _length(now) > 0 and _length(was) == 0:
             peak = _length(now)
-            if peak > largest:
+            if judged and peak > largest:
                 largest, where = peak, row
-            if peak > VEIL_OPEN_M:
-                faults.append({"at": row["at"], "tick": row["tick"], "what": "opening", "m": peak})
+            if judged and peak > VEIL_OPEN_M:
+                faults.append({"at": row["at"], "tick": row["tick"], "what": "opening", "m": peak, "shown": None})
         elif _length(was) > 0:
             change = _length(_sub(now, was))
             bound = max(VEIL_STEP_M, 1.5 * peak * (row["tick"] - before["tick"]) / VEIL_OUT_MS)
-            if change > bound + 1e-6:   # (the rows carry five places)
-                faults.append({"at": row["at"], "tick": row["tick"], "what": "cut" if row["kind"] == 6 else "step", "m": change})
+            if judged and change > bound + 1e-6:   # (the rows carry five places)
+                shown = None
+                if row.get("root") and before.get("root"):
+                    shown = _length(_sub(_sub(_shown(row), _shown(before)), _sub(row["root"], before["root"])))
+                fault = {"at": row["at"], "tick": row["tick"], "what": "cut" if row["kind"] == 6 else "step", "m": change, "shown": shown}
+                if shown is not None and shown <= bound + 1e-6:
+                    if excused is not None:
+                        excused.append({**fault, "bound": bound})
+                else:
+                    faults.append(fault)
             peak = max(peak, _length(now))
         before = row
     return largest, where, faults
@@ -539,13 +684,15 @@ def describe(result):
         return "not traced" if not result.get("judged") else f"jump {result['largest_jump_m']:.3f} m"
     if not result["judged"]:
         return "no frames traced"
-    text = f"jump {result['largest_jump_m']:.3f} m"
+    text = f"jump {over(result['largest_jump_m'], POP_M)} m"
     if result["body_m"] >= POP_M:
         text += f" (body {result['body_m']:.3f})"
     if result.get("largest_veil_m"):
         text += f" (veil {result['largest_veil_m']:.3f} not counted)"
     if result.get("stance_frames"):
         text += f" (stance ramp {result['stance_frames']}, largest {result['largest_stance_m']:.3f} shown, not counted)"
+    if result.get("launch_frames"):   # round 55C
+        text += f" (dive launch {result['launch_frames']}, largest {result['largest_launch_m']:.3f} shown, not counted)"
     text += f" [by lengths {result['by_lengths_m']:.3f}]"
     if result.get("largest_float_m"):
         text += f" float {result['largest_float_m']:.3f} m ({result['float_at']})"
@@ -568,9 +715,13 @@ def pop_lines(result, indent="       "):
     out = []
     for p in result.get("pops", []):
         body = "the body's own" + {0: "", 1: " a frame after the root, with the wanted eye"}.get(p.get("after"), "") + ", not counted"
+        if p.get("fall") is not None:   # round 55C
+            body = (f"the body's own: a fall landing (the root {p['fall']:+.3f} m in one frame; the game's eye went with it, the filter "
+                    f"held {p['held']:.3f} of it), not counted")
         who = {"body": body, "own": "the eye's own, along the view" if _along_named(p) else "the eye's own (nothing carried)", "filter": "the filter's",
                "veil": "the veil's (the eye moved in front of the head at a leave of the native view)",
-               "stance": "the game's stance ramp begun on the root's own change of step, not counted"}[p["whose"]]
+               "stance": "the game's stance ramp begun on the root's own change of step, not counted",
+               "launch": "the game's dive launch (an untouched native frame), not counted"}[p["whose"]]
         split = "" if p.get("along") is None else f" (along the view {p['along']:.3f}, across {p['across']:.3f})"
         if p.get("veil"):
             split += f", veil {p['veil']:.3f}"
@@ -690,18 +841,21 @@ def reloading(name, script):
     return name in RELOADS or bool(re.search(r"\b(?:key|hold|down) r\b", script))
 
 
-def phase_judge(name, script, lines):
+def phase_judge(name, script, lines, before=()):
     """judge() of one matrix phase's stretch of the log, as main() judges it: the toggle phases as toggles, the reload
     phases' slide (RELOADS), the throws' head (THROWS), the turns of a phase that moves the mouse let off, the stance
-    class left out wherever the script presses the reload key (reloading), and the vault phases at their landing."""
+    class left out wherever the script presses the reload key (reloading), and the vault phases at their landing.
+    `before`: the log before the stretch, its context (round 55C)."""
     return judge(lines, name.startswith("toggle"), reload=name in RELOADS, throw=name in THROWS, mouse="look" in script,
-                 stance=not reloading(name, script), landing=name in VAULTS)
+                 stance=not reloading(name, script), landing=name in VAULTS, before=before)
 
 
-def judge(lines, toggles=False, reload=False, throw=False, mouse=False, stance=True, landing=False):
+def judge(lines, toggles=False, reload=False, throw=False, mouse=False, stance=True, landing=False, before=()):
     """`mouse`: the phase's own script moved the mouse (a "look"): its turns at a change of camera are printed and not
-    failed (round 49). `stance`: the stance class may name a frame (round 49g: matrix.reloading says when not);
-    `landing`: a vault phase, judged at its landing too."""
+    failed (round 49). `stance`: the stance class may name a frame (round 49g: matrix.reloading says when not), and
+    so may the dive launch class (round 55C); `landing`: a vault phase, judged at its landing too. `before`: the log's
+    lines before the stretch (round 55C: its traced frames of the CONTEXT_MS before the stretch are what its first
+    frames are measured against: context_rows; nothing of them is judged or counted)."""
     held = other = missed = 0
     masks = set()
     kick = jump = 0.0
@@ -725,22 +879,32 @@ def judge(lines, toggles=False, reload=False, throw=False, mouse=False, stance=T
     # measures before the eye continuity and calls an eased 0.7 m a jump. The trace stops half a second after an edge
     # and starts again at the next: frames on either side of such a pause are not neighbours (a dive begun inside one
     # window and over before the next read as 0.12 m), and measure() takes none of them together.
+    import dive as dive_launch
     import trace as trace_reader
     rows = trace_reader.frames(lines)
     traced = bool(rows)
-    found = measure(rows, stance=stance and not reload)   # round 49: a reload's eye is never the stance ramp's (tools/harness/stance.py)
+    context = list(before)[-CONTEXT_LINES:]
+    judged_rows = sorted(context_rows(context, rows) + rows, key=lambda r: r["tick"])   # round 55C
+    natives = stance and not reload   # round 49: a reload's eye is never the stance ramp's (tools/harness/stance.py), nor a dive launch's
+    marks = dive_launch.launch_marks(context + list(lines)) if natives else None
+    if marks:
+        for row in judged_rows:
+            row["source"] = marks["sources"].get(row["tick"])
+    found = measure(judged_rows, stance=natives, launch=marks)
     stances = [f["shown"] for f in found if f["whose"] == "stance"]
+    launches = [f["shown"] for f in found if f["whose"] == "launch"]
     veil_m = max([0.0] + [f["beyond"] for f in found if f["whose"] == "veil"])
     if traced:
         # Round 19: the eye's own largest, without the veil's move; the veil's frames have their own largest and do
-        # not fail a phase (a soak has some 70 leaves, each with a frame or two the veil moved up to 0.32 m).
-        jump = max([0.0] + [f["bare"] for f in found])
+        # not fail a phase (a soak has some 70 leaves, each with a frame or two the veil moved up to 0.32 m). Round 55C:
+        # nor do the game's dive launches.
+        jump = max([0.0] + [f["bare"] for f in found if f["whose"] != "launch"])
     floated, float_row = trace_reader.largest_float(rows) if traced else (0.0, None)   # round 24
     ok = held > 0 and missed == 0 and (jump < (POP_M if traced else LIMIT_M) or toggles) and not refused and (floated <= trace_reader.FLOAT_M or toggles)   # the toggle itself is a cut by design
     extra, first = {}, []
     # Round 49: the turn at a change of camera, and the veil's bound.
-    snaps = [t for t in turn_snaps(rows) if t["degrees"] > TURN_DEG]
-    worst = max(turn_snaps(rows), key=lambda t: t["degrees"], default=None)
+    snaps = [t for t in turn_snaps(judged_rows) if t["degrees"] > TURN_DEG]
+    worst = max(turn_snaps(judged_rows), key=lambda t: t["degrees"], default=None)
     extra.update({"turn_deg": worst["degrees"] if worst else 0.0, "turn_at": worst["at"] if worst else None, "turn_snaps": snaps})
     for t in snaps:
         text = f"the view turned {t['degrees']:.1f} degrees in one frame at the change of camera kind {t['before']} to {t['kind']} ({t['at']})"
@@ -749,15 +913,22 @@ def judge(lines, toggles=False, reload=False, throw=False, mouse=False, stance=T
         else:
             ok = False
             first.append(text + f": over {TURN_DEG:.0f} without the mouse")
-    opened, opened_row, faults = veil_faults(rows)
-    extra.update({"veil_open_m": opened, "veil_open_at": opened_row["at"] if opened_row else None, "veil_faults": faults})
+    excused = []
+    opened, opened_row, faults = veil_faults(judged_rows, excused)
+    extra.update({"veil_open_m": opened, "veil_open_at": opened_row["at"] if opened_row else None, "veil_faults": faults,
+                  "veil_excused": excused})
     for f in faults:
-        what = {"opening": f"the veil opened with a move of {f['m']:.3f} m (over {VEIL_OPEN_M:.2f})",
-                "step": f"the veil's move changed by {f['m']:.3f} m in one frame (a flick, or a move not let out: over {VEIL_STEP_M:.2f} and over its let-out's steepest)",
-                "cut": f"the native view cut a veil move of {f['m']:.3f} m that was not let out"}[f["what"]]
+        what = {"opening": f"the veil opened with a move of {over(f['m'], VEIL_OPEN_M)} m (over {VEIL_OPEN_M:.2f})",
+                "step": f"the veil's move changed by {over(f['m'], VEIL_STEP_M)} m in one frame (a flick, or a move not let out: over {VEIL_STEP_M:.2f} and over its let-out's steepest)",
+                "cut": f"the native view cut a veil move of {over(f['m'], VEIL_STEP_M)} m that was not let out"}[f["what"]]
+        if f.get("shown") is not None:
+            what += f", the eye shown {f['shown']:.3f} m against the body"
         first.append(f"{what} ({f['at']})")
         if not toggles:
             ok = False
+    for f in excused:   # round 55C
+        first.append(f"the veil's move changed by {f['m']:.3f} m in one frame and the eye shown moved {f['shown']:.3f} m against the body: "
+                     f"the eye before the veil made up the difference (the push), not counted ({f['at']})")
     extra["said"] = list(first)   # the lines of these two judges, for soak.py
     if reload:   # round 39: on the traced eye only, and its slide along the view across the reload's edges
         slide, slide_row = reload_slide(rows)
@@ -779,7 +950,7 @@ def judge(lines, toggles=False, reload=False, throw=False, mouse=False, stance=T
         elif head["frames"] and not head["measured"]:
             first.append("the head was not measured in the head camera (no head_shown or veil_head on the rows)")
     if landing:   # round 49g: the raw vertical step shown in the frames of a landing, against the body's own
-        landed = landings(rows, mask_lines(lines))
+        landed = landings(judged_rows, mask_lines(context + list(lines)))
         frames = [f for one in landed for f in one["frames"]]
         worst = max(frames, key=lambda f: f["beyond"], default=None)
         drops = [one["dropped"] for one in landed if one.get("dropped")]
@@ -794,6 +965,7 @@ def judge(lines, toggles=False, reload=False, throw=False, mouse=False, stance=T
         first.extend(landing_lines(landed))
     return {**extra, "pass": ok, "frames": held, "other_camera_frames": other, "missed": missed, "kinds": sorted(kinds),
             "largest_jump_m": jump, "largest_veil_m": veil_m, "stance_frames": len(stances), "largest_stance_m": max([0.0] + stances),
+            "launch_frames": len(launches), "largest_launch_m": max([0.0] + launches),
             "from_trace": traced, "judged": len(found),
             "by_lengths_m": max([0.0] + [f["lengths"] for f in found]), "body_m": max([0.0] + [f["body"] for f in found]),
             "pops": [f for f in found if f["whose"]], "largest_kick_deg": kick, "notes": first + sorted(set(notes))[:6],
@@ -807,13 +979,43 @@ def unplayed(name, lines):
 
 
 def judge_played(name, lines, judged):
-    """Adds unplayed() to a phase's verdict `judged` (in place): a phase that was not played fails."""
+    """Adds unplayed() to a phase's verdict `judged` (in place): a phase that was not played fails, and (round 55C) is
+    a harness failure, not a camera result (harness True)."""
     notes = unplayed(name, lines)
     if notes:
         judged["pass"] = False
         judged["notes"] = notes + judged["notes"]
     judged["played"] = not notes
+    if notes:
+        judged["harness"] = True   # (a played phase's verdict keeps its keys as they were)
     return judged
+
+
+def judge_stood(name, stood, judged):
+    """Round 55C: a phase whose body could not be brought to its feet first (stand_first: `stood`) was not set up, so
+    whatever its stretch of the log shows is no camera result: it fails as a harness failure (harness True, played
+    False, the reason first in its notes; the camera's lines stay below it for reading). `judged` is changed in place."""
+    failed = bool(stood) and not stood["standing"]
+    judged["harness"] = failed or judged.get("harness", False)
+    if failed:
+        why = stood.get("why") or f"the log said {stood['before']} -> {stood['after']} after {stood['presses']}"
+        judged["pass"] = False
+        judged["played"] = False
+        judged["notes"] = [f"HARNESS FAILURE: the body could not be stood up first ({why}): not a camera result"] + judged["notes"]
+    return judged
+
+
+def result_summary(results):
+    """The run's last line: how many passed, which failed, and apart from them the harness failures: the phases not
+    played (judge_played) or not set up (judge_stood)."""
+    failed = [n for n, r in results.items() if not r["pass"] and not r.get("harness")]
+    harness = [n for n, r in results.items() if r.get("harness")]
+    text = f"{len(results) - len(failed) - len(harness)} of {len(results)} passed"
+    if failed:
+        text += f"; failed: {', '.join(failed)}"
+    if harness:
+        text += f"; harness failures, not camera results: {', '.join(harness)}"
+    return text
 
 
 def stand_first(device, name, log):
@@ -904,8 +1106,6 @@ def main(argv):
             script, settle = PHASES[name]
             phases_levers.prepare(name)                    # nothing for a phase of this file's own
             stood = stand_first(device, name, log)   # before the phase's stretch of the log begins
-            if stood and not stood["standing"]:
-                print(f"  ({name}: the body could not be stood up first: {stood['before']} -> {stood['after']} after {stood['presses']})")
             start = log.stat().st_size
             aimed = play(device, name, log, out)
             time.sleep(min(settle, 1.0))
@@ -916,13 +1116,14 @@ def main(argv):
             time.sleep(max(0.0, settle - 1.0) + 1.2)   # the Lock line is written once a second
             with open(log, errors="replace") as handle:
                 handle.seek(start); lines = handle.read().splitlines()
-            results[name] = judge_played(name, lines, judge_aim(name, aimed, lines, phase_judge(name, script, lines)))
+            context = lines_before(log, start)   # round 55C: the frames before the stretch, as context
+            results[name] = judge_stood(name, stood, judge_played(name, lines, judge_aim(name, aimed, lines, phase_judge(name, script, lines, context))))
             r = results[name]
             for text in style_changes(lines):
                 print(text)
             style = style_in_force(lines) or style
             r["camera_style"] = style
-            print(f"{'pass' if r['pass'] else 'FAIL':4} {name:16} frames {r['frames']:4} other-camera {r['other_camera_frames']:4} missed {r['missed']:3} "
+            print(f"{'pass' if r['pass'] else 'HARN' if r.get('harness') else 'FAIL':4} {name:16} frames {r['frames']:4} other-camera {r['other_camera_frames']:4} missed {r['missed']:3} "
                   f"{describe(r)} kick {r['largest_kick_deg']:.1f} deg kinds {r['kinds']}")
             if aimed is not None:
                 print(f"       {aim_text(r['dive'] if name in DIVES else r['aim'])}")
@@ -933,7 +1134,7 @@ def main(argv):
     with open(log, errors="replace") as handle:
         handle.seek(begun); run = handle.read().splitlines()
     print(style_summary(style_in_force(before), run))
-    print(f"{len(results) - len(failed)} of {len(results)} passed" + (f"; failed: {', '.join(failed)}" if failed else ""))
+    print(result_summary(results))
     return 1 if failed else 0
 
 

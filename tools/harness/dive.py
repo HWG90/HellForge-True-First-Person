@@ -41,6 +41,7 @@ ENTERED = re.compile(STAMP + r"State: entered the native view\b")
 VIEW_KIND = re.compile(STAMP + r"View: .*?\bkind=(\d+)")
 MOTION = re.compile(STAMP + r"Motion: action=([\w-]+)")
 DIVE_ACTION = "dive"   # the mod's name for a dive (src/action_select.c), forward or back; never "dive-back"
+GAP_MS = 80.0          # as matrix.GAP_MS
 VEIL_HEAD = re.compile(STAMP + r"Trace: t=\S+ kind=(\d+)\b.*? veil_head=\((-?[\d.]+) (-?[\d.]+)\)")
 
 # Round 32: the swap's key goes down this long after the dive's key went down, tried in turn until a leave comes in the
@@ -68,6 +69,59 @@ STAND_PRESSES = 3                     # presses at most (prone -> crouch -> idle
 STAND_WAIT_S = 2.0                    # how long the log is read for a new Motion: line after a press
 LANDING_WAIT_S = 2.0                  # where the last action is the dive: how long the log is read for its landing
 LOOKBACK_BYTES = 1 << 20              # the log before the harness began reading it, searched for the last Motion: line
+
+
+# Round 55C: the game's dive launch, for matrix.measure (whose "launch").
+LAUNCH_SOURCE = re.compile(r" Trace: .*? source=(\w+)\b.*? tick=([\d.]+)")
+LAUNCH_AFTER = (2, 3)      # the frame judged is this many frames after the dive's own (its Motion: line's frame)
+LAUNCH_STAMP_S = 0.0025    # the dive's frame: a row written within this of the Motion: line ...
+LAUNCH_EDGE_MS = 5.0       # ... at t= this near 0 (the trace counts from the dive's line: -0.8 to -1.1 ms logged)
+
+
+def launch_marks(lines):
+    """What launch() reads of the log `lines`: {dives: [seconds of the day of every "Motion: action=dive" line],
+    sources: {tick: the Trace row's source=}}; None where the log has no dive line (nothing can be a launch)."""
+    dives = [stamp_s(m[1]) for m in map(MOTION.match, lines) if m and m[2] == DIVE_ACTION]
+    if not dives:
+        return None
+    sources = {}
+    for line in lines:
+        m = LAUNCH_SOURCE.search(line)
+        if m:
+            sources[float(m[2])] = m[1]
+    return {"dives": dives, "sources": sources}
+
+
+def launch(rows, i, shown, root, marks, limit):
+    """Round 55C: whether frame i of `rows` (trace.frames, with source= set from `marks`), whose eye changed its step
+    by `shown` and whose root's own change of step is `root` (m, or None), is the game's dive launch: an untouched
+    native frame of the game's own eye, where the mod can have had no part. All of this must hold:
+      - the frame is LAUNCH_AFTER frames after the dive's own: the row written with the dive's "Motion: action=dive"
+        line (within LAUNCH_STAMP_S, at t= within LAUNCH_EDGE_MS of 0). The root leaves its run in the frame after the
+        dive's and the rig eye is the root a frame late, so the eye's step changes one or two frames after that;
+      - in the dive's frame and every frame from it to frame i: kind 6, jumps not looked for, nothing taken up but
+        "root", under stance.NOTHING_M carried, the wanted eye the eye shown, no veil (stance._untouched), source native,
+        and no two of them further apart than GAP_MS;
+      - the root's own change of step in frame i is under `limit` (POP_M): a lunge of the body is measure()'s own rule;
+      - `shown` is under stance.CAP_M.
+    The feel.63 cases: soak 67-A #54 (0.070 m) and #85 (0.071), 68-C #5 (0.069), #22 (0.090) and #218 (0.072), the
+    matrix's "dive" (0.073); every one two frames after the dive's line, the root's change 0.026 to 0.052 m. matrix.py
+    prints such a frame and does not count it, as it does the stance ramp's (tools/harness/stance.py)."""
+    import stance
+    if not marks or root is None or root >= limit or shown >= stance.CAP_M:
+        return False
+    for back in LAUNCH_AFTER:
+        e = i - back
+        if e < 0:
+            continue
+        edge = rows[e]
+        if abs(edge.get("t", 1e9)) > LAUNCH_EDGE_MS or not any(abs(stamp_s(edge["written"]) - d) <= LAUNCH_STAMP_S for d in marks["dives"]):
+            continue
+        span = rows[e:i + 1]
+        if any(not 0 < b["tick"] - a["tick"] <= GAP_MS for a, b in zip(span, span[1:])):
+            return False
+        return all(stance._untouched(row) and row.get("source") == "native" for row in span)
+    return False
 
 
 def script(after):
@@ -111,12 +165,68 @@ def body_action(tail):
     return last_action(before[1:] if start else before)   # the first line of a cut read may be half a line
 
 
+# Round 55C. The feel.63 matrix (tfp-soak-67-A.modlog): dive-back was not played because its dive key went in while
+# the body was still getting up from prone (Motion: action=idle 11:08:17.948 is written as the stand-up begins; the
+# stand ramp ran to 11:08:18.315 and the dive key, about 0.35 s after the phase began, was not taken). So a body
+# stood up is given this long before the phase: the matrix's own prone phase lets 1.8 s pass after its last z.
+STAND_SETTLE_S = 1.8
+# And stand-up-prone-head was not set up: the phase before left the body prone and then the head camera (the gun out
+# of the hands, 11:08:53.804). The motion runtime writes no Motion: line there (it is idle without a lease), so the
+# last one, "prone" (11:08:51.834), was stale: the body had stood up (eye 4.04 m at 11:08:57.476); stand_up pressed z
+# (it lay down: 2.94 m at 11:09:03.485), the dive key and z, and read "prone" throughout. A Motion: line written before
+# the view last left the game's own is not taken as the stance: the primary is brought back first (the view comes
+# back to the game's with a Motion: line, as at 11:09:10.764), and where it does not, the stance is not known and
+# nothing is pressed.
+
+
+def known_lines(tail):
+    """The log before the harness began reading it (LOOKBACK_BYTES of it) and what `tail` has read since."""
+    try:
+        with open(tail.path, "rb") as handle:
+            start = max(0, tail.offset - LOOKBACK_BYTES)
+            handle.seek(start)
+            before = handle.read(tail.offset - start).decode(errors="replace").splitlines()
+    except OSError:
+        before, start = [], 0
+    return (before[1:] if start else before) + list(tail.lines)
+
+
+def stance_stale(lines):
+    """Round 55C: True where the game's view was left after the last "Motion: action=" line of `lines` and has not come
+    back (no "entered the native view" or View line of kind 6 since): that line says what the body did before the view
+    left, not what it does now. False otherwise, and where the log names no action."""
+    last_motion = last_left = None
+    for i, line in enumerate(lines):
+        if MOTION.match(line):
+            last_motion = i
+        elif LEFT.match(line):
+            last_left = i
+        elif ENTERED.match(line) or ((m := VIEW_KIND.match(line)) and m[2] == "6"):
+            last_left = None
+    return last_motion is not None and last_left is not None and last_left > last_motion
+
+
 def stand_up(device, tail, sleep=time.sleep, clock=time.monotonic):
     """Brings the body to its feet where the log says it is not: waits for a dive to land, then presses the key that
     stands it up from where it is, and reads the log for the next Motion: line, up to STAND_PRESSES times. Returns
-    {before, presses, after, standing}; standing is True where the last action is not in LOWERED (or the log never
-    named one: nothing is pressed then)."""
+    {before, presses, after, standing, why}; standing is True where the last action is not in LOWERED (or the log never
+    named one: nothing is pressed then). Round 55C: where the action read was written before the view last left the
+    game's own (stance_stale), the primary is brought back first and the stance read from the Motion: line the game's
+    view comes back with; where none comes, standing is False and `why` says so, and no stance key is pressed. A body
+    stood up is given STAND_SETTLE_S before this returns (the stand-up takes the dive key from it)."""
     before = action = body_action(tail)
+    primary = []   # the primary, where it was brought back first
+    if action in LOWERED and stance_stale(known_lines(tail)):
+        start = len(tail.lines)
+        device.run(PRIMARY)
+        back = aim.wait_for(tail, lambda lines: in_native_view(lines[start:]) is True and last_action(lines[start:]) is not None,
+                            NATIVE_WAIT_S, sleep, clock)
+        if not back:
+            return {"before": before, "presses": [PRIMARY], "after": None, "standing": False,
+                    "why": (f"the stance is not known: the log's last Motion: line ({before}) is from before the view left the game's own, "
+                            "and the game's view did not come back with the primary")}
+        action = last_action(tail.lines[start:])
+        primary = [PRIMARY]
     if action == DIVE_ACTION:
         start = len(tail.lines)
         aim.wait_for(tail, lambda lines: last_action(lines[start:]) is not None, LANDING_WAIT_S, sleep, clock)
@@ -131,7 +241,9 @@ def stand_up(device, tail, sleep=time.sleep, clock=time.monotonic):
         presses.append(key)
         aim.wait_for(tail, lambda lines: last_action(lines[start:]) is not None, STAND_WAIT_S, sleep, clock)
         action = last_action(tail.lines[start:]) or action
-    return {"before": before, "presses": presses, "after": action, "standing": action not in LOWERED}
+    if presses and action not in LOWERED:
+        sleep(STAND_SETTLE_S)   # round 55C: the stand-up runs on after its Motion: line
+    return {"before": before, "presses": primary + presses, "after": action, "standing": action not in LOWERED, "why": None}
 
 
 def in_native_view(lines):
