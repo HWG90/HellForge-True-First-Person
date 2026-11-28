@@ -808,6 +808,7 @@ static bool reload_constant(const TfpPoseConfig *c, float *forward) {
 static _Atomic uint32_t ads_sight, ads_wanted, ads_pull_bits, ads_share_bits, ads_closer_bits, ads_forward_bits, ads_depth_bits = UINT32_C(0x7fc00000);
 static _Atomic uint32_t ads_full, ads_near_bits; /* what the near clip moves in by (tfp_pose_ads_near) */
 static _Atomic uint32_t ads_editing; /* round 20c: the placement editor on its ADS action (tfp_pose_set_ads_editing) */
+static _Atomic uint32_t ads_enter_ms = 180; /* round 42: "Aim-in time" (tfp_pose_set_ads_enter_ms) */
 static TfpAdsPull ads_pull;
 static TfpAdsLead ads_lead;
 static TfpAdsSeat ads_seat;
@@ -1527,10 +1528,15 @@ static void position_locked(uint32_t unit, uint32_t node, const float *pose, uin
     policy.weight += (target - policy.weight)*tfp_phase_step(&policy.shared, policy.full_ads);
     policy.target = target; policy.start_weight = policy.weight; policy.blend_start = now;
   } else {
-    const float u = (float)(now - policy.blend_start)/(float)policy.c.blend_ms;
+    /* Round 42 (not in retail): a blend into full aim takes no longer than the aim-in time (below 180 only: 180 or more is blend_ms as before). */
+    const uint32_t enter = atomic_load_explicit(&ads_enter_ms, memory_order_relaxed);
+    const uint32_t span = policy.target == 0 && enter < 180 && enter < policy.c.blend_ms ? enter : policy.c.blend_ms;
+    const float u = span ? (float)(now - policy.blend_start)/(float)span : 1;
     const float t = u < 0 ? 0 : (u > 1 ? 1 : u), eased = t*t*(3 - 2*t);
     policy.weight = policy.start_weight + (policy.target - policy.start_weight)*eased;
     if (target != policy.target) { policy.start_weight = policy.weight; policy.target = target; policy.blend_start = now; }
+    /* Not in retail (round 42): "Aim-in time" 0 is in aim at once here too, where no shared packet matches. */
+    if (target == 0 && atomic_load_explicit(&ads_enter_ms, memory_order_relaxed) == 0) policy.weight = policy.start_weight = 0;
   }
   _Alignas(16) float shifted[4]; memcpy(shifted, native, 16);
   if (policy.weight != 0) {
@@ -1578,6 +1584,7 @@ static void position_locked(uint32_t unit, uint32_t node, const float *pose, uin
    * comes nearer than the wanted distance while the game reseats a new zoom level at its own pace (the review's B2). */
   {
     const float out_of_hip = 1 - policy.weight, share = policy.full_ads ? out_of_hip : fminf(policy.ads_share, out_of_hip);
+    const float share_before = policy.ads_share; /* round 42: a share that comes to 1 in one frame is the snap frame */
     policy.ads_share = share > 0 ? (share < 1 ? share : 1) : 0;
     const float sight = bits_float(atomic_load_explicit(&ads_sight, memory_order_relaxed)), wanted = bits_float(atomic_load_explicit(&ads_wanted, memory_order_relaxed));
     if (policy.ads_share == 0) tfp_ads_seat_reset(&ads_seat); /* at the hip: each aim pairs the sight and the depth anew */
@@ -1597,7 +1604,24 @@ static void position_locked(uint32_t unit, uint32_t node, const float *pose, uin
      * is feel.51's, a saved ADS placement toward the eye included. The lead is left as it was while not following: by
      * the time the editor opens it is stale (TFP_ADS_STALE_MS), so the near clip comes in with no lead. */
     const bool follow = wanted > 0 || atomic_load_explicit(&ads_editing, memory_order_relaxed) != 0;
-    atomic_store_explicit(&ads_near_bits, float_bits(follow ? tfp_ads_lead(&ads_lead, closer, (double)now) : 0), memory_order_relaxed);
+    /* Round 42: "Aim-in time" 0 brings the share from below 1 to 1 in one frame: that frame is not led (tfp_ads_lead_snap).
+     * And the near helper may be called before this node in the frame full aim begins, when this frame's closer is not
+     * published yet: the whole pull would then stand in front of the near clip for a frame (73 mm on the Scythe at 10 cm,
+     * tests/wire_pose_test.c ads_frames). So out of full aim, at 0, what full aim will draw the gun in by is handed over
+     * ahead of it. The near helper asks only in its own full-aim calls: at the hip nothing reads it, and a full-aim call
+     * of the near helper after the gun has gone out takes the near clip in further than needed, which cuts nothing.
+     * The pull may still be gliding toward its target (80 ms) when aim begins, and the snap frame has no lead: so at 0
+     * the near clip goes by the farther of the pull and its target, in full aim too (a near clip ahead of the gun cuts
+     * nothing; at 180 nothing here changes). */
+    const bool instant = atomic_load_explicit(&ads_enter_ms, memory_order_relaxed) == 0;
+    const bool snap = instant && policy.full_ads && share_before < 1 && policy.ads_share >= 1;
+    float near_by = follow ? tfp_ads_lead_snap(&ads_lead, closer, (double)now, snap) : 0;
+    if (follow && instant) {
+      const float toward = fmaxf(pull, tfp_ads_pull_for(sight, wanted));
+      const float ahead = tfp_ads_closer(toward, policy.full_ads ? policy.ads_share : 1, policy.ads_placement[1]);
+      if (ahead > near_by) near_by = ahead;
+    }
+    atomic_store_explicit(&ads_near_bits, float_bits(near_by), memory_order_relaxed);
     atomic_store_explicit(&ads_full, policy.full_ads ? 1u : 0u, memory_order_relaxed);
   }
   float applied_depth = 0;
@@ -2334,6 +2358,7 @@ bool tfp_pose_ads_near(float *closer) {
   return on;
 }
 void tfp_pose_set_ads_editing(bool on) { atomic_store_explicit(&ads_editing, on ? 1u : 0u, memory_order_relaxed); }
+void tfp_pose_set_ads_enter_ms(uint32_t ms) { atomic_store_explicit(&ads_enter_ms, ms, memory_order_relaxed); } /* round 42 */
 bool tfp_pose_ads_probe(TfpPoseAdsProbe *out) {
   if (!out) return false;
   out->armed = atomic_load_explicit(&armed, memory_order_acquire) != 0;
@@ -2347,6 +2372,7 @@ bool tfp_pose_ads_probe(TfpPoseAdsProbe *out) {
   out->editing = atomic_load_explicit(&ads_editing, memory_order_relaxed) != 0;
   out->sight = bits_float(atomic_load_explicit(&ads_sight, memory_order_relaxed));
   out->wanted = bits_float(atomic_load_explicit(&ads_wanted, memory_order_relaxed));
+  out->aim_in_ms = atomic_load_explicit(&ads_enter_ms, memory_order_relaxed);
   return true;
 }
 /* Not in retail (pose_helper.h). Reads only. */

@@ -268,6 +268,7 @@ typedef struct TfpPoseAdsProbe {
   bool aim_steady;    /* round 20c: tfp_pose_set_aim_steady (zoom_steady.txt) */
   bool editing;       /* round 20c: tfp_pose_set_ads_editing */
   float sight, wanted; /* round 20c: what tfp_pose_set_ads_seat was handed last */
+  uint32_t aim_in_ms;  /* round 42: what tfp_pose_set_ads_enter_ms was handed last (180 at start-up) */
 } TfpPoseAdsProbe;
 bool tfp_pose_ads_probe(TfpPoseAdsProbe *out); /* reads only */
 /* For the near helper's own calls (tfp_near_set_ads_source): how far in the near clip goes in full aim this frame, `closer`
@@ -279,4 +280,11 @@ bool tfp_pose_ads_near(float *closer);
  * clip follows the gun as with a wanted distance. false, the start-up value: a saved ADS placement is drawn as on
  * feel.51, the near clip the game's. The binder sets it each tick (src/aim_bind.h). Any thread. */
 void tfp_pose_set_ads_editing(bool on);
+/* Round 42, "Aim-in time" (locked_view.json ads_transition_ms; not in retail): the shared clock's ADS_ENTER time in ms. The
+ * shared phase (tfp_pose_set_transition) already carries it; this is for the frames it does not: 0 takes the hip weight
+ * to 0 at once in full aim where no packet matches (blend_ms is the config's, and never 0); below blend_ms (150) that blend
+ * into full aim takes the aim-in time; and at 0 the frame the gun comes
+ * in all at once gives the near clip no lead (src/ads_seat.h tfp_ads_lead_snap). Any other value: as before (180, the
+ * start-up value). Any thread; read in each frame. */
+void tfp_pose_set_ads_enter_ms(uint32_t ms);
 #endif

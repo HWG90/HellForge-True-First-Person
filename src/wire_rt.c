@@ -1034,8 +1034,12 @@ static bool rt_transition_update(TfpRtHost *h, const TfpRtTable *value, double n
     input.action = TFP_TRANSITION_NONE; /* the motion module is off: no action placement */
     input.zoom_identity = zoom.kind == TFP_RT_NUMBER ? (int)zoom.number : TFP_TRANSITION_NONE;
   }
+  tfp_transition_set_enter(&w->transition, w->aim_in_ms / 1000); /* round 42: the aim-in time, before the update that may enter aim */
   tfp_transition_update(&w->transition, p ? &input : NULL, now, truthy(enabled), truthy(foreign), &packet);
   return true;
+}
+void tfp_wire_set_aim_in(TfpWire *w, double ms) { /* round 42 (src/wire.h) */
+  if (w && ms == ms && ms >= 0 && ms <= 300) w->aim_in_ms = ms;
 }
 static bool rt_transition_reset(TfpRtHost *h, const char *reason) { (void)reason; tfp_transition_reset(&W(h)->transition); return true; }
 static bool rt_transition_action(TfpRtHost *h, V action, double now, V *o1, V *o2) { /* only the motion module calls it */
@@ -1160,6 +1164,7 @@ static void mem_log(void *u, const char *text) { io_log(u, text); }
 static void log_sink(void *u, const char *text) { io_log(u, text); }
 void tfp_wire_init(TfpWire *w, const TfpOpsHost *memory, const TfpWirePlatform *platform, const TfpWireHelpers *helpers) {
   memset(w, 0, sizeof *w);
+  w->aim_in_ms = 180; /* round 42: the shared clock's own time until tfp_wire_set_aim_in */
   w->platform = *platform;
   w->helpers = *helpers;
   tfp_view_log_init(&w->log, log_sink, w);

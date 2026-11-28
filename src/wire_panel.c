@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { ROWS = 48, QUEUE = 16 };
+enum { ROWS = 64, QUEUE = 16 }; /* round 54: 49 controls with Aim-in time (main had 48, the old limit); room to grow */
 typedef struct Row { TfpMenuValue value; bool disabled; char label[300]; } Row;
 typedef struct Event { int index; bool activate; TfpMenuValue value, previous; } Event;
 typedef struct Panel {

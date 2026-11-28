@@ -196,18 +196,20 @@ static const float EASE_TAU_US = 45000.0f, EASE_SNAP_METERS = .002f;
 /* cpp:100-110 */
 static uint64_t now_us(void) { return host.now_us(host.user); }
 /* cpp:111 */
+static _Atomic uint32_t ads_enter_ms = 180, ads_was; /* round 42: "Aim-in time" (tfp_near_set_ads_enter_ms); the last owned call was full aim */
 static void ease_reset(void) {
+  atomic_store_explicit(&ads_was, 0, memory_order_relaxed);
   atomic_store_explicit(&shown_at, 0, memory_order_relaxed);
   atomic_store_explicit(&shown_meters, float_bits(0), memory_order_relaxed);
 }
 /* cpp:112-123 */
-static float ease(float target) {
+static float ease(float target, float tau) {
   const uint64_t now = now_us(), before = atomic_load_explicit(&shown_at, memory_order_relaxed);
   const float from = bits_float(atomic_load_explicit(&shown_meters, memory_order_relaxed));
   float out = target;
   if (now && before && now >= before && now - before <= EASE_GAP_US && isfinite(from) && from > 0) {
     const uint64_t elapsed = now - before < EASE_STEP_US ? now - before : EASE_STEP_US;
-    out = from + (target - from) * (1.0f - expf(-(float)elapsed / EASE_TAU_US));
+    out = from + (target - from) * (1.0f - expf(-(float)elapsed / tau));
     if (!isfinite(out) || fabsf(out - target) < EASE_SNAP_METERS) out = target;
   }
   atomic_store_explicit(&shown_meters, float_bits(out), memory_order_relaxed);
@@ -337,10 +339,28 @@ void tfp_near_setter_from(uint64_t ret, void *camera, float native) {
             target = wanted; if (aim) atomic_fetch_add_explicit(&aim_applied, 1, memory_order_relaxed);
           }
         }
-        float eased = ease(target);
-        /* Not in retail (round 20): with the gun drawn closer in full aim, a near clip coming in is taken at once; the
-         * ease would leave it behind the sight's rear while the gun comes in. Going out it eases, as retail's. */
-        if ((closer > 0 || wider) && eased > target) { eased = target; atomic_store_explicit(&shown_meters, float_bits(eased), memory_order_relaxed); }
+        /* Full aim's near clip, the rounds composed in this order (round 54), each step on the one before:
+         *  1. target (above): the game's value, less the gun's move (round 20c), times the fov scale (round 53), never
+         *     under the game's own 0.05 (tfp_clip_ads_near); hip and normal aim their clearances.
+         *  2. the ease toward it: retail's 45 ms; in full aim with an aim-in time below 180, that constant times ms/180
+         *     (round 42; 0 is step 3).
+         *  3. aim-in 0, the first call of full aim: the target at once (round 42).
+         *  4. a near clip coming in (the gun drawn closer, round 20; shown wider than the game's lens, round 53): the
+         *     target at once, at every aim-in time; going out it eases.
+         * Steps 3 and 4 only ever set the target, so in full aim with either of step 4's reasons the near clip is never
+         * past the scaled value, and never under 0.05 (the ease runs between two values at or over it). The aim-in
+         * time changes only steps 2 and 3: at 180 or more (the start-up value) both are retail's / main's, to the bit,
+         * whatever the fov scale; at the game's lens (scale 1) step 1 is the game's value to the bit too. */
+        const uint32_t enter = atomic_load_explicit(&ads_enter_ms, memory_order_relaxed);
+        const bool aim_in_scaled = view == VIEW_ADS && enter > 0 && enter < 180;
+        float eased = ease(target, aim_in_scaled ? EASE_TAU_US*((float)enter/180.0f) : EASE_TAU_US);
+        const bool entered = view == VIEW_ADS && atomic_load_explicit(&ads_was, memory_order_relaxed) == 0;
+        atomic_store_explicit(&ads_was, view == VIEW_ADS ? 1u : 0u, memory_order_relaxed);
+        const bool snap_entry = entered && enter == 0;              /* step 3 */
+        const bool snap_in = (closer > 0 || wider) && eased > target; /* step 4 */
+        if ((snap_entry || snap_in) && eased != target) {
+          eased = target; atomic_store_explicit(&shown_meters, float_bits(eased), memory_order_relaxed);
+        }
         if (meters(eased) && eased >= GAME_METERS && eased != native) { applied = eased; atomic_fetch_add_explicit(&replaced, 1, memory_order_relaxed); }
       }
       atomic_store_explicit(&last_native, float_bits(native), memory_order_relaxed);
@@ -488,6 +508,8 @@ uint32_t tfp_near_read_stats(uint64_t generation, TfpNearStats *output) {
 uint32_t tfp_near_error(void) { return atomic_load_explicit(&last_error, memory_order_acquire); }
 
 /* ---- not in retail ---- */
+void tfp_near_set_ads_enter_ms(uint32_t ms) { atomic_store_explicit(&ads_enter_ms, ms, memory_order_relaxed); } /* round 42 */
+uint32_t tfp_near_ads_enter_ms(void) { return atomic_load_explicit(&ads_enter_ms, memory_order_relaxed); }
 void tfp_near_set_ads_source(TfpNearAdsSource source) { atomic_store_explicit(&ads_source, source, memory_order_release); }
 TfpNearAdsSource tfp_near_ads_source(void) { return atomic_load_explicit(&ads_source, memory_order_acquire); }
 void tfp_near_set_fov_source(TfpNearFovSource source) { atomic_store_explicit(&fov_source, source, memory_order_release); }

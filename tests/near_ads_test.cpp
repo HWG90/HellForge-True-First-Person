@@ -12,6 +12,7 @@
 #define _Static_assert static_assert
 extern "C" {
 #include "near_helper.h"
+#include "weapon_clip.h"
 }
 #include "diff_near_helper_world.h"
 using namespace dt;
@@ -135,6 +136,37 @@ int main() {
   set_closer(NAN);
   for (int i = 0; i < 80; ++i) last = frame(.173f);
   CHECK(near(last, .173, 1e-6));
+  // round 42, "Aim-in time": at 180 (the start-up value) full aim's value is eased to from the hip's (45 ms); at 0 the
+  // first call of full aim hands it over at once, and the hip's way back out eases as before
+  CHECK(tfp_near_ads_enter_ms() == 180);
+  scene.controls[4] = 0;
+  for (int i = 0; i < 60; ++i) last = frame(.173f);
+  CHECK(near(last, .10, 1e-6));
+  scene.controls[4] = 1;
+  last = frame(.173f);
+  CHECK(last > .10f && last < .17f);
+  const float first180 = last;
+  scene.controls[4] = 0;
+  for (int i = 0; i < 60; ++i) last = frame(.173f);
+  // review: at 90 the full-aim ease's time constant is halved (22.5 ms): the first call is further in, and not yet there
+  tfp_near_set_ads_enter_ms(90);
+  scene.controls[4] = 1;
+  last = frame(.173f);
+  CHECK(last > first180 && last < .173f);
+  scene.controls[4] = 0;
+  for (int i = 0; i < 60; ++i) last = frame(.173f);
+  CHECK(near(last, .10, 1e-6));
+  tfp_near_set_ads_enter_ms(0);
+  scene.controls[4] = 1;
+  last = frame(.173f);
+  CHECK(near(last, .173, 1e-6));
+  for (int i = 0; i < 5; ++i) { last = frame(.173f); CHECK(near(last, .173, 1e-6)); }
+  scene.controls[4] = 0;
+  last = frame(.173f);
+  CHECK(last < .17f && last > .10f);                                         // out: eased, as before
+  tfp_near_set_ads_enter_ms(180);
+  scene.controls[4] = 1; set_closer(NAN);                                  // back in full aim, as before the aim-in block
+  for (int i = 0; i < 80; ++i) last = frame(.173f);
   // Round 53 (src/weapon_clip.h): full aim shown wider than the game's lens. The game's near clip (its sight's distance)
   // is scaled so the near plane shows on screen what it shows at the game's lens; a change toward the eye at once.
   // The frame's two fields of view are asked of the field-of-view helper in each call.
@@ -229,6 +261,79 @@ int main() {
   fov.moving = true;
   last = frame(.173f);
   CHECK(near(last, .173*s50, 1e-6));                                        // moving again: in at once
+  // Round 54: "Aim-in time" with round 53's fov scaling on (src/near_helper.c, the composition's steps 1 to 4). The game's
+  // 30-degree lens shown at the lock's 90 and the aim-in glide down to 30, at 0 and 90 ms: the near clip is never past
+  // the frame's scaled value and never under 0.05; the entry frame is the scaled value (a nearer clip, taken at once at
+  // every aim-in time; no frame of the hip's 0.10); the way out with the glide is monotone, under a centimetre a frame,
+  // and ends on the game's value to the bit.
+  auto scaled_of = [](float native_m, float game_deg, float shown_deg) {
+    return tfp_clip_ads_near(native_m, tfp_clip_ads_scale(game_deg*RAD, shown_deg*RAD));
+  };
+  for (uint32_t ms : {0u, 90u}) {
+    tfp_near_set_ads_enter_ms(ms);
+    scene.controls[4] = 0; show(30, 90);
+    for (int i = 0; i < 80; ++i) last = frame(.098f);
+    CHECK(near(last, .10, 1e-6));                                           // the hip clearance
+    scene.controls[4] = 1;
+    last = frame(.098f);                                                    // the entry frame
+    CHECK(last == scaled_of(.098f, 30, 90) && last == .05f);                // 0.026 m scaled: the game's 0.05 floor
+    float prev = last, step = 0; bool monotone = true, inside = true;
+    for (int i = 1; i <= 60; ++i) {
+      show(30, 90 - i);
+      last = frame(.098f);
+      if (!(last <= scaled_of(.098f, 30, 90 - i) && last >= .05f)) inside = false;
+      if (last < prev) monotone = false;
+      if (last - prev > step) step = last - prev;
+      prev = last;
+    }
+    CHECK(inside && monotone && step < .01f);
+    for (int i = 0; i < 80; ++i) { last = frame(.098f); CHECK(last >= prev && last <= .098f); prev = last; }
+    CHECK(bits(last) == bits(.098f));
+  }
+  // the scaled value further out than the hip's (a long scope's 0.35 m at the game's 30 shown at 40: 0.258 m): at 0 the
+  // entry frame is the scaled value; at 90 it is on the way, further than at 180, never past it; at 180 the ease is
+  // main's (retail's 45 ms) to the bit, frame by frame
+  float first_at[3] = {0, 0, 0};
+  const uint32_t times[3] = {0, 90, 180};
+  const float s40 = scaled_of(.35f, 30, 40);
+  CHECK(s40 > .25f && s40 < .26f);
+  for (int t = 0; t < 3; ++t) {
+    tfp_near_set_ads_enter_ms(times[t]);
+    scene.controls[4] = 0; show(30, 40);
+    for (int i = 0; i < 80; ++i) last = frame(.35f);
+    CHECK(bits(last) == bits(.10f));
+    scene.controls[4] = 1;
+    float ref = last; bool same = true, inside = true;
+    for (int i = 0; i < 40; ++i) {
+      last = frame(.35f);
+      if (i == 0) first_at[t] = last;
+      if (!(last <= s40 && last >= .05f)) inside = false;
+      ref = ref + (s40 - ref)*(1.0f - std::exp(-8000.0f/45000.0f));        // main's ease: an 8 ms step at 45 ms
+      if (std::fabs(ref - s40) < .002f) ref = s40;
+      if (bits(last) != bits(ref)) same = false;
+    }
+    CHECK(inside && bits(last) == bits(s40));
+    if (times[t] == 180) CHECK(same);
+  }
+  CHECK(first_at[0] == s40 && first_at[1] > first_at[2] && first_at[1] < s40 && first_at[2] > .10f);
+  // and at the game's zoom with 180: the game's value to the bit from the hip, eased as main's
+  tfp_near_set_ads_enter_ms(180);
+  scene.controls[4] = 0; show(30, 30);
+  for (int i = 0; i < 80; ++i) last = frame(.173f);
+  scene.controls[4] = 1;
+  {
+    float ref = last; bool same = true;
+    for (int i = 0; i < 40; ++i) {
+      last = frame(.173f);
+      ref = ref + (.173f - ref)*(1.0f - std::exp(-8000.0f/45000.0f));
+      if (std::fabs(ref - .173f) < .002f) ref = .173f;
+      if (bits(last) != bits(ref)) same = false;
+    }
+    CHECK(same && bits(last) == game_bits && tfp_near_ads_scale() == 1);
+  }
+  show(30, 50);                                                             // back as the round-53 block left it
+  for (int i = 0; i < 80; ++i) last = frame(.173f);
+  CHECK(near(last, .173*s50, 1e-6));
   // at the hip the pair is nothing: the hip clearance, as main's (asked, so an old pair is known, and not used)
   show(30, 90);
   scene.controls[4] = 0;

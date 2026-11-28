@@ -482,6 +482,40 @@ static int aim_part(void) {
   CHECK(tfp_locked_view_ads_sight_cm(&wire) == 7);
   return 0;
 }
+/* ---- round 42: "Aim-in time" (locked_view.json ads_transition_ms) ---- */
+static int aim_in_part(void) {
+  static TfpSettings s, again;
+  char why[200], text[1 << 14];
+  /* the default is the shared clock's own 180 ms (a file without it reads as feel.59's view) */
+  CHECK(tfp_settings_defaults(&s) && tfp_settings_locked_number(&s, TFP_LOCKED_ads_transition_ms) == 180);
+  const TfpSettingsLockedInfo *info = tfp_settings_locked_info(TFP_LOCKED_ads_transition_ms);
+  CHECK(info && !strcmp(info->name, "ads_transition_ms") && !info->is_bool && info->value == 180 && info->min == 0 && info->max == 300 && info->step == 10);
+  CHECK(tfp_settings_locked("ads_transition_ms") == TFP_LOCKED_ads_transition_ms);
+  /* a file of feel.59 (no member): the default; a file that names it: its value */
+  static const char old_file[] = "{\"format\":1,\"locked_view\":{\"ads_sight_cm\":7}}", file[] = "{\"format\":1,\"locked_view\":{\"ads_transition_ms\":0}}";
+  CHECK(tfp_settings_defaults(&s) && tfp_settings_load_locked(&s, old_file, strlen(old_file), why, sizeof why) && !s.locked_skipped[0]);
+  CHECK(tfp_settings_locked_number(&s, TFP_LOCKED_ads_transition_ms) == 180);
+  CHECK(tfp_settings_defaults(&s) && tfp_settings_load_locked(&s, file, strlen(file), why, sizeof why) && !s.locked_skipped[0]);
+  CHECK(tfp_settings_locked_number(&s, TFP_LOCKED_ads_transition_ms) == 0);
+  /* set: kept inside 0 .. 300, the wrong kind refused */
+  CHECK(tfp_settings_set_locked(&s, TFP_LOCKED_ads_transition_ms, false, false, 400) && tfp_settings_locked_number(&s, TFP_LOCKED_ads_transition_ms) == 300);
+  CHECK(tfp_settings_set_locked(&s, TFP_LOCKED_ads_transition_ms, false, false, -20) && tfp_settings_locked_number(&s, TFP_LOCKED_ads_transition_ms) == 0);
+  CHECK(!tfp_settings_set_locked(&s, TFP_LOCKED_ads_transition_ms, true, true, 0) && !tfp_settings_set_locked(&s, TFP_LOCKED_ads_transition_ms, false, false, NAN));
+  /* written and read again */
+  CHECK(tfp_settings_set_locked(&s, TFP_LOCKED_ads_transition_ms, false, false, 90));
+  const size_t n = tfp_settings_write_locked(&s, text, sizeof text);
+  CHECK(n > 0 && strstr(text, "\"ads_transition_ms\": 90"));
+  CHECK(tfp_settings_defaults(&again) && tfp_settings_load_locked(&again, text, n, why, sizeof why));
+  CHECK(tfp_settings_locked_number(&again, TFP_LOCKED_ads_transition_ms) == 90);
+  /* the getter: the default with no store bound, then the file's value, then the panel's change */
+  new_wire();
+  CHECK(tfp_locked_view_ads_transition_ms(&wire) == 180);
+  CHECK(tfp_wire_settings_bind(&wire, "{\"format\":1,\"first_person\":{}}", 30, "settings.json"));
+  tfp_wire_settings_bind_locked(&wire, file, strlen(file), "locked_view.json");
+  CHECK(tfp_locked_view_ads_transition_ms(&wire) == 0);
+  CHECK(tfp_wire_settings_locked_set(&wire, TFP_LOCKED_ads_transition_ms, false, false, 120) && tfp_locked_view_ads_transition_ms(&wire) == 120);
+  return 0;
+}
 /* ---- the one list (src/wire_menu.c): every option of both files, each with a setter, once ---- */
 static bool has_fird(const char *text) {
   for (const char *t = text; t && *t; t++) if ((t[0] == 'F' || t[0] == 'f') && !strncmp(t + 1, "ird", 3)) return true;
@@ -548,7 +582,7 @@ static int list_part(void) {
   for (int i = 0; i < skipped; i++) CHECK(out[i].why && strlen(out[i].why) > 20 && out[i].key);
   /* the options the locked view brought are all in: field of view and its lock and zoom, the camera style, the kicks,
    * damping, the three live features */
-  static const char *const wanted[] = {"camera_lock", "fov_lock", "fov_degrees", "fov_aim", "fov_aim_degrees", "ads_sight_cm", "camera_style", "kick_strength",
+  static const char *const wanted[] = {"camera_lock", "fov_lock", "fov_degrees", "fov_aim", "fov_aim_degrees", "ads_sight_cm", "ads_transition_ms", "camera_style", "kick_strength",
                                         "kick_max_degrees", "thrown_kick_strength", "camera_damping", "animated_arms", "one_handed_pistols",
                                         "put_away", "smooth_eye", "edit_placement", "editor_key", "toggle_key", "fird_person_arms"};
   for (size_t k = 0; k < COUNT(wanted); k++) {
@@ -1957,6 +1991,7 @@ int main(int argc, char **argv) {
   }
   if (list_part()) return 1;
   if (aim_part()) return 1;
+  if (aim_in_part()) return 1;
   if (compat_part()) return 1;
   printf("wire settings: %u checks passed (%zu refusals of the reader and loader; retail's answers on %zu + %zu + %zu operations, the defaults "
          "also with no file and with a broken one; placement refs; mod.set; the runtime's entry placement, near clip and weapon line)\n",

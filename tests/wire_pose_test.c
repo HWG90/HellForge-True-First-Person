@@ -682,7 +682,8 @@ static float ads_frame(TfpOpsHandle *handle, TfpOpsHelperStats *stats, uint64_t 
   if (order == 1) near_clip = near_world_frame(sight, aim, now_ms * 1000);
   return near_clip;
 }
-static int ads_frames(const TfpOpsPoseHelper *H, const TfpOpsHelperConfig *c) {
+/* Round 42: and with "Aim-in time" 0 (`aim_in_ms`), the gun in at once: the near clip handed over ahead of it. */
+static int ads_frames_at(const TfpOpsPoseHelper *H, const TfpOpsHelperConfig *c, uint32_t aim_in_ms) {
   static const uint64_t steps[3] = {16, 9, 7};
   static const float sights[3] = {.173f, .22f, .35f};
   TfpOpsText why;
@@ -691,6 +692,7 @@ static int ads_frames(const TfpOpsPoseHelper *H, const TfpOpsHelperConfig *c) {
   void *native = NULL;
   bool has_stats = false;
   tfp_near_set_ads_source(tfp_pose_ads_near); /* as src/wire_win.c binds it */
+  tfp_pose_set_ads_enter_ms(aim_in_ms); tfp_near_set_ads_enter_ms(aim_in_ms); /* round 42: as src/aim_bind.h hands it over */
   for (int s = 0; s < 3; s++) for (int f = 0; f < 3; f++) for (int order = 0; order < 2; order++) {
     const float sight = sights[s];
     pose_world_third_person();
@@ -707,6 +709,9 @@ static int ads_frames(const TfpOpsPoseHelper *H, const TfpOpsHelperConfig *c) {
       near_clip = ads_frame(handle, &stats, steps[f], order, sight, 1);
       const float cut = ads_sight_cut(sight, near_clip);
       if (cut > worst) worst = cut;
+      /* round 42: at 0 the gun is in aim (the ADS share 1) in the first frame of full aim; at 180 it is not */
+      TfpPoseAdsProbe probe;
+      if (i == 0) CHECK(tfp_pose_ads_probe(&probe) && (aim_in_ms == 0 ? probe.share == 1 : aim_in_ms >= 180 ? probe.share < .5f : probe.share < 1));
     }
     /* settled: the sight 10 cm from the eye (at most 0.25 m pulled) and the near clip at its rear */
     const float pulled = sight - .10f > .25f ? .25f : sight - .10f;
@@ -718,15 +723,21 @@ static int ads_frames(const TfpOpsPoseHelper *H, const TfpOpsHelperConfig *c) {
       if (cut > worst_out) worst_out = cut;
     }
     if (worst > 1e-4f || worst_out > 1e-4f)
-      printf("wire pose: sight %.3f m, %llu ms frames, near setter %s the gun: the near clip cut %.2f mm into the sight aiming in, %.2f mm aiming out\n",
-             sight, (unsigned long long)steps[f], order ? "after" : "before", worst * 1000, worst_out * 1000);
+      printf("wire pose: aim-in %u ms, sight %.3f m, %llu ms frames, near setter %s the gun: the near clip cut %.2f mm into the sight aiming in, %.2f mm aiming out\n",
+             aim_in_ms, sight, (unsigned long long)steps[f], order ? "after" : "before", worst * 1000, worst_out * 1000);
     near_world_end();
     H->finish(H->user, handle, &has_stats, &stats, &why);
     if (!getenv("TFP_ADS_ALL")) CHECK(worst <= 1e-4f && worst_out <= 1e-4f);
   }
   tfp_near_set_ads_source(NULL);
+  tfp_pose_set_ads_enter_ms(180); tfp_near_set_ads_enter_ms(180);
   pose_world_third_person();
   return 0;
+}
+static int ads_frames(const TfpOpsPoseHelper *H, const TfpOpsHelperConfig *c) {
+  if (ads_frames_at(H, c, 180)) return 1;
+  if (ads_frames_at(H, c, 90)) return 1; /* review: an aim-in time between, the helpers' eases scaled */
+  return ads_frames_at(H, c, 0); /* round 42: "Aim-in time" 0 */
 }
 
 /* ---- round 20, the review's B2 (2026-11-24): a zoom level changes in full aim ----

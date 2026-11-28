@@ -48,6 +48,7 @@ typedef struct TfpAimSample {
   float depth;                   /* m: the game's depth in full aim; NAN: not read */
   bool editor; const char *editor_action;
   double now_ms;
+  double aim_in_ms;              /* round 42: locked_view.json ads_transition_ms ("Aim-in time"); NAN or below 0: not said */
 } TfpAimSample;
 /* A zoom level seen: told by the game's field of view (half a degree apart is another). */
 typedef struct TfpAimLevel { float fov, sight, depth, optic_least, optic_most; } TfpAimLevel;
@@ -137,7 +138,7 @@ static inline void tfp_aim_log_level(TfpAimLog *l, const TfpAimSample *s, bool o
   }
 }
 static inline void tfp_aim_log_line(TfpAimLog *l, const TfpAimSample *s, const char *what, char *out, size_t size) {
-  char shown[24], game[24], sight[48], depth[24], clip[24], weapon[72], field[48], editor[40], counts[440];
+  char shown[24], game[24], sight[48], depth[24], clip[24], weapon[72], field[48], editor[40], counts[440], aim_in[32] = "";
   const float on_screen = isfinite(s->shown_fov) && s->shown_fov > 0 ? s->shown_fov : s->game_fov;
   tfp_aim_degrees(on_screen, shown, sizeof shown);
   if (s->weapon && s->weapon[0]) snprintf(weapon, sizeof weapon, "\"%.60s\"", s->weapon); else snprintf(weapon, sizeof weapon, "no weapon known");
@@ -145,12 +146,13 @@ static inline void tfp_aim_log_line(TfpAimLog *l, const TfpAimSample *s, const c
   else snprintf(sight, sizeof sight, "not known");
   if (s->editor) snprintf(editor, sizeof editor, "open on \"%.20s\"", s->editor_action ? s->editor_action : "?"); else snprintf(editor, sizeof editor, "closed");
   tfp_aim_counts(&l->fov, &l->rig, counts, sizeof counts);
+  if (isfinite(s->aim_in_ms) && s->aim_in_ms >= 0) snprintf(aim_in, sizeof aim_in, "; aim-in %.0f ms", s->aim_in_ms); /* round 42 */
   snprintf(out, size, "Aim: %s: %s; fov %s shown %s (Aim field of view: %s); sight %s, wanted %.3f: pull %.3f, closer %.3f (ADS fwd %+.3f), "
-           "near clip %s; depth %s; editor %s | %s",
+           "near clip %s; depth %s; editor %s%s | %s",
            what, weapon, tfp_aim_degrees(s->game_fov, game, sizeof game), shown, tfp_fov_aim_said(s->aim_field, field, sizeof field), sight,
            isfinite(s->wanted) ? s->wanted : 0, isfinite(s->pull) ? s->pull : 0, isfinite(s->closer) ? s->closer : 0,
            isfinite(s->ads_forward) ? s->ads_forward : 0, tfp_aim_metres(s->near_clip, "not read", clip, sizeof clip),
-           tfp_aim_metres(s->depth, "not read", depth, sizeof depth), editor, counts);
+           tfp_aim_metres(s->depth, "not read", depth, sizeof depth), editor, aim_in, counts);
   memset(&l->fov, 0, sizeof l->fov); memset(&l->rig, 0, sizeof l->rig); l->fov.third_person = l->third_person; l->line_at = s->now_ms; l->mixed = false;
 }
 static inline bool tfp_aim_log_differs(const TfpAimLog *l, const TfpAimSample *s) {

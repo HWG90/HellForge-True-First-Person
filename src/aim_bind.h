@@ -9,6 +9,7 @@
 #include "pose_helper.h"
 #include <math.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 /* The pose helper's frame lens goes to the field-of-view helper: without it every "gate", "optic" and "game/lens"
  * field of the "Aim:" line reads "not noted". */
@@ -32,10 +33,19 @@ static inline void tfp_aim_bind_switches(bool zoom_steady) {
   tfp_fov_set_aim_watch(true, zoom_steady);
 }
 /* Every tick: the game's sight the near helper saw (`near_on` false: no near lease, no sight), the wanted distance
- * (locked_view.json ads_sight_cm) and whether the placement editor is on its ADS action
- * (src/editor_motion.h tfp_editor_motion_editing_ads). */
-static inline void tfp_aim_bind_tick(bool near_on, float sight, double wanted_cm, bool editing_ads) {
+ * (locked_view.json ads_sight_cm), whether the placement editor is on its ADS action
+ * (src/editor_motion.h tfp_editor_motion_editing_ads) and (round 42) the aim-in time, ms (locked_view.json
+ * ads_transition_ms) for the three helpers' frames the shared clock does not reach. Not a number, or outside 0 .. 300:
+ * 180, the clock's own time. */
+static inline uint32_t tfp_aim_bind_aim_in(double aim_in_ms) {
+  return isfinite(aim_in_ms) && aim_in_ms >= 0 && aim_in_ms <= 300 ? (uint32_t)(aim_in_ms + .5) : 180u;
+}
+static inline void tfp_aim_bind_tick(bool near_on, float sight, double wanted_cm, bool editing_ads, double aim_in_ms) {
   tfp_pose_set_ads_seat(near_on ? sight : 0, isfinite(wanted_cm) ? (float)(wanted_cm/100) : 0);
   tfp_pose_set_ads_editing(editing_ads);
+  const uint32_t aim_in = tfp_aim_bind_aim_in(aim_in_ms);
+  tfp_pose_set_ads_enter_ms(aim_in);
+  tfp_fov_set_ads_enter_ms(aim_in);
+  tfp_near_set_ads_enter_ms(aim_in);
 }
 #endif
