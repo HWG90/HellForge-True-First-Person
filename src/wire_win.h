@@ -43,7 +43,9 @@ bool tfp_win_key_down(int virtual_key);
  * tfp_win_keys_begin once per game update before any of them is read (it also puts the keyboard hook on the game
  * window's thread, the first time the window is in front). tfp_win_key_level: down now. tfp_win_key_tapped: up now, but
  * pressed and let go since the previous update, answered once per press, never for a key that was held, only with the
- * game in front at both updates. One GetAsyncKeyState per key and update however often either is asked; a key read with
+ * game in front at both updates; from the window's key messages, each judged by the time the hook took it, and from
+ * GetAsyncKeyState's low bit only while there are none (round 50b, src/key_tap.h: one press is never two, and a key
+ * typed into another window is none). One GetAsyncKeyState per key and update however often either is asked; a key read with
  * these must not also be read with tfp_win_key_down (that call would take the "pressed since" answer).
  * tfp_win_keys_note: a line to log, while there is one. tfp_win_keys_end: the hook taken off, for a live unload (any
  * thread); false when Windows refused or a call of the hook did not return in 2 seconds: the build must then stay. */

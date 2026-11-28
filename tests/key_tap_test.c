@@ -12,14 +12,17 @@ static int checks, failed;
 /* ---- the keyboard ---- */
 enum { LOW_WINDOWS = 1,   /* the low bit: pressed since the last call, down or not */
        LOW_PROTON = 2,    /* the low bit: down now and not down at this process's last call (GE-Proton11-12) */
-       MESSAGES = 4 };    /* a fresh WM_KEYDOWN sets a latch, message_delay ms after the press */
+       MESSAGES = 4 };    /* a fresh WM_KEYDOWN is counted by the hook, message_delay ms after the press */
 typedef struct Event { uint64_t at; int vk; bool down; } Event;
 typedef struct Board {
   unsigned mode;
   uint64_t now, message_delay;
   Event events[64];
   int count;
-  bool level[256], low[256], last_call_down[256], latch[256];
+  bool level[256], low[256], last_call_down[256];
+  bool latch[256];        /* the hook took a message since the last read */
+  uint64_t latch_ms[256]; /* when it took the last of them */
+  uint64_t silent_before; /* presses before this time give no message (another window had the keyboard) */
   bool message_done[64];
   bool repeat;            /* a held key keeps setting the low bit (auto-repeat), as Wine's server does */
   bool thief;             /* another caller of GetAsyncKeyState takes the low bit before every read */
@@ -34,12 +37,12 @@ static void advance(Board *b, uint64_t now) {
       if (e->down && !b->level[e->vk]) b->low[e->vk] = true;
       b->level[e->vk] = e->down;
     }
-    if (e->down && (b->mode & MESSAGES) && !b->message_done[i] && e->at + b->message_delay <= now)
-      b->message_done[i] = true, b->latch[e->vk] = true;
+    if (e->down && (b->mode & MESSAGES) && e->at >= b->silent_before && !b->message_done[i] && e->at + b->message_delay <= now)
+      b->message_done[i] = true, b->latch[e->vk] = true, b->latch_ms[e->vk] = e->at + b->message_delay;
   }
   b->now = now;
 }
-static unsigned raw(void *u, int vk) {
+static unsigned raw(void *u, int vk, uint64_t *message_ms) {
   Board *b = u;
   b->raw_calls++;
   const bool down = b->level[vk];
@@ -49,8 +52,9 @@ static unsigned raw(void *u, int vk) {
   if (b->mode & LOW_WINDOWS) since = b->low[vk];
   if (b->mode & LOW_PROTON) since = down && !b->last_call_down[vk];
   b->low[vk] = false, b->last_call_down[vk] = down;
-  if (b->latch[vk]) since = true, b->latch[vk] = false;
-  return (down ? TFP_KEY_RAW_DOWN : 0) | (since ? TFP_KEY_RAW_SINCE : 0);
+  const bool message = b->latch[vk];
+  *message_ms = b->latch_ms[vk], b->latch[vk] = false;
+  return (down ? TFP_KEY_RAW_DOWN : 0) | (since ? TFP_KEY_RAW_LOW : 0) | (message ? TFP_KEY_RAW_MESSAGE : 0);
 }
 
 /* ---- the toggle key as src/mod_view.c reads it ---- */
@@ -109,6 +113,19 @@ static int run_lost(Rig *r, uint64_t from, uint64_t to, uint64_t step, const uin
   return presses;
 }
 static int run(Rig *r, uint64_t from, uint64_t to, uint64_t step) { return run_lost(r, from, to, step, NULL, 0); }
+/* Game updates at the given times, the game in front at each. */
+static int run_at(Rig *r, const uint64_t *updates, size_t n) {
+  TfpKeyGuardIo io = guard_io;
+  io.user = r;
+  int presses = 0;
+  for (size_t i = 0; i < n; i++) {
+    advance(&r->board, updates[i]);
+    tfp_key_taps_begin(&r->taps, updates[i], true);
+    presses += tfp_key_guard_toggle(&r->guard, &io, updates[i], 'U', true, r->chat < 0);
+  }
+  return presses;
+}
+#define RUN_AT(r, ...) run_at(r, (const uint64_t[]){__VA_ARGS__}, sizeof((const uint64_t[]){__VA_ARGS__}) / sizeof(uint64_t))
 
 static void tap_between_two_updates_is_one_press(void) {
   static const unsigned modes[] = {LOW_WINDOWS, MESSAGES, LOW_WINDOWS | MESSAGES, LOW_PROTON | MESSAGES};
@@ -151,25 +168,137 @@ static void held_key_is_one_edge(void) {
 }
 static void late_key_message_is_not_a_second_press(void) {
   /* the window's thread behind the keyboard: the key message of a press arrives after the level showed it and went */
-  for (uint64_t delay = 0; delay <= 350; delay += 50) {
+  for (uint64_t delay = 0; delay <= 600; delay += 50) {
     Rig *r = rig(MESSAGES);
     r->board.message_delay = delay;
     tap(&r->board, 1090, 'U', 30);                   /* down at the update at 1100, up by 1200 */
     CHECK(run(r, 0, 3000, 100) == 1);
+    CHECK(!r->taps.taps && r->taps.late == (delay >= 50));
     /* a tap the low bit showed, its message later */
     r = rig(LOW_WINDOWS | MESSAGES);
     r->board.message_delay = delay;
     tap(&r->board, 1030, 'U', 20);
     CHECK(run(r, 0, 3000, 100) == 1);
+    /* ... and whatever the update that reads the late message took to come (a hitch of up to two seconds) */
+    for (uint64_t hitch = 100; hitch <= 2000; hitch += 100) {
+      r = rig(LOW_PROTON | MESSAGES);
+      r->board.message_delay = delay;
+      ev(&r->board, 1105, 'U', true); ev(&r->board, 1120, 'U', false);
+      CHECK(RUN_AT(r, 1000, 1100, 1110, 1130, 1130 + hitch, 1230 + hitch, 1330 + hitch, 1930 + hitch, 2030 + hitch) == 1);
+      CHECK(!r->taps.taps);
+    }
   }
-  /* past the quiet time a "since" is a new tap again: the bound is TFP_KEY_TAP_QUIET_MS, stated in key_tap.h */
+  /* the messages of taps no update acted on do not stand in for the message of the press that follows them (a count
+   * of messages against presses would take them for it, and the press's own, later, for a second press) */
   Rig *r = rig(MESSAGES);
-  tap(&r->board, 1030, 'U', 20); tap(&r->board, 1030 + TFP_KEY_TAP_QUIET_MS + 100, 'U', 20);
+  r->board.message_delay = 400;
+  tap(&r->board, 1010, 'U', 20); tap(&r->board, 1050, 'U', 20);    /* two taps and a press inside one hitch */
+  ev(&r->board, 1700, 'U', true); ev(&r->board, 1850, 'U', false);
+  CHECK(RUN_AT(r, 800, 900, 1000, 1800, 1900, 2000, 2050, 2150, 2250, 2350) == 1 && !r->taps.taps);
+  /* past TFP_KEY_TAP_LATE_MS after a press the level showed, a message is a new tap; inside it, the one thing given up */
+  r = rig(MESSAGES);
+  tap(&r->board, 1090, 'U', 30); tap(&r->board, 1100 + TFP_KEY_TAP_LATE_MS + 30, 'U', 20);
+  CHECK(run(r, 0, 3000, 100) == 2 && r->taps.taps == 1);
+  r = rig(MESSAGES);
+  tap(&r->board, 1090, 'U', 30); tap(&r->board, 1100 + TFP_KEY_TAP_LATE_MS - 70, 'U', 20);
+  CHECK(run(r, 0, 3000, 100) == 1 && !r->taps.taps && r->taps.late == 1);
+  /* the bound is the message's own time: taken TFP_KEY_TAP_LATE_MS after the press was shown it is still that
+   * press's; one millisecond later it is a tap (stated in key_tap.h) */
+  r = rig(MESSAGES);
+  r->board.message_delay = TFP_KEY_TAP_LATE_MS + 10;
+  tap(&r->board, 1090, 'U', 30);                                   /* shown at 1100; the message taken at 1850 */
+  CHECK(run(r, 0, 3000, 100) == 1);
+  r = rig(MESSAGES);
+  r->board.message_delay = TFP_KEY_TAP_LATE_MS + 11;
+  tap(&r->board, 1090, 'U', 30);
   CHECK(run(r, 0, 3000, 100) == 2);
-  /* a second tap inside the quiet time, again between two updates, is the one thing given up */
+  /* two taps close together, each between two updates: two presses (a tap from its message leaves nothing to wait for) */
   r = rig(MESSAGES);
   tap(&r->board, 1030, 'U', 20); tap(&r->board, 1230, 'U', 20);
+  CHECK(run(r, 0, 3000, 100) == 2);
+  /* ... the low bit alone keeps its quiet time: the second is given up, a later one is not */
+  r = rig(LOW_WINDOWS);
+  tap(&r->board, 1030, 'U', 20); tap(&r->board, 1230, 'U', 20);
   CHECK(run(r, 0, 3000, 100) == 1);
+  r = rig(LOW_WINDOWS);
+  tap(&r->board, 1030, 'U', 20); tap(&r->board, 1030 + TFP_KEY_TAP_QUIET_MS + 100, 'U', 20);
+  CHECK(run(r, 0, 3000, 100) == 2);
+}
+/* The independent check's two reproductions (~/.cache/tfp-v67-fuzz/det.c), through the toggle key's guard. */
+static void one_press_never_toggles_twice(void) {
+  /* blocking 1: the level shows the press at 1110 and its end at 1130; the window's thread takes the WM_KEYDOWN at
+   * 1135, 30 ms late; the next update comes after a 470 ms hitch, at 1600 */
+  Rig *r = rig(LOW_PROTON | MESSAGES);
+  r->board.message_delay = 30;
+  ev(&r->board, 1105, 'U', true); ev(&r->board, 1120, 'U', false);
+  CHECK(RUN_AT(r, 1000, 1100, 1110, 1130, 1600, 1700, 1800) == 1);
+  CHECK(!r->taps.taps && r->taps.late == 1);
+  /* the same with Windows' low bit beside the messages */
+  r = rig(LOW_WINDOWS | MESSAGES);
+  r->board.message_delay = 30;
+  ev(&r->board, 1105, 'U', true); ev(&r->board, 1120, 'U', false);
+  CHECK(RUN_AT(r, 1000, 1100, 1110, 1130, 1600, 1700, 1800) == 1);
+  /* a key held through the hitch and let go, its message later still */
+  r = rig(MESSAGES);
+  r->board.message_delay = 600;
+  ev(&r->board, 1105, 'U', true); ev(&r->board, 1500, 'U', false);
+  CHECK(RUN_AT(r, 1000, 1100, 1110, 1600, 1650, 1700, 3500, 3600) == 1);
+  CHECK(!r->taps.taps);
+}
+static void a_key_typed_into_another_window_is_no_press(void) {
+  /* blocking 2: Windows' low bit is every window's. Updates at 1100 and 2300 both see the game in front; in between
+   * the player left, typed "u" elsewhere at 1500 and came back */
+  Rig *r = rig(LOW_WINDOWS);
+  tap(&r->board, 1500, 'U', 20);
+  CHECK(RUN_AT(r, 1000, 1100, 2300, 2400) == 0);
+  CHECK(!r->taps.taps);
+  /* the low bit is taken across TFP_KEY_TAP_LOW_GAP_MS and no further */
+  r = rig(LOW_WINDOWS);
+  tap(&r->board, 1200, 'U', 20);
+  CHECK(RUN_AT(r, 1000, 1100, 1100 + TFP_KEY_TAP_LOW_GAP_MS, 1500) == 1);
+  r = rig(LOW_WINDOWS);
+  tap(&r->board, 1200, 'U', 20);
+  CHECK(RUN_AT(r, 1000, 1100, 1101 + TFP_KEY_TAP_LOW_GAP_MS, 1500) == 0);
+  /* the window's own message cannot come from elsewhere: it keeps the long gap (the hitch this round is for) */
+  r = rig(LOW_PROTON | MESSAGES);
+  tap(&r->board, 1500, 'U', 20);
+  CHECK(RUN_AT(r, 1000, 1100, 2300, 2400) == 1);
+  /* once the hook has seen a key message the low bit is not asked at all: "u" typed elsewhere gives the game window
+   * no message, however short the gap */
+  r = rig(LOW_WINDOWS | MESSAGES);
+  tap(&r->board, 1030, 'U', 20);                    /* in the game: one tap, from its message */
+  r->board.silent_before = 0;
+  CHECK(run(r, 0, 2000, 100) == 1 && r->taps.hooked);
+  r->board.silent_before = 9000;                    /* from here the key goes to another window */
+  tap(&r->board, 2130, 'U', 20);
+  CHECK(run(r, 2100, 4000, 100) == 0 && r->taps.taps == 1);
+}
+/* The reader's own focus check: F10's reader (src/mod_panel.c p_tapped) has no other. */
+static void the_reader_refuses_a_tap_out_of_focus(void) {
+  static const unsigned modes[] = {LOW_WINDOWS, MESSAGES};
+  for (size_t m = 0; m < sizeof modes / sizeof modes[0]; m++) {
+    for (int lost = 0; lost < 4; lost++) {            /* 0: in front throughout; 1: not at 1000; 2: not at 1100; 3: neither */
+      Board b = {.mode = modes[m]};
+      TfpKeyTaps t = {0};
+      unsigned answer = 0;
+      tap(&b, 1030, 0x79, 20);
+      for (uint64_t now = 0; now <= 1500; now += 100) {
+        const bool focused = !((now == 1000 && (lost & 1)) || (now == 1100 && (lost & 2)));
+        advance(&b, now);
+        tfp_key_taps_begin(&t, now, focused);
+        answer |= tfp_key_taps_read(&t, 0x79, raw, &b);
+      }
+      CHECK(answer == (lost ? 0u : (unsigned)TFP_KEY_TAPPED));
+      CHECK(t.taps == (lost ? 0u : 1u));
+    }
+  }
+}
+static void a_tap_leaves_the_edge_up(void) {
+  /* tapped between two updates, then down at the very next one: two presses (the tap's edge was let go) */
+  Rig *r = rig(MESSAGES);
+  tap(&r->board, 1030, 'U', 20);
+  ev(&r->board, 1150, 'U', true); ev(&r->board, 1450, 'U', false);
+  CHECK(run(r, 0, 3000, 100) == 2 && r->taps.taps == 1);
 }
 static void focus_lost_between_updates_ignores_the_tap(void) {
   static const unsigned modes[] = {LOW_WINDOWS, MESSAGES};
@@ -306,6 +435,10 @@ static void f11_tap_gets_its_notice(void) {
 }
 
 int main(void) {
+  one_press_never_toggles_twice();
+  a_key_typed_into_another_window_is_no_press();
+  the_reader_refuses_a_tap_out_of_focus();
+  a_tap_leaves_the_edge_up();
   tap_between_two_updates_is_one_press();
   held_key_is_one_edge();
   late_key_message_is_not_a_second_press();

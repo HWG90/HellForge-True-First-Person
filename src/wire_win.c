@@ -369,11 +369,16 @@ bool tfp_win_focused(void) {
 bool tfp_win_key_down(int virtual_key) { return (GetAsyncKeyState(virtual_key) & 0x8000) != 0; }
 /* Round 50 (src/key_tap.h): the mod's edge keys, with a tap between two game updates. "Pressed since the last read" is
  * GetAsyncKeyState's low bit (Windows, upstream Wine; not Proton, whose bit needs the key down now) or a fresh
- * WM_KEYDOWN of the game window, latched by a keyboard hook on the window's thread (WH_KEYBOARD, this process only, no
- * module: nothing is injected anywhere). The hook only sets a latch and passes the message on: no key is taken or
- * changed, and without it (refused, or no window yet) the keys are the level and the low bit, as before the round. */
+ * WM_KEYDOWN of the game window, counted by a keyboard hook on the window's thread (WH_KEYBOARD, this process only, no
+ * module: nothing is injected anywhere). The hook only counts and passes the message on: no key is taken or
+ * changed, and without it (refused, or no window yet) the keys are the level and the low bit, as before the round.
+ * Round 50b: the two sources are told apart, and each message carries the time the hook took it (key_tap.h judges a
+ * late message by that time). key_latch[vk]: 0, or the GetTickCount64 of the last message since the last read with
+ * bit 62 set, written in one exchange. */
+#define KEY_LATCH_SET ((LONG64)1 << 62)
 static TfpKeyTaps key_taps;
-static volatile LONG key_latch[256], key_proc_inside, key_messages;
+static volatile LONG64 key_latch[256];
+static volatile LONG key_proc_inside, key_messages;
 static HHOOK key_hook;
 static DWORD key_hook_thread, key_hook_refused_thread, key_hook_error;
 static unsigned key_notes;   /* 1: the hook's line is due; 2: its refusal's; 4: the first tap's */
@@ -382,18 +387,24 @@ static LRESULT CALLBACK key_proc(int code, WPARAM key, LPARAM flags) {
   InterlockedIncrement(&key_proc_inside);
   /* HC_ACTION: the message is being taken off the queue (a peek that leaves it there would count it twice);
    * bit 31 clear: a key going down; bit 30 clear: it was up before (not an auto-repeat) */
-  if (code == HC_ACTION && key < 256 && !(flags & (LPARAM)0xC0000000)) InterlockedExchange(&key_latch[key], 1), InterlockedIncrement(&key_messages);
+  if (code == HC_ACTION && key < 256 && !(flags & (LPARAM)0xC0000000)) {
+    InterlockedExchange64(&key_latch[key], (LONG64)(GetTickCount64() & (ULONG64)(KEY_LATCH_SET - 1)) | KEY_LATCH_SET);
+    InterlockedIncrement(&key_messages);
+  }
   const LRESULT result = CallNextHookEx(NULL, code, key, flags);
   InterlockedDecrement(&key_proc_inside);
   return result;
 }
-static unsigned key_raw(void *u, int vk) {
+static unsigned key_raw(void *u, int vk, uint64_t *message_ms) {
   (void)u;
   const SHORT word = GetAsyncKeyState(vk);
-  const bool message = InterlockedExchange(&key_latch[vk], 0) != 0;
-  return ((word & 0x8000) ? TFP_KEY_RAW_DOWN : 0u) | (((word & 1) || message) ? TFP_KEY_RAW_SINCE : 0u);
+  const LONG64 latch = InterlockedExchange64(&key_latch[vk], 0);
+  *message_ms = (uint64_t)(latch & (KEY_LATCH_SET - 1));
+  return ((word & 0x8000) ? TFP_KEY_RAW_DOWN : 0u) | ((word & 1) ? TFP_KEY_RAW_LOW : 0u) | (latch ? TFP_KEY_RAW_MESSAGE : 0u);
 }
 void tfp_win_keys_begin(bool focused) {
+  /* the low bit is asked only while the window's thread gives no key messages (src/key_tap.h) */
+  key_taps.hooked = key_hook && InterlockedCompareExchange(&key_messages, 0, 0);
   tfp_key_taps_begin(&key_taps, GetTickCount64(), focused);
   if (!focused) return;
   DWORD process = 0;
@@ -401,7 +412,7 @@ void tfp_win_keys_begin(bool focused) {
   const DWORD thread = window ? GetWindowThreadProcessId(window, &process) : 0;
   if (!thread || process != GetCurrentProcessId() || thread == key_hook_thread || thread == key_hook_refused_thread) return;
   if (key_hook) UnhookWindowsHookEx(key_hook);   /* the window moved to another thread */
-  for (int vk = 0; vk < 256; vk++) InterlockedExchange(&key_latch[vk], 0);
+  for (int vk = 0; vk < 256; vk++) InterlockedExchange64(&key_latch[vk], 0);
   key_hook = SetWindowsHookExW(WH_KEYBOARD, key_proc, NULL, thread);
   if (key_hook) key_hook_thread = thread, key_notes |= 1;
   else key_hook_thread = 0, key_hook_refused_thread = thread, key_hook_error = GetLastError(), key_notes |= 2;

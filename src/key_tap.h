@@ -17,15 +17,30 @@
  *     HostProc), and the only source that works under Proton. The host itself has no shortcut registration to use
  *     (goose_overlay.h, API 8: register_panel's hotkey toggles a window; key_down / key_pressed are for draw callbacks).
  *
- * "Since the last read" alone is not a press now. It is acted on only when all of this holds:
+ * "Since the last read" alone is not a press now. A tap is answered only when all of this holds:
  *   - the key is up now (a key that is down is the level's business, and its edge is the consumers' as before)
  *   - the key was read at the previous update and was up then: a key that was held is never "released into" a press
  *     (its auto-repeat also sets the bit), and a key not watched for a while has an old answer waiting
  *   - the game window is in front now and was at the previous update, and that update is at most TFP_KEY_TAP_GAP_MS ago
- *   - the key was not down, and gave no tap, in the last TFP_KEY_TAP_QUIET_MS: the key message of a press the level
- *     already showed can arrive an update late (the window's thread behind the keyboard), and with both sources one tap
- *     could be answered twice
- * so a tap gives one press, a held key gives one edge, and what is missed is missed as it was before this round.
+ * and one of the two sources says so, each by its own rule (round 50b; they were one "since" bit before, and the
+ * independent check found a press answered twice and a key typed into another window answered):
+ *   - a key message, when the hook took it more than TFP_KEY_TAP_LATE_MS after this reader last answered the key
+ *     without one (the level seen down, or a tap from the low bit). The message of a press arrives when the window's
+ *     thread gets to it, which can be after the update that saw the key down, and after the one that saw it up again;
+ *     then it is that press's own message and no second press. So the hook stamps each message with the time it took
+ *     it, and the message is judged by that time, not by when an update gets to read it: a hitch between the message
+ *     and its read changes nothing (it did, while the quiet time ran from the update: one press toggled twice). The
+ *     bound is the window's thread, not the game's updates: a message taken later than TFP_KEY_TAP_LATE_MS after its
+ *     press was shown is a second press still. What is given up: a tap in that time after a press the level showed.
+ *     (Counting messages against presses instead, with no time bound, does not work: the messages of earlier presses
+ *     that no update acted on are still to come, and cannot be told from this press's.)
+ *   - the low bit, only while the hook has never seen a key message (it was refused, or the window's thread gets
+ *     none), only when the previous update is at most TFP_KEY_TAP_LOW_GAP_MS ago, and not within TFP_KEY_TAP_QUIET_MS
+ *     of the key being down or of a tap. The bit is every window's: across a longer gap the player can have left,
+ *     typed the key elsewhere and come back, with the game in front at both updates. Key messages are the game
+ *     window's own, so they keep the long gap.
+ * so a tap gives one press, a held key gives one edge, one press never gives two, and what is missed is missed as it
+ * was before this round.
  *
  * A consumer turns a tap into its press with its own edge keeper: down then up within one update (see
  * tfp_key_guard_toggle, tfp_f11_hint_tick, tfp_wire_panel_tick), so "just bound, not yet seen up" still refuses it.
@@ -39,28 +54,39 @@
 
 #define TFP_KEY_TAP_QUIET_MS 400u
 #define TFP_KEY_TAP_GAP_MS 2000u
+#define TFP_KEY_TAP_LOW_GAP_MS 250u  /* the low bit: too short to leave the game, type the key and come back */
+#define TFP_KEY_TAP_LATE_MS 750u     /* a press's key message is taken at most this long after the press was shown */
 
-enum { TFP_KEY_RAW_DOWN = 1,    /* down now (GetAsyncKeyState's high bit) */
-       TFP_KEY_RAW_SINCE = 2 }; /* pressed since the last raw read of this key (the low bit, or a key message) */
+enum { TFP_KEY_RAW_DOWN = 1,      /* down now (GetAsyncKeyState's high bit) */
+       TFP_KEY_RAW_LOW = 2,       /* GetAsyncKeyState's low bit: pressed since the last raw read of this key, anywhere */
+       TFP_KEY_RAW_MESSAGE = 4 }; /* the game window took a fresh key-down message for it since the last raw read */
 enum { TFP_KEY_DOWN = 1,        /* down now */
        TFP_KEY_TAPPED = 2 };    /* up now, pressed and let go since the previous update: one press, answered once */
-/* One raw read of a key: TFP_KEY_RAW_* bits. Reading takes the "since" answer. */
-typedef unsigned (*TfpKeyRawFn)(void *user, int vk);
+/* One raw read of a key: TFP_KEY_RAW_* bits; with TFP_KEY_RAW_MESSAGE, *message_ms: when the last such message was
+ * taken, on tfp_key_taps_begin's clock. Reading takes the low bit and the messages. */
+typedef unsigned (*TfpKeyRawFn)(void *user, int vk, uint64_t *message_ms);
 
 typedef struct TfpKeyTaps {
   uint32_t tick;            /* updates begun; 0 before the first */
   uint64_t now_ms;
   bool focused, was_focused;
+  bool short_gap;           /* the previous update is at most TFP_KEY_TAP_LOW_GAP_MS ago */
+  bool hooked;              /* the hook has seen a key message (any key): the low bit is not asked any more. The caller
+                               sets it; a read that is given a message sets it too */
   uint32_t read_tick[256];  /* the update of the key's last read (0: never) */
-  uint8_t state[256];       /* TFP_KEY_DOWN, TFP_KEY_TAPPED as its last read answered; 4: busy_ms is set */
+  uint8_t state[256];       /* TFP_KEY_DOWN, TFP_KEY_TAPPED as its last read answered; 4: busy_ms is set; 8: shown_ms is */
   uint64_t busy_ms[256];    /* when the key was last down, or last gave a tap */
+  uint64_t shown_ms[256];   /* when the key was last down, or last gave a tap from the low bit: a press whose own
+                               message may still come */
   unsigned taps;            /* taps answered, in all */
+  unsigned late;            /* key messages that belonged to a press already answered, in all */
   int last_tap;             /* the key of the last one */
 } TfpKeyTaps;
 
 /* Once per game update, before any read. now_ms: a millisecond clock that does not go back. */
 static inline void tfp_key_taps_begin(TfpKeyTaps *t, uint64_t now_ms, bool focused) {
   const bool recent = t->tick && now_ms - t->now_ms <= TFP_KEY_TAP_GAP_MS;
+  t->short_gap = t->tick && now_ms - t->now_ms <= TFP_KEY_TAP_LOW_GAP_MS;
   t->was_focused = t->focused && recent;
   t->focused = focused, t->now_ms = now_ms;
   if (!++t->tick) t->tick = 2; /* wrapped: never 0 (never read) and 1 has no previous update */
@@ -70,12 +96,21 @@ static inline void tfp_key_taps_begin(TfpKeyTaps *t, uint64_t now_ms, bool focus
 static inline unsigned tfp_key_taps_read(TfpKeyTaps *t, int vk, TfpKeyRawFn raw, void *user) {
   if (vk <= 0 || vk > 255 || !t->tick) return 0;
   if (t->read_tick[vk] == t->tick) return t->state[vk] & (TFP_KEY_DOWN | TFP_KEY_TAPPED);
-  const unsigned r = raw(user, vk);
-  const bool down = (r & TFP_KEY_RAW_DOWN) != 0, since = (r & TFP_KEY_RAW_SINCE) != 0;
+  uint64_t message_ms = 0;
+  const unsigned r = raw(user, vk, &message_ms);
+  const bool down = (r & TFP_KEY_RAW_DOWN) != 0, low = (r & TFP_KEY_RAW_LOW) != 0, message = (r & TFP_KEY_RAW_MESSAGE) != 0;
   const bool was_read = t->tick > 1 && t->read_tick[vk] == t->tick - 1, was_down = (t->state[vk] & TFP_KEY_DOWN) != 0;
   const bool busy = (t->state[vk] & 4) && t->now_ms - t->busy_ms[vk] <= TFP_KEY_TAP_QUIET_MS;
-  const bool tapped = !down && since && was_read && !was_down && t->focused && t->was_focused && !busy;
-  uint8_t state = (uint8_t)(t->state[vk] & 4);
+  uint8_t state = (uint8_t)(t->state[vk] & 12);
+  if (down) t->shown_ms[vk] = t->now_ms, state |= 8;   /* before the message is judged: it may be this very press's */
+  if (message) t->hooked = true;
+  /* a message no answered press is still waiting for: taken later than any of theirs can be */
+  const bool fresh = message && !((state & 8) && message_ms <= t->shown_ms[vk] + TFP_KEY_TAP_LATE_MS);
+  if (message && !fresh && !down) t->late++;
+  const bool may = !down && was_read && !was_down && t->focused && t->was_focused;
+  const bool by_low = low && !t->hooked && t->short_gap && !busy;
+  const bool tapped = may && (fresh || by_low);
+  if (tapped && !fresh) t->shown_ms[vk] = t->now_ms, state |= 8;   /* the low bit's tap: its message may still come */
   if (down || tapped) t->busy_ms[vk] = t->now_ms, state |= 4;
   if (down) state |= TFP_KEY_DOWN;
   if (tapped) state |= TFP_KEY_TAPPED, t->taps++, t->last_tap = vk;
