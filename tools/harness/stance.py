@@ -26,9 +26,12 @@ judged against POP_M as ever. No limit is raised. A frame is the stance ramp's w
     RAMP_M_S, within RAMP_BAND_M_S, in the frame and the three after, and stays within STEADY_M of itself: the
     ramp, begun in this frame and still running;
   - the eye's change less the root's change of the frame before is under the limit given (POP_M);
-  - that change of the root is itself under the limit (round 49g; the first version did not hold it there, and on the
-    soaks of feel.50 on it named 28 dive launches with a root change of up to 0.069 m). A change of the root of POP_M
-    or more is the body's lunge, which measure() takes off by its own rule or not at all.
+  - that change of the root is itself under the limit (round 49g; the first version did not hold it there: 4 of the
+    96 frames it named on the soaks of feel.50 on had a root change of 0.060 to 0.069 m). A change of the root of
+    POP_M or more is the body's lunge, which measure() takes off by its own rule or not at all.
+The class is still wider than the prone phase: it names 92 frames on those soaks, and the check of round49d counted
+28 of the 96 at a dive's launch, where the same ramp begins on the body's lunge (every one leaves under POP_M and
+shows under CAP_M).
 A step the filter made cannot fall in it (nothing was looked for, taken or carried), and a reload's cannot either: a
 reload phase is judged without this class (matrix.judge), because a reload's eye also reads "wanted = shown" and was
 the mod's (the reload hold, round 48). The soak judges an action that presses the reload key without it too
