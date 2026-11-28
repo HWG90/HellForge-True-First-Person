@@ -115,10 +115,19 @@ typedef bool (*TfpNearAdsSource)(float *closer);
 void tfp_near_set_ads_source(TfpNearAdsSource source);
 TfpNearAdsSource tfp_near_ads_source(void); /* what was set (NULL: none). Reads only. */
 bool tfp_near_ads_probe(float *sight, float *native, float *applied);
-/* Not in retail (round 53, src/weapon_clip.h): full aim shown wider than the game's lens. `scale` (tfp_clip_ads_scale:
- * tan(game lens/2)/tan(shown/2)) is what the near clip of full aim is scaled by, after the gun's move above and never
- * under the game's own 0.05; a change toward the eye is taken at once. 1 (the start-up value) or anything not in
- * (0, 1): the game's value. Set every tick; read in the game's own calls. The hip and normal aim never read it. */
-void tfp_near_set_ads_scale(float scale);
+/* Not in retail (round 53, src/weapon_clip.h): full aim shown wider than the game's lens. The game's near clip in full
+ * aim is its sight's distance, made for its own lens; drawn at a wider field of view that plane cuts the scope, the
+ * receiver and the stock on screen. `source` (the field-of-view helper's tfp_fov_frame_pair) is asked in each call of
+ * the game's near setter on the first-person view for the frame's two fields of view: what the game asked for and what its setter
+ * was handed, radians, and how many such calls there were. The near clip of full aim is the game's value (less the
+ * gun's move above) times tan(game/2)/tan(shown/2), never under the game's own 0.05 m and never past the game's value;
+ * a change toward the eye is taken at once, away from it eased. Shown at the game's lens or narrower, NULL (the
+ * start-up value), false, or a pair whose count has stood still for TFP_NEAR_FOV_IDLE calls: the game's value, to the
+ * bit. The hip and normal aim ask (so an old pair is known) and use nothing of it. Set it before arming; it must not block.
+ * tfp_near_ads_scale: what the last call in full aim scaled by (1: the game's value). */
+#define TFP_NEAR_FOV_IDLE 8u
+typedef bool (*TfpNearFovSource)(float *game, float *shown, uint64_t *calls);
+void tfp_near_set_fov_source(TfpNearFovSource source);
+TfpNearFovSource tfp_near_fov_source(void); /* what was set (NULL: none). Reads only. */
 float tfp_near_ads_scale(void);
 #endif

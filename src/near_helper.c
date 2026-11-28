@@ -91,7 +91,12 @@ static _Atomic uint64_t seen, forwarded, replaced, ads_forwarded, aim_applied, o
 static _Atomic uint32_t hip_meters, aim_meters, last_native, last_applied;
 static _Atomic uint32_t ads_sight; /* not in retail (round 20): src/ads_seat.h */
 static _Atomic(TfpNearAdsSource) ads_source; /* not in retail (round 20): the pose helper's closer, read in each call */
-static _Atomic uint32_t ads_scale; /* not in retail (round 53): src/weapon_clip.h, a float's bits; 0: none (the game's) */
+/* Not in retail (round 53, src/weapon_clip.h): the frame's fields of view, asked in each call in full aim. ads_scale:
+ * what the last such call scaled by (a float's bits; 0: nothing, the game's value). fov_calls, fov_idle: the pair's
+ * count as last seen and for how many calls it has stood still. */
+static _Atomic(TfpNearFovSource) fov_source;
+static _Atomic uint32_t ads_scale, fov_idle;
+static _Atomic uint64_t fov_calls;
 _Static_assert(ATOMIC_INT_LOCK_FREE == 2 && sizeof(float) == 4, "Near clip requires lock-free floats");
 static uint32_t float_bits(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
 static float bits_float(uint32_t u) { float f; memcpy(&f, &u, 4); return f; }
@@ -306,12 +311,24 @@ void tfp_near_setter_from(uint64_t ret, void *camera, float native) {
          * game cuts them, however the game's seat moves. */
         if (closer > 0) target = tfp_ads_near(native, closer);
         /* Not in retail (round 53, src/weapon_clip.h): full aim shown wider than the game's lens. The game's value is
-         * its sight's distance, made for its own lens; scaled, the near plane shows on screen what it shows there. */
+         * its sight's distance, made for its own lens; scaled, the near plane shows on screen what it shows there. The
+         * two fields of view are read here, in this call (as the closer above): the frame's own, not a tick's. Asked
+         * in every call, so a pair that stopped moving at the hip is known to be old when full aim begins. */
+        float scale = 1, game_fov = 0, shown_fov = 0; uint64_t calls = 0;
+        const TfpNearFovSource fov = atomic_load_explicit(&fov_source, memory_order_acquire);
+        if (fov && fov(&game_fov, &shown_fov, &calls)) {
+          uint32_t idle = atomic_load_explicit(&fov_idle, memory_order_relaxed);
+          if (calls != atomic_load_explicit(&fov_calls, memory_order_relaxed)) idle = 0;
+          else if (idle < TFP_NEAR_FOV_IDLE) ++idle;
+          atomic_store_explicit(&fov_calls, calls, memory_order_relaxed);
+          atomic_store_explicit(&fov_idle, idle, memory_order_relaxed);
+          if (idle < TFP_NEAR_FOV_IDLE) scale = tfp_clip_ads_scale(game_fov, shown_fov);
+        }
         bool wider = false;
         if (view == VIEW_ADS) {
-          const uint32_t scale = atomic_load_explicit(&ads_scale, memory_order_relaxed);
-          const float scaled = scale ? tfp_clip_ads_near(target, bits_float(scale)) : target;
+          const float scaled = tfp_clip_ads_near(target, scale);
           wider = scaled < target; target = scaled;
+          atomic_store_explicit(&ads_scale, wider ? float_bits(scale) : 0, memory_order_relaxed);
           atomic_fetch_add_explicit(&ads_forwarded, 1, memory_order_relaxed);
         } else {
           const float wanted = bits_float(atomic_load_explicit(aim ? &aim_meters : &hip_meters, memory_order_relaxed));
@@ -473,9 +490,8 @@ uint32_t tfp_near_error(void) { return atomic_load_explicit(&last_error, memory_
 /* ---- not in retail ---- */
 void tfp_near_set_ads_source(TfpNearAdsSource source) { atomic_store_explicit(&ads_source, source, memory_order_release); }
 TfpNearAdsSource tfp_near_ads_source(void) { return atomic_load_explicit(&ads_source, memory_order_acquire); }
-void tfp_near_set_ads_scale(float scale) {
-  atomic_store_explicit(&ads_scale, scale > 0 && scale < 1 ? float_bits(scale) : 0, memory_order_relaxed);
-}
+void tfp_near_set_fov_source(TfpNearFovSource source) { atomic_store_explicit(&fov_source, source, memory_order_release); }
+TfpNearFovSource tfp_near_fov_source(void) { return atomic_load_explicit(&fov_source, memory_order_acquire); }
 float tfp_near_ads_scale(void) {
   const uint32_t scale = atomic_load_explicit(&ads_scale, memory_order_relaxed);
   return scale ? bits_float(scale) : 1;
@@ -494,7 +510,7 @@ void tfp_near_reset_for_tests(void) {
   atomic_store(&seen, 0); atomic_store(&forwarded, 0); atomic_store(&replaced, 0); atomic_store(&ads_forwarded, 0);
   atomic_store(&aim_applied, 0); atomic_store(&other_kind, 0); atomic_store(&text_low, 0); atomic_store(&text_high, 0);
   atomic_store(&hip_meters, 0); atomic_store(&aim_meters, 0); atomic_store(&last_native, 0); atomic_store(&last_applied, 0);
-  atomic_store(&ads_sight, 0); atomic_store(&ads_scale, 0);
+  atomic_store(&ads_sight, 0); atomic_store(&ads_scale, 0); atomic_store(&fov_idle, 0); atomic_store(&fov_calls, 0);
   slot = 0; slot_image = 0; generation_counter = 0; owned_generation = 0; retired_generation = 0; possible = false;
   memset(&policy, 0, sizeof policy);
   for (unsigned i = 0; i < 16; ++i) {
