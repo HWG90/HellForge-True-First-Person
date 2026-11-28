@@ -64,17 +64,18 @@ def listed(pops):
 
 def unlisted(whole, seen):
     """The frames over the limit in the whole log that no action's own stretch listed (`seen`: their ticks)."""
-    return [p for p in whole if p["whose"] not in ("body", "veil") and p["tick"] not in seen]
+    return [p for p in whole if p["whose"] not in ("body", "veil", "stance") and p["tick"] not in seen]
 
 
 def counted(pops):
     """The summary's words for the frames at or over the limit: how many, whose, the largest."""
     counts = matrix.whose_counts(pops)
-    flagged = [p for p in pops if p["whose"] not in ("body", "veil")]
+    flagged = [p for p in pops if p["whose"] not in ("body", "veil", "stance")]
     veiled = [p["beyond"] for p in pops if p["whose"] == "veil"]
     veil = f"{len(veiled)} the veil's" + (f", largest {max(veiled):.3f} m" if veiled else "") + ", not counted"
     return (f"{len(flagged)} frames flagged ({counts['own']} the eye's own, {counts['along']} of them along the view; {counts['filter']} the filter's), "
-            f"largest {max([0.0] + [p.get('bare', p['beyond']) for p in flagged]):.3f} m; {veil}; {counts['body']} the body's own, not counted")
+            f"largest {max([0.0] + [p.get('bare', p['beyond']) for p in flagged]):.3f} m; {veil}; {counts['body']} the body's own, not counted"
+            + (f"; {counts['stance']} the game's stance ramp, not counted" if counts["stance"] else ""))   # round 49 (tools/harness/stance.py)
 
 
 def aim_summary(aims, lines):
@@ -105,6 +106,23 @@ def act(device, name, script, settle, log, sleep=time.sleep):
         return aimed
     device.run(f"{script}; wait {settle:.2f}")
     return None
+
+
+def judged(name, script, lines):
+    """matrix.judge of one action's stretch of the log. An action that presses the reload key is judged without the
+    stance class (round 49g: matrix.reloading, as matrix.phase_judge and phases_levers.py ask it); a vault action is
+    judged at its landing too (matrix.landings); the turns of an action that moves the mouse are let off (round 49)."""
+    return matrix.judge(lines, mouse="look" in script, stance=not matrix.reloading(name, script), landing=name in matrix.VAULTS)
+
+
+def flagged(j, script=""):
+    """Whether an action's verdict flags it: a frame missed, a step at or over the limit, a refusal, (round 49) a fault
+    of the veil's bound or a turn at a change of camera over matrix.TURN_DEG where `script` (the action's) did not move
+    the mouse, or (round 49g, the vault actions) a landing over matrix.LAND_M, or its drop frame over matrix.LAND_STEP_M
+    (matrix.landings)."""
+    flag = j["missed"] or j["largest_jump_m"] >= matrix.POP_M or any("Refused" in n for n in j["notes"])
+    flag = flag or bool(j["veil_faults"]) or (bool(j["turn_snaps"]) and "look" not in script)   # round 49
+    return bool(flag or j.get("landing_m", 0.0) > matrix.LAND_M or j.get("landing_drop_m", 0.0) > matrix.LAND_STEP_M)
 
 
 def judge_log(lines):
@@ -162,12 +180,11 @@ def main(argv):
             lines = handle.read().splitlines()
         for text in matrix.style_changes(lines):
             print(text, flush=True)
-        j = matrix.judge(lines, mouse="look" in script)
+        j = judged(name, script, lines)
         count += 1
         worst = max(worst, j["largest_jump_m"])
         veiled = max(veiled, j.get("largest_veil_m", 0.0))
-        flag = j["missed"] or j["largest_jump_m"] >= matrix.POP_M or any("Refused" in n for n in j["notes"])
-        flag = flag or bool(j["veil_faults"]) or (bool(j["turn_snaps"]) and "look" not in script)   # round 49
+        flag = flagged(j, script)
         if flag:
             bad.append((count, name, script, j["missed"], round(j["largest_jump_m"], 3)))
         print(f"{count:3d} {'BAD ' if flag else 'ok  '}{name:16s} missed {j['missed']} {matrix.describe(j)} kinds {j['kinds']}  {script[:60]}", flush=True)
@@ -177,8 +194,8 @@ def main(argv):
         elif aimed is not None:
             aims.append((count, name, aimed["reached"]))
             print(f"      {matrix.aim_text({**aimed, **aim.counts(lines)})}", flush=True)
-        for text in [f"       {said}" for said in j["said"]] + matrix.pop_lines(j):
-            print(text, flush=True)
+        for text in [f"       {said}" for said in j["said"]] + matrix.landing_lines(j.get("landed", [])) + matrix.pop_lines(j):
+            print(text if text.startswith(" ") else f"       {text}", flush=True)
         seen |= listed(j["pops"])
     d.run("up w; up s; up shift; up right; wait 2.0")
     with open(log, errors="replace") as handle:
