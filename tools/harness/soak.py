@@ -159,16 +159,31 @@ def judged(name, script, lines, before=()):
     return j
 
 
+UNPLAYED_M = 0.20   # round 55C: the most an untouched native frame of an action not played may change the eye's step
+                    # and not be counted: the largest such frame in the feel.63 soaks is 0.131 m (67-A #212 clamber-high
+                    # at 11:24:15.876; 68-C #210 dive 0.103), with half again for margin. Over it, it is counted
+
+
+def moved(pops):
+    """Round 55C: the frames over the limit of an action not played that still count: every frame the mod had a part in
+    (the filter's, the eye's own with something carried, looked for or taken up, a veil: matrix.measure's untouched
+    False), and an untouched native frame at or over UNPLAYED_M. What is left, the game's own frames under it, is no
+    result of the action named (67-A #212, 68-C #210: wanted eye the eye shown, nothing carried, kind 6)."""
+    return [p for p in pops if p["whose"] not in NATIVE and not (p.get("untouched") and p.get("bare", p["beyond"]) < UNPLAYED_M)]
+
+
 def flagged(j, script=""):
     """Whether an action's verdict flags it: a frame missed, a step at or over the limit, a refusal, (round 49) a fault
     of the veil's bound or a turn at a change of camera over matrix.TURN_DEG where `script` (the action's) did not move
     the mouse, or (round 49g, the vault actions) a landing over matrix.LAND_M, or its drop frame over matrix.LAND_STEP_M
-    (matrix.landings). Round 55C: an action that was not played (judged: "played" False) is flagged for a frame missed
-    or a refusal only: what its steps showed is no result of the action named."""
+    (matrix.landings). Round 55C: an action that was not played (judged: "played" False) is let off only the steps of
+    its untouched native frames under UNPLAYED_M (moved): what the game alone showed is no result of the action named;
+    a frame the mod moved, a veil fault and a turn snap flag it as they would a played one."""
     flag = j["missed"] or any("Refused" in n for n in j["notes"])
-    if not j.get("played", True):
-        return bool(flag)
-    flag = flag or j["largest_jump_m"] >= matrix.POP_M
+    if j.get("played", True):
+        flag = flag or j["largest_jump_m"] >= matrix.POP_M
+    else:
+        flag = flag or any(p.get("bare", p["beyond"]) >= matrix.POP_M for p in moved(j["pops"]))
     flag = flag or bool(j["veil_faults"]) or (bool(j["turn_snaps"]) and "look" not in script)   # round 49
     return bool(flag or j.get("landing_m", 0.0) > matrix.LAND_M or j.get("landing_drop_m", 0.0) > matrix.LAND_STEP_M)
 
@@ -240,7 +255,7 @@ def main(argv):
             skipped.append((count, name, j["unplayed"]))
         print(f"{count:3d} {'BAD ' if flag else 'ok  ' if j['played'] else 'n/p '}{name:16s} missed {j['missed']} {matrix.describe(j)} kinds {j['kinds']}  {script[:60]}", flush=True)
         for note in j["unplayed"]:
-            print(f"       {note}: its frames below are not counted", flush=True)
+            print(f"       {note}: its untouched native frames below (under {UNPLAYED_M:.2f} m) are not counted", flush=True)
         if aimed is not None and name in matrix.DIVES:
             dives.append((count, aimed))
             print(f"      {dive.text(aimed)}", flush=True)

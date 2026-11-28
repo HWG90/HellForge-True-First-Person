@@ -428,6 +428,9 @@ def measure(rows, stance=True, launch=None):
     held. Soak 67-A #216:
     the root 1.109 m down at 11:24:25.191, a hold's end opened the window at 11:24:25.257 and the frame read as the
     filter's 0.929 m, 0.060 beyond the body with 0.060 carried and the wanted eye 0.022.
+    Round 55C: untouched says the frame and the two it is measured across are untouched native frames (stance._untouched:
+    kind 6, nothing looked for, taken up but "root" or carried, the wanted eye the eye shown, no veil): the mod had no
+    part in them (soak.moved).
     Rows marked "context" (context_rows) are measured against and never judged themselves.
     Each dict also has at (the frame's own time), written (the stamp of its line) and tick (the helper's clock: what
     tells two frames apart; frames from before an edge are all written with it, under one stamp)."""
@@ -508,7 +511,8 @@ def measure(rows, stance=True, launch=None):
         found.append({"at": c["at"], "written": c["written"], "tick": c["tick"], "kind": c["kind"], "looked": c["looked"], "taken": c["taken"], "carried": c["carried"], "shown": shown,
                       "lengths": change["lengths"], "wanted": wanted, "root": _length(change["root"]) if change["root"] else None,
                       "body": body, "after": after, "beyond": beyond, "whose": whose, "along": along, "across": across,
-                      "veil": change["veil"], "bare": bare, **({"fall": fall, "held": held} if fall is not None else {})})
+                      "veil": change["veil"], "bare": bare, **({"fall": fall, "held": held} if fall is not None else {}),
+                      "untouched": all(stance_ramp._untouched(r) for r in rows[i - 2:i + 1])})   # round 55C: soak.moved
     return found
 
 

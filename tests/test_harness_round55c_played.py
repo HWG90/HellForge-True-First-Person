@@ -4,6 +4,7 @@
   3. the soak's dives and clambers must have been played (a dive line, a traversal mask);
   4. the matrix's setup: a stance read while the view was elsewhere is stale, a stand-up is let settle, and a phase
      whose body could not be stood up is a harness failure, not a camera result;"""
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -74,6 +75,52 @@ class SoakPlayed(unittest.TestCase):
         self.assertGreaterEqual(j["largest_jump_m"], matrix.POP_M)   # 0.131 m: still measured and printed
         self.assertFalse(soak.flagged(j, script))
         self.assertTrue(soak.flagged({**j, "missed": 1}, script))       # a frame out of first person is one whatever
+
+    def test_its_untouched_frames_are_what_is_let_off(self):
+        # every frame over the limit in #212's stretch is an untouched native frame (kind 6, nothing carried, the
+        # wanted eye the eye shown), the largest 0.131 m: under soak.UNPLAYED_M
+        j = soak.judged("clamber-high", matrix.PHASES["clamber-high"][0], lines_of("feel63-A212-clamber-not-played.log"))
+        counted = [p for p in j["pops"] if p["whose"] not in soak.NATIVE]
+        self.assertTrue(counted)
+        self.assertTrue(all(p["untouched"] for p in counted))
+        self.assertLess(max(p["bare"] for p in counted), soak.UNPLAYED_M)
+        self.assertEqual(soak.moved(j["pops"]), [])
+
+    def test_a_snap_the_mod_made_still_flags_it(self):
+        # the check's mutation: a 0.2 m snap made by the mod (looked=1, correction 0.2) in the middle of #212's stretch;
+        # main flags it, and an action not played must not hide it
+        # (and a 0.05 m one, whose step changes stay under UNPLAYED_M: flagged because the mod made it, not for its size)
+        script = matrix.PHASES["clamber-high"][0]
+        for dz in (0.2, 0.05):
+            with self.subTest(dz=dz):
+                lines = lines_of("feel63-A212-clamber-not-played.log")
+                traced = [i for i, line in enumerate(lines) if " Trace: " in line and "kind=6" in line]
+                k = traced[len(traced) // 2]
+                m = re.search(r"eye_world=\((\S+) (\S+) (\S+)\)", lines[k])
+                lines[k] = (lines[k].replace(m[0], f"eye_world=({m[1]} {m[2]} {float(m[3]) + dz:.5f})")
+                            .replace("looked=0", "looked=1").replace("correction=0.0000", f"correction={dz:.4f}"))
+                j = soak.judged("clamber-high", script, lines)
+                self.assertFalse(j["played"])
+                made = soak.moved(j["pops"])
+                self.assertTrue(made)
+                self.assertFalse(any(p["untouched"] for p in made))
+                if dz < 0.1:
+                    self.assertLess(max(p["bare"] for p in made), soak.UNPLAYED_M)
+                self.assertTrue(soak.flagged(j, script))
+
+    def test_an_untouched_frame_over_the_bound_still_flags_it(self):
+        # the same untouched frames, one made bigger than any the logs show: the game's own or not, it is counted
+        script = matrix.PHASES["clamber-high"][0]
+        j = soak.judged("clamber-high", script, lines_of("feel63-A212-clamber-not-played.log"))
+        big = dict(next(p for p in j["pops"] if p["whose"] == "own"), bare=soak.UNPLAYED_M + 0.01)
+        self.assertTrue(big["untouched"])
+        self.assertTrue(soak.flagged({**j, "pops": j["pops"] + [big]}, script))
+
+    def test_a_veil_fault_or_a_turn_snap_still_flags_it(self):
+        script = matrix.PHASES["clamber-high"][0]
+        j = soak.judged("clamber-high", script, lines_of("feel63-A212-clamber-not-played.log"))
+        self.assertTrue(soak.flagged({**j, "veil_faults": [{"what": "step", "m": 0.07, "at": "x"}]}, script))
+        self.assertTrue(soak.flagged({**j, "turn_snaps": [{"degrees": 20.0, "at": "x"}]}, script))
 
     def test_a_played_one_is_judged_as_before(self):
         script = matrix.PHASES["dive"][0]
