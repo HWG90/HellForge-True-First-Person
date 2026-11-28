@@ -79,6 +79,15 @@ int main(void) {
   /* How long: the steepest point at 200 degrees a second, 120 ms at least. */
   CHECK(fabsf(tfp_turn_duration_ms(29)-217.5f) < .01f && fabsf(tfp_turn_duration_ms(39.5f)-296.25f) < .01f && fabsf(tfp_turn_duration_ms(73)-547.5f) < .01f);
   CHECK(tfp_turn_duration_ms(2) == TFP_TURN_LEAST_MS && tfp_turn_duration_ms(.5f) == TFP_TURN_LEAST_MS);
+  /* The ease is rest to rest, not a straight line: a quarter of the way through 27/32 is still carried (a straight line:
+   * 3/4), half way a half, three quarters 5/32; nothing before it began is more than the whole, nothing after it is over. */
+  {
+    const TfpQ from = about(.3f, .1f, 1, 40);
+    CHECK(fabsf(tfp_turn_degrees(tfp_turn_carry_at(from, 75, 300))-40*27/32.f) < .01f);
+    CHECK(fabsf(tfp_turn_degrees(tfp_turn_carry_at(from, 150, 300))-20) < .01f);
+    CHECK(fabsf(tfp_turn_degrees(tfp_turn_carry_at(from, 225, 300))-40*5/32.f) < .01f);
+    CHECK(fabsf(tfp_turn_degrees(tfp_turn_carry_at(from, -5, 300))-40) < .01f && tfp_turn_none(tfp_turn_carry_at(from, 300, 300)) && tfp_turn_none(tfp_turn_carry_at(from, 10, 0)));
+  }
   /* The three logged turns, at 8, 16.7 and 33 ms a frame, out of the native view and into it. */
   static const double dts[3] = {8, 16.7, 33}; static const float sizes[3] = {29, 39.5f, 73};
   for (int d = 0; d < 3; ++d) for (int s = 0; s < 3; ++s) { play(6, 4, sizes[s], dts[d], 0, NULL); play(4, 6, sizes[s], dts[d], 0, NULL); }

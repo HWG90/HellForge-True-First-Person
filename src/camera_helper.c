@@ -1001,11 +1001,13 @@ static void lock_rotation(Policy *p, const float *native, uint32_t kind, double 
   const bool held = foreign || p->lock_down;
   atomic_fetch_add_explicit(&lock_frames, 1, memory_order_relaxed); atomic_store_explicit(&lock_last_kind, kind, memory_order_relaxed);
   if (foreign) atomic_fetch_add_explicit(&lock_foreign_frames, 1, memory_order_relaxed);
-  if (!read((uint64_t)(uintptr_t)argument, &given, 16) || !tfp_q_valid(given)) { tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity(); return; }
+  /* (A frame that cannot be read is shown as the game gives it: a carry under way ends with it, and it is no start for
+   * the next change. Left alone, the frame after snapped back to what was carried and eased again.) */
+  if (!read((uint64_t)(uintptr_t)argument, &given, 16) || !tfp_q_valid(given)) { tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity(); tfp_turn_reset(&lock_turn); return; }
   given = tfp_q_normalised(given);
   if (kind == 6) {
     TfpQ rendered = tfp_q_identity(); /* last frame's view in the world, with last frame's kick in it */
-    if (!rendered_rotation(p, &rendered)) { tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity(); return; }
+    if (!rendered_rotation(p, &rendered)) { tfp_kick_reset(&lock_kick); lock_last_kick = tfp_q_identity(); tfp_turn_reset(&lock_turn); return; }
     view = tfp_q_normalised(tfp_q_mul(tfp_q_normalised(rendered), tfp_q_inv(lock_last_kick)));
     lock_carry = tfp_q_identity(); lock_was_held = false;
   } else if (held) {
