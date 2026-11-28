@@ -129,7 +129,7 @@ int main(void) {
                  .set = f_set, .set_disabled = f_set_disabled, .set_label = f_set_label, .open = f_open, .close = f_close,
                  .is_open = f_is_open, .focus_page = f_focus_page, .status = f_status};
   hf.log = hf_log;
-  const TfpPanelPlatform platform = {NULL, p_lock, p_lock, p_connect, p_mcm, false, "goose.true-first-person/settings", NULL, TFP_EDITOR_KEY, p_key, p_show, NULL};
+  const TfpPanelPlatform platform = {NULL, p_lock, p_lock, p_connect, p_mcm, false, "goose.true-first-person/settings", NULL, TFP_EDITOR_KEY, p_key, p_show, NULL, NULL};
   new_wire();
   CHECK(tfp_wire_settings_bind(&wire, settings_json, sizeof settings_json - 1, "test"));
   mcm_loaded = 1;

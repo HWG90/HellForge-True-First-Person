@@ -61,6 +61,10 @@ typedef struct TfpPanelPlatform {
   const char *(*mcm_show)(void *user, bool *opened);
   /* Round 50, may be NULL: the key is up now but was pressed and let go since the previous update (src/key_tap.h). */
   bool (*key_tapped)(void *user, int virtual_key);
+  /* Round 50c, may be NULL: DBF-MCM is taking a key, a text or a colour now (its status's editing). With key_tapped,
+   * asked at every update F10 is up while MCM holds the menu, so that a tap of F10 is refused when MCM was taking
+   * input at the previous update and finished in the gap (F10 was the key it took): mcm_show sees only now. */
+  bool (*mcm_editing)(void *user);
 } TfpPanelPlatform;
 
 /* Every game update while the mode runs, before tfp_wire_panel_frame: the rule above. now_ms: any millisecond clock

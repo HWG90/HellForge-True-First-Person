@@ -16,6 +16,8 @@ TfpMcmState tfp_mod_menu_try(const HfApi *hf, HfMod *mod, TfpWire *w, unsigned u
  * (*opened false): NULL. Not done (MCM is taking a key or text, nothing is registered, MCM refused): why, for the
  * "Menu: F10: refused: ..." line (round 50). */
 const char *tfp_mod_menu_show(bool *opened);
+/* Round 50c: DBF-MCM is taking a key, a text or a colour now (its status's editing); false without MCM. */
+bool tfp_mod_menu_editing(void);
 /* Takes the registration out of MCM (a live replace). true: nothing is registered any more. */
 bool tfp_mod_menu_release(const HfApi *hf, HfMod *mod, TfpWire *w);
 bool tfp_mod_menu_registered(void);

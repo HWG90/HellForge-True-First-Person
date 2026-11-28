@@ -457,7 +457,9 @@ static TfpMcmState p_mcm(void *u, TfpWire *w, unsigned unavailable, TfpMenuEditF
   return mcm_ready_after >= 0 && (int)mcm_ticks > mcm_ready_after ? TFP_MCM_READY : mcm_answer;
 }
 static bool p_key(void *u, int vk) { (void)u; return vk == TFP_PANEL_KEY && f10_down; }
-static bool f10_tapped, mcm_window;
+static bool f10_tapped, mcm_window, mcm_editing_now;
+static unsigned mcm_editing_asks;
+static bool p_editing(void *u) { (void)u; mcm_editing_asks++; return mcm_editing_now; }
 static const char *mcm_refusal;
 static bool p_tapped(void *u, int vk) { (void)u; return vk == TFP_PANEL_KEY && f10_tapped; }
 static const char *p_show(void *u, bool *opened) {
@@ -471,7 +473,7 @@ static const char *p_show(void *u, bool *opened) {
 static const char *test_edit(TfpWire *w) { (void)w; edits++; return NULL; }
 /* panel_on.txt: the panel at once, DBF-MCM is not tried (the parts below about the panel itself) */
 static const TfpPanelPlatform platform = {NULL, p_lock, p_unlock, p_connect, p_mcm, true, "goose.true-first-person/settings", "goose.true-first-person/settings@test", 33,
-                                          p_key, p_show, p_tapped};
+                                          p_key, p_show, p_tapped, p_editing};
 static int log_count(const char *part) {
   int n = 0;
   for (int i = 0; i < line_count; i++) if (strstr(lines[i], part)) n++;
@@ -507,7 +509,7 @@ static bool start_wire(void) {
   new_wire();
   if (!tfp_wire_settings_bind(&wire, settings_json, sizeof settings_json - 1, "test")) return false;
   tfp_wire_settings_disk(&wire, &test_disk, false);
-  saves = 0; mcm_ticks = 0; edits = 0; mcm_shows = 0; mcm_answer = TFP_MCM_WAITING; mcm_ready_after = -1; f10_down = false; f10_tapped = false; mcm_window = false; mcm_refusal = NULL;
+  saves = 0; mcm_ticks = 0; edits = 0; mcm_shows = 0; mcm_answer = TFP_MCM_WAITING; mcm_ready_after = -1; f10_down = false; f10_tapped = false; mcm_window = false; mcm_refusal = NULL; mcm_editing_now = false; mcm_editing_asks = 0;
   new_options();
   return true;
 }
@@ -921,6 +923,23 @@ static int choice_part(void) {
   f10_down = false; tfp_wire_panel_tick(&wire, &mcm, 3860, 0, test_edit);
   CHECK(mcm_shows == 5 && logged_count("Menu: F10: refused: DBF-MCM is taking a key, a text or a colour (F10 belongs to that)") == 1 && logged_count("Menu: F10:") == 5);
   mcm_refusal = NULL;
+  /* round 50c: MCM taking a key at the previous update and done by this one (F10 was the key it took, pressed and
+   * let go in the gap): the tap is MCM's, refused, though mcm_show would see no editing now */
+  const unsigned shows = mcm_shows, asks = mcm_editing_asks;
+  mcm_editing_now = true; tfp_wire_panel_tick(&wire, &mcm, 3880, 0, test_edit);
+  mcm_editing_now = false; f10_tapped = true; tfp_wire_panel_tick(&wire, &mcm, 3900, 0, test_edit);
+  f10_tapped = false; tfp_wire_panel_tick(&wire, &mcm, 3920, 0, test_edit);
+  CHECK(mcm_shows == shows && mcm_editing_asks > asks);
+  CHECK(logged_count("Menu: F10: refused: DBF-MCM was taking a key, a text or a colour at the previous update (F10 belongs to that)") == 1);
+  /* the next tap, with MCM seen not editing at the update before it, opens MCM */
+  f10_tapped = true; tfp_wire_panel_tick(&wire, &mcm, 3940, 0, test_edit);
+  f10_tapped = false; tfp_wire_panel_tick(&wire, &mcm, 3960, 0, test_edit);
+  CHECK(mcm_shows == shows + 1);
+  /* a press the level sees is mcm_show's to judge, as before: editing at the previous update does not refuse it */
+  mcm_editing_now = true; tfp_wire_panel_tick(&wire, &mcm, 3970, 0, test_edit);
+  mcm_editing_now = false; f10_down = true; tfp_wire_panel_tick(&wire, &mcm, 3980, 0, test_edit);
+  f10_down = false; tfp_wire_panel_tick(&wire, &mcm, 3990, 0, test_edit);
+  CHECK(mcm_shows == shows + 2);
   /* a registration lost later and refused when made again (after a refused live replace): the panel takes over */
   mcm_answer = TFP_MCM_REFUSED;
   for (uint64_t ms = 4000; ms < 6000; ms += 100) tfp_wire_panel_tick(&wire, &mcm, ms, 0, test_edit);

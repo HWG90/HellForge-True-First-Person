@@ -79,6 +79,10 @@ TfpMcmState tfp_mod_menu_try(const HfApi *hf, HfMod *mod, TfpWire *w, unsigned u
                "the mod's own is made", TFP_MENU_MOD_ID);
   return TFP_MCM_READY;
 }
+bool tfp_mod_menu_editing(void) {
+  McmStatus status = {.size = sizeof status};
+  return registered && mcm && mcm->status && mcm->status(&status) && status.editing;
+}
 static char show_why[200];
 const char *tfp_mod_menu_show(bool *opened) {
   McmStatus status = {.size = sizeof status};
