@@ -787,6 +787,7 @@ static void arms_tick(void) {
     tfp_arm_drive_set(wanted, tfp_arm_drive_put_back(arms_keep, arms_restore), weight);
     /* Round 23: the left hand on the weapon's grip (src/offhand_grip.h): the option, the test switch, a handgun at the hip */
     tfp_arm_drive_set_grip(!grip_off && tfp_wire_settings_first_person_arms(&wire), tfp_wire_settings_sidearm(&wire));
+    tfp_pose_set_sidearm(tfp_wire_settings_sidearm(&wire)); /* round 49e: for the "Reload rest:" line only */
   }
   { /* The resting weapon pose (src/arm_drive.h): the clock, whether this tick is a rest and in which stance, and the body's layer states.
      * The action alone is not a rest: a walk, hip fire, an ammo check and a melee are "idle" to it (src/action_select.c), and in the game
@@ -1132,6 +1133,15 @@ static void start(void) {
         tfp_camera_set_settle(settle_file != NULL);
         if (settle_file) say("Test: settle_on.txt: the native view coming back on mask 0 after it was left for a new request or firearm holds the "
                              "eye against the root until the rig is steady (3 frames, 350 ms at most), then eases once (THE SETTLE)");
+        /* Round 49: the frame the head camera's eye is damped in (src/camera_damp.h tfp_damp_frame_step), off by default:
+         * it takes the 0.31 m out of a get-up from lying on the back, and replayed over the soaks (tools/harness/replay.py
+         * --damp-frame against --root-frame) it made other frames worse by more than 5 mm; on only to compare in the game. */
+        strcpy(slash + 1, "damp_frame_on.txt");
+        FILE *damp_frame_file = fopen(parts_path, "r");
+        if (damp_frame_file) fclose(damp_frame_file);
+        tfp_camera_set_damp_frame(damp_frame_file != NULL);
+        if (damp_frame_file) say("Test: damp_frame_on.txt: the head camera's eye is damped in a level frame that turns with the body only as far as "
+                                 "the view turns the same way (a body that turns under a still view does not swing the eye)");
         /* The overrides of the three live features (src/wire_options.h): for testing only. */
         static const struct { const char *name; TfpFeature feature; bool on; } forced[] = {
           {"arms_live.txt", TFP_FEATURE_ARMS, true}, {"arms_off.txt", TFP_FEATURE_ARMS, false},
@@ -1417,6 +1427,9 @@ static void steady_note(void) { /* once a second: the rig's depth held steady (s
   /* round 39: once a reload, in the second it ended (src/reload_hold.h) */
   for (uint32_t i = 0; i < held.reload.count && i < TFP_RELOAD_LOGGED; ++i) { tfp_reload_line(&held.reload.ends[i], line, sizeof line); say("%s", line); }
   if (held.reload.count > TFP_RELOAD_LOGGED) say("Reload: %u more reloads ended in the same second", held.reload.count - TFP_RELOAD_LOGGED);
+  /* round 49e: the edges of each, looked at (the frame before it, its start and its end: src/reload_hold.h) */
+  for (uint32_t i = 0; i < held.reload.edge_count && i < TFP_RELOAD_EDGES_LOGGED; ++i)
+    for (uint32_t k = 0; tfp_reload_edges_line(&held.reload.edges[i], k, line, sizeof line); ++k) say("%s", line);
   if (!tfp_steady_worth(&held)) return;
   tfp_steady_line(&held, line, sizeof line);
   say("%s", line);

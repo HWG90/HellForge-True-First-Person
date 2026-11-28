@@ -75,6 +75,43 @@ class NewFields(unittest.TestCase):
         self.assertEqual([row["veil"] for row in replay.read(longer)], [None, [0.0, 0.32, 0.0], [0.0, 0.32, 0.0], None])
 
 
+class DampFrame(unittest.TestCase):
+    """Round 49: the row handed to replay_filter.c ends with the logged view (the damping's frame is told the view's
+    heading), zeros where the line does not say; the arguments for the filter are passed on after "settle"."""
+
+    def rows(self, tail):
+        axes = (1, 0, 0, 0, 1, 0, 0, 0, 1)
+        return replay.read([line(33 * i, 33.0 * i, 4, (0.01 * i, 1, 2), (0.01 * i, 1, 2.1), 0.1, axes=axes, source="head",
+                                 tail=" quiet=0 tick=%.3f" % (5000 + 33.0 * i) + tail) for i in range(3)])
+
+    def test_the_row_ends_with_the_view(self):
+        said = replay.row_text(self.rows(" off_foot=0 damped=1 damp=(0.00000 0.00000 0.10000) view=(-0.29552 0.95534 0.00000)")[1], "axes").split()
+        bare = replay.row_text(self.rows("")[1], "axes").split()
+        self.assertEqual(len(said), 14 + 9 + 4 + 10 + 3)
+        self.assertEqual(len(bare), 14 + 9 + 4 + 10 + 3)
+        self.assertEqual([float(x) for x in said[-3:]], [-0.29552, 0.95534, 0.0])
+        self.assertEqual([float(x) for x in bare[-3:]], [0.0, 0.0, 0.0])
+        self.assertEqual(said[:5], bare[:5])  # tick, source, detect, quiet, fresh: as before
+
+    def test_the_filter_is_told_the_frame_and_the_floor(self):
+        import subprocess
+        seen = []
+        real = subprocess.run
+
+        def fake(command, **more):
+            seen.append(command[1:])
+            return type("Done", (), {"stdout": "".join("0 0 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 0\n" for _ in more["input"].splitlines())})()
+        subprocess.run = fake
+        try:
+            rows = self.rows(" off_foot=0 damped=1 damp=(0.00000 0.00000 0.10000) view=(-0.29552 0.95534 0.00000)")
+            replay.run("filter", "run", rows, "axes")
+            replay.run("filter", "run", rows, "axes", True, ["dampframe", "floor"])
+            replay.run("filter", "run", rows, "axes", False, ["rootframe"])
+        finally:
+            subprocess.run = real
+        self.assertEqual(seen, [["run"], ["run", "settle", "dampframe", "floor"], ["run", "rootframe"]])
+
+
 class Frames(unittest.TestCase):
     def test_lines_with_and_without_the_axes(self):
         axes = (1, 0, 0, 0, 1, 0, 0, 0, 1)
@@ -160,7 +197,7 @@ class Cut(unittest.TestCase):
         row = self.row(damp=(0.1, -0.2, 0.05))
         row["fit"] = list(self.AXES)
         fields = replay.row_text(row, "fit").split()
-        self.assertEqual(len(fields), 14 + 9 + 4 + 10)   # round 24: mask kind damped off_foot damp stable rearm_only settle_arm
+        self.assertEqual(len(fields), 14 + 9 + 4 + 10 + 3)   # round 24: mask kind damped off_foot damp stable rearm_only settle_arm; round 49: the view
         self.assertEqual(fields[23], "1")
         for got, want in zip([float(x) for x in fields[24:27]], [0.9, 2.02, 2.91]):
             self.assertAlmostEqual(got, want, places=6)

@@ -197,6 +197,7 @@
 #define L_REQUEST_SIGHT     0x18   /* layout; pose_policy.c */
 #define L_REQUEST_HISTORY   0x3c   /* input-json request_history */
 #define L_REQUEST_POSITION  0x48   /* image: lea r8,[r15+0x48] at game+0x128840e, before the rig position call */
+#define L_REQUEST_ANCHOR    0x60   /* image: addss xmm2/xmm1/xmm0,[r15+0x60/0x64/0x68] at game+0x128656e..0x128657a (added to the body's place; read for the "Reload start:" line only) */
 #define L_REQUEST_STATE     0x80   /* input-json request_preset (+0x80), request_lens (+0x84), request_pitch_gate (+0x8c); 0x24 bytes are read */
 #define L_REQUEST_COUPLING  0x98   /* layout; pose_policy.c */
 #define L_VT_GRAPH_GETTER   0xE8   /* layout; scene.c */
@@ -205,6 +206,7 @@
 #define L_UNIT_LINKS        0x98   /* layout; scene.c */
 #define L_UNIT_HASHES       0xA0   /* layout; scene.c */
 #define L_LOCAL_POSITION    0x24   /* image: "4883c124" in B_HEX_LOCAL_POSITION */
+#define L_LOCAL_SIZE        0x40   /* a node's local record (src/arm_graft.h TfpGraftLocal: basis, position at +0x24, scale); read for the "Reload start:" line only */
 #define L_RIG_NODES         63     /* same; scene.c */
 #define L_RIG_NODE          5      /* same; scene.c (hash 0x9B115563) */
 #define L_RIG_CAMERA_NODE   50     /* same; scene.c */
@@ -789,6 +791,9 @@ static TfpSteady steady; static TfpSteadyLog steady_log; static TfpSteadyPair st
 /* Not in retail (round 39, src/reload_hold.h): the eye held through a reload. Under the policy lock. reload_lease: the
  * lease C was read for (reload_read: it was); reload_known: C's forward part was read, in reload_forward. */
 static TfpReloadHold reload_hold; static uint64_t reload_lease; static bool reload_read, reload_known; static float reload_forward;
+/* Round 49e (src/reload_hold.h "the edges looked at"): a diagnostic. reload_watch: the frames of a reload's edges, under
+ * the policy lock; reload_sidearm: the binder's word that the weapon is a handgun (tfp_pose_set_sidearm), for the line. */
+static TfpReloadWatch reload_watch; static _Atomic uint32_t reload_sidearm;
 /* C, the game's reload vector, from the evaluator's own code: the 460 bytes from game+0x1287a44 checked against the
  * pinned evaluator, the three floats its nine instructions name read where they name them (src/reload_hold.h). Its
  * forward part (request+0x4c's) to `*forward`. Once a lease: C is the game's data, and a lease is short. */
@@ -890,6 +895,23 @@ static bool steady_frame(Policy *p, const DepthObservation *observation, uint64_
       float added = 0; TfpReloadEnd end;
       const uint32_t held_now = tfp_reload_frame(&reload_hold, &r, generation, &added, &end);
       tfp_reload_note(&steady_log.now.reload, &end);
+      /* Round 49e: the edges of the reload looked at, for the "Reload rest/start/end:" lines. Read only, and after the
+       * hold has its number: node 50's local position (what the evaluator read into the rig's own vector at
+       * game+0x1287a41, from the rig's local records), its parents' records (nodes 1 to 4: graph_rows has the chain
+       * 50, 4, 3, 2, 1, the root, proven in this call) and the anchor request+0x60..0x68, as this call finds them. Four
+       * guarded reads a frame; nothing of the frame's numbers is theirs. */
+      {
+        TfpReloadProbe probe; TfpReloadEdges edges; uint64_t locals = 0; uint8_t parents[4*L_LOCAL_SIZE];
+        tfp_reload_probe(&probe, &r, held_now, added, now);
+        const bool have_locals = pointer(p->object + L_UNIT_LOCALS, &locals);
+        probe.eye_known = have_locals && read(locals + (uint64_t)L_RIG_CAMERA_NODE*L_LOCAL_SIZE + L_LOCAL_POSITION, probe.eye, sizeof probe.eye);
+        if (have_locals && read(locals + L_LOCAL_SIZE, parents, sizeof parents)) tfp_reload_probe_parents(&probe, parents, 4);
+        probe.anchor_known = read(p->c.request + L_REQUEST_ANCHOR, probe.anchor, sizeof probe.anchor);
+        if (tfp_reload_watch_frame(&reload_watch, &reload_hold, &probe, generation, &edges)) {
+          edges.sidearm = atomic_load_explicit(&reload_sidearm, memory_order_relaxed) != 0;
+          tfp_reload_note_edges(&steady_log.now.reload, &edges);
+        }
+      }
       if (reason == TFP_STEADY_WORKED) *delta += added;
       else if (scaled && held_now == TFP_RELOAD_ADDED) { *delta = added; scaled_held = true; }
     }
@@ -2240,6 +2262,7 @@ uint32_t tfp_pose_set_depth_steady(uint32_t mode) {
   if (mode > 2) return 0;
   atomic_store_explicit(&steady_mode, mode, memory_order_relaxed); return 1;
 }
+void tfp_pose_set_sidearm(bool on) { atomic_store_explicit(&reload_sidearm, on ? 1u : 0u, memory_order_relaxed); }
 uint32_t tfp_pose_steady_take(TfpSteadySecond *out) {
   if (!out || !host.lock_exclusive) return 0;
   policy_acquire();
@@ -2277,6 +2300,7 @@ void tfp_pose_reset_for_tests(void) {
   memset(&gate, 0, sizeof gate); atomic_store(&gate_reads, 0); atomic_store(&depth_off, 0);
   memset(&steady, 0, sizeof steady); memset(&steady_log, 0, sizeof steady_log); memset(&steady_pair, 0, sizeof steady_pair); atomic_store(&steady_mode, 0); atomic_store(&aim_steady, 0);
   memset(&reload_hold, 0, sizeof reload_hold); reload_lease = 0; reload_read = reload_known = false; reload_forward = 0;
+  memset(&reload_watch, 0, sizeof reload_watch); atomic_store(&reload_sidearm, 0);
   atomic_store(&ads_sight, 0); atomic_store(&ads_wanted, 0); atomic_store(&ads_pull_bits, 0); atomic_store(&ads_share_bits, 0);
   atomic_store(&ads_closer_bits, 0); atomic_store(&ads_forward_bits, 0); atomic_store(&ads_depth_bits, UINT32_C(0x7fc00000)); atomic_store(&ads_full, 0);
   atomic_store(&ads_near_bits, 0); atomic_store(&ads_editing, 0);
