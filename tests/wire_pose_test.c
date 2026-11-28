@@ -1445,6 +1445,9 @@ static int real(void) {
       float w = 1; uint8_t ability = 0; int scaled_frames = 0;
       pose_world_main_row(0, 1, 1, SCALE_OF[sm]);
       double eye_rest = 0, eye_least = 1e9, eye_most = -1e9, step_most = 0, eye_last = 0; int n = 0, kept = 0;
+      /* round 56: node 50's forward move from its rest (EYE50 below). The evaluator reads node 50 into the rig's own
+       * vector (game+0x1287a41), and the eye hangs on node 50: here it goes with the opposite sign to the rig's value */
+      float d50 = 0;
       /* one frame of the game: the bytes, the rig's forward value, the evaluator's two writes; what the eye is */
 #define RELOAD_FRAME(calm_) do { \
         const float before_ = w; if (w < 1) { w += (float)step / 75.0f; if (w > 1) w = 1; } \
@@ -1452,10 +1455,10 @@ static int real(void) {
         const bool scaled_ = !(calm_) && (sm == 1 || sm == 2) && before_ < 1; scaled_frames += scaled_; \
         pose_world_avatar_bit(!(calm_) && sm != 0, !(calm_) && sm == 3); \
         pose_world_request_field(0x8C, 0x00000100u | (ability ? 0x01000000u : 0)); \
-        const float y_ = ((1 - r_) * v + r_ * C) * (scaled_ ? SCALE_OF[sm] : 1.0f) + C; \
+        const float y_ = ((1 - r_) * (v + d50) + r_ * C) * (scaled_ ? SCALE_OF[sm] : 1.0f) + C; \
         { uint32_t u_; memcpy(&u_, &y_, 4); pose_world_request_field(0x4C, u_); } \
         stepped_root_frame(step, before_, w); \
-        const double eye_ = (double)y_ - (double)root_forwarded[1]; \
+        const double eye_ = (double)y_ - (double)root_forwarded[1] - (double)d50; \
         if (n) { step_most = fmax(step_most, fabs(eye_ - eye_last)); } \
         eye_least = fmin(eye_least, eye_); eye_most = fmax(eye_most, eye_); eye_last = eye_; ++n; \
         if ((calm_) && kept + 4 <= CAP) { float *o_ = &calm[aim][f][kept]; \
@@ -1464,7 +1467,8 @@ static int real(void) {
           kept += 4; } \
       } while (0)
       /* round 49e: the edges looked at. Node 50 of the rig rests at EYE50 and stands 0.0645 m further forward through
-       * the reload; request+0x60..0x68 is ANCHOR throughout. Read and said, and nothing of the eye changes by it. */
+       * the reload; request+0x60..0x68 is ANCHOR throughout. Read and said. Round 56: and held (src/reload_hold.h
+       * "node 50"): the eye stays where it was. */
       static const float EYE50[3] = {.01f, -.3717f, .02f}, EYE50_IN[3] = {.01f, -.3717f + .0645f, .02f}, ANCHOR[3] = {1.5f, -2.25f, .125f};
       pose_world_eye_local(EYE50);
       for (int i = 0; i < 3; i++) { uint32_t u_; memcpy(&u_, &ANCHOR[i], 4); pose_world_request_field(0x60 + 4 * (unsigned)i, u_); }
@@ -1473,10 +1477,10 @@ static int real(void) {
       eye_rest = eye_last; eye_least = eye_most = eye_rest; step_most = 0;
       CHECK(tfp_pose_steady_take(&held) == 1 && held.reload.count == 0 && held.reload.edge_count == 0);
       ability = 1; w = 0;                                                    /* the reload begins */
-      pose_world_eye_local(EYE50_IN);
+      pose_world_eye_local(EYE50_IN); d50 = EYE50_IN[1] - EYE50[1];
       for (int i = 0; i < (int)(1500 / step); i++) RELOAD_FRAME(false);
       ability = 0; w = 0;                                                    /* and ends */
-      pose_world_eye_local(EYE50);
+      pose_world_eye_local(EYE50); d50 = 0;
       for (int i = 0; i < (int)(600 / step); i++) RELOAD_FRAME(false);
       CHECK(tfp_pose_steady_take(&held) == 1 && held.reload.count == 1);
       CHECK(held.reload.edge_count == 1);
@@ -1490,7 +1494,7 @@ static int real(void) {
         CHECK(e->constant_known == (code != 0) && (!code || e->constant == C));
         if (code && !aim && sm == 0) { /* the argument and what was put on node 5, as the frames had them */
           CHECK(near(e->rest.argument, v + C, 1e-6) && near(e->start[e->starts - 1].argument, 2 * C, 1e-6) && e->held_known);
-          CHECK(near(e->start[e->starts - 1].own + e->start[e->starts - 1].put, eye_rest - 2 * (double)C, 2e-6));
+          CHECK(near(e->start[e->starts - 1].own + e->start[e->starts - 1].put, eye_rest - 2 * (double)C + (double)(EYE50_IN[1] - EYE50[1]), 2e-6));
         }
         char said[640];
         CHECK(tfp_reload_edges_line(e, 0, said, sizeof said) && !strncmp(said, "Reload rest: tick ", 18)
@@ -1506,14 +1510,15 @@ static int real(void) {
         char want[240]; snprintf(want, sizeof want, "Reload: eye held through the reload (would have slid %.3f m)", eye_rest - 2 * (double)C); /* to 2C: the eye at rest (with the held depth's own) to the game's reload place */
         if (scaled_frames) snprintf(want + strlen(want), sizeof want - strlen(want), "; %d frames the game scaled by main row +0x11ac held, %d of them by the eye's offset",
                                     scaled_frames, sm == 2 ? scaled_frames : 0); /* round 40 */
+        snprintf(want + strlen(want), sizeof want - strlen(want), "; node 50 held up to %.3f m", (double)fabsf(EYE50_IN[1] - EYE50[1])); /* round 56 */
         if (strcmp(line, want)) printf("wire pose: %s (wanted: %s)\n", line, want);
         CHECK(!strcmp(line, want));
         CHECK(held.roots == held.shifted && held.stops == 0);              /* node 5 and its root together, every frame */
       } else if (code) {
-        CHECK(near(eye_least, 2 * C, 2e-6) && near(eye_most, eye_rest, 2e-6) && near(eye_rest, v + C, 2e-6)); /* full aim: the game's own reload, off the sight to 2C */
+        CHECK(near(eye_least, 2 * C - (double)(EYE50_IN[1] - EYE50[1]), 2e-6) && near(eye_most, eye_rest, 2e-6) && near(eye_rest, v + C, 2e-6)); /* full aim: the game's own reload, off the sight to 2C (node 50's move too: round 56) */
         CHECK(strstr(line, "Reload: eye held through the reload (would have slid ") != NULL); /* worked out, nothing put back (the hip share is 0) */
       } else {
-        CHECK(near(eye_least, 2 * C, 2e-6) && near(eye_most, eye_rest, 2e-6) && eye_rest - eye_least > .1); /* not the pinned evaluator: main's slide, to 2C */
+        CHECK(near(eye_least, 2 * C - (double)(EYE50_IN[1] - EYE50[1]), 2e-6) && near(eye_most, eye_rest, 2e-6) && eye_rest - eye_least > .1); /* not the pinned evaluator: main's slide, to 2C (and node 50's move) */
         if (sm) CHECK(scaled_frames > 0);
         CHECK(strstr(line, "Reload: eye not held through the reload (") && strstr(line, "the game's reload vector could not be read"));
       }
