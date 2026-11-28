@@ -129,4 +129,76 @@ static inline float tfp_eye_damp_release(TfpEyeDamp *d, double tick, uint32_t ma
 static inline float tfp_eye_damp_release_slowly(TfpEyeDamp *d, double tick, uint32_t max_gap_ms, float *behind) {
   return tfp_eye_damp_let_go(d, tick, max_gap_ms, true, behind);
 }
+/* Round 49: the frame the head camera's eye is damped in (lock_damp_eye in src/camera_helper.c, and
+ * tools/harness/replay_filter.c). Until now that was the body root's own axes: the head's place against the root was
+ * low-passed as the root sees it. A root that turns under a view that does not (the Stable soak of 2026-11-27, a
+ * get-up from lying on the back in the head camera: the view fixed, the root's tilt of 15.5 degrees gone in one frame
+ * and its heading turning 16.5 degrees a frame for eight; round 30's whip is the same) then moves the head 0.23 to
+ * 0.33 m a frame in those axes where it moves 0.14 to 0.23 m in the world, the 0.25 m limit is reached in one frame,
+ * sideways, and the lag swings round with the root: the eye's step changed by 0.29, 0.20, 0.31 and 0.13 m in four
+ * frames (tests/reference/soak-60-standup.h). And the tilt going in one frame carried the head 0.30 m in the world
+ * without moving it in the root's axes, so nothing of that was damped at all.
+ * So the frame is level (its up is the world's), and it turns with the root's heading only as far as the view's
+ * heading turns the same way in the same frame:
+ *   the body turns with the view (the mouse turns both): the frame is the root's, as before; for a level root to
+ *     the bit, the axes themselves are handed back;
+ *   the root turns under a still view, or against it: the frame stands still, and what the head does in the world
+ *     against the root's place is what is damped;
+ *   only the view turns: the root did not, nor does the frame;
+ *   the root's heading jumps by more than TFP_DAMP_FRAME_RESEAT in one frame (157 to 180 degrees out of an emote into
+ *     a dive backwards): that is no turn, the game has set the axes anew, and the frame goes with them as it always
+ *     did. The continuity reads such a frame in the root's axes (THE CUT, src/camera_continuity.h); with the frame
+ *     left standing it took the cut up round the wrong way, 0.09 m of step change became 0.26 (soak 29, 16:16:30.8).
+ * It starts at the root's heading in the first frame, and again after a pause longer than `max_gap_ms`, a clock that
+ * went back or an input that is not a number. Where there is no view to compare with (none given, or straight up or
+ * down) the frame turns with the root, as it always did. The lag that is let go when damping stops
+ * (tfp_eye_damp_release) is carried in the same frame, so a root that flips under the view (a dive backwards) does
+ * not swing it round either.
+ * off: how far the root's heading has turned on from the frame's (radians); root_yaw, view_yaw: the headings of the
+ * frame before; view_known: that frame had one for the view. */
+#define TFP_DAMP_FRAME 1 /* tools/harness/replay_filter.c asks: an older header has none of this */
+#define TFP_DAMP_FRAME_RESEAT (TFP_PI/2) /* radians in one frame: more is the game setting the root's axes anew, not a turn */
+#define TFP_DAMP_FRAME_SAME 1e-5f /* radians (0.0006 degrees): two turns nearer than this are the same turn */
+#define TFP_DAMP_FRAME_LEVEL_MIN 1e-4f /* a forward axis or a view with less than this of level length has no heading */
+typedef struct TfpDampFrame { float off, root_yaw, view_yaw; double tick; bool known, view_known; } TfpDampFrame;
+static inline void tfp_damp_frame_reset(TfpDampFrame *f) { f->off = f->root_yaw = f->view_yaw = 0; f->tick = 0; f->known = f->view_known = false; }
+static inline float tfp_damp_frame_wrap(float angle) { /* into -pi..pi; the angles here are differences of two atan2f */
+  if (angle > TFP_PI) angle -= 2*TFP_PI; else if (angle < -TFP_PI) angle += 2*TFP_PI;
+  return angle;
+}
+/* One frame. `root_basis`: the root's axes (rows: right, forward, up); `view`: the view's forward direction in the
+ * world, or NULL; `frame` takes the axes to damp in (rows as the root's). True: `frame` is `root_basis` itself, bit
+ * for bit (a level root whose every turn so far the view made with it, a first frame, or nothing to work from). */
+static inline bool tfp_damp_frame_step(TfpDampFrame *f, const float *root_basis, const float *view, double tick, uint32_t max_gap_ms, float *frame) {
+  for (unsigned i = 0; i < 9; ++i) frame[i] = root_basis[i];
+  bool finite = isfinite(tick);
+  for (unsigned i = 0; i < 9; ++i) finite = finite && isfinite(root_basis[i]);
+  if (!finite) { tfp_damp_frame_reset(f); return true; }
+  const bool again = !f->known || tick < f->tick || tick-f->tick > max_gap_ms;
+  /* a forward axis straight up or down has no heading: the one of the frame before stands (a first frame: the axes) */
+  const bool headed = sqrtf(root_basis[3]*root_basis[3]+root_basis[4]*root_basis[4]) >= TFP_DAMP_FRAME_LEVEL_MIN;
+  if (!headed && again) { tfp_damp_frame_reset(f); return true; }
+  const float root_yaw = headed ? atan2f(root_basis[4], root_basis[3]) : f->root_yaw;
+  const bool viewed = view && isfinite(view[0]) && isfinite(view[1]) && sqrtf(view[0]*view[0]+view[1]*view[1]) >= TFP_DAMP_FRAME_LEVEL_MIN;
+  const float view_yaw = viewed ? atan2f(view[1], view[0]) : 0;
+  if (again) f->off = 0;
+  else {
+    const float root_turn = tfp_damp_frame_wrap(root_yaw-f->root_yaw);
+    const float view_turn = viewed && f->view_known ? tfp_damp_frame_wrap(view_yaw-f->view_yaw) : root_turn;
+    float with = 0; /* how far the frame turns: the smaller of the two turns where they are the same way */
+    if (fabsf(root_turn) > TFP_DAMP_FRAME_RESEAT) with = root_turn; /* the axes set anew: the frame goes with them */
+    else if (root_turn > 0 && view_turn > 0) with = view_turn < root_turn ? view_turn : root_turn;
+    else if (root_turn < 0 && view_turn < 0) with = view_turn > root_turn ? view_turn : root_turn;
+    /* the view as far or further: off as it was, to the bit (two headings read back through atan2f differ in the last
+     * digits where the turns were the same) */
+    if (fabsf(root_turn-with) > TFP_DAMP_FRAME_SAME) f->off = tfp_damp_frame_wrap(f->off+(root_turn-with));
+  }
+  f->root_yaw = root_yaw; f->view_yaw = view_yaw; f->view_known = viewed; f->tick = tick; f->known = true;
+  if (f->off == 0 && root_basis[6] == 0 && root_basis[7] == 0 && root_basis[8] == 1) return true; /* the level root's own */
+  const float c = cosf(root_yaw-f->off), s = sinf(root_yaw-f->off);
+  frame[0] = s; frame[1] = -c; frame[2] = 0;
+  frame[3] = c; frame[4] = s; frame[5] = 0;
+  frame[6] = 0; frame[7] = 0; frame[8] = 1;
+  return false;
+}
 #endif

@@ -156,6 +156,9 @@ static bool panel_wanted;
  * shoulder instead of following the body; rest_trace.txt makes the "Rest:" line (the resting weapon pose, once a
  * second) come every tick. */
 static bool arms_live, arms_keep, arms_restore, arms_bend, arms_rest_trace, grip_off;
+/* Round 42b test switch game_ik_off.txt: the gun's own IK_left (the target of the game's left-hand IK) is never moved onto a
+ * fitted grip (src/game_ik.h), to compare. */
+static bool game_ik_off;
 /* Test switch depth_off.txt, read once at the start: the pose helper's zoom-depth term adds nothing on any frame, so
  * neither the rig nor its root is shifted for the optic. It is there to find out in the game whether that shift is
  * part of the unzoom gate's flipping (docs/design/specs/2026-11-23-gate-flip.md). */
@@ -747,6 +750,12 @@ static void arms_start(void) {
   else say("Grip: the left hand of the drawn arms holds the weapon's grip node (a foregrip's or vertical grip's own node when one is fitted) "
            "whenever the body's left hand is on it, while First Person Arms and Animated arms are on, also while aiming (on the game's own aim "
            "pose, the left arm only); not for a handgun. A file grip_off.txt beside the DLL leaves the hand as the body puts it, to compare");
+  if (!grip_off && game_ik_off) say("Test: game_ik_off.txt: the game's left-hand IK keeps its target on the gun's own IK_left node; a fitted grip is held "
+                                    "by the mod's reach alone");
+  else if (!grip_off)
+    say("Grip: on a fitted foregrip or vertical grip the game's own left-hand IK is aimed there too: the gun's own IK_left node (its "
+        "target) is moved onto the grip's node while the hand holds it, and put back when it lets go. A file game_ik_off.txt beside "
+        "the DLL leaves the game's IK on the gun's own node, to compare");
   const char *why = tfp_render_slot_contract();
   if (why) {
     snprintf(arms_refusal, sizeof arms_refusal, "%s", why);
@@ -787,6 +796,9 @@ static void arms_tick(void) {
     tfp_arm_drive_set(wanted, tfp_arm_drive_put_back(arms_keep, arms_restore), weight);
     /* Round 23: the left hand on the weapon's grip (src/offhand_grip.h): the option, the test switch, a handgun at the hip */
     tfp_arm_drive_set_grip(!grip_off && tfp_wire_settings_first_person_arms(&wire), tfp_wire_settings_sidearm(&wire));
+    tfp_pose_set_sidearm(tfp_wire_settings_sidearm(&wire)); /* round 49e: for the "Reload rest:" line only */
+    tfp_arm_drive_set_game_ik(!game_ik_off); /* round 42b: the game's IK target on a fitted grip (only while the grip runs) */
+    tfp_arm_drive_set_grip_thumb(!tfp_locked_view_foregrip_thumb_wrapped(&wire)); /* round 42b: "Foregrip thumb", Straight unless Wrapped */
   }
   { /* The resting weapon pose (src/arm_drive.h): the clock, whether this tick is a rest and in which stance, and the body's layer states.
      * The action alone is not a rest: a walk, hip fire, an ammo check and a melee are "idle" to it (src/action_select.c), and in the game
@@ -831,6 +843,8 @@ static void arms_tick(void) {
         if (g.frames) say("Grip: gate: %s", tfp_arm_drive_grip_gate_line(&g)); /* round 38b: why it holds or lets go */
         const char *drawn = g.frames ? tfp_arm_drive_grip_drawn_line(&g) : NULL; /* round 36b: the hand as drawn, a line of its own */
         if (drawn) say("Grip: %s", drawn);
+        const char *ik = tfp_arm_drive_grip_ik_line(&g); /* round 42b: which path holds the hand */
+        if (ik) say("Grip: hand: %s", ik);
         const char *units = g.frames ? tfp_arm_drive_grip_units_line(&g, true) : NULL; /* round 36: whenever the gun's units change */
         if (units) say("Grip: %s", units);
         if (g.frames && g.state != told_state && g.state != TFP_ARM_GRIP_HELD && g.state != TFP_ARM_GRIP_EASING)
@@ -1082,9 +1096,9 @@ static void start(void) {
           say("%s", memo_line);
         }
 #ifdef TFP_FEEL
-        static const char *const arm_files[] = {"arms_live_keep.txt", "arms_live_restore.txt", "arm_bend.txt", "rest_trace.txt", "grip_off.txt"};
-        bool *const arm_switches[] = {&arms_keep, &arms_restore, &arms_bend, &arms_rest_trace, &grip_off};
-        for (int i = 0; i < 5; i++) {
+        static const char *const arm_files[] = {"arms_live_keep.txt", "arms_live_restore.txt", "arm_bend.txt", "rest_trace.txt", "grip_off.txt", "game_ik_off.txt"};
+        bool *const arm_switches[] = {&arms_keep, &arms_restore, &arms_bend, &arms_rest_trace, &grip_off, &game_ik_off};
+        for (int i = 0; i < 6; i++) {
           strcpy(slash + 1, arm_files[i]);
           FILE *arm_file = fopen(parts_path, "r");
           if (arm_file) fclose(arm_file);
@@ -1132,6 +1146,15 @@ static void start(void) {
         tfp_camera_set_settle(settle_file != NULL);
         if (settle_file) say("Test: settle_on.txt: the native view coming back on mask 0 after it was left for a new request or firearm holds the "
                              "eye against the root until the rig is steady (3 frames, 350 ms at most), then eases once (THE SETTLE)");
+        /* Round 49: the frame the head camera's eye is damped in (src/camera_damp.h tfp_damp_frame_step), off by default:
+         * it takes the 0.31 m out of a get-up from lying on the back, and replayed over the soaks (tools/harness/replay.py
+         * --damp-frame against --root-frame) it made other frames worse by more than 5 mm; on only to compare in the game. */
+        strcpy(slash + 1, "damp_frame_on.txt");
+        FILE *damp_frame_file = fopen(parts_path, "r");
+        if (damp_frame_file) fclose(damp_frame_file);
+        tfp_camera_set_damp_frame(damp_frame_file != NULL);
+        if (damp_frame_file) say("Test: damp_frame_on.txt: the head camera's eye is damped in a level frame that turns with the body only as far as "
+                                 "the view turns the same way (a body that turns under a still view does not swing the eye)");
         /* The overrides of the three live features (src/wire_options.h): for testing only. */
         static const struct { const char *name; TfpFeature feature; bool on; } forced[] = {
           {"arms_live.txt", TFP_FEATURE_ARMS, true}, {"arms_off.txt", TFP_FEATURE_ARMS, false},
@@ -1417,6 +1440,9 @@ static void steady_note(void) { /* once a second: the rig's depth held steady (s
   /* round 39: once a reload, in the second it ended (src/reload_hold.h) */
   for (uint32_t i = 0; i < held.reload.count && i < TFP_RELOAD_LOGGED; ++i) { tfp_reload_line(&held.reload.ends[i], line, sizeof line); say("%s", line); }
   if (held.reload.count > TFP_RELOAD_LOGGED) say("Reload: %u more reloads ended in the same second", held.reload.count - TFP_RELOAD_LOGGED);
+  /* round 49e: the edges of each, looked at (the frame before it, its start and its end: src/reload_hold.h) */
+  for (uint32_t i = 0; i < held.reload.edge_count && i < TFP_RELOAD_EDGES_LOGGED; ++i)
+    for (uint32_t k = 0; tfp_reload_edges_line(&held.reload.edges[i], k, line, sizeof line); ++k) say("%s", line);
   if (!tfp_steady_worth(&held)) return;
   tfp_steady_line(&held, line, sizeof line);
   say("%s", line);

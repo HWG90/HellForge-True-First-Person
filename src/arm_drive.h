@@ -236,6 +236,20 @@ const char *tfp_arm_drive_held(void);
  * the copy fades out (the drive's weight) and the game's own aim pose holds the gun; since round 36b the reach runs on that
  * blend, so the hand stays on the grip, and only the left arm (nodes 10, 12, 13) differs from the game's own there. */
 void tfp_arm_drive_set_grip(bool on, bool one_handed);
+/* Round 42b (src/game_ik.h, docs/design/specs/2026-11-25-game-ik.md): the game solves the drawn left arm onto the gun's own
+ * IK_left node by its own IK (the first-person rig's state machine, chain 0C92A44D), whatever the drive writes into nodes
+ * 10, 12, 13. on: while the hand is held on an attachment's grip node, the gun's own IK_left node (a leaf locator) is given
+ * that node's pose in the gun's frame, easing there and back in the time the distance asks (tfp_gik_seconds), so the game's IK puts the hand on the
+ * fitted grip; the game's own record goes back exactly when the gun changes or goes, the drive stops or is not driven, or
+ * this is switched off, and eased when the hand lets go or the attachment goes. Only the local player's first-person gun
+ * (the one the drive proved on the rig's socket). The drive's own reach of nodes 10, 12, 13 runs as before: it aims at the
+ * same pose, so the two agree. Off at the start and until this is called with true. */
+void tfp_arm_drive_set_game_ik(bool on);
+/* Round 42b (src/grip_fingers.h): how the thumb closes on a VERTICAL grip (an attachment's grip node whose Y runs down the
+ * gun). straight: laid up along the handle, joints 2 and 3 the body's own; else wrapped round it as on every other grip.
+ * Off (wrapped) at the start. With the game's IK target on, the fingers close by that target's share of its way, since
+ * the drawn hand is on the handle only as far as the target is. */
+void tfp_arm_drive_set_grip_thumb(bool straight);
 /* What the grip did in the driven frames since the last call, for the "Grip:" line (the call empties it). */
 enum {
   TFP_ARM_GRIP_OFF = 0,   /* switched off */
@@ -317,6 +331,15 @@ typedef struct TfpArmDriveGrip {
   float gun_mps;                  /* the body's hand against the gun over the last ~80 ms, last frame; -1: not known */
   float most_held_mps;            /* the most of that while held */
   uint32_t taken, let_far, let_fast, let_action; /* times the grip was taken, and let go for each reason */
+  /* round 42b: the game's IK target (tfp_arm_drive_set_game_ik) */
+  bool ik_on;                     /* switched on */
+  uint32_t ik_why;                /* TFP_GIK_* of the last frame (src/game_ik.h; 0: moved or easing) */
+  float ik_share;                 /* how far the gun's IK_left is on its way to the grip, last frame (0 to 1) */
+  float ik_m;                     /* the grip's node from where the game keeps the gun's IK_left, last frame it was read */
+  uint32_t ik_frames, ik_full;    /* frames the node was moved; of those, all the way onto the grip */
+  uint32_t ik_writes, ik_restores;/* writes of the node; times the game's own record went back */
+  bool vertical;                  /* the grip held is a vertical one (its node's Y runs down the gun), last frame */
+  uint32_t thumb_straight;        /* frames the hand was closed with the straight thumb (tfp_arm_drive_set_grip_thumb) */
 } TfpArmDriveGrip;
 void tfp_arm_drive_grip_take(TfpArmDriveGrip *out);
 /* "the gun's units: 2, 2 with a grip node: [0] the gun e5796355a8fd67e0, 39 nodes, grip node 13; [1] on [0] node 17
@@ -338,6 +361,10 @@ const char *tfp_arm_drive_grip_gate_line(const TfpArmDriveGrip *grip);
  * 0.000 m from the grip (most 0.001), turned 2.1 degrees (most 4.0), palm 0.002 m (most 0.004), fingers curled 65.0 degrees
  * (least 64.2), 0.084 m from the gun's own node; while aiming (30 frames, 30 held): ...". NULL: nothing measured. A static buffer. */
 const char *tfp_arm_drive_grip_drawn_line(const TfpArmDriveGrip *grip);
+/* Round 42b, a line of its own ("Grip: hand: ..."): which path holds the hand. "held by the game's IK, its target (the gun's
+ * own IK_left) moved onto the fitted grip: 52 of 52 frames (51 all the way), 0.124 m from where the game keeps it; 1 write,
+ * 0 put back", or "the mod's reach alone; the game's IK target stays on the gun's own IK_left: <why>". NULL: no frames. */
+const char *tfp_arm_drive_grip_ik_line(const TfpArmDriveGrip *grip);
 const char *tfp_arm_drive_grip_state_name(uint32_t state);
 
 void tfp_arm_drive_stats(TfpArmDriveStats *out);

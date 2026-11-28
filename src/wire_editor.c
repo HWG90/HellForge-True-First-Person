@@ -15,6 +15,10 @@ typedef struct Ed {
   TfpOpsPlacement argument;   /* the placement of the call in progress: handed to the runtime by this identity */
   bool (*previous_decode)(TfpWire *w, V value, TfpOpsPlacement *out);
   char title[64], save_label[64], all_label[64], footer[96], actions[256], why[224];
+  /* round 53: the list of saved placements (src/editor_weapons.h) */
+  char held[TFP_EW_KEY];      /* store.target()'s last key; "": none, or not text */
+  bool listed;                /* the platform has the list of this opening */
+  TfpEwWeapon list[TFP_EW_MAX];
 } Ed;
 static Ed *state(const TfpWire *w) { return w ? w->ext[TFP_WIRE_EXT_EDITOR] : NULL; }
 #define W(h) ((TfpWire *)(h)->user)
@@ -80,6 +84,36 @@ static bool decode(TfpWire *w, V value, TfpOpsPlacement *out) {
   return st->previous_decode && st->previous_decode(w, value, out);
 }
 
+/* ---- round 53: the list of saved placements ---- */
+static void list_add(TfpWire *w, const char *key, bool saved, TfpEwWeapon *out, int *count, int capacity) {
+  const TfpActionCatalogue *catalogue = tfp_wire_settings_catalogue(w);
+  const TfpActionWeapon *info = catalogue ? tfp_action_weapon_info(catalogue, key) : NULL;
+  const char *name = info && info->name ? info->name : !strcmp(key, "__all") ? "All weapons (shared)" : key;
+  tfp_ew_add(out, count, capacity, key, name, tfp_ew_group_of_kind(info ? info->kind : 0), saved);
+}
+int tfp_wire_editor_weapon_list(TfpWire *w, const char *held, TfpEwWeapon *out, int capacity) {
+  TfpSettings *store = tfp_wire_settings(w);
+  int count = 0;
+  if (!store) return 0;
+  const TfpSettingsValue *profiles = store->field[TFP_SET_action_placements], *older = store->field[TFP_SET_weapon_placements];
+  for (size_t i = 0; profiles && profiles->kind == TFP_SETTINGS_PROFILES && i < profiles->count; i++)
+    if (profiles->profiles[i].has) list_add(w, profiles->ids[i], true, out, &count, capacity);
+  for (size_t i = 0; older && older->kind == TFP_SETTINGS_PLACEMENTS && i < older->count; i++) list_add(w, older->ids[i], true, out, &count, capacity);
+  if (held && *held) list_add(w, held, false, out, &count, capacity);   /* already there: stays as saved */
+  tfp_ew_sort(out, count, held);
+  return count;
+}
+/* The editor draws: the platform gets the list once an opening, and again after "Reset all" emptied it. */
+static void list_show(Ed *st) {
+  if (st->listed || !st->p.weapons) return;
+  st->listed = true;
+  st->p.weapons(st->p.user, st->list, tfp_wire_editor_weapon_list(st->w, st->held, st->list, TFP_EW_MAX));
+}
+static void list_hide(Ed *st) {
+  st->listed = false;
+  if (st->p.weapons) st->p.weapons(st->p.user, NULL, 0);
+}
+
 /* One of the runtime's own functions. false: it raised (reply->a is the text) or does not exist. */
 static bool entry(Ed *st, TfpRtEntry which, const TfpRtArgs *args, V *r, int count, TfpEdReply *reply) {
   TfpRtArgs none; memset(&none, 0, sizeof none);
@@ -125,7 +159,11 @@ static bool host_call(void *user, TfpEdCall which, const TfpEdArgs *a, TfpEdRepl
       PAIR(TFP_RT_E_pc_start, &args);
     case TFP_ED_S_SELECT_MODE: args.v[0] = text_n(a->text); PAIR(TFP_RT_E_store_select_mode, &args);
     case TFP_ED_S_CAN_START: PAIR(TFP_RT_E_store_can_start, NULL);
-    case TFP_ED_S_TARGET: PAIR(TFP_RT_E_store_target, NULL);
+    case TFP_ED_S_TARGET:
+      if (!entry(st, TFP_RT_E_store_target, NULL, r, 8, reply)) return false;
+      reply->a = from_rt(r[0]); reply->b = from_rt(r[1]);
+      snprintf(st->held, sizeof st->held, "%.*s", TFP_EW_KEY - 1, reply->a.kind == TFP_ED_TEXT ? reply->a.s : "");   /* round 53: the list marks it */
+      return true;
     case TFP_ED_S_GET:
       if (!entry(st, TFP_RT_E_store_get, NULL, r, 8, reply)) return false;
       place_of(st, r[0], reply); reply->b = from_rt(r[1]);
@@ -140,7 +178,9 @@ static bool host_call(void *user, TfpEdCall which, const TfpEdArgs *a, TfpEdRepl
       args.v[0] = reference(&st->argument); args.v[1] = to_rt(&a->key); args.v[2] = to_rt(&a->owner); args.v[3] = boolean(a->flag);
       args.v[4] = text_n(a->text);
       PAIR(TFP_RT_E_store_save, &args);
-    case TFP_ED_S_RESET_ALL: PAIR(TFP_RT_E_store_reset_all, NULL);
+    case TFP_ED_S_RESET_ALL:
+      st->listed = false;   /* round 53: the next drawn frame lists what is left */
+      PAIR(TFP_RT_E_store_reset_all, NULL);
     case TFP_ED_S_BASELINE:
       args.v[0] = to_rt(&a->key); args.v[1] = text_n(a->text);
       if (!entry(st, TFP_RT_E_store_baseline, &args, r, 8, reply)) return false;
@@ -169,6 +209,7 @@ static bool host_call(void *user, TfpEdCall which, const TfpEdArgs *a, TfpEdRepl
     }
     case TFP_ED_A_CREATE_VIEW: reply->a.kind = TFP_ED_TABLE; reply->view.has_draw = reply->view.has_release = true; return true;
     case TFP_ED_I_ACQUIRE:
+      st->listed = false;   /* round 53: a new opening lists anew */
       if (st->p.acquire(st->p.user)) ed_text(&reply->a, "goose_first_person_editor", 25);
       else ed_text(&reply->b, "the overlay host did not open the editor's panel", 48);
       return true;
@@ -186,8 +227,8 @@ static bool host_call(void *user, TfpEdCall which, const TfpEdArgs *a, TfpEdRepl
     }
     case TFP_ED_I_DOWN: reply->a.kind = st->p.down(st->p.user, (int)a->number) ? TFP_ED_TRUE : TFP_ED_FALSE; return true;
     case TFP_ED_I_FOCUSED: reply->a.kind = st->p.focused(st->p.user) ? TFP_ED_TRUE : TFP_ED_FALSE; return true;
-    case TFP_ED_V_DRAW: st->p.draw(st->p.user, a->commands, a->ncommands); return true;
-    case TFP_ED_V_RELEASE: st->p.draw(st->p.user, NULL, 0); return true;   /* nothing left to draw */
+    case TFP_ED_V_DRAW: list_show(st); st->p.draw(st->p.user, a->commands, a->ncommands); return true;
+    case TFP_ED_V_RELEASE: list_hide(st); st->p.draw(st->p.user, NULL, 0); return true;   /* nothing left to draw */
     default: return true;   /* LUT_STATUS and V_REFRESH_FONT are never asked: look() offers neither */
   }
 }

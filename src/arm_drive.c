@@ -61,6 +61,7 @@
 #include "arm_drive.h"
 #include "offhand_grip.h"
 #include "grip_fingers.h"
+#include "game_ik.h"
 #include "profile.h"
 #include "snapshot.h"
 #include <float.h>
@@ -146,12 +147,14 @@ typedef struct GripUnit {
  * it in 134 frames of 20910. Once held it is kept until the body's hand is beyond GRIP_LEAVE_M, moves faster than
  * GRIP_FAST_MPS against the gun (a reload's pull, a melee), or the game's action says so (its reload flag; the drive's
  * hold through a throw, a stratagem, an injection). Speeds are of the hand in a grip node's own frame (rigid on the gun),
- * over the last GRIP_SPEED_MS, so walking and turning, which move the two together, are not counted. Where the hand rests
+ * over the last GRIP_SPEED_MS, so walking and turning, which move the two together, are not counted; nor is this mod's
+ * own slide of the gun's IK_left (round 42b: grip_track, gik_commanded), which the body's hand follows. Where the hand rests
  * on this gun while held (GRIP_REST_S to follow it) is kept: after letting go it is taken again only back within
  * GRIP_RETURN_M of there, or after GRIP_SETTLE_LONG_MS steady anywhere by the grip (a pause at the magazine is neither). */
 static const float GRIP_PIN_M = .03f, GRIP_TAKE_M = .15f, GRIP_LEAVE_M = .18f, GRIP_RETURN_M = .05f;
 static const float GRIP_STEADY_MPS = .35f, GRIP_FAST_MPS = .9f;
 static const double GRIP_REST_S = .5;
+static const float GRIP_VERTICAL_DEGREES = 30;
 enum { GRIP_SPEED_MS = 80, GRIP_TRACK_MS = 250, GRIP_SETTLE_MS = 150, GRIP_SETTLE_LONG_MS = 800, GRIP_TRACK = 32 };
 
 static struct {
@@ -233,12 +236,34 @@ static struct {
     bool action;        /* this frame: the game's reload flag (the snapshot's), or the drive's hold */
     uintptr_t ref_object;
     uint32_t ref_node, track_count, track_next;
-    struct { uint64_t at; float p[3]; } track[GRIP_TRACK];
+    struct { uint64_t at; float p[3], c[3]; } track[GRIP_TRACK]; /* c: where this mod had moved the gun's IK_left then (gik_commanded) */
     uint64_t steady_since; /* the body's hand by the grip and steady since (0: it is not) */
     bool has_rest;
+    unsigned thumb;                /* TFP_GF_THUMB_* of the hand as closed last */
+    bool thumb_straight, vertical; /* round 42b: the option (tfp_arm_drive_set_grip_thumb); the grip held is a vertical one */
     float rest[3];      /* where it rests on this gun while held, in the same frame */
     TfpArmDriveGrip seen;
   } grip;
+  /* round 42b: the gun's own IK_left, moved onto a fitted grip for the game's IK (src/game_ik.h; gik_* below) */
+  struct {
+    bool on;
+    bool bound;              /* node and parent known for this gun object and node count */
+    uintptr_t bound_object;
+    uint32_t bound_nodes, node, parent;
+    bool owned;              /* the node holds a record of this mod: original is the game's, applied ours */
+    uintptr_t object, world;
+    uint32_t ref, own_node, own_parent; /* the unit and the node written, its own record: kept until it is put back or the unit is dead,
+                                         * whatever gun is bound meanwhile */
+    TfpGraftLocal original, applied;
+    bool has_target;
+    TfpGraftMatrix target;   /* the attachment's grip node in the frame of the IK_left's parent, last read */
+    uintptr_t target_object;
+    uint32_t target_node;
+    double progress;         /* tfp_gik_ease */
+    TfpGraftMatrix shown, from; /* the target as aimed at last frame; where a change of grip node slides from */
+    double cross, cross_s;   /* that slide's progress (1: on the new target) and how long it takes */
+    uint64_t at;             /* the clock at the last frame (0: none) */
+  } gik;
 } d;
 
 static const FpMemory *mem(void) { return &d.host.memory; }
@@ -800,6 +825,17 @@ static bool grip_in_socket(const Tree *tree, unsigned index, uint32_t node, TfpG
   }
   return false;
 }
+/* Round 42b: a grip node's world matrix as the gate and the log are to see it. The gun's own IK_left while this mod has
+ * moved it (gik_frame) is where the game keeps it: its parent's world times the game's own record. */
+static bool grip_node_world(uintptr_t object, uintptr_t worlds, uint32_t node, TfpGraftMatrix *out) {
+  if (d.gik.owned && object == d.gik.object && node == d.gik.own_node) {
+    TfpGraftMatrix parent;
+    if (!rd(worlds + 64 * (uintptr_t)d.gik.own_parent, &parent, sizeof parent) || !tfp_graft_rigid(&parent)) return false;
+    *out = tfp_gik_unmoved(&d.gik.original, &parent);
+    return tfp_graft_rigid(out);
+  }
+  return rd(worlds + 64 * (uintptr_t)node, out, sizeof *out);
+}
 static void grip_unlatch(void) { d.grip.latched = d.grip.held = d.grip.pinned = d.grip.has_rel = d.grip.has_last = false, d.grip.target_object = 0; }
 static float grip_gap(const float *a, const float *b) {
   const float x = a[0] - b[0], y = a[1] - b[1], z = a[2] - b[2];
@@ -812,9 +848,26 @@ static void grip_local(const TfpGraftMatrix *ref, const float *hand, float out[3
   const float v[3] = {hand[0] - ref->values[12], hand[1] - ref->values[13], hand[2] - ref->values[14]};
   for (unsigned k = 0; k < 3; ++k) out[k] = v[0] * ref->values[4 * k] + v[1] * ref->values[4 * k + 1] + v[2] * ref->values[4 * k + 2];
 }
+/* Round 42b: how far this mod has the gun's own IK_left from where the game keeps it (what it wrote last frame, which the
+ * body's hand has followed by now if the body's IK follows the node), along the axes of the gate's frame `ref`; zero
+ * while the node is the game's. */
+static void gik_commanded(uintptr_t gun, const TfpGraftMatrix *ref, float out[3]) {
+  uintptr_t worlds;
+  TfpGraftMatrix parent;
+  out[0] = out[1] = out[2] = 0;
+  if (!d.gik.owned || d.gik.object != gun || !ptr(gun + L_UNIT_WORLDS, &worlds) || !rd(worlds + 64 * (uintptr_t)d.gik.own_parent, &parent, sizeof parent) ||
+      !tfp_graft_rigid(&parent))
+    return;
+  float v[3], w[3];
+  for (unsigned k = 0; k < 3; ++k) v[k] = d.gik.applied.position[k] - d.gik.original.position[k];
+  for (unsigned i = 0; i < 3; ++i) w[i] = v[0] * parent.values[i] + v[1] * parent.values[4 + i] + v[2] * parent.values[8 + i];
+  for (unsigned k = 0; k < 3; ++k) out[k] = w[0] * ref->values[4 * k] + w[1] * ref->values[4 * k + 1] + w[2] * ref->values[4 * k + 2];
+}
 /* The speed (m/s) from the newest sample at least GRIP_SPEED_MS old (else the oldest there is) to `p`, then `p` kept;
- * -1: no clock or nothing within GRIP_TRACK_MS. */
-static float grip_track(const float p[3]) {
+ * -1: no clock or nothing within GRIP_TRACK_MS. `c` (gik_commanded): the hand's speed is also taken with this mod's own
+ * move of the node left out (the body's hand on the node goes with it), and the lesser of the two is the hand's: whether
+ * the body's hand follows the node or not, the mod's own slide is never read as the hand leaving the gun. */
+static float grip_track(const float p[3], const float c[3]) {
   if (!d.now) return -1;
   float mps = -1;
   for (unsigned k = 1; k <= d.grip.track_count; ++k) { /* newest first */
@@ -822,11 +875,13 @@ static float grip_track(const float p[3]) {
     if (d.grip.track[i].at > d.now || d.now - d.grip.track[i].at > GRIP_TRACK_MS) break;
     const uint64_t age = d.now - d.grip.track[i].at;
     if (!age) continue;
-    mps = grip_gap(p, d.grip.track[i].p) / ((float)age / 1000);
+    const float less[3] = {p[0] - c[0], p[1] - c[1], p[2] - c[2]};
+    const float then[3] = {d.grip.track[i].p[0] - d.grip.track[i].c[0], d.grip.track[i].p[1] - d.grip.track[i].c[1], d.grip.track[i].p[2] - d.grip.track[i].c[2]};
+    mps = fminf(grip_gap(p, d.grip.track[i].p), grip_gap(less, then)) / ((float)age / 1000);
     if (age >= GRIP_SPEED_MS) break;
   }
   const unsigned at = d.grip.track_next;
-  d.grip.track[at].at = d.now, memcpy(d.grip.track[at].p, p, sizeof d.grip.track[at].p);
+  d.grip.track[at].at = d.now, memcpy(d.grip.track[at].p, p, sizeof d.grip.track[at].p), memcpy(d.grip.track[at].c, c, sizeof d.grip.track[at].c);
   d.grip.track_next = (at + 1) % GRIP_TRACK;
   if (d.grip.track_count < GRIP_TRACK) d.grip.track_count++;
   return isfinite(mps) ? mps : -1;
@@ -852,7 +907,7 @@ static uint32_t grip_target(const Units *u, const TfpGraftMatrix *body, const Tf
   const float *hand = body[d.map.body[TFP_OG_HAND]].values + 12;
   int best = -1, kept = -1;
   float best_m = FLT_MAX, kept_m = FLT_MAX;
-  struct { unsigned unit; uint32_t node; float at[3]; } seen_nodes[TREE_UNITS * GRIP_PER_UNIT];
+  struct { unsigned unit; uint32_t node; float at[3], y[3]; } seen_nodes[TREE_UNITS * GRIP_PER_UNIT];
   unsigned count = 0;
   TfpGraftMatrix ref_w = {.values = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}}; /* the first grip node found: the frame the gate tracks the body's hand in */
   uintptr_t ref_object = 0;
@@ -870,9 +925,9 @@ static uint32_t grip_target(const Units *u, const TfpGraftMatrix *body, const Tf
     seen->units++;
     for (unsigned k = 0; k < g->count; ++k) {
       TfpGraftMatrix w;
-      if (!rd(worlds + 64 * (uintptr_t)g->node[k], &w, sizeof w) || !tfp_graft_rigid(&w)) continue;
+      if (!grip_node_world(tree.units[i].object, worlds, g->node[k], &w) || !tfp_graft_rigid(&w)) continue;
       seen_nodes[count].unit = i, seen_nodes[count].node = g->node[k];
-      memcpy(seen_nodes[count].at, w.values + 12, sizeof seen_nodes[count].at);
+      memcpy(seen_nodes[count].at, w.values + 12, sizeof seen_nodes[count].at), memcpy(seen_nodes[count].y, w.values + 4, sizeof seen_nodes[count].y);
       if (!count) ref_w = w, ref_object = tree.units[i].object;
       float m = grip_gap(w.values + 12, hand);
       const bool in_use = d.grip.latched && tree.units[i].object == d.grip.object && tree.units[i].ref == d.grip.ref && g->node[k] == d.grip.node;
@@ -888,10 +943,11 @@ static uint32_t grip_target(const Units *u, const TfpGraftMatrix *body, const Tf
   const bool was_held = d.grip.held;
   if (d.grip.ref_object != ref_object || d.grip.ref_node != seen_nodes[0].node)
     grip_track_reset(), d.grip.has_rest = false, d.grip.ref_object = ref_object, d.grip.ref_node = seen_nodes[0].node;
-  float local[3];
+  float local[3], commanded[3];
   grip_local(&ref_w, hand, local);
+  gik_commanded(tree.units[0].object, &ref_w, commanded);
   const uint64_t previous_at = d.grip.track_count ? d.grip.track[(d.grip.track_next + GRIP_TRACK - 1) % GRIP_TRACK].at : 0;
-  const float mps = grip_track(local);
+  const float mps = grip_track(local, commanded);
   const float near_m = kept >= 0 ? fminf(best_m, kept_m) : best_m;
   const bool fast = mps > GRIP_FAST_MPS, steady = mps >= 0 && mps <= GRIP_STEADY_MPS, on_node = near_m <= GRIP_PIN_M;
   if (near_m <= GRIP_TAKE_M && steady && !d.grip.action) { if (!d.grip.steady_since) d.grip.steady_since = d.now; }
@@ -954,6 +1010,15 @@ static uint32_t grip_target(const Units *u, const TfpGraftMatrix *body, const Tf
     d.grip.has_rel = false;
   }
   d.grip.attachment = seen_nodes[target].unit != 0;
+  { /* round 42b: a vertical grip is one whose node's Y (down the handle, src/grip_fingers.h) runs down the gun, against the
+     * gun root's Z, within GRIP_VERTICAL_DEGREES (the BR-14's standard vertical grip: 5 degrees) */
+    uintptr_t gun_worlds;
+    TfpGraftMatrix root;
+    const float *y = seen_nodes[target].y;
+    d.grip.vertical = d.grip.attachment && ptr(tree.units[0].object + L_UNIT_WORLDS, &gun_worlds) && rd(gun_worlds, &root, sizeof root) &&
+                      tfp_graft_rigid(&root) &&
+                      -(y[0] * root.values[8] + y[1] * root.values[9] + y[2] * root.values[10]) >= cosf(GRIP_VERTICAL_DEGREES * (float)TFP_OG_PI / 180);
+  }
   d.grip.own_object = 0;
   { /* for the log: the gun's own grip node nearest the one held */
     float own_m = FLT_MAX;
@@ -1032,9 +1097,17 @@ static void grip_frame(const Units *u, const TfpGraftMatrix *body, TfpGraftLocal
   /* round 36b: the hand closed on an attachment's grip, with the reach's weight; never on the gun's own node (the body's
    * fingers suit its handguard). Otherwise what is curled eases out over EASE_S. */
   const bool on_attachment = d.grip.attachment && d.grip.target_object && state >= TFP_ARM_GRIP_NO_NODE;
-  if (on_attachment) d.grip.finger_weight = weight_of_reach;
-  else d.grip.finger_weight = fmax(0, d.grip.finger_weight - seconds / TFP_OG_EASE_S);
-  tfp_grip_fingers_close(&d.grip.fingers, mixed, d.grip.finger_weight);
+  if (on_attachment) {
+    d.grip.finger_weight = weight_of_reach;
+    /* round 42b: where the game's own IK holds the drawn hand (the gun has an IK_left of its own), the hand is on the
+     * handle only as far as that node is (its share last frame; none while it is refused): the curl is for the handle,
+     * and the body's fingers suit the handguard the hand is on until then */
+    if (d.gik.on && d.gik.bound && d.gik.bound_object == u->weapon)
+      d.grip.finger_weight = fmin(d.grip.finger_weight, d.gik.owned && d.gik.object == u->weapon ? tfp_gik_share(d.gik.progress) : 0);
+    d.grip.thumb = d.grip.thumb_straight && d.grip.vertical ? TFP_GF_THUMB_STRAIGHT : TFP_GF_THUMB_WRAPPED; /* kept while it eases out */
+  } else d.grip.finger_weight = fmax(0, d.grip.finger_weight - seconds / TFP_OG_EASE_S);
+  tfp_grip_fingers_close(&d.grip.fingers, mixed, d.grip.finger_weight, d.grip.thumb);
+  seen->vertical = d.grip.vertical && d.grip.attachment, seen->thumb_straight += d.grip.finger_weight > 0 && d.grip.thumb == TFP_GF_THUMB_STRAIGHT;
   seen->state = state, seen->weight = weight, seen->to_m = wanted ? to : 0;
   seen->reach = wanted ? r.reach_share : 0, seen->shoulder_m = r.shoulder_m;
   if (state == TFP_ARM_GRIP_HELD) {
@@ -1075,7 +1148,7 @@ static void grip_drawn(uintptr_t rig_worlds) {
     for (unsigned i = 0; i < 4; ++i) read = read && rd(rig_worlds + 64 * (uintptr_t)nodes[i], &w[i], sizeof w[i]) && tfp_graft_rigid(&w[i]);
     if (read) curl = (float)((tfp_gf_x_degrees(&w[0], &w[1]) + tfp_gf_x_degrees(&w[2], &w[3])) / 2);
   }
-  if (d.grip.own_object && ptr(d.grip.own_object + L_UNIT_WORLDS, &worlds) && rd(worlds + 64 * (uintptr_t)d.grip.own_node, &own, sizeof own) &&
+  if (d.grip.own_object && ptr(d.grip.own_object + L_UNIT_WORLDS, &worlds) && grip_node_world(d.grip.own_object, worlds, d.grip.own_node, &own) &&
       tfp_graft_rigid(&own))
     own_m = grip_gap(hand.values + 12, own.values + 12);
   b->frames++, b->held += held;
@@ -1087,6 +1160,182 @@ static void grip_drawn(uintptr_t rig_worlds) {
     if (curl >= 0 && (b->held == 1 || curl < b->least_curl)) b->least_curl = curl;
   }
   d.grip.seen.drawn = true;
+}
+
+/* ---- round 42b: the game's own left-hand IK, its target moved onto a fitted grip (src/game_ik.h) ---- */
+/* The gun's own IK_left node and the node it hangs on, read once per gun object and node count. false: none, or not a leaf
+ * with a parent in the gun (*why says which). */
+static bool gik_bind(uintptr_t gun, uint32_t *why) {
+  static uint32_t names[512], links[512];
+  uint32_t nodes;
+  uintptr_t at;
+  if (!u32(gun + L_UNIT_NODES, &nodes) || !nodes || nodes > 512) { *why = TFP_GIK_UNREAD; return false; }
+  if (d.gik.bound && d.gik.bound_object == gun && d.gik.bound_nodes == nodes) return true;
+  d.gik.bound = false;
+  if (!ptr(gun + L_UNIT_NAMES, &at) || !rd(at, names, nodes * sizeof *names) || !ptr(gun + L_UNIT_LINKS, &at) || !rd(at, links, nodes * sizeof *links)) {
+    *why = TFP_GIK_UNREAD;
+    return false;
+  }
+  uint32_t node = nodes;
+  for (uint32_t i = 0; i < nodes && node == nodes; ++i)
+    if (names[i] == GRIP_NAME) node = i;
+  if (node == nodes) { *why = TFP_GIK_NO_OWN; return false; }
+  /* a parent in the gun (link kind 1, an earlier node), and no node hanging on it: moving it moves nothing else */
+  if ((links[node] & 65535) != 1 || (links[node] >> 16) >= node) { *why = TFP_GIK_NOT_LEAF; return false; }
+  for (uint32_t i = 0; i < nodes; ++i)
+    if ((links[i] & 65535) == 1 && links[i] >> 16 == node) { *why = TFP_GIK_NOT_LEAF; return false; }
+  d.gik.bound = true, d.gik.bound_object = gun, d.gik.bound_nodes = nodes, d.gik.node = node, d.gik.parent = links[node] >> 16;
+  return true;
+}
+/* Whether a unit hangs on the gun's node `node`: a child of the gun linked to it, or a unit mounted from elsewhere on the
+ * gun's matrices (mounted_elsewhere: the R-4 Hyena's vertical grip) linked to it; or the gun's children cannot be read.
+ * Asked every frame: an attachment can be fitted without the gun changing. */
+static bool gik_carries(uintptr_t gun, uint32_t gun_ref, uint32_t node) {
+  uintptr_t child = 0, links, external, gun_worlds;
+  uint32_t link;
+  if (!rd(gun + L_UNIT_CHILD, &child, sizeof child) || !ptr(gun + L_UNIT_WORLDS, &gun_worlds)) return true;
+  for (unsigned n = 0; child; ++n) {
+    if (n == TREE_UNITS || !ptr(child + L_UNIT_LINKS, &links) || !u32(links, &link)) return true;
+    if ((link & 65535) == 2 && link >> 16 == node) return true;
+    if (!rd(child + L_UNIT_SIBLING, &child, sizeof child)) return true;
+  }
+  for (unsigned i = 0; d.grip.elsewhere_weapon == gun_ref && i < d.grip.elsewhere_count; ++i) {
+    const uintptr_t object = d.grip.elsewhere[i].object;
+    if (unit(d.grip.elsewhere[i].ref) != object || !ptr(object + L_UNIT_EXTERNAL, &external) || external != gun_worlds) continue;
+    if (!ptr(object + L_UNIT_LINKS, &links) || !u32(links, &link)) return true;
+    if ((link & 65535) == 2 && link >> 16 == node) return true;
+  }
+  return false;
+}
+/* The game's own record goes back exactly, now, on the unit and the node it was written to (not the gun bound now). A gun
+ * that is no longer this unit in this world, or no longer has the node, has nothing to put back.
+ * false: it could not be done now (kept, with the unit and the node, for the next try). */
+static bool gik_restore(void) {
+  d.gik.progress = 0;
+  if (!d.gik.owned) return true;
+  uintptr_t world, locals;
+  uint32_t nodes;
+  if (unit(d.gik.ref) != d.gik.object || !ptr(d.gik.object + L_UNIT_WORLD, &world) || world != d.gik.world ||
+      (u32(d.gik.object + L_UNIT_NODES, &nodes) && d.gik.own_node >= nodes)) {
+    d.gik.owned = false;
+    return true;
+  }
+  Api a;
+  TfpGraftLocal now;
+  if (!api(&a) || !ptr(d.gik.object + L_UNIT_LOCALS, &locals) || !rd(locals + 64 * (uintptr_t)d.gik.own_node, &now, sizeof now)) return false;
+  const TfpGraftLocal game = tfp_graft_underlying(true, &d.gik.original, &d.gik.applied, now);
+  if (memcmp(&game, &now, 48)) {
+    if (!d.host.set_local(d.host.user, a.set_local, d.gik.ref, d.gik.own_node, &game) || !update(&a, world, d.gik.ref)) return false;
+    d.grip.seen.ik_writes++;
+  }
+  d.gik.owned = false;
+  d.grip.seen.ik_restores++;
+  return true;
+}
+/* One driven frame, after grip_frame has said whether the hand is held and on which node. */
+static void gik_frame(const Units *u, const Api *a) {
+  TfpArmDriveGrip *seen = &d.grip.seen;
+  double seconds = 0;
+  if (d.now && d.gik.at && d.now > d.gik.at && d.now - d.gik.at <= 250) seconds = (double)(d.now - d.gik.at) / 1000;
+  d.gik.at = d.now;
+  seen->ik_on = d.gik.on;
+  /* another gun, or the gun away: the game's own record goes back at once, on the gun it was written to. Where that
+   * cannot be done now and the unit lives, nothing of the gun in the hands is bound or written until it is (the record
+   * kept is of the first gun's node). */
+  if (d.gik.owned && (u->gun_away || !u->weapon || d.gik.ref != u->weapon_ref || d.gik.object != u->weapon || d.gik.world != u->world)) {
+    d.gik.has_target = false;
+    if (!gik_restore()) { seen->ik_why = TFP_GIK_FAULT, seen->ik_share = 0; return; }
+  }
+  uint32_t why = TFP_GIK_NONE;
+  if (!d.gik.on || !d.grip.on) why = TFP_GIK_OFF;
+  else if (u->gun_away || !u->weapon || d.grip.one_handed) why = TFP_GIK_NOT_HELD;
+  else if (!gik_bind(u->weapon, &why)) {}
+  else if (gik_carries(u->weapon, u->weapon_ref, d.gik.node)) why = TFP_GIK_CARRIES;
+  else if (!(d.grip.held && d.grip.latched && d.grip.target_object)) why = TFP_GIK_NOT_HELD;
+  else if (!d.grip.attachment || d.grip.target_object == u->weapon) why = TFP_GIK_GUN_OWN;
+  /* the same gun made again with its IK_left on another node: the record kept is of the first */
+  if (d.gik.owned && d.gik.bound && d.gik.bound_object == u->weapon && d.gik.own_node != d.gik.node) {
+    d.gik.has_target = false;
+    if (!gik_restore()) { seen->ik_why = TFP_GIK_FAULT, seen->ik_share = 0; return; }
+  }
+  if (why == TFP_GIK_OFF || why == TFP_GIK_NO_OWN || why == TFP_GIK_NOT_LEAF || why == TFP_GIK_CARRIES || (why == TFP_GIK_UNREAD && !d.gik.bound) ||
+      (why == TFP_GIK_NOT_HELD && (u->gun_away || !u->weapon))) {
+    /* switched off, or nothing of this gun to move: back at once, exactly */
+    if (!gik_restore()) why = TFP_GIK_FAULT;
+    d.gik.has_target = false;
+    seen->ik_why = why, seen->ik_share = 0;
+    return;
+  }
+  uintptr_t gun_worlds, gun_locals, grip_worlds;
+  TfpGraftMatrix parent, grip;
+  const bool want = why == TFP_GIK_NONE;
+  if (want) {
+    /* the attachment's grip node in the frame of the node the gun's IK_left hangs on, both as evaluated now */
+    if (ptr(u->weapon + L_UNIT_WORLDS, &gun_worlds) && rd(gun_worlds + 64 * (uintptr_t)d.gik.parent, &parent, sizeof parent) &&
+        tfp_graft_rigid(&parent) && ptr(d.grip.target_object + L_UNIT_WORLDS, &grip_worlds) &&
+        rd(grip_worlds + 64 * (uintptr_t)d.grip.target_node, &grip, sizeof grip) && tfp_graft_rigid(&grip)) {
+      const TfpGraftMatrix target = tfp_graft_relative(&grip, &parent);
+      if (tfp_graft_rigid(&target)) {
+        if (!d.gik.has_target || d.gik.target_object != d.grip.target_object || d.gik.target_node != d.grip.target_node) {
+          /* another grip node while the node is on its way or there: it slides from where it was aimed, never jumps */
+          if (d.gik.has_target && d.gik.progress > 0)
+            d.gik.from = d.gik.shown, d.gik.cross = 0, d.gik.cross_s = tfp_gik_seconds((double)grip_gap(d.gik.shown.values + 12, target.values + 12));
+          else d.gik.cross = 1;
+          d.gik.target_object = d.grip.target_object, d.gik.target_node = d.grip.target_node;
+        }
+        d.gik.target = target, d.gik.has_target = true;
+      } else why = TFP_GIK_UNREAD;
+    } else why = TFP_GIK_UNREAD;
+  }
+  TfpGraftLocal now;
+  if (!ptr(u->weapon + L_UNIT_LOCALS, &gun_locals) || !rd(gun_locals + 64 * (uintptr_t)d.gik.node, &now, sizeof now)) {
+    seen->ik_why = TFP_GIK_UNREAD, seen->ik_share = 0;
+    return;
+  }
+  /* the game's own record: what this mod saved where the record is still ours, what the game wrote since elsewhere */
+  const TfpGraftLocal game = tfp_graft_underlying(d.gik.owned, &d.gik.original, &d.gik.applied, now);
+  /* held and read: towards the grip; else back towards the game's own on the last target read. The slide takes the time
+   * its length asks (tfp_gik_seconds), so the node's own speed stays at half of what the gate lets go at. */
+  const float *far_end = d.gik.target.values + 12;
+  const double length = d.gik.has_target ? (double)grip_gap(far_end, game.position) : 0;
+  d.gik.progress = tfp_gik_ease(d.gik.progress, why == TFP_GIK_NONE, seconds, tfp_gik_seconds(length));
+  const double share = d.gik.has_target ? tfp_gik_share(d.gik.progress) : 0;
+  if (!(share > 0)) {
+    if (d.gik.owned && !gik_restore()) why = TFP_GIK_FAULT;
+    d.gik.progress = 0;
+    if (why == TFP_GIK_NONE) why = TFP_GIK_NOT_HELD; /* not reached the first frame of the ease: no time yet */
+    seen->ik_why = why, seen->ik_share = 0;
+    return;
+  }
+  TfpGraftMatrix aim = d.gik.target;
+  d.gik.cross = tfp_gik_ease(d.gik.cross, true, seconds, d.gik.cross_s);
+  if (d.gik.cross < 1) {
+    TfpGraftLocal from;
+    if (!tfp_gik_pose(&game, &d.gik.from, 1, &from) || !tfp_gik_cross(&from, &d.gik.target, tfp_gik_share(d.gik.cross), &aim)) aim = d.gik.target;
+  }
+  d.gik.shown = aim;
+  TfpGraftLocal out;
+  if (!tfp_gik_pose(&game, &aim, share, &out)) {
+    if (!gik_restore()) why = TFP_GIK_FAULT;
+    seen->ik_why = why == TFP_GIK_NONE ? TFP_GIK_UNREAD : why, seen->ik_share = 0;
+    return;
+  }
+  if (!d.gik.owned) d.gik.object = u->weapon, d.gik.ref = u->weapon_ref, d.gik.world = u->world, d.gik.own_node = d.gik.node, d.gik.own_parent = d.gik.parent;
+  d.gik.original = game;
+  if (memcmp(&now, &out, 48)) {
+    if (!d.host.set_local(d.host.user, a->set_local, u->weapon_ref, d.gik.node, &out)) {
+      seen->ik_why = TFP_GIK_FAULT, seen->ik_share = 0;
+      return;
+    }
+    /* the record is ours from here: the game's goes back from d.gik.original */
+    d.gik.applied = out, d.gik.owned = true;
+    seen->ik_writes++;
+    if (!update(a, u->world, u->weapon_ref)) { seen->ik_why = TFP_GIK_FAULT, seen->ik_share = (float)share; return; }
+  } else d.gik.applied = out, d.gik.owned = true;
+  const float *g = d.gik.target.values + 12, *o = game.position;
+  seen->ik_m = sqrtf((g[0] - o[0]) * (g[0] - o[0]) + (g[1] - o[1]) * (g[1] - o[1]) + (g[2] - o[2]) * (g[2] - o[2]));
+  seen->ik_why = why, seen->ik_share = (float)share;
+  seen->ik_frames++, seen->ik_full += share >= 1;
 }
 
 /* ---- one frame (graft:662-817 graft_present, its steady action path) ---- */
@@ -1121,6 +1370,7 @@ static uint32_t drive(const Units *u) {
       if (!tfp_graft_mix(&base[i], &poses[i], d.weight, &target[i])) return TFP_ARM_POSE;
     d.grip.measure = false; /* grip_frame says, when it runs */
     if (d.grip.on || d.grip.ik.active || d.grip.ik.weight > 0 || d.grip.finger_weight > 0) grip_frame(u, body, target);
+    if (d.gik.on || d.gik.owned) gik_frame(u, &a); /* round 42b: the game's IK target, after grip_frame said what is held */
     /* For the log (stats.draw.sock_m): the socket as it is about to be drawn less the game's own, along the view.
      * Both are locals of the socket's parent (the rig's root, which the drive does not write), so the difference
      * goes through that node's axes into the world and onto the forward axis of the rig's eye. */
@@ -1168,6 +1418,8 @@ void tfp_arm_drive_set(bool on, bool restore_after_draw, float weight) {
 }
 void tfp_arm_drive_set_bend(bool on) { d.bend = on; }
 void tfp_arm_drive_set_grip(bool on, bool one_handed) { d.grip.on = on, d.grip.one_handed = one_handed; }
+void tfp_arm_drive_set_game_ik(bool on) { d.gik.on = on; }
+void tfp_arm_drive_set_grip_thumb(bool straight) { d.grip.thumb_straight = straight; }
 void tfp_arm_drive_grip_take(TfpArmDriveGrip *out) {
   *out = d.grip.seen;
   const TfpArmDriveGrip keep = d.grip.seen;
@@ -1179,6 +1431,7 @@ void tfp_arm_drive_grip_take(TfpArmDriveGrip *out) {
   d.grip.seen.gate_unit = keep.gate_unit, d.grip.seen.gate_node = keep.gate_node;
   d.grip.seen.target_unit = keep.target_unit, d.grip.seen.target_node = keep.target_node;
   d.grip.seen.gate = keep.gate, d.grip.seen.gun_mps = keep.gun_mps;
+  d.grip.seen.ik_on = keep.ik_on, d.grip.seen.ik_why = keep.ik_why, d.grip.seen.ik_share = keep.ik_share, d.grip.seen.ik_m = keep.ik_m;
 }
 /* Round 38b: the gate's words, "held, the body's hand with the gun (0.092 m from the nearest grip node, 0.02 m/s against
  * the gun)"; then the takes and let-gos since the last line. */
@@ -1258,6 +1511,22 @@ const char *tfp_arm_drive_grip_drawn_line(const TfpArmDriveGrip *g) {
   snprintf(line, sizeof line, "%s; %s", hip, aim);
   return line;
 }
+const char *tfp_arm_drive_grip_ik_line(const TfpArmDriveGrip *g) {
+  static char line[400];
+  if (!g->frames) return NULL;
+  if (!g->ik_on) snprintf(line, sizeof line, "the mod's reach alone; the game's IK target is not moved (switched off)");
+  else if (g->ik_frames)
+    snprintf(line, sizeof line, "held by the game's IK, its target (the gun's own IK_left) moved onto the fitted grip: %u of %u frames (%u all the way), "
+             "%.3f m from where the game keeps it, now %.2f of the way; %u writes, %u put back", (unsigned)g->ik_frames, (unsigned)g->frames,
+             (unsigned)g->ik_full, (double)g->ik_m, (double)g->ik_share, (unsigned)g->ik_writes, (unsigned)g->ik_restores);
+  else
+    snprintf(line, sizeof line, "the mod's reach alone; the game's IK target stays on the gun's own IK_left: %s; %u writes, %u put back",
+             tfp_gik_why_name(g->ik_why), (unsigned)g->ik_writes, (unsigned)g->ik_restores);
+  const size_t used = strlen(line);
+  if (g->thumb_straight) snprintf(line + used, sizeof line - used, "; a vertical grip, the thumb straight along it: %u frames", (unsigned)g->thumb_straight);
+  else if (g->vertical) snprintf(line + used, sizeof line - used, "; a vertical grip, the thumb wrapped");
+  return line;
+}
 static char grip_units_last[700];
 const char *tfp_arm_drive_grip_units_line(const TfpArmDriveGrip *g, bool only_changed) {
   static char line[700];
@@ -1310,7 +1579,7 @@ void tfp_arm_drive_rest_take(TfpArmDriveRest *out) {
 static void refused(uint32_t reason) { d.stats.refused++, d.stats.reason = reason; }
 
 bool tfp_arm_drive_render(uint64_t world, bool game_thread) {
-  if (!d.has_host || (!d.on && !d.owned)) return false;
+  if (!d.has_host || (!d.on && !d.owned && !d.gik.owned)) return false;
   if (!game_thread) {
     if (d.on) refused(TFP_ARM_THREAD);
     return false;
@@ -1361,17 +1630,22 @@ bool tfp_arm_drive_render(uint64_t world, bool game_thread) {
   /* Not driven: nothing of the binding is kept, and what is written goes back to the game's values. */
   d.bound = false;
   restore();
+  gik_restore(); /* round 42b: the gun's IK_left too, at once */
   return false;
 }
 void tfp_arm_drive_after_render(void) {
   if (d.has_host && d.owned) restore();
 }
 bool tfp_arm_drive_release(void) {
-  if (!d.has_host || !d.owned) return true;
+  if (!d.has_host || (!d.owned && !d.gik.owned)) return true;
   d.bound = false;
-  return restore();
+  const bool rig = restore(), gun = gik_restore();
+  return rig && gun;
 }
-const char *tfp_arm_drive_held(void) { return d.owned ? "the arm drive has not put the first-person rig's own joint poses back" : NULL; }
+const char *tfp_arm_drive_held(void) {
+  if (d.owned) return "the arm drive has not put the first-person rig's own joint poses back";
+  return d.gik.owned ? "the arm drive has not put the gun's own IK_left node back" : NULL;
+}
 void tfp_arm_drive_stats(TfpArmDriveStats *out) {
   *out = d.stats;
   out->owned = bits(d.owned);

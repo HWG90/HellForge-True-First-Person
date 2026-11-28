@@ -106,6 +106,12 @@ void pose_world_depth_pin(int intact) {
 /* Round 40: the avatar's packed bit and the byte after it (the evaluator's locals at stack +0x44 and +0x45) alone, the
  * lens as it stands. */
 void pose_world_avatar_bit(int bit, int unscaled) { scene.frame[0] = bit ? 1 : 0; scene.frame[1] = unscaled ? 1 : 0; sync(); }
+/* Round 49e: the rig eye node's local position (node 50 of the rig's local records: 64 bytes a node, the position at
+ * +0x24), where the "Reload start:" line reads it. */
+void pose_world_eye_local(const float *v) {
+  for (uint64_t locals : {W.a[A_RIG_LOCALS], W.a[A_ALT] + 0x3000})
+    std::memcpy(reinterpret_cast<void *>(locals + 50 * 64 + 0x24), v, 12);
+}
 /* The avatar's main row (avatar owner + 0x53d8b0 + index * 0x1238): byte +5, byte +0x3d, the float at +0x11ac. */
 void pose_world_main_row(unsigned index, int five, int three_d, float scalar) {
   const uint64_t row = W.a[A_OWNER] + 0x53d8b0 + static_cast<uint64_t>(index) * 0x1238;
@@ -561,6 +567,7 @@ void pose_world_second_request(int pushed);
 void pose_world_request_field(unsigned at, uint32_t value);
 void pose_world_reload_code(int state, const float *c);
 void pose_world_avatar_bit(int bit, int unscaled);
+void pose_world_eye_local(const float *v);
 static PoseWorld world;
 static int lock_depth[2], lock_faults;
 static unsigned forwarded_calls, getter_calls, cas_calls, input_only_calls;
@@ -1445,14 +1452,40 @@ static int real(void) {
           else CHECK(o_[0] == forwarded[0] && o_[1] == forwarded[1] && o_[2] == forwarded[2] && o_[3] == root_forwarded[1]); \
           kept += 4; } \
       } while (0)
+      /* round 49e: the edges looked at. Node 50 of the rig rests at EYE50 and stands 0.0645 m further forward through
+       * the reload; request+0x60..0x68 is ANCHOR throughout. Read and said, and nothing of the eye changes by it. */
+      static const float EYE50[3] = {.01f, -.3717f, .02f}, EYE50_IN[3] = {.01f, -.3717f + .0645f, .02f}, ANCHOR[3] = {1.5f, -2.25f, .125f};
+      pose_world_eye_local(EYE50);
+      for (int i = 0; i < 3; i++) { uint32_t u_; memcpy(&u_, &ANCHOR[i], 4); pose_world_request_field(0x60 + 4 * (unsigned)i, u_); }
+      tfp_pose_set_sidearm(f == 1);
       for (int i = 0; i < (int)(1200 / step); i++) RELOAD_FRAME(true);        /* at rest: the held depth settles */
       eye_rest = eye_last; eye_least = eye_most = eye_rest; step_most = 0;
-      CHECK(tfp_pose_steady_take(&held) == 1 && held.reload.count == 0);
+      CHECK(tfp_pose_steady_take(&held) == 1 && held.reload.count == 0 && held.reload.edge_count == 0);
       ability = 1; w = 0;                                                    /* the reload begins */
+      pose_world_eye_local(EYE50_IN);
       for (int i = 0; i < (int)(1500 / step); i++) RELOAD_FRAME(false);
       ability = 0; w = 0;                                                    /* and ends */
+      pose_world_eye_local(EYE50);
       for (int i = 0; i < (int)(600 / step); i++) RELOAD_FRAME(false);
       CHECK(tfp_pose_steady_take(&held) == 1 && held.reload.count == 1);
+      CHECK(held.reload.edge_count == 1);
+      if (held.reload.edge_count == 1) {
+        const TfpReloadEdges *e = &held.reload.edges[0];
+        CHECK(e->ready && e->rest_known && e->sidearm == (f == 1) && e->starts >= 3 && e->ends >= 3);
+        CHECK(e->rest.up_known && e->rest.up[0] == 0 && e->rest.up[1] == 0 && e->rest.up[2] == 0); /* the fake rig's nodes 1 to 4 are at nothing */
+        CHECK(e->rest.eye_known && !memcmp(e->rest.eye, EYE50, 12) && e->rest.anchor_known && !memcmp(e->rest.anchor, ANCHOR, 12) && e->rest.r == 0);
+        CHECK(e->start[0].r > 0 && !memcmp(e->start[0].eye, EYE50_IN, 12) && !memcmp(e->start[e->starts - 1].anchor, ANCHOR, 12));
+        CHECK(e->end[0].r == 1 && !memcmp(e->end[0].eye, EYE50_IN, 12) && !memcmp(e->end[e->ends - 1].eye, EYE50, 12) && e->end[e->ends - 1].r == 0);
+        CHECK(e->constant_known == (code != 0) && (!code || e->constant == C));
+        if (code && !aim && sm == 0) { /* the argument and what was put on node 5, as the frames had them */
+          CHECK(near(e->rest.argument, v + C, 1e-6) && near(e->start[e->starts - 1].argument, 2 * C, 1e-6) && e->held_known);
+          CHECK(near(e->start[e->starts - 1].own + e->start[e->starts - 1].put, eye_rest - 2 * (double)C, 2e-6));
+        }
+        char said[640];
+        CHECK(tfp_reload_edges_line(e, 0, said, sizeof said) && !strncmp(said, "Reload rest: tick ", 18)
+              && strstr(said, "node 50 at (0.0100 -0.3717 0.0200), its parents 1 to 4 (0.0000 0.0000 0.0000), axes 0.0000, request+0x60 (1.5000 -2.2500 0.1250)") && strstr(said, f == 1 ? "sidearm 1" : "sidearm 0"));
+        CHECK(tfp_reload_edges_line(e, 1, said, sizeof said) && !strncmp(said, "Reload start: +", 15) && strstr(said, "n50 (+0.0000 +0.0645 +0.0000) a60 (+0.0000 +0.0000 +0.0000)"));
+      }
       tfp_reload_line(&held.reload.ends[0], line, sizeof line);
       if (code && !aim) {
         if (eye_most - eye_least > 2e-6 || step_most > 2e-6)
@@ -1480,6 +1513,8 @@ static int real(void) {
       pose_world_request_field(0x8C, 0); pose_world_request_field(0x88, 0x3f800000);
       { const float two = 2; uint32_t u; memcpy(&u, &two, 4); pose_world_request_field(0x4C, u); }
       pose_world_aim(0);
+      { static const float nothing[3] = {0, 0, 0}; pose_world_eye_local(nothing); for (unsigned i = 0; i < 3; i++) pose_world_request_field(0x60 + 4 * i, 0); }
+      tfp_pose_set_sidearm(false);
       CHECK(tfp_pose_set_depth_steady(0) == 1);
       CHECK(H->finish(H->user, handle, &has_stats, &stats, &why) == TFP_OPS_TRUE);
       tfp_pose_steady_take(&held); tfp_pose_gate_take(&g);
