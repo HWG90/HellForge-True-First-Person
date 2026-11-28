@@ -125,6 +125,13 @@ void tfp_fov_set_lock(float radians, bool zoom_when_aiming, double now_ms);
 void tfp_fov_set_lock_aim(float radians, float aim, double now_ms);
 typedef struct TfpFovLockStats { uint64_t applied; float game_radians, shown_radians; } TfpFovLockStats;
 void tfp_fov_lock_stats(TfpFovLockStats *out);
+/* Beyond retail (round 53, src/weapon_clip.h): the two fields of view of the frame being drawn, radians. `*game`: what
+ * the game asked its setter for in the last call on the armed camera (the hooked call, or the forwarded call that
+ * follows it in the same frame); `*shown`: what the setter was handed in that call (the lock, a chosen aim value, the
+ * helper's own lens, or the game's value untouched). `*calls`: how many such calls there were; a reader that sees it
+ * stand still knows the pair is no longer the frame's. false: no call yet, or not two angles. Reads only; any thread
+ * (two floats and a counter, read apart: a reader on the game's thread, as the near helper is, reads one call's). */
+bool tfp_fov_frame_pair(float *game, float *shown, uint64_t *calls);
 /* Beyond retail (round 20, docs/design/specs/2026-11-23-gate-flip.md "Round 20"): the kind-6 evaluator's lens of this
  * frame, as the pose helper read it in the same evaluation (before the hooked setter call of the frame): the unzoom
  * gate as the evaluator took it (the avatar's packed bit 0 or request+0x8f), the lens target it chose, the lens after

@@ -636,6 +636,22 @@ void tfp_fov_lock_stats(TfpFovLockStats *out) {
 static volatile double lock_frame_at, lock_tail_at;      /* host milliseconds of the last hooked / forwarded call */
 static volatile float lock_frame_value, lock_frame_applied, lock_tail_native;
 static volatile uint32_t lock_frame_open, lock_frame_aim; /* open: the hooked call's value not yet repeated */
+/* Round 53 (tfp_fov_frame_pair, src/weapon_clip.h): the last call of the game's setter on the armed camera, the hooked
+ * one or the forwarded one that follows it: what the game asked for and what its setter was handed (the later write of
+ * the frame is what the screen keeps). Counted, so a reader can tell a pair that no longer moves. */
+static volatile float pair_game, pair_shown; static _Atomic uint64_t pair_calls;
+static void pair_note(void *camera, float native, float handed) {
+  if (!camera || (uint64_t)(uintptr_t)camera != atomic_load_explicit(&lock_camera, memory_order_relaxed)) return;
+  pair_game = native; pair_shown = handed; atomic_fetch_add_explicit(&pair_calls, 1, memory_order_relaxed);
+}
+bool tfp_fov_frame_pair(float *game, float *shown, uint64_t *calls) {
+  const uint64_t count = atomic_load_explicit(&pair_calls, memory_order_relaxed);
+  const float g = pair_game, s = pair_shown;
+  if (game) *game = count ? g : 0;
+  if (shown) *shown = count ? s : 0;
+  if (calls) *calls = count;
+  return count != 0 && isfinite(g) && isfinite(s) && g > 0 && s > 0;
+}
 /* Round 20 (docs/design/specs/2026-11-23-gate-flip.md "Round 20"): the evaluator's lens of the frame, noted by the
  * pose helper before the hooked call, and the "Aim:" line's second. Game thread, as the setter calls. */
 static TfpAimLens aim_lens; static TfpFovAimSecond aim_second; static bool aim_gate_known, aim_gate_last; static float aim_shown_last;
@@ -732,7 +748,9 @@ static float lock_field(void *camera, float native, float applied, bool aiming, 
 void tfp_fov_setter_from(uint64_t caller, void *camera, float native) {
   atomic_fetch_add_explicit(&seen, 1, memory_order_relaxed);
   if (!atomic_load_explicit(&armed, memory_order_acquire) || caller != atomic_load_explicit(&return_address, memory_order_relaxed)) {
-    atomic_fetch_add_explicit(&forwarded, 1, memory_order_relaxed); call_original(camera, lock_field(camera, native, native, false, false)); return;
+    atomic_fetch_add_explicit(&forwarded, 1, memory_order_relaxed);
+    const float handed = lock_field(camera, native, native, false, false);
+    pair_note(camera, native, handed); call_original(camera, handed); return;
   }
   policy_acquire();
   float applied = native; bool diagnostics_changed = false;
@@ -781,6 +799,7 @@ void tfp_fov_setter_from(uint64_t caller, void *camera, float native) {
     }
   }
   applied = lock_field(camera, native, applied, policy.full_ads, true);
+  pair_note(camera, native, applied);
   atomic_fetch_add_explicit(&forwarded, 1, memory_order_relaxed); call_original(camera, applied);
   if (diagnostics_changed) publish_diagnostics(&policy);
   policy_release();
@@ -1003,6 +1022,7 @@ void tfp_fov_reset_for_tests(void) {
   lock_frame_at = 0; lock_tail_at = 0; lock_frame_value = 0; lock_frame_applied = 0; lock_tail_native = 0; lock_frame_open = 0; lock_frame_aim = 0;
   tfp_aim_lens_reset(&aim_lens); memset(&aim_second, 0, sizeof aim_second); aim_gate_known = false; aim_gate_last = false; aim_shown_last = 0; aim_call_at = 0; aim_watch = 0; aim_steady = 0;
   atomic_store(&lock_camera, 0); atomic_store(&lock_applied, 0);
+  pair_game = 0; pair_shown = 0; atomic_store(&pair_calls, 0);
   display_cache.native = 0; display_cache.applied = 0; display_cache.degrees = 0;
   atomic_store(&display_sequence, 0); atomic_store(&display_native, 0); atomic_store(&display_applied, 0); atomic_store(&display_degrees, 0);
   owner_read_probe = NULL;
