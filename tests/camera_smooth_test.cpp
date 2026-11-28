@@ -161,6 +161,9 @@ static void fresh(bool lock, bool smooth, bool trace = false, float damping_ms =
   tfp_camera_set_host(&host);
   tfp_camera_set_lock(lock, 0, 0, 300, 0, 0, damping_ms, bodycam); // no kick: the rotation is not the subject
   tfp_camera_set_continuity(smooth, trace);
+  // Round 55: the scenarios written before it are main's veil, the whole move at once (they hold that the head is never
+  // in front of the eye in a veiled frame); round 55's cases turn THE OPEN on themselves (tfp_camera_set_veil_open).
+  tfp_camera_set_veil_open(false);
   clock_ms += 5000;
 }
 static void standing(Game &g, int frames, double dt, bool native_view, uint32_t mask = 0) {

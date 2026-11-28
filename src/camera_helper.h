@@ -336,6 +336,18 @@ void tfp_camera_orphan_stats(TfpCameraOrphanStats *out);
  * a frame or two of the helmet where the body is drawn, as a move over TFP_CAMERA_VEIL_MOST already accepts. */
 #define TFP_CAMERA_VEIL_LET_IN_M .04f
 static inline float tfp_camera_veil_let_in(unsigned frames) { return TFP_CAMERA_VEIL_LET_IN_M*(float)frames*(float)(frames+1)/2; }
+/* Round 55, THE OPEN: at a leave out of prone or a dive the head is far in front of the eye the swap holds, and the veil
+ * (with the push's floor) moved the eye shown 0.39 to 0.45 m along the view in one frame (soak 68 Bodycam #68 0.434,
+ * #82 0.423, #200 0.447; the matrix's dive-swap 0.406). From the leave on, the n-th head-camera frame moves the eye
+ * shown at most tfp_camera_veil_open_cap(n) = TFP_CAMERA_VEIL_OPEN_STEP_M n from the eye before the veil, until a frame
+ * moves no more than that (0.4 m: 0.15, 0.30, 0.40; 0.2 m: 0.15, 0.20; 0.15 m or less: at once, as before). The cost:
+ * a frame or two short of TFP_CAMERA_VEIL_CLEAR (counted behind), the helmet's inside where the body is drawn. Not in a
+ * leave kept pending (tfp_camera_veil_let_in caps those already) or a kept leave's clamped frame. */
+/* tfp_camera_set_veil_open: THE OPEN on (true: the default, and what tfp_camera_reset_for_tests leaves) or off (main's
+ * veil, the whole move at once). */
+#define TFP_CAMERA_VEIL_OPEN_STEP_M .15f
+#define TFP_CAMERA_VEIL_OPEN_FRAMES 4u /* the cap is let go after this many frames whatever is left */
+static inline float tfp_camera_veil_open_cap(unsigned frames) { return TFP_CAMERA_VEIL_OPEN_STEP_M*(float)frames; }
 /* Round 32 (docs/design/specs/2026-11-24-helmet-in-view.md "Round 32"): a kept leave whose view really leaves (soak
  * 37, 10:07:04.745: a bolt-action pistol fired in full aim; the game dropped the aim, and nothing held the native eye)
  * showed its frame the whole way from the native eye at once, 0.425 m, unveiled, because the continuity takes nothing
@@ -368,6 +380,7 @@ void tfp_camera_veil_tick(bool hidden);
  * taken by one tick, opened or not. In the other order (the tick before the first head-camera frame, not seen in soak 27) that frame, the one
  * with the body, is not moved. The stats say which way it opens (second). */
 void tfp_camera_set_veil_second(bool on);
+void tfp_camera_set_veil_open(bool on); /* round 55, THE OPEN (TFP_CAMERA_VEIL_OPEN_STEP_M); on by default */
 /* Counts since the start: leaves the veil opened at or was kept open for; frames drawn while it was open; of them, frames whose eye it moved;
  * behind: of them, frames other than the native view whose eye was not proven TFP_CAMERA_VEIL_CLEAR in front of the
  * head (a body off foot, a frame the helper did not present, an eye it would not move): the body may have been in
