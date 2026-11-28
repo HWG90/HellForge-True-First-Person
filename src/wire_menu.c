@@ -10,6 +10,7 @@
 typedef TfpMenuControl Control;
 const char *const tfp_wire_menu_presets[3] = {"Custom (keep existing sliders)", "Comfort", "Natural"};
 static const char *const STYLES[2] = {"Stable", "Bodycam"};
+static const char *const THUMBS[2] = {"Straight", "Wrapped"};
 const char *const tfp_wire_menu_aim_fields[3] = {"The game's zoom", "Your locked view", "A chosen value"};
 /* Every entry names its store, so one without a store says -1 and never 0 (a real id). */
 #define ROW(id_, kind_, label_, page_, ...) {.id = id_, .kind = kind_, .label = label_, .page = page_, __VA_ARGS__}
@@ -109,6 +110,10 @@ static const Control CONTROLS[] = {
       TIP("One-handed weapons are held as your character holds them. This comes from the character's own animation while Animated arms is on; "
           "there is nothing to set here."),
       .note = "Comes from your character's own animation while Animated arms is on.", .inert = true),
+  /* round 42b (src/grip_fingers.h): Boolean `foregrip_thumb_wrapped` in the file, a choice of two here */
+  ROW("foregrip_thumb", TFP_MK_CHOICE, "Foregrip thumb", 2, L(foregrip_thumb_wrapped), .choices = THUMBS, .choice_count = 2,
+      TIP("How the left thumb holds a vertical foregrip. Straight: laid up along the grip. Wrapped: closed round it. Other grips and the "
+          "weapon's own handguard are not changed.")),
   ROW("put_away", TFP_MK_TOGGLE, "Weapon put-away", 2, L(put_away), TIP("Keep first person while the weapon is put away for a swap, grenade or stim.")),
   ROW("smooth_eye", TFP_MK_TOGGLE, "Smooth eye", 2, L(smooth_eye), TIP("No camera pops when the game changes its camera.")),
   /* round 38 (docs/design/specs/2026-11-25-exosuit-seat.md) */

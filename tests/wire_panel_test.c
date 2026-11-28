@@ -114,7 +114,10 @@ static int store_part(void) {
   CHECK(tfp_settings_defaults(&s));
   /* the seventeen options and their defaults (round 20: Aim field of view, its chosen degrees, the sight distance in aim;
    * round 38: See through the exosuit cockpit, on; round 45: Cockpit frame, on, and its opacity, 90) */
-  CHECK(TFP_LOCKED_COUNT == 19);
+  CHECK(TFP_LOCKED_COUNT == 20);
+  /* round 42b: Foregrip thumb, Straight (the stored Boolean foregrip_thumb_wrapped off) */
+  CHECK(!tfp_settings_locked_flag(&s, TFP_LOCKED_foregrip_thumb_wrapped) && tfp_settings_locked_info(TFP_LOCKED_foregrip_thumb_wrapped)->is_bool &&
+        tfp_settings_locked("foregrip_thumb_wrapped") == TFP_LOCKED_foregrip_thumb_wrapped);
   CHECK(tfp_settings_locked_flag(&s, TFP_LOCKED_cockpit_frame) && tfp_settings_locked_info(TFP_LOCKED_cockpit_frame)->is_bool &&
         tfp_settings_locked_number(&s, TFP_LOCKED_cockpit_frame_opacity) == 90 && tfp_settings_locked_info(TFP_LOCKED_cockpit_frame_opacity)->min == 20 &&
         tfp_settings_locked_info(TFP_LOCKED_cockpit_frame_opacity)->max == 100);
@@ -577,7 +580,7 @@ static int panel_part(void) {
   CHECK(drawn("tab:First person") && drawn("tab:Bob and sway") && drawn("tab:Locked view"));
   int count = 0, sliders = 0, checks_drawn = 0, keys = 0, described = 0, choices = 0;
   const TfpMenuControl *controls = tfp_wire_menu_controls(&count);
-  CHECK(count == 47);   /* round 38: See through the exosuit cockpit; round 45: Cockpit frame and its opacity */
+  CHECK(count == 48);   /* round 38: See through the exosuit cockpit; round 45: Cockpit frame and its opacity; round 42b: Foregrip thumb */
   for (int i = 0; i < count; i++) {
     const TfpMenuControl *c = &controls[i];
     char line[420];
@@ -609,7 +612,7 @@ static int panel_part(void) {
     }
     if (c->description) { snprintf(line, sizeof line, "tip:%s", c->description); CHECK(drawn_part(line)); described++; }
   }
-  CHECK(sliders == 17 && checks_drawn == 18 && keys == 2 && choices == 3 && described == 34);
+  CHECK(sliders == 17 && checks_drawn == 18 && keys == 2 && choices == 4 && described == 35);
   CHECK(drawn("check:Cockpit frame=on") && drawn("slider:Cockpit frame opacity (%)=90[20..100]")); /* round 45: enabled with the see-through cockpit on */
   CHECK(drawn("text:First person through every action, one field of view, and how much your body's movement moves the view."));
   CHECK(drawn("primary:Enable True First Person") && drawn("cap:U") && !drawn("cap:F11") && drawn("cap:PAGE UP")); /* the stored 122 (F11) reads as U */
@@ -852,6 +855,14 @@ static int panel_part(void) {
   ov.flip = "Cockpit frame"; draw_frame(); game_update();          /* greyed: a click does nothing */
   CHECK(tfp_locked_view_cockpit_frame(&wire) && ov.flip);
   ov.flip = NULL;
+  /* ---- round 42b: Foregrip thumb, a choice of two over the stored Boolean: Straight unless picked Wrapped ---- */
+  draw_frame();
+  CHECK(drawn("combo:Foregrip thumb=Straight") && !tfp_locked_view_foregrip_thumb_wrapped(&wire));
+  ov.pick = "Foregrip thumb"; ov.pick_to = 1; draw_frame(); game_update(); draw_frame();
+  CHECK(tfp_locked_view_foregrip_thumb_wrapped(&wire) && strstr(saved_text, "\"foregrip_thumb_wrapped\": true") && drawn("combo:Foregrip thumb=Wrapped"));
+  ov.pick = "Foregrip thumb"; ov.pick_to = 0; draw_frame(); game_update(); draw_frame();
+  CHECK(!tfp_locked_view_foregrip_thumb_wrapped(&wire) && strstr(saved_text, "\"foregrip_thumb_wrapped\": false") && drawn("combo:Foregrip thumb=Straight"));
+  ov.pick = NULL;
   tfp_wire_menu_unbind(&wire);
   tfp_wire_panel_free(&wire);
   tfp_wire_settings_free(&wire);
