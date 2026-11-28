@@ -32,6 +32,23 @@ def split_at(lines, stamp):
     return lines[:k], lines[k:]
 
 
+def snap_from(lines, stamp, dz):
+    """The Trace lines from `stamp` on with the eye shown moved dz m down off the game's eye, the correction grown by
+    dz and the frame marked as the mod's (looked, taken jump): a filter snap the size of its own hold."""
+    import re
+    out, on = [], False
+    for line in lines:
+        if line.startswith(stamp + " Trace:"):
+            on = True
+        if on and " Trace: " in line:
+            m = re.search(r"eye_world=\((\S+) (\S+) (\S+)\)", line)
+            line = line.replace(m[0], f"eye_world=({m[1]} {m[2]} {float(m[3]) - dz:.5f})")
+            line = re.sub(r"correction=(\S+)", lambda c: f"correction={float(c[1]) + dz:.4f}", line)
+            line = line.replace("taken=root ", "taken=jump+root ").replace("taken=- ", "taken=jump ").replace("looked=0", "looked=1")
+        out.append(line)
+    return out
+
+
 def pop_at(j, at):
     found = [p for p in j["pops"] if p["at"] == at]
     return found[0] if found else None
@@ -186,6 +203,24 @@ class FallLanding(unittest.TestCase):
         p = pop_at(matrix.judge(lines), "11:24:25.257")
         self.assertNotEqual(p["whose"], "body")
         self.assertNotIn("fall", p)
+
+    def test_a_filter_snap_in_the_landing_still_fails(self):
+        # the check's mutation: the eye shown moved 0.10 m, then 0.20 m, off the game's eye from 11:24:25.224 on, with
+        # the matching correction (the filter's hold as big as the snap): main fails both as the filter's, and so must this
+        for dz in (0.10, 0.20):
+            with self.subTest(dz=dz):
+                j = matrix.judge(snap_from(lines_of("feel63-A216-fall-landing.log"), "11:24:25.224", dz))
+                for at in ("11:24:25.224", "11:24:25.257"):
+                    p = pop_at(j, at)
+                    self.assertEqual(p["whose"], "filter")
+                    self.assertNotIn("fall", p)
+                    self.assertGreater(p["beyond"], matrix.FALL_HELD_M)
+                self.assertGreater(j["largest_jump_m"], matrix.POP_M)
+                self.assertFalse(j["pass"])
+
+    def test_the_bound_is_the_largest_honest_hold_with_margin(self):
+        self.assertGreater(matrix.FALL_HELD_M, 0.0603)     # 67-A #216, the only fall landing in the 49 soak logs
+        self.assertLessEqual(matrix.FALL_HELD_M, 0.085)    # the smallest mutated hold above (0.10 m snap) must fail
 
     def test_not_a_smaller_drop(self):
         # the same frames with every root lifted by the drop's excess in the drop frame and after: a 0.9 m drop

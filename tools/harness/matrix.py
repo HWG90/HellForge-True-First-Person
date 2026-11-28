@@ -88,8 +88,9 @@ No limit was raised; tests/test_harness_round55c_judges.py and _played.py have e
   the matrix's "dive" 0.073).
   Fall landing (whose "body", with fall and held): one to two frames after the root went FALL_M or more down in one
   native frame, where the game's eye less the body's lunge is under POP_M and the eye shown has no more beyond the body
-  than the filter's hold of that frame (67-A #216: the root 1.109 m down, a hold's end opened the window, the filter
-  took up 0.060 m and the frame read as "the filter's" 0.929).
+  than the filter's hold of that frame, and under FALL_HELD_M (67-A #216: the root 1.109 m down, a hold's end opened
+  the window, the filter took up 0.060 m and the frame read as "the filter's" 0.929; the only fall landing in all 49
+  soak logs, so the bound is that hold with a third for margin: a filter snap of 0.10 m in the same frames fails).
   Played. The clambers need a traversal mask (0x20) in their stretch, as the dives need a dive line (NEEDS); the
   feel.63 matrix's clamber-low and clamber-high passed with mask 0 only. A phase whose body could not be stood up
   first is a harness failure (judge_stood), counted apart from the camera's failures; dive.stand_up reads no stance
@@ -237,6 +238,9 @@ CONTEXT_MS = 500.0     # an action's stretch is judged with the traced frames of
 CONTEXT_LINES = 600    # of the log before the stretch, the lines read for them (a trace window is 0.5 s)
 CONTEXT_BYTES = 1 << 18
 FALL_M = 1.0           # a fall: the root this far down in one native frame (soak 67-A #216: 1.109 m at 11:24:25.191)
+FALL_HELD_M = 0.08     # ... and the most the eye shown may have beyond the body in its landing frame and still be the
+                       # body's: the largest honest hold in the logs is 0.0603 m (67-A #216 at 11:24:25.257, the only
+                       # fall landing in all 49 soak logs), with a third for margin. A filter snap past this fails
 
 
 def over(m, bound):
@@ -420,7 +424,8 @@ def measure(rows, stance=True, launch=None):
     Round 55C, a fall landing: a frame that would be the filter's or the eye's own, one to two frames after the root
     went FALL_M or more down in one native frame, where the body's lunge was taken off, the wanted eye less that lunge
     is under POP_M (the game's own eye went with the body) and what the eye shown has beyond the body is no more than
-    the filter's hold of that frame (carried): whose "body", fall the drop, held what the filter held. Soak 67-A #216:
+    the filter's hold of that frame (carried) and under FALL_HELD_M: whose "body", fall the drop, held what the filter
+    held. Soak 67-A #216:
     the root 1.109 m down at 11:24:25.191, a hold's end opened the window at 11:24:25.257 and the frame read as the
     filter's 0.929 m, 0.060 beyond the body with 0.060 carried and the wanted eye 0.022.
     Rows marked "context" (context_rows) are measured against and never judged themselves.
@@ -498,7 +503,7 @@ def measure(rows, stance=True, launch=None):
         if whose in ("filter", "own") and after is not None and change["wanted"]:
             drop = _fall(rows, i)
             game = _length(_sub(change["wanted"], changes[lunge[i]]["root"]))
-            if drop is not None and game < POP_M and beyond <= c["carried"] + stance_ramp.NOTHING_M:
+            if drop is not None and game < POP_M and beyond <= c["carried"] + stance_ramp.NOTHING_M and beyond < FALL_HELD_M:
                 whose, fall, held, beyond, bare = "body", drop, beyond, game, game   # round 55C: a fall landing
         found.append({"at": c["at"], "written": c["written"], "tick": c["tick"], "kind": c["kind"], "looked": c["looked"], "taken": c["taken"], "carried": c["carried"], "shown": shown,
                       "lengths": change["lengths"], "wanted": wanted, "root": _length(change["root"]) if change["root"] else None,
