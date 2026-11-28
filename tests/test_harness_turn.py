@@ -82,6 +82,30 @@ class Turn(unittest.TestCase):
         self.assertTrue(any("not counted" in n for n in with_mouse["notes"]))
         self.assertFalse(any("72.7" in n and "not counted" in n for n in without["notes"]))
 
+    def test_a_turn_alone_fails_a_phase(self):
+        """Every reference window with a turn fails for another reason too. A swap on foot, which passes, with the
+        ordinary camera's rows turned 26 degrees about up: nothing else is wrong with it."""
+        lines = cut(FOOT_SWAP)
+        self.assertTrue(matrix.judge(lines)["pass"])
+        c, n = math.cos(math.radians(26)), math.sin(math.radians(26))
+
+        def turned(line):
+            if "Trace:" not in line or " kind=4 " not in line:
+                return line
+            return re.sub(r" turn=\(([-\d.]+) ([-\d.]+) ([-\d.]+)\)",
+                          lambda m: f" turn=({float(m[1]) * c - float(m[2]) * n:.4f} {float(m[1]) * n + float(m[2]) * c:.4f} {m[3]})", line)
+        j = matrix.judge([turned(line) for line in lines])
+        self.assertEqual([round(t["degrees"]) for t in j["turn_snaps"]], [23, 23])   # 26 about up, under a view pitched 28 degrees
+        self.assertFalse(j["pass"])
+        self.assertTrue(matrix.judge([turned(line) for line in lines], mouse=True)["pass"])   # a phase that looks around
+
+    def test_a_reload_phase_keeps_the_turn_and_the_veil(self):
+        """The reload judge replaced what the turn and the veil judges had found; a reader of turn_snaps raised."""
+        j = matrix.judge(cut(DIVE_SWAP), reload=True)
+        self.assertEqual([round(t["degrees"], 1) for t in j["turn_snaps"]], [29.0, 39.5])
+        for key in ("turn_deg", "turn_at", "veil_open_m", "veil_faults", "said", "slide_m", "slide_at"):
+            self.assertIn(key, j)
+
 
 def veiled(moves, kinds=None, dt=33.0):
     kinds = kinds or [4] * len(moves)

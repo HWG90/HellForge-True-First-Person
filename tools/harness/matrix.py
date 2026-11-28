@@ -619,7 +619,7 @@ def judge(lines, toggles=False, reload=False, throw=False, mouse=False):
     extra["said"] = list(first)   # the lines of these two judges, for soak.py
     if reload:   # round 39: on the traced eye only, and its slide along the view across the reload's edges
         slide, slide_row = reload_slide(rows)
-        extra = {"slide_m": slide, "slide_at": slide_row["at"] if slide_row else None}
+        extra.update({"slide_m": slide, "slide_at": slide_row["at"] if slide_row else None})   # beside the turn's and the veil's
         if not traced:
             ok = False
             first.append("not traced: a reload phase is judged on the traced eye only")
