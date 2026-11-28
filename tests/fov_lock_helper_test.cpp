@@ -534,6 +534,59 @@ int main() {
     aim(false);
     tfp_fov_end(gen);
   }
+  // ---- Round 53 (tfp_fov_frame_pair): the two fields of view of the frame, as the game's setter was called on the
+  // armed camera: what the game asked for and what the setter was handed, from the later call of the frame. ----
+  {
+    fresh();
+    float game = -1, shown = -1; uint64_t calls = 9;
+    CHECK(!tfp_fov_frame_pair(&game, &shown, &calls) && game == 0 && shown == 0 && calls == 0);   // no call yet
+    CHECK(!tfp_fov_frame_pair(nullptr, nullptr, nullptr));
+    float handed = frame(dt, true);                                                               // another camera: not the pair's
+    CHECK(!tfp_fov_frame_pair(&game, &shown, &calls) && calls == 0);
+    handed = frame(dt);                                                                           // the hip, no lock
+    CHECK(tfp_fov_frame_pair(&game, &shown, &calls) && game == NATIVE && shown == handed && calls == 1);
+    frame(dt, true);
+    CHECK(tfp_fov_frame_pair(&game, &shown, &calls) && calls == 1 && shown == handed);            // the other camera changes nothing
+    tfp_fov_set_lock(LOCKED, false, 5000);                                                        // the lock, 'your locked view' in aim
+    float a = 0, b = 0;
+    for (int i = 0; i < 144; ++i) b = frame2(dt, 1.3, &a);
+    CHECK(tfp_fov_frame_pair(&game, &shown, &calls) && game == NATIVE && shown == b && std::fabs(shown - LOCKED) < 1e-3f && calls == 1 + 1 + 144);  // the first frame's two calls, then the later call of each
+    { // between a frame's two calls the pair is the frame before's later call, not the hooked call's
+      uint64_t before = 0, between = 0; float g0 = 0, s0 = 0, g1 = 0, s1 = 0;
+      tfp_fov_frame_pair(&g0, &s0, &before);
+      sent.seen = false; seconds_now += dt / 1000;
+      tfp_fov_setter_from(W.a[A_GAME] + HERE.call + 6, reinterpret_cast<void *>(W.a[A_CAMERA]), 40 * RAD);
+      CHECK(tfp_fov_frame_pair(&g1, &s1, &between) && between == before && g1 == g0 && s1 == s0);
+      b = second(1.3, 40 * RAD);
+      CHECK(tfp_fov_frame_pair(&g1, &s1, &between) && between == before + 1 && g1 == 40 * RAD && s1 == b);
+      for (int i = 0; i < 3; ++i) frame(dt);                                                      // forwarded calls stop: the hooked call's, a frame later
+      CHECK(tfp_fov_frame_pair(&g1, &s1, &between) && between == before + 3 && g1 == NATIVE && s1 == sent.radians);
+      for (int i = 0; i < 144; ++i) b = frame2(dt, 1.3, &a);
+    }
+    aim(true);
+    const float lens = 30 * RAD;                                                                  // the game's lens in full aim
+    for (int i = 0; i < 144; ++i) {
+      b = frame2(dt, 1.3, &a, lens);
+      CHECK(tfp_fov_frame_pair(&game, &shown, nullptr) && game == lens && shown == b);            // every frame: this frame's
+    }
+    CHECK(std::fabs(shown - LOCKED) < 1e-3f);                                                     // full aim shown at the locked value
+    tfp_fov_set_lock(LOCKED, true, 5000);                                                         // 'the game's zoom': glides to the lens
+    float last = shown; bool down = true;
+    for (int i = 0; i < 144; ++i) {
+      b = frame2(dt, 1.3, &a, lens);
+      CHECK(tfp_fov_frame_pair(&game, &shown, nullptr) && game == lens && shown == b);
+      if (shown > last + 1e-6f) down = false;
+      last = shown;
+    }
+    CHECK(down && std::fabs(shown - lens) < 1e-3f);
+    tfp_fov_set_lock(0, true, 5000);                                                              // the lock off: let go, the game's value to the bit
+    for (int i = 0; i < 144; ++i) b = frame2(dt, 1.3, &a, lens);
+    CHECK(tfp_fov_frame_pair(&game, &shown, nullptr) && game == lens && shown == lens && b == lens);
+    aim(false);
+    tfp_fov_end(gen);
+    tfp_fov_reset_for_tests();
+    CHECK(!tfp_fov_frame_pair(&game, &shown, &calls) && calls == 0);
+  }
   std::printf("fov lock helper: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

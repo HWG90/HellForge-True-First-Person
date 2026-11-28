@@ -41,6 +41,13 @@ bool tfp_wire_settings_options_of(TfpWire *w, TfpRtValue value, TfpMotionOptions
 TfpRtValue tfp_wire_settings_markers(TfpWire *w, const char *const *keys, size_t count);
 /* Actions.resolve(mod.config, key, action) typed. false: an action outside the list. */
 bool tfp_wire_settings_resolve(TfpWire *w, const char *key, TfpAct action, TfpActionPlacement *out, bool *is_explicit);
+/* Round 53 (src/weapon_clip.h): the `Clip:` line of the session log. tfp_wire_settings_frame says it per weapon and
+ * view (hip, normal aim, full aim) once its figures have stood for half a second, and again when they change. The
+ * near clip in it is the near lease's own statistics (what the game's setter was handed). The fields of view and the
+ * full-aim scale are the helpers' own, handed here by the Windows binder every tick (src/mod_view.c:
+ * tfp_fov_frame_pair, tfp_near_ads_scale), not the diagnostics row's, which never holds the field-of-view lock's
+ * value. Reads only: nothing here changes the near clip. */
+void tfp_wire_clip_note(TfpWire *w, bool has_fov, float game_fov, float shown_fov, float ads_scale);
 /* Where that placement comes from, for the log: "imported(own)", "imported(__all)", "idle>imported(own)",
  * "imported(older own)", "imported(older __all)", "family(rifle)", "imported(global)", "shipped default",
  * "ads default". */

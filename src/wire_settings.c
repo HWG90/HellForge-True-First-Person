@@ -5,6 +5,7 @@
 #include "wire_settings.h"
 #include "wire_off.h"
 #include "action_placement_data.h"
+#include "weapon_clip.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,6 +45,12 @@ typedef struct Settings {
   NearAnswer near_clip;      /* the table menu:near_options() last answered */
   bool has_weapon;           /* the weapon key of the last `Weapon:` line */
   char weapon[17];
+  /* Round 53 (src/weapon_clip.h): the `Clip:` line. standing: this frame's figures and since when they have stood;
+   * said: the last line's. The keys are copies (the samples point at them). */
+  struct {
+    TfpClipSample standing, said; char standing_key[17], said_key[17]; double since; bool has_standing, has_said;
+    bool has_fov; float game_fov, shown_fov, scale; /* tfp_wire_clip_note: the helpers' own figures, as the binder last read them */
+  } clip;
 } Settings;
 static Settings *state(TfpWire *w) { return w ? w->ext[TFP_WIRE_EXT_SETTINGS] : NULL; }
 #define S(h) state((TfpWire *)(h)->user)
@@ -296,6 +303,58 @@ static bool rt_menu_near_options(TfpRtHost *h, V *o1) { /* menu:172-182 */
   *o1 = tfp_wire_ref(&st->near_clip);
   return true;
 }
+/* ---- round 53 (src/weapon_clip.h): the `Clip:` line ----------------------------------------------- */
+void tfp_wire_clip_note(TfpWire *w, bool has_fov, float game_fov, float shown_fov, float ads_scale) {
+  Settings *st = state(w);
+  if (!st) return;
+  st->clip.has_fov = has_fov && tfp_clip_fov(game_fov) && tfp_clip_fov(shown_fov);
+  st->clip.game_fov = game_fov, st->clip.shown_fov = shown_fov;
+  st->clip.scale = ads_scale > 0 && ads_scale < 1 ? ads_scale : 1;
+}
+/* After on_update (the row and the snapshot are this frame's): the figures of the frame, said once they have stood
+ * for half a second and again when they change. Reads only; nothing here reaches the near clip. */
+static void clip_frame(TfpWire *w, Settings *st, const char *key) {
+  if (!w->controller.enabled || !key || !w->has_row || !w->snap_next || w->rt.clock_previous.kind != TFP_RT_NUMBER) {
+    st->clip.has_standing = false;
+    return;
+  }
+  const TfpOpsSnapshot *last = &w->snaps[(w->snap_next - 1) % TFP_WIRE_SNAPS].s;
+  const double now = w->rt.clock_previous.number;
+  const TfpActionWeapon *info = tfp_action_weapon_info(&st->catalogue, key);
+  double hip, aim;
+  TfpNearResult result;
+  TfpClipSample s;
+  memset(&s, 0, sizeof s);
+  s.view = last->controller_active ? TFP_CLIP_ADS : last->shoulder_aim ? TFP_CLIP_AIM : TFP_CLIP_HIP;
+  s.name = info ? info->name : NULL;
+  s.has_fov = st->clip.has_fov;
+  if (s.has_fov) s.fov = st->clip.shown_fov, s.game_fov = st->clip.game_fov;
+  tfp_near_lease_result(&w->near_clip, &result);
+  s.has_near = result.stats.has;
+  s.game_near = (float)result.stats.last_native, s.near = (float)result.stats.last_applied;
+  s.scale = 1;
+  if (s.view == TFP_CLIP_ADS) s.scale = st->clip.scale;
+  else {
+    tfp_settings_near_options(&st->store, key, &hip, &aim, NULL);
+    s.wanted = (float)(s.view == TFP_CLIP_AIM ? aim : hip);
+    if (w->ops.has_pose_placement) s.x = (float)w->ops.pose_placement.x, s.z = (float)w->ops.pose_placement.z; /* the placement in force */
+  }
+  s.key = key;
+  if (!st->clip.has_standing || tfp_clip_changed(&st->clip.standing, &s)) {
+    snprintf(st->clip.standing_key, sizeof st->clip.standing_key, "%s", key);
+    st->clip.standing = s, st->clip.standing.key = st->clip.standing_key;
+    st->clip.since = now, st->clip.has_standing = true;
+    return;
+  }
+  if (now - st->clip.since < .5 || (st->clip.has_said && !tfp_clip_changed(&st->clip.said, &st->clip.standing))) return;
+  char line[560];
+  tfp_clip_line(&st->clip.standing, line, sizeof line);
+  tfp_wire_say(w, line);
+  memcpy(st->clip.said_key, st->clip.standing_key, sizeof st->clip.said_key);
+  st->clip.said = st->clip.standing, st->clip.said.key = st->clip.said_key;
+  st->clip.has_said = true;
+}
+
 /* What the near-clip adapter reads (rt:713-716): the menu's table when the menu answered, else the
  * runtime's {hip=0, aim=0}. Replaces the view build's reader, which knew no menu table. */
 static void near_options(void *user, TfpNearOptions *out) {
@@ -352,6 +411,7 @@ void tfp_wire_settings_frame(TfpWire *w) {
   Settings *st = state(w);
   if (!st) return;
   const char *key = w->ops.has_placement_weapon_key ? w->ops.placement_weapon_key : NULL;
+  clip_frame(w, st, key);
   if (!key || (st->has_weapon && !strcmp(st->weapon, key))) return;
   snprintf(st->weapon, sizeof st->weapon, "%s", key);
   st->has_weapon = true;

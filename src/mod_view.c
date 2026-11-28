@@ -1456,6 +1456,11 @@ static void ads_seat_tick(void) {
   const bool near_on = tfp_near_ads_probe(&sight, &native, &applied);
   const TfpEditor *editor = tfp_wire_editor_of(&wire);
   tfp_aim_bind_tick(near_on, sight, tfp_locked_view_ads_sight_cm(&wire), tfp_editor_motion_editing_ads(editor)); /* src/aim_bind.h */
+  { /* round 53: the "Clip:" line's fields of view and full-aim scale, the helpers' own (src/wire_settings.h); the log only */
+    float game_fov = 0, shown_fov = 0;
+    const bool has_fov = tfp_fov_frame_pair(&game_fov, &shown_fov, NULL);
+    tfp_wire_clip_note(&wire, has_fov, game_fov, shown_fov, tfp_near_ads_scale());
+  }
   TfpPoseAdsProbe ads;
   const bool pose_on = tfp_pose_ads_probe(&ads) && ads.armed;
   TfpFovLockStats f; tfp_fov_lock_stats(&f);
