@@ -893,6 +893,14 @@ static bool steady_frame(Policy *p, const DepthObservation *observation, uint64_
           r.scale_known = value(row + 0x11ac, r.scale);
         }
       }
+      /* Round 56: node 50's local position as this call finds it (the rig eye node the camera hangs on: what the
+       * evaluator read into the rig's own vector at game+0x1287a41), its forward part (y) to the hold, which puts back
+       * its move since the last frame without C (src/reload_hold.h "node 50"). The same read round 49e's probe made
+       * after the hold; now made before it, and the probe takes it from here. */
+      uint64_t locals = 0; float eye50[3] = {0, 0, 0};
+      const bool have_locals = pointer(p->object + L_UNIT_LOCALS, &locals);
+      const bool eye50_known = have_locals && read(locals + (uint64_t)L_RIG_CAMERA_NODE*L_LOCAL_SIZE + L_LOCAL_POSITION, eye50, sizeof eye50);
+      r.eye = eye50[1]; r.eye_known = eye50_known;
       float added = 0; TfpReloadEnd end;
       const uint32_t held_now = tfp_reload_frame(&reload_hold, &r, generation, &added, &end);
       tfp_reload_note(&steady_log.now.reload, &end);
@@ -902,10 +910,9 @@ static bool steady_frame(Policy *p, const DepthObservation *observation, uint64_
        * 50, 4, 3, 2, 1, the root, proven in this call) and the anchor request+0x60..0x68, as this call finds them. Four
        * guarded reads a frame; nothing of the frame's numbers is theirs. */
       {
-        TfpReloadProbe probe; TfpReloadEdges edges; uint64_t locals = 0; uint8_t parents[4*L_LOCAL_SIZE];
+        TfpReloadProbe probe; TfpReloadEdges edges; uint8_t parents[4*L_LOCAL_SIZE];
         tfp_reload_probe(&probe, &r, held_now, added, now);
-        const bool have_locals = pointer(p->object + L_UNIT_LOCALS, &locals);
-        probe.eye_known = have_locals && read(locals + (uint64_t)L_RIG_CAMERA_NODE*L_LOCAL_SIZE + L_LOCAL_POSITION, probe.eye, sizeof probe.eye);
+        probe.eye_known = eye50_known; memcpy(probe.eye, eye50, sizeof probe.eye);
         if (have_locals && read(locals + L_LOCAL_SIZE, parents, sizeof parents)) tfp_reload_probe_parents(&probe, parents, 4);
         probe.anchor_known = read(p->c.request + L_REQUEST_ANCHOR, probe.anchor, sizeof probe.anchor);
         if (tfp_reload_watch_frame(&reload_watch, &reload_hold, &probe, generation, &edges)) {

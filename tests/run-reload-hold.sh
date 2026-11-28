@@ -9,4 +9,4 @@ cc -std=c11 -O1 -ffp-contract=off -Wall -Wextra -Werror -fsanitize=address,undef
 TFP_IMAGE="${TFP_GAME_IMAGE:-$HOME/Documents/ChatGPT/Linux HD2/native-work/evidence/game-pre1020.dll}"
 if [ -f "$TFP_IMAGE" ]; then export TFP_GAME_IMAGE="$TFP_IMAGE"; else unset TFP_GAME_IMAGE; fi
 ASAN_OPTIONS=detect_leaks=0 "$TFP_ROOT/work/tests/reload_hold_test" "$TFP_ROOT/tests/reference/reload/feel56-L6985-7100.log" "$TFP_ROOT/tests/reference/reload/feel58-L4150-4266.log" \
-  "$TFP_ROOT/tests/reference/reload/feel60-L3545-3625.log"
+  "$TFP_ROOT/tests/reference/reload/feel60-L3545-3625.log" "$TFP_ROOT/tests/reference/reload/feel63-L6193-6292.log"
