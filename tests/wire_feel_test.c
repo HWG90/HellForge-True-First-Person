@@ -130,8 +130,9 @@ static bool ed_down(void *u, int key) { (void)u; return ed.down[key & 255]; }
 static bool ed_resolution(void *u, double *w, double *h) { (void)u; *w = 1920; *h = 1080; return true; }
 static void ed_draw(void *u, const TfpEdCommand *c, int n) { (void)u; (void)c; ed.draws++; ed.last_count = n; }
 static bool ed_window(void *u, bool *focus, bool *cursor) { (void)u; *focus = true; *cursor = false; return true; }
+static void ed_weapons(void *u, const TfpEwWeapon *list, int count) { (void)u; (void)list; (void)count; }   /* round 53: only with a drawn frame, which needs a game */
 static const TfpEditorPlatform editor_platform = {NULL, ed_available, ed_menu_close, ed_menu_is_open, ed_busy, ed_acquire, ed_release, ed_focused,
-                                                  ed_sample, ed_down, ed_resolution, ed_draw, ed_window};
+                                                  ed_sample, ed_down, ed_resolution, ed_draw, ed_window, ed_weapons};
 
 int main(void) {
   static const TfpCameraHelperApi camera = {h_validate_c, h_begin_c, h_end, h_stats_c, h_error, h_generation, h_handoff, h_u32, h_u32};
@@ -493,8 +494,45 @@ int main(void) {
   }
   CHECK(wire.memo_off && tfp_wire_memo_start(&wire, false) && !wire.ops.perf.memo_live &&
         tfp_wire_memo_state(&wire) == TFP_PERF_MEMO_TURNED_OFF); /* the session's failed check is not undone */
+  /* ---- round 53: the placement editor's list of saved placements (src/editor_weapons.h), from the settings store and the
+   * catalogue: every key that holds an action, the older per-weapon rows, the held weapon; in its category, by name ---- */
+  {
+    static TfpEwWeapon list[TFP_EW_MAX];
+    TfpSettings *store = tfp_wire_settings(&wire);
+    const char *why = NULL;
+    CHECK(store != NULL);
+    CHECK(tfp_wire_editor_weapon_list(&wire, NULL, list, TFP_EW_MAX) == 0);                              /* nothing saved, nothing held */
+    CHECK(tfp_wire_editor_weapon_list(&wire, "64ce3d03c0118296", list, TFP_EW_MAX) == 1 && list[0].held && !list[0].saved &&
+          !strcmp(list[0].name, "AR-23 Liberator") && list[0].group == TFP_EW_PRIMARY);                    /* the held weapon alone */
+    TfpActionProfile rows[6];
+    memset(rows, 0, sizeof rows);
+    static const char *const ids[6] = {"5689b3ab3b7dc211" /* MG-43 Machine Gun */, "0294f1b2a3523d8d" /* P-4 Senator */, "28131d96503b1846" /* SG-225 Breaker */,
+                                       "__all", "ffff000011112222" /* not in the catalogue */, "a2446edbc2e5e405" /* P-2 Peacemaker: a row without an action */};
+    for (int i = 0; i < 6; i++) {
+      rows[i].id = ids[i];
+      if (i == 5) continue;
+      rows[i].has = 1u << TFP_ACT_IDLE;
+      rows[i].action[TFP_ACT_IDLE] = (TfpActionPlacement){.1, .2, .3, 0, 0, 0, TFP_PLACE_XYZ};
+    }
+    const TfpActionLegacy legacy[2] = {{"64ce3d03c0118296" /* AR-23 Liberator */, {.1, .2, .3, 0, 0, 0, TFP_PLACE_XYZ}},
+                                       {"28131d96503b1846" /* also in action_placements: once */, {.1, .2, .3, 0, 0, 0, TFP_PLACE_XYZ}}};
+    CHECK(tfp_settings_set(store, TFP_SET_action_placements, tfp_settings_new_profiles(store, rows, 6), &why));
+    CHECK(tfp_settings_set(store, TFP_SET_weapon_placements, tfp_settings_new_placements(store, legacy, 2), &why));
+    int n = tfp_wire_editor_weapon_list(&wire, "0294f1b2a3523d8d", list, TFP_EW_MAX);
+    static const struct { const char *name; TfpEwGroup group; } want[6] = {
+      {"P-4 Senator", TFP_EW_SECONDARY}, {"AR-23 Liberator", TFP_EW_PRIMARY}, {"SG-225 Breaker", TFP_EW_PRIMARY}, {"MG-43 Machine Gun", TFP_EW_SUPPORT},
+      {"All weapons (shared)", TFP_EW_OTHER}, {"ffff000011112222", TFP_EW_OTHER}};
+    CHECK(n == 6);
+    for (int i = 0; i < 6; i++) CHECK(!strcmp(list[i].name, want[i].name) && list[i].group == want[i].group && list[i].saved && list[i].held == (i == 0));
+    n = tfp_wire_editor_weapon_list(&wire, "a2446edbc2e5e405", list, TFP_EW_MAX);                          /* held, its row holds no action: listed as not saved */
+    CHECK(n == 7 && list[0].held && !list[0].saved && !strcmp(list[0].name, "P-2 Peacemaker") && !strcmp(list[1].name, "AR-23 Liberator") &&
+          !strcmp(list[3].name, "P-4 Senator") && list[3].group == TFP_EW_SECONDARY && !list[3].held);
+    CHECK(tfp_wire_editor_weapon_list(&wire, NULL, list, 3) == 3);                                         /* a short list is filled, not overrun */
+    static TfpWire unbound;
+    CHECK(tfp_wire_editor_weapon_list(&unbound, "64ce3d03c0118296", list, TFP_EW_MAX) == 0);              /* no settings bound */
+  }
   tfp_wire_set_memo(&wire, false);
   printf("wire feel: %u checks passed (all five module binders joined with no game: enable, 90 frames, F11 refused, the placement editor opened and refused, disable, what a live replace finds held; the motion "
-         "binder's shapes and presentation calls; the markers table; the Feel line; the laps and parts; the memo switch, on by default)\n", checks);
+         "binder's shapes and presentation calls; the markers table; the Feel line; the laps and parts; the memo switch, on by default; the editor's list of saved placements)\n", checks);
   return 0;
 }

@@ -27,6 +27,14 @@
  * the finger (X towards -Z, where the bind fingers bend). No vertical-grip hand pose of the game's own was found to take
  * the angles from.
  *
+ * The straight thumb (round 42b; a request: "grip the vertical grip with a straight thumb instead of the full hollywood
+ * grip"). TFP_GF_THUMB_STRAIGHT, for a vertical grip: thumb joints 2 and 3 stay the body's own and joint 1 is turned, the
+ * shortest way, until the thumb (joint 1 to the tip) lies up along the handle, leaning TFP_GF_THUMB_LEAN_DEGREES towards
+ * it: beside the handle on the thumb's own side, not round it. The handle's axis in the hand's frame is the measure
+ * above (7.1 cm out along the hand's X, 4.9 cm under the palm, running along the hand's Y; up, towards the gun, is -Y but for 5 degrees).
+ * On the bind pose that takes the thumb from 52 degrees off the handle's axis, its tip against the handle's top, to 10
+ * degrees off it with the tip 4.8 cm from the axis (the last bone 22 degrees off it: the body's own bend of the thumb). TFP_GF_THUMB_WRAPPED is the thumb as before.
+ *
  * The joints are found by name in the drive's map (tfp_grip_fingers_find), never by their numbers. */
 #ifndef TFP_GRIP_FINGERS_H
 #define TFP_GRIP_FINGERS_H
@@ -36,6 +44,11 @@ enum { TFP_GF_PINKY = 0, TFP_GF_RING, TFP_GF_MIDDLE, TFP_GF_INDEX, TFP_GF_THUMB,
 /* the grip's curl of each joint of a finger, about the bone's own +Y (pinky, ring, middle, index: the enum's order) */
 static const double tfp_gf_curl_degrees[TFP_GF_THUMB] = {53, 63, 65, 60};
 #define TFP_GF_THUMB_TURN_DEGREES 20.0 /* added to the body's own curl of thumb joints 2 and 3 (joint 1 the body's) */
+enum { TFP_GF_THUMB_WRAPPED = 0, TFP_GF_THUMB_STRAIGHT };
+#define TFP_GF_THUMB_LEAN_DEGREES 10.0 /* the straight thumb's lean from the handle's axis towards the handle */
+#define TFP_GF_TIP_M .025              /* a fingertip: this far along the third joint's X */
+static const double tfp_gf_handle_at[3] = {.071, 0, -.049}; /* a point of the vertical grip's axis, in the hand's frame */
+static const double tfp_gf_handle_up[3] = {.009, -.9955, .094}; /* along it, towards the gun (a unit vector) */
 
 typedef struct TfpGripFingers {
   bool ok;
@@ -80,12 +93,39 @@ static inline double tfp_gf_curl(const TfpGraftLocal *l) {
   const TfpOgFrame f = tfp_og_frame(&m);
   return tfp_gf_curl_rows(f.r);
 }
-/* The hand closed on the grip by `weight` (0..1): each finger joint that share of the way from its curl to the grip's, thumb
- * joints 2 and 3 turned by that share of THUMB_TURN. locals: the 42 joints in the map's order. */
-static inline void tfp_grip_fingers_close(const TfpGripFingers *fingers, TfpGraftLocal *locals, double weight) {
+/* The straight thumb by `weight`: joint 1 turned that share of the shortest way that lays the thumb (joint 1 to the tip)
+ * up along the handle with its lean; joints 2 and 3, positions and the rest of the record untouched. */
+static inline void tfp_grip_thumb_straight(const TfpGripFingers *fingers, TfpGraftLocal *locals, double weight) {
+  TfpGraftLocal *l = &locals[fingers->joint[TFP_GF_THUMB][0]];
+  const TfpGraftMatrix m1 = tfp_graft_local_matrix(l), m2 = tfp_graft_local_matrix(&locals[fingers->joint[TFP_GF_THUMB][1]]),
+                       m3 = tfp_graft_local_matrix(&locals[fingers->joint[TFP_GF_THUMB][2]]);
+  if (!tfp_graft_rigid(&m1) || !tfp_graft_rigid(&m2) || !tfp_graft_rigid(&m3)) return;
+  const TfpGraftMatrix f2 = tfp_graft_product(&m2, &m1), f3 = tfp_graft_product(&m3, &f2); /* in the hand's frame */
+  double thumb[3], in[3], aim[3], axis[3];
+  for (unsigned j = 0; j < 3; ++j) thumb[j] = (double)f3.values[12 + j] + TFP_GF_TIP_M * (double)f3.values[j] - (double)m1.values[12 + j];
+  for (unsigned j = 0; j < 3; ++j) in[j] = tfp_gf_handle_at[j] - (double)m1.values[12 + j];
+  const double length = tfp_og_len(thumb), rise = tfp_og_dot(in, tfp_gf_handle_up);
+  for (unsigned j = 0; j < 3; ++j) in[j] -= rise * tfp_gf_handle_up[j]; /* from the thumb's root straight to the handle's axis */
+  const double away = tfp_og_len(in), lean = away > 1e-6 ? TFP_GF_THUMB_LEAN_DEGREES * (TFP_OG_PI / 180) : 0;
+  if (!(length > 1e-6)) return;
+  for (unsigned j = 0; j < 3; ++j) thumb[j] /= length, aim[j] = cos(lean) * tfp_gf_handle_up[j] + (lean > 0 ? sin(lean) * in[j] / away : 0);
+  tfp_og_cross(thumb, aim, axis);
+  const double sine = tfp_og_len(axis);
+  if (!(sine > 1e-9)) return; /* there already (or straight away from it: left alone) */
+  for (unsigned j = 0; j < 3; ++j) axis[j] /= sine;
+  TfpOgFrame fr = tfp_og_frame(&m1);
+  tfp_og_turn_rows(fr.r, axis, atan2(sine, tfp_og_dot(thumb, aim)) * weight);
+  for (unsigned i = 0; i < 3; ++i)
+    for (unsigned j = 0; j < 3; ++j) l->basis[3 * i + j] = (float)fr.r[i][j];
+}
+/* The hand closed on the grip by `weight` (0..1): each finger joint that share of the way from its curl to the grip's; the
+ * thumb as `thumb` says: TFP_GF_THUMB_WRAPPED, joints 2 and 3 turned by that share of THUMB_TURN; TFP_GF_THUMB_STRAIGHT,
+ * tfp_grip_thumb_straight. locals: the 42 joints in the map's order. */
+static inline void tfp_grip_fingers_close(const TfpGripFingers *fingers, TfpGraftLocal *locals, double weight, unsigned thumb) {
   if (!fingers->ok || !(weight > 0)) return;
   if (weight > 1) weight = 1;
-  for (unsigned f = 0; f < TFP_GF_FINGERS; ++f)
+  if (thumb == TFP_GF_THUMB_STRAIGHT) tfp_grip_thumb_straight(fingers, locals, weight);
+  for (unsigned f = 0; f < (thumb == TFP_GF_THUMB_STRAIGHT ? (unsigned)TFP_GF_THUMB : (unsigned)TFP_GF_FINGERS); ++f)
     for (unsigned k = f == TFP_GF_THUMB ? 1 : 0; k < 3; ++k) {
       TfpGraftLocal *l = &locals[fingers->joint[f][k]];
       TfpGraftMatrix m = tfp_graft_local_matrix(l);

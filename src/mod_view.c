@@ -156,6 +156,9 @@ static bool panel_wanted;
  * shoulder instead of following the body; rest_trace.txt makes the "Rest:" line (the resting weapon pose, once a
  * second) come every tick. */
 static bool arms_live, arms_keep, arms_restore, arms_bend, arms_rest_trace, grip_off;
+/* Round 42b test switch game_ik_off.txt: the gun's own IK_left (the target of the game's left-hand IK) is never moved onto a
+ * fitted grip (src/game_ik.h), to compare. */
+static bool game_ik_off;
 /* Test switch depth_off.txt, read once at the start: the pose helper's zoom-depth term adds nothing on any frame, so
  * neither the rig nor its root is shifted for the optic. It is there to find out in the game whether that shift is
  * part of the unzoom gate's flipping (docs/design/specs/2026-11-23-gate-flip.md). */
@@ -747,6 +750,12 @@ static void arms_start(void) {
   else say("Grip: the left hand of the drawn arms holds the weapon's grip node (a foregrip's or vertical grip's own node when one is fitted) "
            "whenever the body's left hand is on it, while First Person Arms and Animated arms are on, also while aiming (on the game's own aim "
            "pose, the left arm only); not for a handgun. A file grip_off.txt beside the DLL leaves the hand as the body puts it, to compare");
+  if (!grip_off && game_ik_off) say("Test: game_ik_off.txt: the game's left-hand IK keeps its target on the gun's own IK_left node; a fitted grip is held "
+                                    "by the mod's reach alone");
+  else if (!grip_off)
+    say("Grip: on a fitted foregrip or vertical grip the game's own left-hand IK is aimed there too: the gun's own IK_left node (its "
+        "target) is moved onto the grip's node while the hand holds it, and put back when it lets go. A file game_ik_off.txt beside "
+        "the DLL leaves the game's IK on the gun's own node, to compare");
   const char *why = tfp_render_slot_contract();
   if (why) {
     snprintf(arms_refusal, sizeof arms_refusal, "%s", why);
@@ -788,6 +797,8 @@ static void arms_tick(void) {
     /* Round 23: the left hand on the weapon's grip (src/offhand_grip.h): the option, the test switch, a handgun at the hip */
     tfp_arm_drive_set_grip(!grip_off && tfp_wire_settings_first_person_arms(&wire), tfp_wire_settings_sidearm(&wire));
     tfp_pose_set_sidearm(tfp_wire_settings_sidearm(&wire)); /* round 49e: for the "Reload rest:" line only */
+    tfp_arm_drive_set_game_ik(!game_ik_off); /* round 42b: the game's IK target on a fitted grip (only while the grip runs) */
+    tfp_arm_drive_set_grip_thumb(!tfp_locked_view_foregrip_thumb_wrapped(&wire)); /* round 42b: "Foregrip thumb", Straight unless Wrapped */
   }
   { /* The resting weapon pose (src/arm_drive.h): the clock, whether this tick is a rest and in which stance, and the body's layer states.
      * The action alone is not a rest: a walk, hip fire, an ammo check and a melee are "idle" to it (src/action_select.c), and in the game
@@ -832,6 +843,8 @@ static void arms_tick(void) {
         if (g.frames) say("Grip: gate: %s", tfp_arm_drive_grip_gate_line(&g)); /* round 38b: why it holds or lets go */
         const char *drawn = g.frames ? tfp_arm_drive_grip_drawn_line(&g) : NULL; /* round 36b: the hand as drawn, a line of its own */
         if (drawn) say("Grip: %s", drawn);
+        const char *ik = tfp_arm_drive_grip_ik_line(&g); /* round 42b: which path holds the hand */
+        if (ik) say("Grip: hand: %s", ik);
         const char *units = g.frames ? tfp_arm_drive_grip_units_line(&g, true) : NULL; /* round 36: whenever the gun's units change */
         if (units) say("Grip: %s", units);
         if (g.frames && g.state != told_state && g.state != TFP_ARM_GRIP_HELD && g.state != TFP_ARM_GRIP_EASING)
@@ -1083,9 +1096,9 @@ static void start(void) {
           say("%s", memo_line);
         }
 #ifdef TFP_FEEL
-        static const char *const arm_files[] = {"arms_live_keep.txt", "arms_live_restore.txt", "arm_bend.txt", "rest_trace.txt", "grip_off.txt"};
-        bool *const arm_switches[] = {&arms_keep, &arms_restore, &arms_bend, &arms_rest_trace, &grip_off};
-        for (int i = 0; i < 5; i++) {
+        static const char *const arm_files[] = {"arms_live_keep.txt", "arms_live_restore.txt", "arm_bend.txt", "rest_trace.txt", "grip_off.txt", "game_ik_off.txt"};
+        bool *const arm_switches[] = {&arms_keep, &arms_restore, &arms_bend, &arms_rest_trace, &grip_off, &game_ik_off};
+        for (int i = 0; i < 6; i++) {
           strcpy(slash + 1, arm_files[i]);
           FILE *arm_file = fopen(parts_path, "r");
           if (arm_file) fclose(arm_file);
