@@ -747,6 +747,36 @@ int main() {
     CHECK(std::fabs(swap - TFP_CAMERA_VEIL_CLEAR) < .002f);
     g.end();
   }
+  // ---- Round 49: a veiled frame that moves less than the frame before it (soak 60, 19:38:37.383: the veil 0.248 m in
+  // the first head-camera frame and nothing in the second, the view having pitched 13.7 degrees; soak 62, 19:45:10.494:
+  // 0.120 m, then 0.055 with the head below the view). It wrote its own move over the one kept for the let-out, so the
+  // difference was dropped in one frame, the body still. Now the earlier move and its time are kept and let out from
+  // that frame on. The view pitched up 63 degrees (the head half below it: 0.025 m moved) and 80 (nothing moved). ----
+  for (float pitch : {1.1f, 1.4f}) {
+    Game g; leave(g, true, true, -.22f, &first);
+    CHECK(std::fabs(first - TFP_CAMERA_VEIL_CLEAR) < .002f);
+    const float moved = first - held_ahead; // 0.31 m
+    tfp_camera_veil_tick(false);           // the tick that sees the leave: the veil stays open
+    const TfpCameraVeilStats before = veil();
+    g.look(.2f, pitch); g.hip(2); g.frame(33.3);
+    CHECK(veil().frames == before.frames + 1); // a veiled frame
+    // short of the first frame's place by the let-out's share of one frame (3.4 percent: 0.011 m), not by the move
+    const float now = ahead_of_head(g);
+    std::printf("  a veiled frame that moves less, the view pitched %.0f degrees: the eye %.3f m back from the frame before (the let-out's share %.3f; the move %.3f)\n",
+                pitch * 57.29578f, first - now, moved * (1 - tfp_camera_veil_let_out(33.3)), moved);
+    CHECK(std::fabs(first - now - moved * (1 - tfp_camera_veil_let_out(33.3))) < .003f);
+    // and it goes on from there, counted from the frame that moved: no step over the let-out's own
+    tfp_camera_veil_tick(true);
+    float last = now, steepest = 0;
+    for (int i = 2; i <= 10; ++i) {
+      g.hip(2); g.frame(33.3);
+      const float at = ahead_of_head(g);
+      CHECK(std::fabs(first - at - moved * (1 - tfp_camera_veil_let_out(33.3 * i))) < .004f);
+      steepest = std::fmax(steepest, std::fabs(at - last)); last = at;
+    }
+    CHECK(steepest < 1.5f * moved * 33.3f / 300 + .003f && std::fabs(last - held_ahead) < .004f);
+    g.end();
+  }
   std::printf("camera veil through the helper: %d checks, %d failed\n", checks, failed);
   return failed != 0;
 }

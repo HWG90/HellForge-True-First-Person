@@ -26,6 +26,7 @@ void tfp_wire_engine_allow_arms(bool allowed); /* wire_engine.c: beyond-retail s
 #include "wire_win_engine.h"
 #include "wire_win_effects.h"
 #include "perf_line.h"
+#include "trace_row.h"
 #include "wire_warp.h"
 #include "engine.h"
 #include "mod_menu.h"
@@ -296,7 +297,7 @@ static bool same_user_file(void *user, TfpSettingsFile which, const char *suffix
 
 static uint64_t say_lines; /* round 28: lines said, for the Perf line */
 static void say(const char *format, ...) {
-  char line[700];
+  char line[700]; /* TFP_LOG_LINE (src/trace_row.h): what is longer is cut; tests/trace_row_test.c holds the Trace row under it */
   say_lines++;
   va_list args;
   va_start(args, format);
@@ -496,6 +497,23 @@ static void entry_note(void) {
  *   head_shown   round 44: in every head-camera frame of the lock, the head node from the eye shown (eye_world + veil):
  *                (ahead up), m; a negative ahead is the eye that far in front of the head. 0 in any other frame
  *   clear        round 44: how far src/camera_clear.h pushed the eye the frame was built on along the level view (m)
+ * Round 49's fields are not on the row (it has no room: src/trace_row.h). They are on two lines written straight after
+ * the row they belong to, each with that row's t=, tick= and kind=:
+ * "Turn:", in every frame a direction is carried in:
+ *   turn_carry   how far the direction shown (the row's turn) is off the game's own in this frame, degrees: the
+ *                difference carried across a change of camera and eased out (src/camera_turn.h)
+ *   turn_edge    only on the frame a change of camera began a carry: the degrees it began with (the player's own turn
+ *                of that frame taken out), then the probe: game_turn, the game's own direction in the world; game_cam,
+ *                where the game put its ordinary (kind 4) camera, in this frame at a leave of the native view, in the
+ *                last ordinary frame at an entry ("-": not known); heading, the body root's forward axis as a compass
+ *                angle, degrees (atan2(x, y)). Why the game's two cameras point apart is not known; this is what a
+ *                cause can be read from
+ * "Held:", for a row that has either:
+ *   hold         only in a head-camera frame whose eye a swap holds: the held difference, the eye from the head
+ *                camera's own in the body root's frame (m): the held native eye, its glide to the incoming weapon's
+ *                eye, or its release
+ *   dive         only where it is 1: the body is in a dive (the motion runtime's action), as the camera helper was
+ *                told (Stable's eye damping is let go there)
  * A window is also opened when the body's action changes (src/trace_edges.h); such a window has no State line before
  * it, and "t=" starts again in it. So does one the eye opens itself (eye_edge), unless a window was open. */
 static void trace_note(void) {
@@ -505,6 +523,7 @@ static void trace_note(void) {
   const int action = motion && motion->state.phase == TFP_MOTION_PHASE_ACTIVE && motion->state.action != TFP_ACT_NONE ? (int)motion->state.action : -1;
   const unsigned edge = tfp_trace_edges_step(&edges, wire.log.has_lease, wire.controller.holding, action);
   if ((edge & TFP_TRACE_EDGE_EVENT) && lock_wanted) tfp_camera_continuity_event(); /* a lease or a hold begun or ended: the rig may be re-seated */
+  tfp_camera_set_dive(lock_wanted && action == (int)TFP_ACT_DIVE); /* round 49: Stable's eye damping is let go in a dive (src/camera_helper.h) */
   /* Round 24: the native view left because its request or firearm changed (a backpack picked up): the next entry may
    * hold the eye until the rig has settled (THE SETTLE). On the leave only. */
   static bool had_lease;
@@ -526,7 +545,6 @@ static void trace_note(void) {
   memset(&pose, 0, sizeof pose);
   tfp_pose_hold_probe(&pose);
   const unsigned long long lease = wire.controller.lease ? (unsigned long long)wire.controller.lease->request : 0;
-  static const char *const sources[] = {"-", "head", "native", "repeat"};
   for (uint32_t i = 0; i < count; i++) {
     const TfpCameraTraceRow *r = &rows[i];
     /* root: the body root the eye was measured against, axes: its three axis rows (the soak of 2026-11-22 on feel.59:
@@ -539,31 +557,14 @@ static void trace_note(void) {
      * run it again frame for frame (the soaks of 2026-11-22 on feel.59: without the time across edges, full aim and
      * the starts, and with places to 0.1 mm, 29 of 3447 frames could not be replayed: two decisions that fell
      * within the rounding). */
-    char taken[64] = "";
-    snprintf(taken, sizeof taken, "%s%s%s%s%s%s%s", r->what & TFP_CAMERA_TRACE_JUMP ? "+jump" : "", r->what & TFP_CAMERA_TRACE_EDGE ? "+edge" : "",
-             r->what & TFP_CAMERA_TRACE_ROOT ? "+root" : "", r->what & TFP_CAMERA_TRACE_RESTART ? "+restart" : "",
-             r->what & TFP_CAMERA_TRACE_START ? "+start" : "", r->what & TFP_CAMERA_TRACE_CUT ? "+cut" : "",
-             r->what & TFP_CAMERA_TRACE_SETTLE ? "+settle" : "");
-    char veil[64] = "0";
-    if (r->veil[0] != 0 || r->veil[1] != 0 || r->veil[2] != 0)
-      snprintf(veil, sizeof veil, "(%.5f %.5f %.5f)", (double)r->veil[0], (double)r->veil[1], (double)r->veil[2]);
-    char veil_head[48] = "0";
-    if (r->veil_head[0] != 0 || r->veil_head[1] != 0) snprintf(veil_head, sizeof veil_head, "(%.4f %.4f)", (double)r->veil_head[0], (double)r->veil_head[1]);
-    char head_shown[48] = "0";
-    if (r->head_known) snprintf(head_shown, sizeof head_shown, "(%.4f %.4f)", (double)r->head_shown[0], (double)r->head_shown[1]);
-    say("Trace: t=%.1f kind=%u eye_world=(%.5f %.5f %.5f) step=%.4f wanted=(%.5f %.5f %.5f) correction=%.4f lease=0x%llx pose_armed=%d entry_ease=%.2f source=%s"
-        " root=(%.5f %.5f %.5f) axes=(%.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f) looked=%d taken=%s quiet=%d tick=%.3f"
-        " off_foot=%d damped=%d damp=(%.5f %.5f %.5f) view=(%.5f %.5f %.5f) sock=%.5f arms=%u eye_edge=%d veil=%s turn=(%.4f %.4f %.4f) veil_head=%s"
-        " head_shown=%s clear=%.4f",
-        (double)r->ms, r->kind, (double)r->eye[0], (double)r->eye[1], (double)r->eye[2], (double)r->step, (double)r->wanted[0], (double)r->wanted[1],
-        (double)r->wanted[2], (double)r->correction, lease, (int)(pose.armed != 0), (double)r->entry_ease, sources[r->source < 4 ? r->source : 0],
-        (double)r->root[0], (double)r->root[1], (double)r->root[2], (double)r->axes[0], (double)r->axes[1], (double)r->axes[2], (double)r->axes[3],
-        (double)r->axes[4], (double)r->axes[5], (double)r->axes[6], (double)r->axes[7], (double)r->axes[8],
-        (int)((r->what & TFP_CAMERA_TRACE_LOOKED) != 0), taken[0] ? taken + 1 : "-", (int)((r->what & TFP_CAMERA_TRACE_QUIET) != 0), r->tick,
-        (int)((r->what & TFP_CAMERA_TRACE_OFF_FOOT) != 0), (int)((r->what & TFP_CAMERA_TRACE_DAMPED) != 0), (double)r->damp[0], (double)r->damp[1],
-        (double)r->damp[2], (double)r->view[0], (double)r->view[1], (double)r->view[2], (double)r->sock, (unsigned)r->arms,
-        (int)((r->what & TFP_CAMERA_TRACE_SELF) != 0), veil, (double)r->turn[0], (double)r->turn[1], (double)r->turn[2], veil_head,
-        head_shown, (double)r->clear);
+    /* The text is src/trace_row.h's (its length is tested there). Round 49's fields are not on the row, which has no
+     * room for them (701 to 706 characters on a dive + swap's edge row, of the 699 a line holds): Turn and Held follow
+     * the row they belong to, with its t=, tick= and kind=. */
+    char line[TFP_LOG_LINE];
+    tfp_trace_row_text(line, sizeof line, r, lease, pose.armed != 0);
+    say("%s", line);
+    if (tfp_trace_turn_text(line, sizeof line, r) > 0) say("%s", line);
+    if (tfp_trace_held_text(line, sizeof line, r) > 0) say("%s", line);
   }
 }
 #endif

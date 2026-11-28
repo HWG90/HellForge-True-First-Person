@@ -1088,3 +1088,165 @@ the split, since in both ways of holding a frame the rig's own vector is what it
 4. The other two reasons a scaled frame could be the game's and not this model's: a write of main row +0x11ac between
    the evaluator's read (game+0x1287b88) and the helper's, on another thread; and [rsp+0x45] meaning something else
    in another state (the avatar dead, in a vehicle).
+
+## Round 49: the direction at a change of camera, the orphan's eye, the veil's dropped move
+
+From the round 48 diagnosis of the matrix and the two soaks of 2026-11-27 (feel.59 with rounds 40 and 43; soak 60
+Stable, soak 62 Bodycam). Reference rows: `tests/reference/turn`.
+
+### The judge (changed)
+
+`tools/harness/matrix.py` read the eye only. Two judges are added, both on the Trace rows.
+
+- **The turn** (`turn_snaps`): the angle between the directions two consecutive frames were shown with (`turn=`). A
+  frame whose camera kind differs from the frame before and that turns more than 10 degrees (`TURN_DEG`) fails the
+  phase, unless the phase's own script moved the mouse. Soak 60: 29.0 (6 to 4), 39.5 (4 to 6), 28.6, 28.7, 28.6, 40.7,
+  13.7 and 14.5. Soak 62: 10.2, 72.7 and 26.4. None was seen before.
+- **The veil's bound** (`veil_faults`): any frame the veil moved was "the veil's" and not counted. Now the opening
+  frame's move is printed and capped at 0.40 m (`VEIL_OPEN_M`: the most the veil is built to move), and after it the
+  move may change by 0.05 m a frame (`VEIL_STEP_M`), or by the steepest frame of its own let-out where that is more
+  (1.5 times the veil's largest move over 300 ms: the LAS-5 Scythe's 0.32 m is let out at 0.053 m a frame at 30 frames
+  a second, which is the let-out and no flick). A veil that falls to nothing in one frame fails ("step"), and so does
+  one the native view cuts ("cut"). Soak 60: 0.248 then 0 (19:38:37.415), a cut of 0.087 (19:38:42.705), a growth of
+  0.076 (19:34:57.250). Soak 62: 0.115 and a cut of 0.081 (#13 melee, which had passed), 0.065 (19:45:10.494).
+  The veil's frames stay out of the step judge.
+
+### 1. THE CARRY (`src/camera_turn.h`, `lock_rotation`)
+
+At a change between the native view (kind 6) and the ordinary camera (kind 4) the game's direction can be 26 to 73
+degrees off the one shown the frame before, with no mouse input, and it stays there: after the matrix's dive-swap the
+view stayed 22 degrees left and 30 up for the rest of the run. `lock_rotation` showed the game's rotation as given.
+
+**The cause is not known.** The diagnosis's first reading was the third-person camera's parallax (the game keeping
+the aimed-at point while its camera moves right of and above the head): that fits the always-left drift of 0.3 to 1.9
+degrees on foot and the large turns near geometry, and it does not fit 72.7 degrees prone on open ground, where the
+game's direction lands 80 degrees off the body's heading. So this round does not correct the aim. It takes the cut
+out of the picture, and writes what a cause can be read from.
+
+- The difference between the direction last shown and the game's new one is carried, as a rotation in the view's own
+  frame, and eased out from rest to rest: 200 degrees a second at the steepest (`TFP_TURN_RATE_DEG_S`), 120 ms at
+  least. 29 degrees take 218 ms, 73 take 548.
+- The native frame's direction is the rig eye's axes times the game's rotation argument, the product `turn=` is
+  written from. Not `lock_view` (the camera node's world matrix less the kick): in orphaned frames that was 36 to 117
+  degrees off the frames either side.
+- Under 0.5 degrees nothing is carried and the rotation handed on is main's, bit for bit. Over 120 is another view.
+- The carry sits on top of each frame's own rotation, so the mouse and recoil go through whole during the ease.
+- A second change while a carry is under way starts from what is shown then.
+- **The player's own turn is not part of the difference.** Out of the native view both calls usually come in one game
+  frame (0 to 1 ms apart), but the second check found 15 of about 660 logged 6 → 4 changes 5 to 34 ms apart, three a
+  whole 33.6 ms frame (session 20261125-045337 L2523, L14177, L19521), where the first build still froze a pan; the
+  advance is now taken in both directions, and scales with the time since the last frame, so a 0-1 ms change moves
+  by almost nothing (0.02 degrees at most on every logged change). Into it the frame before is a whole frame earlier (32 to 35 ms), so the
+  game's new direction is off the one last shown by one frame of mouse turn as well. The first build carried that:
+  any pan over 30 degrees a second at 60 frames a second stood still for the frame of the change and caught up after
+  (100 degrees a second at 16.7 ms: 1.67, 0.00, 1.76, 1.90, 1.98, 2.02 degrees a frame, where main turns 1.67 in each;
+  found by the round's check). Now, at a change either way, the direction last shown is first advanced by
+  the turn the game's own direction made over the ordinary camera's last frame (about the world's axes, in proportion
+  to the time since, four frames at most; a second call within 4 ms is the same frame), the difference is taken from
+  there and the 0.5 degrees apply to what is left. A pan through agreeing cameras carries nothing and is main's bit
+  for bit at 30 to 600 degrees a second (`tests/camera_turn_test.c`, `tests/camera_turn_helper_test.cpp` 8); with the
+  cameras 29 degrees apart the frame of the change is shown where the pan would have taken the last one and the 29
+  degrees ease out under the pan (helper 9).
+  **What cannot be told apart** is a turn that changes speed in that very frame: the change of speed times the frame
+  is left over, and is carried where it is over 0.5 degrees. A pan that stops dead in that frame leaves one frame of
+  itself (as much as the first build carried in every pan), shown as one more frame of the pan and eased back. A
+  mouse that is uneven by a tenth at 300 degrees a second leaves 0.5 to 1 degree, eased out in 120 ms.
+- Nothing is carried in a frame of full aim: the sights stay on the eye, as the damping and the continuity leave them.
+  A carry under way when full aim begins ends there in one frame (at most what main turned at the change itself).
+- **Cost.** During the ease the picture points off the game's aim by what is still carried (`turn_carry=` on the `Turn:` line);
+  a shot in that time lands where the game aims, not at the centre of the picture. And the turn itself remains.
+- **Left as it is.** The head camera's eye is still built 0.18 m along the game's own level direction, so at the
+  change it stands up to 0.09 m (29 degrees) to 0.21 m (73) off the direction shown; the continuity takes that up as
+  the change of camera it is. The veil also pushes along the game's direction.
+
+**The probe** (the log only). A `Turn:` line straight after the Trace row of every frame something is carried in,
+with that row's `t=`, `tick=` and `kind=` and `turn_carry=`. On the frame a carry begins it also has `turn_edge=`
+(degrees), `game_turn=` (the game's own direction, what `turn=` would have been), `game_cam=` (where the game put its
+ordinary camera: the kind 4 position argument, of this frame at a leave, of the last ordinary frame at an entry) and
+`heading=` (the body root's forward as a compass angle). With the eye and the root on the row before it these say
+whether the game's camera, the eye and one point in the world are in line (parallax) or not.
+
+**Not on the Trace row, and why.** The first build wrote these on the row itself, and `hold=` and `dive=1` (below)
+after them. A line of the log holds 699 characters and cuts the rest without a word; the edge row of a dive + swap
+came to 701 (soak 60 L6779) and 706 (soak 62 L1993), so `dive=1` and part of `hold=` were lost on the very row they
+were added for (found by the round's check). The row has no room to give: the longest of the six last sessions is 603
+characters before any of this round's fields, and the same shape with a lease at 1 km from the origin is 634. So the
+row is main's, character for character, and the round's fields are on `Turn:` and `Held:` lines (`src/trace_row.h`).
+`tests/trace_row_test.c` holds a session's widest row under 640 and the widest row there can be (every mark at once,
+10 km out: 689) under the line.
+
+### 3. The orphan's eye (`orphan_head`)
+
+An orphaned native frame (the game keeps its first-person request with the gun off the rig) is shown with the head
+camera's eye, 0.18 m in front of the head along the level view. The level view was taken from `lock_view`, which in
+those frames is not the view: 117 degrees off in soak 62 #13, so the eye stood 0.10 m behind the head node, the first
+head-camera frame wanted a point 0.307 m away (taken as a jump, 0.312 carried) and the veil saw the head in front of
+the eye and pushed (0.196, 0.081 m, cut by the native view). All six orphan runs of the two soaks were off (36, 90,
+117 degrees). Now the direction is THE DIRECTION of the frame (the rig eye's axes times the argument), and the rows
+carry `turn=`. It rests on the rig eye's axes being true in orphaned frames; they are on the native rows either side.
+
+### 5. The veil's dropped move
+
+A veiled frame wrote its own move over `veil_out_move`, also when it moved nothing or less than the frame before.
+
+- Soak 60, 19:38:37.383: the first veiled frame moved the eye 0.248 m and the second nothing ("too far to move": the
+  view it works from had pitched 13.7 degrees). The move was dropped whole in one frame, the body still.
+- Soak 62, 19:45:10.494: 0.120 m, then 0.055 with the head below the view: 0.065 m dropped in one frame.
+
+Now a veiled frame whose own move is less than what is left of the move kept (its let-out, counted from its frame)
+keeps that move and its time and shows what is left, as a frame after the veil does. What the eye itself has gained on
+the head since the kept frame is taken off first: a held eye being let go under the veil needs less of the move, and
+there the veil's own move stands, as before. Not covered: a move the native view cuts (soak 60, 19:38:42.705); the
+let-out runs in head-camera frames only.
+
+### 6. In a dive: the log, and Stable's damping
+
+A dive is "on foot" to the layer `lock_off_foot` reads, so the Stable style's eye damping ran through it. With the
+continuity's carry on top, the eye stood 0.36 to 0.38 m above the rig eye when the native view came back and floated
+down after the landing (0.355 m in soak 60's dive + swap on open ground; 0.403 m in the matrix's, checked by an
+obstacle).
+
+- **On.** The binder says each tick whether the body is in a dive (`tfp_camera_set_dive`, from `TFP_ACT_DIVE`). While
+  it is, in the Stable style, the head camera's eye is not damped and a lag carried is let go on 40 ms, as in a
+  clamber. Bodycam is as before.
+- **The evidence** (`tests/test_harness_turn.py` Dive: the logged rows with the damping taken off the dive's
+  head-camera frames, through this tree's continuity). Open ground: the float 0.355 m to 0.142 (limit 0.26). It is not
+  all gain: the two head-camera frames over the step limit go (0.065 and 0.054 m to 0.035 and 0.030) and the second
+  native frame of the entry comes in their place, larger (0.043 to 0.083 m). Against the obstacle: 0.403 to 0.335, still
+  a float (a real 0.58 m between the two poses; it closes only with eye memory kept per posture). Bodycam, replayed
+  the same way, gained nothing that matters (0.106 to 0.051 m, never a float) and its largest step grew (0.063 to
+  0.082), which is why Bodycam is left alone.
+- **Kept, as the owner decided, with its price.** The rule takes the float from 0.355 m to 0.144 m (the check's own
+  replay; 0.142 here) and puts one native frame at 0.083 m where it was 0.043: over the judge's 0.06 m step limit,
+  where main's worst frame in the same window was 0.065. One frame over the limit either way; the float is worth it.
+  The replay is an approximation (the logged damping subtracted, not the game). To go back: the dive rule in
+  `lock_damp_eye`; the log lines stay.
+- **The log.** A `Held:` line straight after the Trace row it belongs to (with that row's `t=`, `tick=`, `kind=`):
+  `hold=` for a head-camera row whose eye a swap holds, the held difference in the root's frame; `dive=1` for the rows
+  of a dive.
+- **Not built: no glide to the incoming weapon's eye in a dive, and round 44's push let go in a dive.** Both rest on
+  inference. That the glide (begun one frame after the weapon's identity changes, to an eye remembered standing) makes
+  the jump the continuity then carries is read from timing and size alone; the held delta was never logged, and no
+  replay can stand in for it. Round 44's push in a dive has not been run in the game at all. `hold=` and `dive=1` now
+  say both in one dive + swap: the delta's course across the frame the identity changes, and `clear=` beside it.
+
+### The phases (changed)
+
+- "dive" and "dive-back": the body is stood up first (`dive.stand_up`, before the phase's stretch of the log), and
+  the phase fails where its stretch has no `Motion: action=dive`. The feel.59 matrix's "dive-back" never dived: "dive"
+  landed prone and the dive key stood the body up.
+- New: "prone-swap", "aim-swap", "stand-up-supine", "stand-up-prone-head". Each fails where its stretch does not show
+  what it is about (`NEEDS`: prone, a dive, full aim, a head-camera frame). The scripts are written from the soak's
+  own inputs and have not been run in the game. The log does not tell lying on the back from lying prone.
+
+### What only the game can show
+
+1. That the picture no longer cuts at a dive + swap and at the primary coming back prone, in both styles, and what
+   the 220 to 550 ms of turning look like while the body lands.
+2. The probe's rows: whether `game_cam`, the eye and a point along `game_turn` line up.
+3. Whether the aim being off the picture's centre during the ease is felt when firing straight out of a swap.
+4. The orphan's eye in a melee and a stim from prone: no `veil=` on the leave after an `Orphan:` line.
+5. A swap from prone under the veil's bound.
+6. A dive + swap in Stable on open ground: the float gone, and what the entry's second frame does (0.083 m in the
+   replay); and the `hold=` rows of that dive, for the glide.
+7. The four new phases' scripts: that each plays what it is named for.

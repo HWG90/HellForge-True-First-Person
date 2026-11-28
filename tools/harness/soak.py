@@ -162,11 +162,12 @@ def main(argv):
             lines = handle.read().splitlines()
         for text in matrix.style_changes(lines):
             print(text, flush=True)
-        j = matrix.judge(lines)
+        j = matrix.judge(lines, mouse="look" in script)
         count += 1
         worst = max(worst, j["largest_jump_m"])
         veiled = max(veiled, j.get("largest_veil_m", 0.0))
         flag = j["missed"] or j["largest_jump_m"] >= matrix.POP_M or any("Refused" in n for n in j["notes"])
+        flag = flag or bool(j["veil_faults"]) or (bool(j["turn_snaps"]) and "look" not in script)   # round 49
         if flag:
             bad.append((count, name, script, j["missed"], round(j["largest_jump_m"], 3)))
         print(f"{count:3d} {'BAD ' if flag else 'ok  '}{name:16s} missed {j['missed']} {matrix.describe(j)} kinds {j['kinds']}  {script[:60]}", flush=True)
@@ -176,7 +177,7 @@ def main(argv):
         elif aimed is not None:
             aims.append((count, name, aimed["reached"]))
             print(f"      {matrix.aim_text({**aimed, **aim.counts(lines)})}", flush=True)
-        for text in matrix.pop_lines(j):
+        for text in [f"       {said}" for said in j["said"]] + matrix.pop_lines(j):
             print(text, flush=True)
         seen |= listed(j["pops"])
     d.run("up w; up s; up shift; up right; wait 2.0")

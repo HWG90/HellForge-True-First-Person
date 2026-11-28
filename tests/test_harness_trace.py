@@ -451,8 +451,10 @@ class Veil(unittest.TestCase):
         for dt in (8.0, 16.7, 33.3, 50.0):
             for walk in (0.0, 0.04):
                 result = matrix.judge(self.leave(dt, walk=walk))
-                # the veil's frames are printed with their own largest, and neither set the eye's nor fail the leave
-                self.assertTrue(result["pass"], (dt, walk))
+                # the veil's frames are printed with their own largest and do not set the eye's. Round 49: this veil is
+                # taken back in one frame (the build before round 26), which the veil's bound fails
+                self.assertFalse(result["pass"], (dt, walk))
+                self.assertEqual([(f["what"], round(f["m"], 3)) for f in result["veil_faults"]], [("step", 0.32)], (dt, walk))
                 self.assertLess(result["largest_jump_m"], 1e-3, (dt, walk))
                 self.assertAlmostEqual(result["largest_veil_m"], 0.32, 3)
                 self.assertIn("veil 0.320 not counted", matrix.describe(result))
@@ -470,7 +472,8 @@ class Veil(unittest.TestCase):
         result = matrix.judge(self.leave(33.3, veiled=(2,)))
         self.assertEqual([round(p["beyond"], 3) for p in result["pops"]], [0.32, 0.64, 0.32])
         self.assertEqual({p["whose"] for p in result["pops"]}, {"veil"})
-        self.assertTrue(result["pass"])
+        self.assertFalse(result["pass"])   # round 49: in, and out again in one frame, is a flick
+        self.assertEqual([f["what"] for f in result["veil_faults"]], ["step"])
         self.assertEqual((round(result["largest_jump_m"], 3), round(result["largest_veil_m"], 3)), (0.0, 0.64))
 
     def test_the_row_keeps_the_eye_before_the_veil(self):
@@ -511,7 +514,8 @@ class Veil(unittest.TestCase):
         self.assertTrue(all(p["whose"] in ("veil", "body") for p in result["pops"]), [(p["whose"], round(p["beyond"], 3)) for p in result["pops"]])
         self.assertIn("veil", {p["whose"] for p in result["pops"]})
         self.assertLess(result["largest_jump_m"], matrix.POP_M)
-        self.assertTrue(result["pass"])
+        self.assertEqual([f["what"] for f in result["veil_faults"]], ["step"])   # round 49: one veiled frame is a flick; nothing else fails it
+        self.assertFalse(result["pass"])
 
     def test_a_leave_with_nothing_veiled_says_no_veil(self):
         result = matrix.judge(self.leave(33.3, veiled=()))
